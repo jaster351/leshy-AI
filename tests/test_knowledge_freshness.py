@@ -37,6 +37,21 @@ def test_fresh_dynamic_knowledge_keeps_provenance_and_check_time(tmp_path):
     assert is_fresh(row)
 
 
+def test_recheck_of_same_dynamic_claim_refreshes_checked_at_and_ttl(tmp_path):
+    storage = Storage(tmp_path / "brain.db")
+    kb = KnowledgeBase(storage, min_trusted_confidence=0.0)
+    old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    fresh = datetime.now(timezone.utc).isoformat()
+    first_id = kb.add_candidate(topic="погода", claim="Сейчас +20", source_url="https://example.gov/weather", data_class="dynamic", checked_at=old, ttl_seconds=60)
+    second_id = kb.add_candidate(topic="погода", claim="Сейчас +20", source_url="https://example.gov/weather", data_class="dynamic", checked_at=fresh, ttl_seconds=600)
+    assert second_id == first_id
+    with storage.connection() as conn:
+        row = dict(conn.execute("SELECT * FROM knowledge WHERE id=?", (first_id,)).fetchone())
+    assert row["checked_at"] == fresh
+    assert row["ttl_seconds"] == 600
+    assert is_fresh(row)
+
+
 def test_static_knowledge_does_not_expire_without_ttl(tmp_path):
     storage = Storage(tmp_path / "brain.db")
     kb = KnowledgeBase(storage, min_trusted_confidence=0.0)
