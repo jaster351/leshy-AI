@@ -1,0 +1,53 @@
+name: Leshy AI CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Установить встроенный llama.cpp runtime из CPU wheel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+          python -c "import llama_cpp; assert hasattr(llama_cpp, 'Llama')"
+      - name: Установить Лешего
+        run: pip install -e .
+      - name: Проверить Python
+        run: python -m compileall -q src tests windows
+      - name: Запустить unit и regression тесты
+        run: python -m unittest discover -s tests -v
+      - name: Проверить Web JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html=Path('web/index.html').read_text(encoding='utf-8')
+          m=re.search(r'<script>(.*)</script>',html,re.S)
+          assert m, 'script не найден'
+          Path('/tmp/leshy-web.js').write_text(m.group(1),encoding='utf-8')
+          PY
+          node --check /tmp/leshy-web.js
+      - name: Проверить Docker Compose
+        env:
+          LESHY_API_TOKEN: ci-only-token
+          SEARXNG_SECRET: ci-only-secret
+        run: docker compose config --quiet
