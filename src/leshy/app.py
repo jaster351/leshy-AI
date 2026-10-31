@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from hashlib import sha256
+from pathlib import Path
 import uuid
 from typing import Any
 
+from .accelerator_runtime import LlamaCppRuntimeManager, LlamaServerLLM
+from .adaptive_backend import AdaptiveLLM
 from .config import Settings
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
@@ -33,8 +36,11 @@ class LeshyApp:
             self.knowledge,
             FallbackSearch(SearxngSearch(self.settings.searxng_url, timeout=3), DdgsSearch()),
         )
+        self.hardware = self._detect_hardware()
+        self.model_path = self.settings.native_models_dir / self.settings.native_chat_file
+        self.model_downloader = ModelDownloader(self.model_path)
+        self.accelerator_runtime = LlamaCppRuntimeManager(self.settings.brain_dir)
         self.llm = self._build_llm()
-        self.model_downloader = ModelDownloader(self.settings.native_models_dir / self.settings.native_chat_file)
         self.self_learning = SelfLearningWorker(self.storage, self.learning, self.research)
         self.telegram = None
         event(
@@ -43,6 +49,23 @@ class LeshyApp:
             backend=self.settings.llm_backend,
             model=self.settings.native_chat_file if self.settings.llm_backend == "native" else self.settings.ollama_model,
             brain_dir=self.settings.brain_dir,
+            gpu_names=list(getattr(self.hardware, "gpu_names", ())),
+            npu_names=list(getattr(self.hardware, "npu_names", ())),
+        )
+
+    @staticmethod
+    def _detect_hardware():
+        try:
+            return detect_hardware()
+        except Exception as exc:
+            problem("hardware_detection_failed", str(exc))
+            return None
+
+    def _require_model(self) -> Path:
+        if self.model_path.is_file():
+            return self.model_path
+        raise LLMUnavailable(
+            "Локальная модель не загружена. Нажмите «Загрузить Qwen3-8B Q4_K_M» в системной панели."
         )
 
     def _build_llm(self):
@@ -53,9 +76,50 @@ class LeshyApp:
             return OllamaLLM(self.settings.ollama_url, self.settings.ollama_model)
         if backend != "native":
             raise ValueError(f"Неизвестный LLM backend: {backend}")
-        return NativeGGUFLLM(
-            self.settings.native_models_dir / self.settings.native_chat_file,
-            n_ctx=self.settings.native_context_size,
+
+        cpu_llm = NativeGGUFLLM(self.model_path, n_ctx=self.settings.native_context_size, n_gpu_layers=0)
+        candidates: list[tuple[str, Any]] = []
+        caps = self.hardware
+
+        # Windows GPU: официальный Vulkan llama.cpp runtime загружается и проверяется менеджером.
+        if caps is not None and bool(getattr(caps, "gpu", False)):
+            candidates.append((
+                "gpu-vulkan",
+                LlamaServerLLM(
+                    self.accelerator_runtime,
+                    "vulkan",
+                    self.model_path,
+                    ensure_model=self._require_model,
+                    n_ctx=self.settings.native_context_size,
+                    n_gpu_layers=-1,
+                    gpu_count=max(1, len(getattr(caps, "gpu_names", ()) or ())),
+                    startup_timeout=45,
+                    request_timeout=120,
+                ),
+            ))
+
+        # Intel/совместимый NPU используется после GPU, если устройство реально обнаружено.
+        if caps is not None and bool(getattr(caps, "npu", False)):
+            candidates.append((
+                "npu-openvino",
+                LlamaServerLLM(
+                    self.accelerator_runtime,
+                    "openvino",
+                    self.model_path,
+                    ensure_model=self._require_model,
+                    n_ctx=min(self.settings.native_context_size, 2048),
+                    n_gpu_layers=0,
+                    device="NPU",
+                    startup_timeout=30,
+                    request_timeout=120,
+                ),
+            ))
+
+        candidates.append(("cpu-native", cpu_llm))
+        return AdaptiveLLM(
+            candidates,
+            cooldown_seconds=180,
+            priority=("gpu", "npu", "cpu", "other"),
         )
 
     def start_background(self) -> None:
@@ -64,6 +128,9 @@ class LeshyApp:
 
     def stop_background(self) -> None:
         self.self_learning.stop()
+        closer = getattr(self.llm, "close", None)
+        if callable(closer):
+            closer()
         event("background_stopped")
 
     def _ensure_session(self, owner_id: str, session_id: str | None) -> str:
@@ -119,9 +186,7 @@ class LeshyApp:
 
     def _memory_context(self, owner_id: str) -> str:
         items = self.memories(owner_id, limit=8)
-        if not items:
-            return ""
-        return "\n".join(f"- {item['content']}" for item in items)
+        return "\n".join(f"- {item['content']}" for item in items) if items else ""
 
     @staticmethod
     def _needs_live_search(text: str) -> bool:
@@ -246,26 +311,23 @@ class LeshyApp:
                 "memories": int(conn.execute("SELECT COUNT(*) AS c FROM memories").fetchone()["c"]),
                 **self.knowledge.counts(),
             }
-        try:
-            hardware = asdict(detect_hardware())
-        except Exception as exc:
-            hardware = {"error": str(exc)}
-        model_path = self.settings.native_models_dir / self.settings.native_chat_file
-        telegram_status = self.telegram.status() if self.telegram is not None else {"configured": False, "running": False}
+        hardware = asdict(self.hardware) if self.hardware is not None else {"error": "hardware detection failed"}
+        router_status = getattr(self.llm, "status", None)
         return {
             "name": "Леший",
             "version": VERSION,
             "backend": self.settings.llm_backend,
             "model": getattr(self.llm, "model", self.settings.ollama_model),
-            "model_ready": bool(model_path.is_file()) if self.settings.llm_backend == "native" else True,
+            "model_ready": bool(self.model_path.is_file()) if self.settings.llm_backend == "native" else True,
             "model_download": self.model_downloader.status(),
             "brain_dir": str(self.settings.brain_dir),
             "logs_dir": str(self.settings.brain_dir / "logs"),
             "learning_enabled": self.learning.is_enabled(),
             "learning_worker": self.self_learning.status(),
-            "telegram": telegram_status,
+            "telegram": self.telegram.status() if self.telegram is not None else {"configured": False, "running": False},
             "stats": stats,
             "hardware": hardware,
+            "chat_router": router_status() if callable(router_status) else None,
         }
 
 
