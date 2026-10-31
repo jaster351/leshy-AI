@@ -159,6 +159,8 @@ class TelegramBridge:
             "group_context_aware": True,
             "natural_name_addressing": True,
             "message_reactions": True,
+            "reply_to_each_message": True,
+            "backlog_before_ack": True,
             "privacy_mode_note": "Для чтения обычных сообщений группы без @упоминания Privacy Mode бота должен быть отключён в Telegram.",
         }
 
@@ -239,8 +241,6 @@ class TelegramBridge:
             )
             event("telegram_reaction_set", chat_id=str(chat_id), message_id=int(message_id), emoji=emoji)
         except Exception as exc:
-            # Не все группы/чаты разрешают все реакции. Ошибка реакции не должна
-            # мешать обычному ответу Лешего.
             problem("telegram_reaction_failed", str(exc), chat_id=str(chat_id), message_id=int(message_id))
 
     def _send_typing(self, chat_id: int | str) -> None:
@@ -286,7 +286,6 @@ class TelegramBridge:
 
         if not self._can_chat(user_id):
             problem("telegram_access_denied", "Telegram ID не разрешён", telegram_user_id=user_id)
-            # В группе не засоряем общий разговор сообщениями про права доступа.
             if not self._social.is_group(message):
                 self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
             return
@@ -335,7 +334,7 @@ class TelegramBridge:
             self._send_answer(
                 chat_id,
                 answer,
-                reply_to_message_id=int(message_id) if self._social.is_group(message) and message_id else None,
+                reply_to_message_id=int(message_id) if message_id else None,
             )
             self._social.mark_leshy_answered(message)
             reaction = self._social.reaction_for(message, addressed=addressed, answer=answer)
@@ -347,6 +346,7 @@ class TelegramBridge:
                 group=self._social.is_group(message),
                 address_reason=address_reason,
                 reaction=reaction or "",
+                reply_to_message_id=int(message_id) if message_id else None,
             )
         except Exception as exc:
             problem("telegram_chat_failed", str(exc), telegram_user_id=user_id)
@@ -379,14 +379,21 @@ class TelegramBridge:
                     {"timeout": 10, "offset": self._offset, "allowed_updates": json.dumps(["message"])}
                 )
                 result = self._api("getUpdates?" + query, timeout=15) or []
+                queued = 0
                 for update in result:
                     self._offset = max(self._offset, int(update.get("update_id", 0)) + 1)
                     message = update.get("message")
                     if isinstance(message, dict):
                         try:
                             self._queue.put_nowait(message)
+                            queued += 1
                         except queue.Full:
                             problem("telegram_queue_full", "Очередь Telegram переполнена")
+                # Не подтверждаем следующему getUpdates обработку этой пачки, пока
+                # worker не закончил каждое сообщение. Это сохраняет backlog при
+                # аварийном выключении между получением и ответом.
+                if queued:
+                    self._queue.join()
                 self._last_error = ""
                 backoff = 0.5
             except (error.URLError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError) as exc:
