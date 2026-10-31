@@ -35,7 +35,13 @@
       #localModelCard .upload-progress{display:none;height:7px;margin-top:9px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.07)}
       #localModelCard .upload-progress span{display:block;height:100%;width:0;background:linear-gradient(90deg,#4a9be8,#67b7ff);transition:width .15s linear}
       #localModelCard .model-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-top:9px}
-      @media(max-width:720px){#localModelCard .model-row{grid-template-columns:1fr}}
+      #tasksHelpCard{margin:0 0 12px}
+      #tasksHelpCard .task-help-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}
+      #tasksHelpCard .task-help-state{border:1px solid var(--line);border-radius:10px;padding:9px;background:rgba(255,255,255,.025)}
+      #tasksHelpCard .task-help-state b{display:block;font-size:12px;margin-bottom:3px}
+      #tasksHelpCard .task-help-state span{font-size:11px;color:var(--muted)}
+      @media(max-width:900px){#tasksHelpCard .task-help-grid{grid-template-columns:1fr 1fr}}
+      @media(max-width:720px){#localModelCard .model-row{grid-template-columns:1fr}#tasksHelpCard .task-help-grid{grid-template-columns:1fr}.task-form{grid-template-columns:1fr!important}}
     `;
     document.head.appendChild(style);
   }
@@ -190,7 +196,80 @@
     xhr.send(file);
   }
 
-  function init(){ensurePanel();loadModels();}
+  function installTasksHelp(){
+    ensureStyle();
+    const pane=byId('pane-tasks');
+    if(!pane || byId('tasksHelpCard')) return;
+    const subtitle=pane.querySelector('.section-subtitle');
+    const card=document.createElement('div');
+    card.id='tasksHelpCard';
+    card.className='card';
+    card.innerHTML=`
+      <h3>Как пользоваться разделом «Задачи»</h3>
+      <div class="item-body" style="margin-top:0">Это локальный план и трекер дел. Создайте задачу, добавьте описание, выберите приоритет и при необходимости срок. Затем меняйте её состояние по мере работы.</div>
+      <div class="task-help-grid">
+        <div class="task-help-state"><b>Открыта</b><span>ещё не начата</span></div>
+        <div class="task-help-state"><b>В работе</b><span>выполняется сейчас</span></div>
+        <div class="task-help-state"><b>Готово</b><span>задача завершена</span></div>
+        <div class="task-help-state"><b>Отменено</b><span>больше не требуется</span></div>
+      </div>
+      <div class="hint" style="margin-top:10px"><b>Важно:</b> сейчас этот раздел хранит и отслеживает задачи, но ещё не является автономным исполнителем. Если нужно, чтобы Леший реально выполнил действие, дайте команду в чате. В дальнейшем задачи будут связаны с автономным планировщиком и инструментами.</div>
+      <div class="hint" style="margin-top:7px">Пример: «Проверить NAS после обновления» → описание «проверить SMB и папку torrent-watch» → высокий приоритет → срок → «В работу» → «Готово».</div>`;
+    if(subtitle) subtitle.insertAdjacentElement('afterend',card); else pane.insertBefore(card,pane.firstChild);
+  }
+
+  function installTaskDueField(){
+    const title=byId('taskTitle');
+    if(!title || byId('taskDueAt')) return;
+    const form=title.closest('.task-form');
+    if(!form) return;
+    const due=document.createElement('input');
+    due.className='field';
+    due.id='taskDueAt';
+    due.type='datetime-local';
+    due.title='Необязательный срок задачи';
+    due.setAttribute('aria-label','Срок задачи');
+    const priority=byId('taskPriority');
+    if(priority) priority.insertAdjacentElement('afterend',due); else title.insertAdjacentElement('afterend',due);
+    form.style.gridTemplateColumns='minmax(0,1fr) 150px minmax(180px,220px)';
+  }
+
+  function bindTaskCreate(){
+    const button=byId('taskCreate');
+    if(!button || button.dataset.tasksEnhanced==='1') return;
+    button.dataset.tasksEnhanced='1';
+    button.onclick=async()=>{
+      const title=(byId('taskTitle')&&byId('taskTitle').value||'').trim();
+      if(!title) return;
+      button.disabled=true;
+      try{
+        const raw=(byId('taskDueAt')&&byId('taskDueAt').value||'').trim();
+        const dueAt=raw?new Date(raw).toISOString():'';
+        await requestJson('/v1/tasks',{method:'POST',body:JSON.stringify({
+          owner_id:typeof window.ownerId!=='undefined'?window.ownerId:'web:local',
+          title,
+          details:(byId('taskDetails')&&byId('taskDetails').value)||'',
+          priority:Number((byId('taskPriority')&&byId('taskPriority').value)||0),
+          due_at:dueAt
+        })});
+        byId('taskTitle').value='';
+        if(byId('taskDetails')) byId('taskDetails').value='';
+        if(byId('taskPriority')) byId('taskPriority').value='0';
+        if(byId('taskDueAt')) byId('taskDueAt').value='';
+        if(typeof window.loadTasks==='function') await window.loadTasks();
+        if(typeof window.loadOverview==='function') await window.loadOverview();
+      }catch(error){alert(error.message||String(error));}
+      finally{button.disabled=false;}
+    };
+  }
+
+  function init(){
+    ensurePanel();
+    loadModels();
+    installTasksHelp();
+    installTaskDueField();
+    bindTaskCreate();
+  }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init,{once:true});
   else init();
 })();
