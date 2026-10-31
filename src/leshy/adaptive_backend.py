@@ -33,11 +33,7 @@ def _hardware_kind(name: str) -> str:
 
 
 def _fatal_npu_failure(name: str, exc: BaseException) -> bool:
-    """Return True for NPU/OpenVINO compute failures that must not stall chat again.
-
-    The quarantine is intentionally process-local: restarting Leshy creates a new
-    router and therefore performs the next availability check naturally.
-    """
+    """Return True for NPU/OpenVINO compute failures that must not stall chat again."""
     if _hardware_kind(name) != "npu":
         return False
     text = str(exc).upper().replace("-", "_").replace(" ", "_")
@@ -53,12 +49,7 @@ def _fatal_npu_failure(name: str, exc: BaseException) -> bool:
 
 
 class AdaptiveLLM:
-    """Failover between local LLM backends with an explicit device order.
-
-    Interactive chat is strictly GPU -> NPU -> CPU by default. A fatal NPU or
-    OpenVINO compute failure quarantines that backend until process restart, so
-    subsequent user answers do not repeatedly wait for the same broken device.
-    """
+    """Failover between resident local LLM backends with GPU -> NPU -> CPU priority."""
 
     def __init__(self, candidates: list[tuple[str, Any]], *, cooldown_seconds: float = 180.0,
                  priority: tuple[str, ...] = ("gpu", "npu", "cpu", "other")):
@@ -86,6 +77,60 @@ class AdaptiveLLM:
                 return healthy
             return sorted(cooling, key=lambda state: state.failed_until)[:1]
 
+    def _mark_failure(self, state: _BackendState, exc: BaseException, latency_ms: int) -> bool:
+        fatal = _fatal_npu_failure(state.name, exc)
+        with self._lock:
+            state.failures += 1
+            state.last_latency_ms = latency_ms
+            if fatal:
+                state.quarantined = True
+                state.quarantine_reason = str(exc)
+                state.failed_until = float("inf")
+            else:
+                state.failed_until = time.monotonic() + self.cooldown_seconds
+        return fatal
+
+    def _mark_success(self, state: _BackendState, latency_ms: int) -> bool:
+        with self._lock:
+            switched = self._preferred != state.name
+            self._preferred = state.name
+            state.failures = 0
+            state.failed_until = 0.0
+            state.last_latency_ms = latency_ms
+        return switched
+
+    def warmup(self) -> str | None:
+        """Preload the highest-priority usable backend and keep it resident.
+
+        Called in a background thread when Leshy starts, so the first Telegram/Web
+        message does not pay model/runtime loading time. A failed GPU is cooled down
+        and the next backend is warmed instead.
+        """
+        for state in self._ordered():
+            warmer = getattr(state.provider, "warmup", None)
+            if not callable(warmer):
+                continue
+            started = time.monotonic()
+            try:
+                warmer()
+            except Exception as exc:
+                latency_ms = int((time.monotonic() - started) * 1000)
+                fatal = self._mark_failure(state, exc, latency_ms)
+                exception(
+                    "adaptive_llm_warmup_failed",
+                    exc,
+                    backend=state.name,
+                    latency_ms=latency_ms,
+                    cooldown_seconds=self.cooldown_seconds,
+                    quarantined=fatal,
+                )
+                continue
+            latency_ms = int((time.monotonic() - started) * 1000)
+            switched = self._mark_success(state, latency_ms)
+            event("adaptive_llm_warmup_ok", backend=state.name, latency_ms=latency_ms, switched=switched)
+            return state.name
+        return None
+
     def chat(self, messages: list[ChatMessage]) -> str:
         prepared_messages = with_leshy_identity(messages)
         errors: list[str] = []
@@ -95,27 +140,13 @@ class AdaptiveLLM:
                 text = state.provider.chat(prepared_messages)
             except Exception as exc:
                 latency_ms = int((time.monotonic() - started) * 1000)
-                fatal = _fatal_npu_failure(state.name, exc)
-                with self._lock:
-                    state.failures += 1
-                    state.last_latency_ms = latency_ms
-                    if fatal:
-                        state.quarantined = True
-                        state.quarantine_reason = str(exc)
-                        state.failed_until = float("inf")
-                    else:
-                        state.failed_until = time.monotonic() + self.cooldown_seconds
+                fatal = self._mark_failure(state, exc, latency_ms)
                 exception("adaptive_llm_backend_failed", exc, backend=state.name, latency_ms=latency_ms,
                           cooldown_seconds=self.cooldown_seconds, quarantined=fatal)
                 errors.append(f"{state.name}: {exc}")
                 continue
             latency_ms = int((time.monotonic() - started) * 1000)
-            with self._lock:
-                switched = self._preferred != state.name
-                self._preferred = state.name
-                state.failures = 0
-                state.failed_until = 0.0
-                state.last_latency_ms = latency_ms
+            switched = self._mark_success(state, latency_ms)
             event("adaptive_llm_backend_ok", backend=state.name, latency_ms=latency_ms, switched=switched)
             return text
         raise LLMUnavailable("Все локальные LLM backend недоступны: " + "; ".join(errors[-3:]))
@@ -123,19 +154,35 @@ class AdaptiveLLM:
     def status(self) -> dict[str, Any]:
         now = time.monotonic()
         with self._lock:
-            return {"preferred": self._preferred, "priority": list(self.priority), "backends": [
-                {"name": state.name, "kind": _hardware_kind(state.name),
-                 "cooldown_remaining_seconds": None if state.quarantined else max(0.0, round(state.failed_until - now, 1)),
-                 "failures": state.failures, "last_latency_ms": state.last_latency_ms,
-                 "quarantined": state.quarantined, "quarantine_reason": state.quarantine_reason}
-                for state in self._states]}
+            rows = []
+            for state in self._states:
+                resident = None
+                resident_status = getattr(state.provider, "resident_status", None)
+                if callable(resident_status):
+                    try:
+                        resident = resident_status()
+                    except Exception:
+                        resident = None
+                rows.append({
+                    "name": state.name,
+                    "kind": _hardware_kind(state.name),
+                    "cooldown_remaining_seconds": None if state.quarantined else max(0.0, round(state.failed_until - now, 1)),
+                    "failures": state.failures,
+                    "last_latency_ms": state.last_latency_ms,
+                    "quarantined": state.quarantined,
+                    "quarantine_reason": state.quarantine_reason,
+                    "resident": resident,
+                })
+            return {"preferred": self._preferred, "priority": list(self.priority), "backends": rows}
 
     def close(self) -> None:
         for state in self._states:
             closer = getattr(state.provider, "close", None)
             if callable(closer):
-                try: closer()
-                except Exception: pass
+                try:
+                    closer()
+                except Exception:
+                    pass
 
 
 class AdaptiveEmbeddings:
@@ -163,8 +210,10 @@ class AdaptiveEmbeddings:
                 continue
             available = getattr(state.provider, "available", None)
             try:
-                if available is None or bool(available()): return True
-            except Exception: continue
+                if available is None or bool(available()):
+                    return True
+            except Exception:
+                continue
         return False
 
     def _rank(self, state: _BackendState) -> tuple[int, int, str]:
@@ -177,7 +226,8 @@ class AdaptiveEmbeddings:
             healthy = [state for state in usable if state.failed_until <= now]
             cooling = [state for state in usable if state.failed_until > now]
             healthy.sort(key=self._rank)
-            if healthy: return healthy
+            if healthy:
+                return healthy
             return sorted(cooling, key=lambda state: state.failed_until)[:1]
 
     def embed(self, text: str) -> list[float]:
@@ -228,5 +278,7 @@ class AdaptiveEmbeddings:
         for state in self._states:
             closer = getattr(state.provider, "close", None)
             if callable(closer):
-                try: closer()
-                except Exception: pass
+                try:
+                    closer()
+                except Exception:
+                    pass
