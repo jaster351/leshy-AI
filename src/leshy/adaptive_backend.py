@@ -21,9 +21,10 @@ class _BackendState:
 class AdaptiveLLM:
     """Быстрый failover между локальными LLM backend.
 
-    Первый рабочий backend становится предпочтительным. После ошибки backend
-    временно исключается из маршрутизации, чтобы каждый новый запрос не ждал
-    повторного старта заведомо неисправного ускорителя.
+    Ускоритель может быть предпочтительным, но он не имеет права блокировать
+    пользовательский ответ. После ошибки ускорителя проверенный cpu-native путь
+    из стабильной ветки 1.9 получает приоритет перед следующими экспериментальными
+    ускорителями. Неисправный backend временно исключается circuit breaker'ом.
     """
 
     def __init__(self, candidates: list[tuple[str, Any]], *, cooldown_seconds: float = 180.0):
@@ -40,7 +41,17 @@ class AdaptiveLLM:
         with self._lock:
             healthy = [state for state in self._states if state.failed_until <= now]
             cooling = [state for state in self._states if state.failed_until > now]
-            healthy.sort(key=lambda state: (state.name != self._preferred, state.failures, state.name))
+
+            def priority(state: _BackendState) -> tuple[int, int, str]:
+                if state.name == self._preferred:
+                    rank = 0
+                elif state.name == "cpu-native":
+                    rank = 1
+                else:
+                    rank = 2
+                return (rank, state.failures, state.name)
+
+            healthy.sort(key=priority)
             if healthy:
                 return healthy
             return sorted(cooling, key=lambda state: state.failed_until)[:1]
@@ -122,12 +133,7 @@ class AdaptiveEmbeddings:
         self._lock = threading.RLock()
 
         provider_models = [str(getattr(state.provider, "model", state.name)) for state in self._states]
-        # Все кандидаты используют один и тот же embedding GGUF. Backend не должен
-        # менять логическую идентичность векторного пространства, иначе после
-        # переключения ускорителя старый индекс перестанет находиться.
-        basenames = []
-        for value in provider_models:
-            basenames.append(value.split(":", 1)[-1])
+        basenames = [value.split(":", 1)[-1] for value in provider_models]
         canonical = basenames[0] if basenames and all(name == basenames[0] for name in basenames) else "mixed"
         self.model = f"adaptive:{canonical}"
         self.compatible_models = tuple(dict.fromkeys([self.model, *provider_models]))
