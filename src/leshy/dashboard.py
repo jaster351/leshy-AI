@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
+import threading
 from typing import Any
 
 from .diagnostics import recent_problems
+from .llm import ChatMessage
 from .storage import utcnow
 
 
@@ -13,6 +16,8 @@ class DashboardService:
     def __init__(self, app):
         self.app = app
         self.storage = app.storage
+        self._title_lock = threading.Lock()
+        self._title_thread: threading.Thread | None = None
 
     @staticmethod
     def _owner(value: str | None) -> str:
@@ -43,13 +48,80 @@ class DashboardService:
             "research": {str(row["status"]): int(row["n"]) for row in research_rows},
         }
 
+    @staticmethod
+    def _clean_generated_title(value: str, fallback: str) -> str:
+        text = str(value or "").strip()
+        text = re.sub(r"(?is)<think>.*?</think>", " ", text)
+        text = re.sub(r"(?im)^\s*(название|заголовок)\s*[:—-]\s*", "", text)
+        text = text.strip(" \t\r\n`*_#\"'«»")
+        text = " ".join(text.split())
+        if not text:
+            text = " ".join(str(fallback or "Новый диалог").split())
+        if len(text) > 64:
+            text = text[:61].rstrip(" ,.;:-—") + "…"
+        return text or "Новый диалог"
+
+    def _auto_title_one(self, owner: str, session_id: str) -> None:
+        try:
+            with self.storage.connection() as conn:
+                session = conn.execute(
+                    "SELECT id,title,title_source FROM sessions WHERE id=? AND owner_id=?",
+                    (session_id, owner),
+                ).fetchone()
+                if session is None or str(session["title_source"] or "") != "auto":
+                    return
+                messages = conn.execute(
+                    "SELECT role,content FROM messages WHERE session_id=? ORDER BY id ASC LIMIT 4",
+                    (session_id,),
+                ).fetchall()
+            if not messages:
+                return
+            first_user = next((str(row["content"]) for row in messages if str(row["role"]) == "user"), str(session["title"] or ""))
+            excerpt = "\n".join(f"{row['role']}: {str(row['content'])[:1200]}" for row in messages)[:4000]
+            prompt = [
+                ChatMessage(
+                    "system",
+                    "/no_think\nПридумай короткое название этого диалога на языке пользователя. "
+                    "2–6 слов, без кавычек, без точки в конце, без пояснений. "
+                    "Название должно отражать главную тему, а не копировать весь вопрос.",
+                ),
+                ChatMessage("user", excerpt),
+            ]
+            raw = self.app.llm.chat(prompt)
+            title = self._clean_generated_title(raw, first_user[:64])
+            with self.storage.connection() as conn:
+                conn.execute(
+                    "UPDATE sessions SET title=?,title_source=?,updated_at=updated_at WHERE id=? AND owner_id=? AND title_source='auto'",
+                    (title, "auto-llm", session_id, owner),
+                )
+            self.storage.audit("session.auto_titled", {"session_id": session_id, "owner_id": owner, "title": title})
+        except Exception:
+            # Название — косметическая функция и не должно ломать список чатов.
+            return
+
+    def _schedule_auto_title(self, owner: str, rows: list[Any]) -> None:
+        candidate = next((row for row in rows if str(row["title_source"] or "") == "auto"), None)
+        if candidate is None:
+            return
+        with self._title_lock:
+            if self._title_thread and self._title_thread.is_alive():
+                return
+            self._title_thread = threading.Thread(
+                target=self._auto_title_one,
+                args=(owner, str(candidate["id"])),
+                name="leshy-session-auto-title",
+                daemon=True,
+            )
+            self._title_thread.start()
+
     def sessions(self, owner_id: str = "web:local", limit: int = 50) -> list[dict[str, Any]]:
         owner = self._owner(owner_id)
         with self.storage.connection() as conn:
             rows = conn.execute(
-                "SELECT id,title,created_at,updated_at FROM sessions WHERE owner_id=? ORDER BY updated_at DESC LIMIT ?",
+                "SELECT id,title,title_source,created_at,updated_at FROM sessions WHERE owner_id=? ORDER BY updated_at DESC LIMIT ?",
                 (owner, self._limit(limit)),
             ).fetchall()
+        self._schedule_auto_title(owner, list(rows))
         return [dict(row) for row in rows]
 
     def memories(self, owner_id: str = "web:local", limit: int = 100) -> list[dict[str, Any]]:
@@ -157,13 +229,13 @@ class DashboardService:
     def capabilities(self) -> list[dict[str, Any]]:
         status = self.app.status()
         return [
-            {"id": "chat", "title": "Локальный чат", "ready": bool(status.get("model_ready")), "detail": "Qwen3-8B через локальный runtime"},
+            {"id": "chat", "title": "Локальный чат", "ready": bool(status.get("model_ready")), "detail": "Локальная LLM через адаптивный runtime"},
             {"id": "search", "title": "Интернет-поиск", "ready": True, "detail": "Live search + сохранение candidate-знаний"},
             {"id": "memory", "title": "Долговременная память", "ready": True, "detail": "Изолированная память пользователя в SQLite"},
             {"id": "learning", "title": "Самообучение", "ready": True, "detail": "Управляемый research → candidate → verification → trusted"},
-            {"id": "telegram", "title": "Telegram", "ready": bool((status.get("telegram") or {}).get("configured")), "detail": "Long polling, список разрешённых Telegram ID"},
+            {"id": "telegram", "title": "Telegram", "ready": bool((status.get("telegram") or {}).get("configured")), "detail": "Long polling, адресные ответы и история сообщений"},
             {"id": "tasks", "title": "Задачи", "ready": True, "detail": "Локальный список задач с состояниями и приоритетом"},
-            {"id": "logs", "title": "Диагностика", "ready": True, "detail": "Санитизированные runtime/probleмные логи"},
+            {"id": "logs", "title": "Диагностика", "ready": True, "detail": "Санитизированные runtime/problem логи"},
         ]
 
     def logs(self, limit: int = 120) -> dict[str, Any]:
