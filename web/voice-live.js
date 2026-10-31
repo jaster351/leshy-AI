@@ -84,11 +84,10 @@
     }finally{state.inFlight=false}
   }
 
-  function speechTextFromLastAnswer(){
-    const messages=[...document.querySelectorAll('#messages .msg.assistant')];const last=messages[messages.length-1];if(!last)return '';
-    const body=last.querySelector('.chat-rich-body')||last;let text=String(body.innerText||body.textContent||'');
+  function speechTextFromAnswer(answer){
+    let text=String(answer||'').trim();if(!text)return '';
     text=text.replace(/```[\s\S]*?```/g,' Код приведён на экране. ').replace(/\bКопировать\b/g,' ').replace(/https?:\/\/\S+/g,' ссылка ');
-    text=text.replace(/[`*_#>|]/g,' ').replace(/\s+/g,' ').trim();return text.slice(0,12000);
+    return text.replace(/[`*_#>|]/g,' ').replace(/\s+/g,' ').trim();
   }
 
   function stopPlayback(){
@@ -97,9 +96,9 @@
     if(state.playbackUrl){try{URL.revokeObjectURL(state.playbackUrl)}catch(_e){}state.playbackUrl=''}
   }
 
-  async function speakLatestAssistant(){
+  async function speakAssistantAnswer(answer){
     if(!state.enabled||state.ttsUnavailable)return;
-    const text=speechTextFromLastAnswer();if(!text)return;
+    const text=speechTextFromAnswer(answer);if(!text)return;
     notice('Леший говорит…',1200);
     try{
       const response=await fetch('/v1/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
@@ -120,8 +119,10 @@
     const text=state.latestText||await transcribeSnapshot(true,generation);state.recorder=null;
     if(send&&text&&generation===state.generation&&!state.asrFailed){
       const input=$('chatInput');if(input)input.value=(state.baseText+(state.baseText?' ':'')+text).trim();notice('Отправляю…',700);
-      try{if(typeof window.sendFrom==='function')await window.sendFrom(input);else $('chatSend')?.click()}catch(_e){}
-      if(state.enabled)await speakLatestAssistant();
+      let result=null;
+      try{if(typeof window.sendFrom==='function')result=await window.sendFrom(input);else $('chatSend')?.click()}catch(_e){}
+      const answer=result&&typeof result.answer==='string'?result.answer:'';
+      if(state.enabled&&answer)await speakAssistantAnswer(answer);
     }
     clearRecordedAudio();if(keepSession&&state.enabled&&!state.asrFailed)scheduleRestartAfterAnswer();
   }
