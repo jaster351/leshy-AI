@@ -19,6 +19,26 @@
     `;document.head.appendChild(s);
   }
 
+  function typography(){
+    if($('leshyChatGPTTypography'))return;
+    const s=document.createElement('style');s.id='leshyChatGPTTypography';s.textContent=`
+      :root{--leshy-ui-font:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+      html,body,button,input,textarea,select{font-family:var(--leshy-ui-font)!important;font-weight:400}
+      body{font-size:14px!important;letter-spacing:0!important}
+      #chatSidebarNew,#chatHistorySearch,#sidebarHistory #sessionList .item,#sidebarHistory #sessionList .leshy-session-item,.leshy-session-title,#profileMenuButton,#profileMenu button,#chatMoreMenu button,#leshyTopActions button{font-size:14px!important;line-height:1.35!important}
+      #sidebarHistoryTitle,#profileCopy span,#chatComposerHint,#chatVoiceState{font-size:11px!important;line-height:1.35!important}
+      body.full .head-title strong{font-size:14px!important;font-weight:600!important;line-height:1.35!important}
+      #messages .msg,#messages .msg .chat-rich-body,#messages .msg .chat-rich-text{font-family:var(--leshy-ui-font)!important;font-size:15px!important;line-height:1.55!important;letter-spacing:0!important}
+      #messages .msg.assistant .who{font-size:11px!important;line-height:1.3!important;font-weight:600!important;letter-spacing:.01em!important}
+      #messages .msg.user{font-size:15px!important;line-height:1.5!important;padding:9px 14px!important}
+      #messages .sources,#messages .sources a{font-size:12px!important;line-height:1.45!important}
+      #messages .chat-inline-code,#messages .chat-code-block code{font-family:"Cascadia Code",Consolas,ui-monospace,SFMono-Regular,Menlo,monospace!important;font-size:13px!important;line-height:1.5!important}
+      #messages .chat-code-head,.chat-code-copy{font-size:12px!important}
+      #chatInput{font-family:var(--leshy-ui-font)!important;font-size:16px!important;line-height:1.45!important;font-weight:400!important;letter-spacing:0!important}
+      #shellToast{font-size:13px!important;line-height:1.4!important}
+    `;document.head.appendChild(s);
+  }
+
   function bindMenu(){
     const menu=$('chatMoreMenu'),button=$('chatMoreButton');
     if(!menu||!button)return false;
@@ -43,8 +63,8 @@
   }
 
   function boot(){
-    style();hideLegacyPanel();
-    let tries=0;const timer=setInterval(()=>{tries++;hideLegacyPanel();if(bindMenu()||tries>=12)clearInterval(timer)},250);bindMenu();
+    style();typography();hideLegacyPanel();
+    let tries=0;const timer=setInterval(()=>{tries++;hideLegacyPanel();typography();if(bindMenu()||tries>=12)clearInterval(timer)},250);bindMenu();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
