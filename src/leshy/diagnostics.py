@@ -13,12 +13,14 @@ import traceback
 import uuid
 from typing import Any
 
+from .logging_paths import analysis_log_dir as resolve_analysis_log_dir
 from .logging_paths import central_log_dir, resolve_brain_root
 
 _LOGGER_NAME = "leshy"
 _SESSION_ID = uuid.uuid4().hex[:12]
 _CONFIGURED = False
 _LOG_DIR: Path | None = None
+_ANALYSIS_LOG_DIR: Path | None = None
 _HANDLERS: list[logging.Handler] = []
 _SECRET_MARKERS = ("token", "secret", "password", "authorization", "api_key", "apikey", "cookie")
 
@@ -27,6 +29,7 @@ _BOT_RE = re.compile(r"(?i)(/bot)(\d+:[A-Za-z0-9_-]+)")
 _QUERY_SECRET_RE = re.compile(
     r"(?i)((?:token|secret|password|api[_-]?key|authorization|cookie|signature|policy|key-pair-id|x-amz-signature|x-amz-credential|x-amz-security-token)=)([^&\s\"]+)"
 )
+_HOME = str(Path.home())
 
 
 def _sanitize_text(value: str) -> str:
@@ -34,6 +37,8 @@ def _sanitize_text(value: str) -> str:
     text = _BEARER_RE.sub(r"\1<redacted>", text)
     text = _BOT_RE.sub(r"\1<redacted>", text)
     text = _QUERY_SECRET_RE.sub(r"\1<redacted>", text)
+    if _HOME not in {"", "/", "\\"}:
+        text = text.replace(_HOME, "<home>")
     return text
 
 
@@ -43,7 +48,7 @@ class RedactingFormatter(logging.Formatter):
 
 
 def close_diagnostics() -> None:
-    global _CONFIGURED, _LOG_DIR, _HANDLERS
+    global _CONFIGURED, _LOG_DIR, _ANALYSIS_LOG_DIR, _HANDLERS
     logger = logging.getLogger(_LOGGER_NAME)
     root = logging.getLogger()
     handlers = list(_HANDLERS)
@@ -64,17 +69,22 @@ def close_diagnostics() -> None:
             pass
     _CONFIGURED = False
     _LOG_DIR = None
+    _ANALYSIS_LOG_DIR = None
 
 
 def configure_diagnostics(base_dir: Path, version: str) -> logging.Logger:
-    global _CONFIGURED, _LOG_DIR, _HANDLERS
+    global _CONFIGURED, _LOG_DIR, _ANALYSIS_LOG_DIR, _HANDLERS
     log_dir = central_log_dir(Path(base_dir))
-    if _CONFIGURED and _LOG_DIR == log_dir:
+    analysis_dir = resolve_analysis_log_dir()
+    if analysis_dir == log_dir:
+        analysis_dir = None
+    if _CONFIGURED and _LOG_DIR == log_dir and _ANALYSIS_LOG_DIR == analysis_dir:
         event("process_reconfigured", version=version, pid=os.getpid(), session=_SESSION_ID)
         return logging.getLogger(_LOGGER_NAME)
     if _CONFIGURED:
         close_diagnostics()
     _LOG_DIR = log_dir
+    _ANALYSIS_LOG_DIR = analysis_dir
     formatter = RedactingFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     all_handler = RotatingFileHandler(log_dir / "leshy.log", maxBytes=10 * 1024 * 1024, backupCount=10, encoding="utf-8")
     all_handler.setLevel(logging.INFO)
@@ -82,25 +92,46 @@ def configure_diagnostics(base_dir: Path, version: str) -> logging.Logger:
     problem_handler = RotatingFileHandler(log_dir / "problems.log", maxBytes=10 * 1024 * 1024, backupCount=10, encoding="utf-8")
     problem_handler.setLevel(logging.WARNING)
     problem_handler.setFormatter(formatter)
+    handlers: list[logging.Handler] = [all_handler, problem_handler]
+    if analysis_dir is not None:
+        analysis_handler = RotatingFileHandler(
+            analysis_dir / "leshy-auto.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=4,
+            encoding="utf-8",
+        )
+        analysis_handler.setLevel(logging.INFO)
+        analysis_handler.setFormatter(formatter)
+        handlers.append(analysis_handler)
     logger = logging.getLogger(_LOGGER_NAME)
     logger.setLevel(logging.INFO)
     logger.propagate = False
-    logger.addHandler(all_handler)
-    logger.addHandler(problem_handler)
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    root.addHandler(all_handler)
-    root.addHandler(problem_handler)
+    for handler in handlers:
+        logger.addHandler(handler)
+        root.addHandler(handler)
     logging.captureWarnings(True)
-    _HANDLERS = [all_handler, problem_handler]
+    _HANDLERS = handlers
     _CONFIGURED = True
     _install_exception_hooks(logger)
-    event("process_start", version=version, pid=os.getpid(), session=_SESSION_ID, log_dir=log_dir)
+    event(
+        "process_start",
+        version=version,
+        pid=os.getpid(),
+        session=_SESSION_ID,
+        runtime_log_root="LeshyBrain/logs",
+        analysis_mirror=analysis_dir is not None,
+    )
     return logger
 
 
 def log_dir() -> Path | None:
     return _LOG_DIR
+
+
+def analysis_log_dir() -> Path | None:
+    return _ANALYSIS_LOG_DIR
 
 
 def _redact_dict(value: dict[Any, Any]) -> dict[str, Any]:
@@ -116,7 +147,7 @@ def _redact_dict(value: dict[Any, Any]) -> dict[str, Any]:
 
 def _safe(value: Any) -> Any:
     if isinstance(value, Path):
-        return str(value)
+        return _sanitize_text(str(value))
     if isinstance(value, str):
         return _sanitize_text(value)
     if isinstance(value, (int, float, bool)) or value is None:
@@ -152,13 +183,20 @@ def exception(name: str, exc: BaseException, **fields: Any) -> None:
     logging.getLogger(_LOGGER_NAME).error(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def write_snapshot(base_dir: Path, **state: Any) -> Path:
     brain_root = resolve_brain_root(Path(base_dir))
     path = central_log_dir(brain_root) / "diagnostics.json"
     payload = {"timestamp": time.time(), "session": _SESSION_ID, "pid": os.getpid(), **_redact_dict(state)}
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, path)
+    _write_json_atomic(path, payload)
+    analysis_dir = _ANALYSIS_LOG_DIR or resolve_analysis_log_dir()
+    if analysis_dir is not None and analysis_dir != path.parent:
+        _write_json_atomic(analysis_dir / "diagnostics-auto.json", payload)
     return path
 
 
