@@ -1,14 +1,47 @@
 from __future__ import annotations
 
+import html
 import json
 import os
 from pathlib import Path
+import re
 import threading
 from typing import Iterable
 from urllib import parse, request, error
 
 from .diagnostics import event, problem
 from .secret_store import load_secret, save_secret
+
+
+_THINK_RE = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
+
+
+def _telegram_answer_html(text: str) -> str:
+    """Hide model reasoning behind Telegram's click-to-reveal spoiler UI."""
+    value = str(text or "")
+    parts: list[str] = []
+    offset = 0
+    for match in _THINK_RE.finditer(value):
+        visible = value[offset:match.start()]
+        if visible:
+            parts.append(html.escape(visible))
+        thought = str(match.group(1) or "").strip()
+        if thought:
+            parts.append("<tg-spoiler>" + html.escape(thought) + "</tg-spoiler>")
+        offset = match.end()
+    tail = value[offset:]
+    lower_tail = tail.lower()
+    open_index = lower_tail.find("<think>")
+    if open_index >= 0:
+        visible = tail[:open_index]
+        thought = tail[open_index + len("<think>"):].replace("</think>", "").strip()
+        if visible:
+            parts.append(html.escape(visible))
+        if thought:
+            parts.append("<tg-spoiler>" + html.escape(thought) + "</tg-spoiler>")
+    elif tail:
+        parts.append(html.escape(tail.replace("</think>", "")))
+    return "".join(parts).strip()
 
 
 class TelegramBridge:
@@ -108,6 +141,13 @@ class TelegramBridge:
     def _send(self, chat_id: int | str, text: str) -> None:
         self._api("sendMessage", {"chat_id": chat_id, "text": text[:4000]})
 
+    def _send_answer(self, chat_id: int | str, text: str) -> None:
+        rendered = _telegram_answer_html(text[:3800])
+        self._api(
+            "sendMessage",
+            {"chat_id": chat_id, "text": rendered or "…", "parse_mode": "HTML"},
+        )
+
     def _handle_message(self, message: dict) -> None:
         chat = message.get("chat") or {}
         sender = message.get("from") or {}
@@ -143,7 +183,7 @@ class TelegramBridge:
                 owner_id=f"telegram:{user_id}",
                 session_id=f"telegram:{chat_id}:{user_id}",
             )
-            self._send(chat_id, result["answer"])
+            self._send_answer(chat_id, result["answer"])
         except Exception as exc:
             problem("telegram_chat_failed", str(exc), telegram_user_id=user_id)
             self._send(chat_id, f"Не удалось получить ответ Лешего: {exc}")
