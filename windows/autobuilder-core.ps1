@@ -13,6 +13,7 @@ $LiveRoot = Join-Path $RepoRoot 'dist\Leshy'
 $LiveExe = Join-Path $LiveRoot 'Leshy.exe'
 $BrainRoot = Join-Path $LiveRoot 'LeshyBrain'
 $PackageRoot = Join-Path $RuntimeRoot 'package-dist\Leshy'
+$BackupRoot = Join-Path $RuntimeRoot 'live-backup'
 $BuildScript = Join-Path $PSScriptRoot 'build.ps1'
 $LiveStatePath = Join-Path $RuntimeRoot 'live-state.json'
 $UiStatusPath = Join-Path $RuntimeRoot 'ui-status.json'
@@ -103,7 +104,7 @@ function Invoke-RepoUpdate {
     if ($LASTEXITCODE -ne 0) { throw 'git fetch origin main failed.' }
     $remote = Get-HeadSha -Git $git -Ref 'origin/main'
     if ($remote -ne $before) {
-        & $git -C $RepoRoot pull --ff-only origin main
+        & $git -C $RepoRoot pull --ff-only origin main | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'git pull --ff-only origin main failed.' }
     }
     $after = Get-HeadSha -Git $git
@@ -183,7 +184,7 @@ function Invoke-Build {
     $buildLog = Join-Path $LogsRoot ('live-build-{0}-{1}-{2}.log' -f $version, $shortSha, $stamp)
     Write-CoreLog ('Starting live build ' + $version + ' at ' + $shortSha)
     Write-UiStatus -State 'building' -Message ('Building Leshy ' + $version) -Sha $Sha -Version $version
-    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $BuildScript 2>&1 | Tee-Object -FilePath $buildLog
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $BuildScript 2>&1 | Tee-Object -FilePath $buildLog | Out-Host
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) { throw ('build.ps1 failed with exit code ' + $exitCode + '. Log: ' + $buildLog) }
     $packageExe = Join-Path $PackageRoot 'Leshy.exe'
@@ -191,22 +192,50 @@ function Invoke-Build {
     return $version
 }
 
+function Copy-ProgramTree {
+    param([string]$Source, [string]$Destination)
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction SilentlyContinue)) {
+        if ($entry.Name -ieq 'LeshyBrain') { continue }
+        Copy-Item -LiteralPath $entry.FullName -Destination $Destination -Recurse -Force
+    }
+}
+
+function Clear-ProgramTree {
+    param([string]$Root)
+    if (-not (Test-Path -LiteralPath $Root)) { return }
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Root -Force -ErrorAction SilentlyContinue)) {
+        if ($entry.Name -ieq 'LeshyBrain') { continue }
+        Remove-Item -LiteralPath $entry.FullName -Recurse -Force -ErrorAction Stop
+    }
+}
+
 function Deploy-Package {
     param([string]$Sha, [string]$Version)
     if (-not (Test-Path -LiteralPath (Join-Path $PackageRoot 'Leshy.exe'))) { throw 'Package tree is missing.' }
     Write-UiStatus -State 'deploying' -Message 'Updating dist\Leshy while preserving LeshyBrain' -Sha $Sha -Version $Version
     New-Item -ItemType Directory -Force -Path $LiveRoot | Out-Null
-    foreach ($entry in @(Get-ChildItem -LiteralPath $LiveRoot -Force -ErrorAction SilentlyContinue)) {
-        if ($entry.Name -ieq 'LeshyBrain') { continue }
-        Remove-Item -LiteralPath $entry.FullName -Recurse -Force -ErrorAction Stop
+    Remove-Item -LiteralPath $BackupRoot -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
+    Copy-ProgramTree -Source $LiveRoot -Destination $BackupRoot
+    try {
+        Clear-ProgramTree -Root $LiveRoot
+        Copy-ProgramTree -Source $PackageRoot -Destination $LiveRoot
+        if (-not (Test-Path -LiteralPath $LiveExe)) { throw 'Live deployment did not produce Leshy.exe.' }
+        Save-LiveState -Sha $Sha -Version $Version
+        Remove-Item -LiteralPath $BackupRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Write-CoreLog ('Live deployment completed. LeshyBrain preserved at ' + $BrainRoot)
+    } catch {
+        $deployError = $_.Exception.Message
+        Write-CoreLog ('Live deployment failed; restoring previous program files: ' + $deployError) 'ERROR'
+        try {
+            Clear-ProgramTree -Root $LiveRoot
+            Copy-ProgramTree -Source $BackupRoot -Destination $LiveRoot
+        } catch {
+            Write-CoreLog ('Rollback failed: ' + $_.Exception.Message) 'ERROR'
+        }
+        throw $deployError
     }
-    foreach ($entry in @(Get-ChildItem -LiteralPath $PackageRoot -Force)) {
-        if ($entry.Name -ieq 'LeshyBrain') { continue }
-        Copy-Item -LiteralPath $entry.FullName -Destination $LiveRoot -Recurse -Force
-    }
-    if (-not (Test-Path -LiteralPath $LiveExe)) { throw 'Live deployment did not produce Leshy.exe.' }
-    Save-LiveState -Sha $Sha -Version $Version
-    Write-CoreLog ('Live deployment completed. LeshyBrain preserved at ' + $BrainRoot)
 }
 
 function Invoke-FullUpdate {
