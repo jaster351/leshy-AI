@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -60,3 +61,16 @@ def test_diagnostics_are_automatically_mirrored_and_redacted(
     snapshot = (destination / "diagnostics-auto.json").read_text(encoding="utf-8")
     assert "do-not-copy-this-secret" not in snapshot
     assert "<redacted>" in snapshot
+
+
+def test_diagnostics_do_not_keep_brain_logs_locked(tmp_path: Path) -> None:
+    brain = tmp_path / "removable" / "LeshyBrain"
+    close_diagnostics()
+    try:
+        configure_diagnostics(brain, "test-version")
+        event("windows_file_lock_regression")
+        assert (brain / "logs" / "leshy.log").is_file()
+        shutil.rmtree(brain)
+        assert not brain.exists()
+    finally:
+        close_diagnostics()
