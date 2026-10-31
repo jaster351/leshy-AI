@@ -49,6 +49,16 @@ class PresentationTests(unittest.TestCase):
         for control in ("heroSend", "chatSend", "learningSwitch", "researchQueue", "modelDownload"):
             self.assertIn(control, runtime)
 
+    def test_pending_chat_message_cannot_stretch_to_full_screen(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "web" / "ui-enhancements.js").read_text(encoding="utf-8")
+        self.assertIn("#messages .msg.user", source)
+        self.assertIn("height:auto!important", source)
+        self.assertIn("max-width:min(78%,720px)!important", source)
+        self.assertIn("function addPendingMessage()", source)
+        self.assertIn("pending.remove()", source)
+        self.assertIn("pending-dots", source)
+
 
 if __name__ == "__main__":
     unittest.main()
