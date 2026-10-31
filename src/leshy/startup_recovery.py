@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from .diagnostics import event, problem
+from .inference_scheduler import PRIORITY_RECOVERY, get_inference_scheduler
 from .llm import ChatMessage
 from .research_policy import research_reason
 
@@ -36,7 +37,7 @@ def _pending_sessions(app, *, limit: int = 50) -> list[dict[str, Any]]:
 
 
 def _interactive_llm_busy(app) -> bool:
-    """Не давать recovery конкурировать с Web/Telegram за resident LLM slot."""
+    """Консервативная проверка для quiet-периода перед постановкой recovery в очередь."""
     llm = getattr(app, "llm", None)
     states = list(getattr(llm, "_states", []) or [])
     providers = [getattr(state, "provider", None) for state in states]
@@ -49,11 +50,16 @@ def _interactive_llm_busy(app) -> bool:
                 return True
         except Exception:
             continue
-    return False
+    scheduler = get_inference_scheduler(app)
+    status = scheduler.status()
+    active = status.get("active") or {}
+    if int(active.get("priority") or 0) > PRIORITY_RECOVERY:
+        return True
+    return any(int(item.get("priority") or 0) > PRIORITY_RECOVERY for item in status.get("waiting") or [])
 
 
 def _wait_for_interactive_idle(app, *, quiet_seconds: float = 3.0, max_wait_seconds: float = 300.0) -> bool:
-    """Ждать устойчивого простоя LLM, не замедляя пользовательские запросы."""
+    """Recovery ставится в очередь только после устойчивого интерактивного простоя."""
     started = time.monotonic()
     idle_since: float | None = None
     while time.monotonic() - started < max_wait_seconds:
@@ -71,11 +77,13 @@ def _wait_for_interactive_idle(app, *, quiet_seconds: float = 3.0, max_wait_seco
 
 
 def _llm_answer(app, messages: list[ChatMessage]) -> str:
-    """Recovery использует потоковый backend, чтобы получить ту же защиту контекста, что Web/Telegram."""
-    streamer = getattr(app.llm, "stream_chat", None)
-    if callable(streamer):
-        return "".join(str(part or "") for part in streamer(messages)).strip()
-    return str(app.llm.chat(messages) or "").strip()
+    """Recovery всегда проходит через общий scheduler с низким приоритетом."""
+    scheduler = get_inference_scheduler(app)
+    with scheduler.slot(source="startup-recovery", priority=PRIORITY_RECOVERY):
+        streamer = getattr(app.llm, "stream_chat", None)
+        if callable(streamer):
+            return "".join(str(part or "") for part in streamer(messages)).strip()
+        return str(app.llm.chat(messages) or "").strip()
 
 
 def _build_answer(app, owner_id: str, session_id: str, message: str) -> str:
@@ -178,9 +186,9 @@ def _notify_telegram(app, owner_id: str, session_id: str, answer: str) -> None:
 def recover_unanswered(app, *, limit: int = 50) -> dict[str, int]:
     """Ответить на сообщения, которые остались последними в диалоге без assistant-ответа.
 
-    Recovery является фоновой работой: перед каждой генерацией он ждёт устойчивого
-    простоя локальной LLM и никогда намеренно не стартует поверх активного Web/Telegram
-    запроса. Контекст обрабатывается тем же streaming backend, что интерактивный чат.
+    Recovery является фоновой работой: перед каждой генерацией ждёт устойчивого
+    простоя, затем входит в общий inference scheduler с приоритетом ниже Web и
+    Telegram. Если пользовательский запрос уже ожидает LLM, он будет выбран раньше.
     """
 
     recovered = 0
