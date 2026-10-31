@@ -21,6 +21,7 @@ from .model_catalog import (
     configure_app_model_verifier,
     switch_app_model,
 )
+from .nas_settings import NasSettings, NasSettingsStore
 from .startup_recovery import recover_unanswered
 from .telegram import TelegramBridge
 
@@ -49,6 +50,7 @@ def make_handler(
     model_catalog: LocalModelCatalog,
 ):
     dashboard = DashboardService(app)
+    nas_store = NasSettingsStore(settings.brain_dir)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "Leshy/2"
@@ -106,6 +108,7 @@ def make_handler(
                     '<script src="/ui-enhancements.js"></script>',
                     '<script src="/hardware-panel.js"></script>',
                     '<script src="/model-panel.js"></script>',
+                    '<script src="/nas-panel.js"></script>',
                     '<script src="/variant3.js"></script>',
                 )
                 scripts = "".join(marker + "\n" for marker in markers if marker not in html)
@@ -127,6 +130,9 @@ def make_handler(
                 return
             if parsed.path == "/model-panel.js":
                 self._send_asset(_web_asset(settings, "model-panel.js"), "application/javascript; charset=utf-8")
+                return
+            if parsed.path == "/nas-panel.js":
+                self._send_asset(_web_asset(settings, "nas-panel.js"), "application/javascript; charset=utf-8")
                 return
             if parsed.path == "/variant3.js":
                 self._send_asset(_web_asset(settings, "variant3.js"), "application/javascript; charset=utf-8")
@@ -164,6 +170,9 @@ def make_handler(
                 return
             if parsed.path == "/v1/models":
                 self._json(HTTPStatus.OK, model_catalog.status(active_path=app.model_path))
+                return
+            if parsed.path == "/v1/nas":
+                self._json(HTTPStatus.OK, nas_store.public_status(probe=False))
                 return
             if parsed.path == "/v1/image/status":
                 self._json(HTTPStatus.OK, app.image_generation.status())
@@ -256,6 +265,26 @@ def make_handler(
                     store.save(config)
                     self._json(HTTPStatus.OK, hardware_status(settings.brain_dir))
                     return
+                if self.path == "/v1/nas/config":
+                    current = nas_store.load()
+                    config = NasSettings(
+                        root=str(body.get("root", current.root) or ""),
+                        torrent_watch=str(body.get("torrent_watch", current.torrent_watch) or ""),
+                        music=str(body.get("music", current.music) or ""),
+                        video=str(body.get("video", current.video) or ""),
+                        smb_server=str(body.get("smb_server", current.smb_server) or ""),
+                        smb_username=str(body.get("smb_username", current.smb_username) or ""),
+                        smb_domain=str(body.get("smb_domain", current.smb_domain) or ""),
+                    )
+                    password_supplied = "password" in body and bool(str(body.get("password") or ""))
+                    saved = nas_store.save(config, password=str(body.get("password") or "") if password_supplied else None)
+                    if bool(body.get("clear_password")) or not saved.smb_username:
+                        nas_store.clear_password()
+                    self._json(HTTPStatus.OK, nas_store.public_status(probe=False))
+                    return
+                if self.path == "/v1/nas/test":
+                    self._json(HTTPStatus.OK, nas_store.public_status(probe=True))
+                    return
                 if self.path == "/v1/image/generate":
                     job = app.image_generation.enqueue(
                         str(body.get("prompt") or ""),
@@ -315,9 +344,6 @@ def make_handler(
                         allow_all=bool(body.get("allow_all", False)),
                         owner_id=str(body.get("owner_id") or ""),
                     )
-                    # При ручном сохранении настроек пользователь ожидает запуск
-                    # Telegram сразу, стартовая 30-секундная пауза относится только
-                    # к запуску самого приложения.
                     telegram.start()
                     self._json(HTTPStatus.OK, telegram.status())
                     return
