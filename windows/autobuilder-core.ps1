@@ -1,10 +1,20 @@
 param(
     [ValidateSet('repo-update','full-update','startup','launch','stop','status')]
-    [string]$Mode = 'status'
+    [string]$Mode = 'status',
+    [string]$RepositoryPath = '',
+    [string]$Remote = 'origin',
+    [string]$Branch = 'main'
 )
 
 $ErrorActionPreference = 'Stop'
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$ScriptRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if ([string]::IsNullOrWhiteSpace($RepositoryPath)) { $RepositoryPath = $ScriptRepoRoot }
+if (-not (Test-Path -LiteralPath $RepositoryPath -PathType Container)) {
+    throw ('Repository path does not exist: ' + $RepositoryPath)
+}
+$RepoRoot = (Resolve-Path -LiteralPath $RepositoryPath).Path
+if ([string]::IsNullOrWhiteSpace($Remote)) { $Remote = 'origin' }
+if ([string]::IsNullOrWhiteSpace($Branch)) { $Branch = 'main' }
 Set-Location -LiteralPath $RepoRoot
 
 $RuntimeRoot = Join-Path $RepoRoot '.autobuild'
@@ -14,7 +24,7 @@ $LiveExe = Join-Path $LiveRoot 'Leshy.exe'
 $BrainRoot = Join-Path $LiveRoot 'LeshyBrain'
 $PackageRoot = Join-Path $RuntimeRoot 'package-dist\Leshy'
 $BackupRoot = Join-Path $RuntimeRoot 'live-backup'
-$BuildScript = Join-Path $PSScriptRoot 'build.ps1'
+$BuildScript = Join-Path $RepoRoot 'windows\build.ps1'
 $LiveStatePath = Join-Path $RuntimeRoot 'live-state.json'
 $UiStatusPath = Join-Path $RuntimeRoot 'ui-status.json'
 $CoreLog = Join-Path $LogsRoot 'autobuilder-gui.log'
@@ -37,6 +47,9 @@ function Write-UiStatus {
         sha = $Sha
         version = $Version
         updated_at = (Get-Date).ToString('o')
+        repository_path = $RepoRoot
+        remote = $Remote
+        branch = $Branch
         live_root = $LiveRoot
         brain_root = $BrainRoot
     }
@@ -131,7 +144,7 @@ function Get-CurrentBranch {
     return ''
 }
 
-function Assert-CleanMain {
+function Assert-CleanBranch {
     param([string]$Git)
 
     $inside = Invoke-GitCapture -Git $Git -Arguments @('rev-parse','--is-inside-work-tree') -AllowFailure
@@ -145,47 +158,52 @@ function Assert-CleanMain {
         throw ('Local repository changes are present. AutoBuilder will not overwrite them: ' + (($changes | Select-Object -First 8) -join ' | '))
     }
 
-    $branch = Get-CurrentBranch -Git $Git
-    if (-not $branch) {
+    $current = Get-CurrentBranch -Git $Git
+    if (-not $current) {
         $head = Get-HeadSha -Git $Git
-        $localMain = Get-HeadSha -Git $Git -Ref 'refs/heads/main' -AllowMissing
-        if ($localMain -and $head -eq $localMain) {
-            $switchResult = Invoke-GitCapture -Git $Git -Arguments @('switch','main') -AllowFailure
+        $localTarget = Get-HeadSha -Git $Git -Ref ('refs/heads/' + $Branch) -AllowMissing
+        if ($localTarget -and $head -eq $localTarget) {
+            $switchResult = Invoke-GitCapture -Git $Git -Arguments @('switch',$Branch) -AllowFailure
             if ($switchResult.ExitCode -eq 0) {
-                $branch = Get-CurrentBranch -Git $Git
-                Write-CoreLog 'Repository was on detached HEAD at main; attached back to main.' 'WARN'
+                $current = Get-CurrentBranch -Git $Git
+                Write-CoreLog ('Repository was on detached HEAD at ' + $Branch + '; attached back to branch.') 'WARN'
             }
         }
     }
 
-    if (-not $branch) {
+    if (-not $current) {
         $head = Get-HeadSha -Git $Git -AllowMissing
         throw ('Could not determine current Git branch. Repository=' + $RepoRoot + '; HEAD=' + $head)
     }
-    if ($branch -ne 'main') {
-        throw ('AutoBuilder requires main branch. Current: ' + $branch)
+    if ($current -ne $Branch) {
+        throw ('AutoBuilder requires branch ' + $Branch + '. Current: ' + $current)
     }
+}
+
+function Fetch-ConfiguredRemote {
+    param([string]$Git)
+    $fetch = Invoke-GitCapture -Git $Git -Arguments @('fetch',$Remote,$Branch,'--quiet') -AllowFailure
+    if ($fetch.ExitCode -ne 0) {
+        throw ('git fetch failed for ' + $Remote + ' ' + $Branch + ': ' + $fetch.Text)
+    }
+    return Get-HeadSha -Git $Git -Ref 'FETCH_HEAD'
 }
 
 function Invoke-RepoUpdate {
     $git = Get-Git
-    Assert-CleanMain -Git $git
+    Assert-CleanBranch -Git $git
     $before = Get-HeadSha -Git $git
-    Write-UiStatus -State 'repo-update' -Message 'Fetching origin/main' -Sha $before
+    Write-UiStatus -State 'repo-update' -Message 'Fetching configured repository' -Sha $before
 
-    $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch','origin','main','--quiet') -AllowFailure
-    if ($fetch.ExitCode -ne 0) {
-        throw ('git fetch origin main failed: ' + $fetch.Text)
-    }
-    $remote = Get-HeadSha -Git $git -Ref 'origin/main'
-    if ($remote -ne $before) {
-        $pull = Invoke-GitCapture -Git $git -Arguments @('pull','--ff-only','origin','main') -AllowFailure
-        if ($pull.ExitCode -ne 0) {
-            throw ('git pull --ff-only origin main failed: ' + $pull.Text)
+    $remoteSha = Fetch-ConfiguredRemote -Git $git
+    if ($remoteSha -ne $before) {
+        $merge = Invoke-GitCapture -Git $git -Arguments @('merge','--ff-only','FETCH_HEAD') -AllowFailure
+        if ($merge.ExitCode -ne 0) {
+            throw ('Fast-forward update failed: ' + $merge.Text)
         }
     }
     $after = Get-HeadSha -Git $git
-    Write-CoreLog ('Repository update: ' + $before.Substring(0,8) + ' -> ' + $after.Substring(0,8))
+    Write-CoreLog ('Repository update: ' + $before.Substring(0,8) + ' -> ' + $after.Substring(0,8) + '; source=' + $Remote + '; branch=' + $Branch)
     Write-UiStatus -State 'repo-ready' -Message 'Repository is up to date' -Sha $after
     return $after
 }
@@ -248,6 +266,9 @@ function Save-LiveState {
         sha = $Sha
         version = $Version
         deployed_at = (Get-Date).ToString('o')
+        repository_path = $RepoRoot
+        remote = $Remote
+        branch = $Branch
         live_root = $LiveRoot
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $LiveStatePath -Encoding UTF8
 }
@@ -255,7 +276,12 @@ function Save-LiveState {
 function Invoke-Build {
     param([string]$Sha)
     Initialize-Environment
-    $version = (Get-Content -LiteralPath (Join-Path $RepoRoot 'VERSION') -Raw -Encoding UTF8).Trim()
+    if (-not (Test-Path -LiteralPath $BuildScript)) {
+        throw ('Build script was not found in selected repository: ' + $BuildScript)
+    }
+    $versionPath = Join-Path $RepoRoot 'VERSION'
+    if (-not (Test-Path -LiteralPath $versionPath)) { throw ('VERSION was not found: ' + $versionPath) }
+    $version = (Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8).Trim()
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $shortSha = $Sha.Substring(0,8)
     $buildLog = Join-Path $LogsRoot ('live-build-{0}-{1}-{2}.log' -f $version, $shortSha, $stamp)
@@ -362,24 +388,31 @@ function Invoke-Startup {
 function Get-CoreStatus {
     $git = $null
     $head = ''
-    $remote = ''
-    $branch = ''
+    $remoteSha = ''
+    $currentBranch = ''
+    $originUrl = ''
     $errorText = ''
     try {
         $git = Get-Git
         $head = Get-HeadSha -Git $git -AllowMissing
-        $branch = Get-CurrentBranch -Git $git
-        $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch','origin','main','--quiet') -AllowFailure
-        if ($fetch.ExitCode -eq 0) { $remote = Get-HeadSha -Git $git -Ref 'origin/main' -AllowMissing }
+        $currentBranch = Get-CurrentBranch -Git $git
+        $origin = Invoke-GitCapture -Git $git -Arguments @('remote','get-url','origin') -AllowFailure
+        if ($origin.ExitCode -eq 0) { $originUrl = $origin.Text }
+        $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch',$Remote,$Branch,'--quiet') -AllowFailure
+        if ($fetch.ExitCode -eq 0) { $remoteSha = Get-HeadSha -Git $git -Ref 'FETCH_HEAD' -AllowMissing }
         elseif ($fetch.Text) { $errorText = $fetch.Text }
     } catch {
         $errorText = $_.Exception.Message
     }
     $state = Read-LiveState
     [ordered]@{
+        repository_path = $RepoRoot
+        remote = $Remote
+        origin_url = $originUrl
+        configured_branch = $Branch
+        current_branch = $currentBranch
         repo_sha = $head
-        remote_sha = $remote
-        branch = $branch
+        remote_sha = $remoteSha
         git_error = $errorText
         deployed_sha = if ($state) { [string]$state.sha } else { '' }
         deployed_version = if ($state) { [string]$state.version } else { '' }
@@ -390,12 +423,14 @@ function Get-CoreStatus {
     } | ConvertTo-Json -Depth 4
 }
 
-$mutex = New-Object System.Threading.Mutex($false, 'Local\LeshyAutoBuilderCore')
+$mutexName = 'Local\LeshyAutoBuilderCore-' + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
+if ($mutexName.Length -gt 240) { $mutexName = $mutexName.Substring(0,240) }
+$mutex = New-Object System.Threading.Mutex($false, $mutexName)
 $hasMutex = $false
 try {
     if ($Mode -ne 'status') {
         $hasMutex = $mutex.WaitOne(0)
-        if (-not $hasMutex) { throw 'Another AutoBuilder operation is already running.' }
+        if (-not $hasMutex) { throw 'Another AutoBuilder operation is already running for this repository.' }
     }
     switch ($Mode) {
         'repo-update' { [void](Invoke-RepoUpdate) }
