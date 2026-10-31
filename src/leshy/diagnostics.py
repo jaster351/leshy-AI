@@ -13,6 +13,8 @@ import traceback
 import uuid
 from typing import Any
 
+from .logging_paths import central_log_dir, resolve_brain_root
+
 _LOGGER_NAME = "leshy"
 _SESSION_ID = uuid.uuid4().hex[:12]
 _CONFIGURED = False
@@ -38,15 +40,6 @@ def _sanitize_text(value: str) -> str:
 class RedactingFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         return _sanitize_text(super().format(record))
-
-
-def _resolve_brain_root(base_dir: Path) -> Path:
-    base = Path(base_dir)
-    if base.name == "LeshyBrain":
-        return base
-    if base.name.lower() == "leshy":
-        return base / "data" / "LeshyBrain"
-    return base
 
 
 def close_diagnostics() -> None:
@@ -75,9 +68,7 @@ def close_diagnostics() -> None:
 
 def configure_diagnostics(base_dir: Path, version: str) -> logging.Logger:
     global _CONFIGURED, _LOG_DIR, _HANDLERS
-    brain_root = _resolve_brain_root(Path(base_dir))
-    log_dir = brain_root / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = central_log_dir(Path(base_dir))
     if _CONFIGURED and _LOG_DIR == log_dir:
         event("process_reconfigured", version=version, pid=os.getpid(), session=_SESSION_ID)
         return logging.getLogger(_LOGGER_NAME)
@@ -162,9 +153,8 @@ def exception(name: str, exc: BaseException, **fields: Any) -> None:
 
 
 def write_snapshot(base_dir: Path, **state: Any) -> Path:
-    brain_root = _resolve_brain_root(Path(base_dir))
-    path = brain_root / "logs" / "diagnostics.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    brain_root = resolve_brain_root(Path(base_dir))
+    path = central_log_dir(brain_root) / "diagnostics.json"
     payload = {"timestamp": time.time(), "session": _SESSION_ID, "pid": os.getpid(), **_redact_dict(state)}
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
