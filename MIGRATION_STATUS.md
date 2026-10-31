@@ -1,32 +1,42 @@
-# Статус миграции Лешего
+# MIGRATION STATUS — Leshy 1.10.3
 
-Миграция активна. На базе перенесённого состояния начата новая стабилизационная версия `1.10.3`.
+Источник миграции: CineMax / ветка Leshy 1.10.x — только чтение.
+Рабочий репозиторий: `jaster351/leshy-AI`.
+Рабочая ветка: `migration/cinemax-1.10.2-live`.
 
-- Канонический репозиторий: `jaster351/leshy-AI`
-- Рабочая ветка миграции: `migration/cinemax-1.10.2-live`
-- Read-only источник: `jaster351/CINEMAX-Marketplace-.`, ветка `leshy-1.10-stage`
-- Зафиксированный источник: `6fd608cfeeb8137039d9a53e9fb1d16f0c51be7b`
-- Текущая разрабатываемая версия: `1.10.3`
-- Правило: новые изменения в CineMax не вносить; дальнейшая разработка и исправления только в `leshy-AI`.
+## Уже перенесено / зафиксировано
 
-## Критический Quality Gate 1.10.3
+- версия 1.10.3;
+- GPU-first интерактивный runtime с fallback;
+- правила NPU cooldown после подтверждённых compute/memory ошибок;
+- live-search и немедленное добавление candidate knowledge;
+- счётчики knowledge total/candidate/trusted/stale/conflict;
+- единый корень логов `LeshyBrain/logs`;
+- обязательная ротация логов и ограничение дискового роста;
+- UI-контракт вариант 4 → вариант 3;
+- постоянный голосовой разговор в Web UI;
+- полностью офлайн-голос: local STT → local LLM → local TTS;
+- политика кроссплатформенных AI-ускорителей: Intel NPU, AMD Ryzen AI/XDNA, Apple Neural Engine, Qualcomm Hexagon и последующие совместимые ускорители;
+- различение «ускоритель физически найден» и «runtime реально работоспособен»;
+- обязательный health/smoke probe ускорителя перед использованием.
 
-- [x] Версия поднята до 1.10.3.
-- [x] Интерактивный LLM: строгий порядок `GPU → NPU → CPU`.
-- [x] Embeddings: строгий порядок `GPU → NPU → CPU`.
-- [x] Фоновые LLM-задачи отделены от чата: `NPU → CPU → GPU`, чтобы не отнимать GPU у ответа пользователю.
-- [x] Добавлены regression-тесты GPU-first/failover/cooldown.
-- [x] Добавлены тесты аппаратного execution plan.
-- [x] Добавлена детерминированная политика live-search для актуальных данных, явного веб-поиска и пробелов локальной БЗ.
-- [x] `research.search` переведён на быстрый live-search: результаты сразу сохраняются как `candidate`, глубокая верификация остаётся в очереди.
-- [x] Добавлены отдельные счётчики `knowledge_total / candidate / trusted / stale / conflict`.
-- [x] Добавлены regression-тесты: актуальный запрос обязан искать в интернете; успешный live-search обязан увеличивать локальную БЗ.
-- [ ] Полностью перенесён `src/leshy`.
-- [ ] Полностью перенесены все тесты.
-- [ ] Перенесены Web/Windows UI.
-- [ ] Перенесены сборочные файлы и CI/CD.
-- [ ] Пройдены все unit/regression tests на полном дереве.
-- [ ] Пройден Windows frozen smoke-test.
-- [ ] Собран и проверен `LeshySetup-1.10.3.exe`.
-- [ ] Опубликован GitHub Release в `jaster351/leshy-AI`.
-- [ ] Подготовлено слияние в `main`.
+## Обязательные оставшиеся Gate
+
+- [ ] Полный перенос Web UI варианта 4 → 3 в рабочее дерево.
+- [ ] Полный перенос/адаптация Windows UI и установщика.
+- [ ] Локальный TTS backend без облака.
+- [ ] Offline voice smoke-test с заблокированным внешним интернетом.
+- [ ] Barge-in: пользователь может перебить озвучивание.
+- [ ] Автоматический возврат в режим прослушивания после ответа.
+- [ ] Cross-platform hardware discovery: Windows x86-64/ARM64, Linux x86-64/ARM64, macOS Apple Silicon.
+- [ ] Vendor-specific accelerator adapters/health probes для доступных Intel/AMD/Apple/Qualcomm платформ.
+- [ ] Regression profiles: Intel CPU+GPU+NPU, AMD Ryzen AI, Apple Silicon, Qualcomm ARM64, CPU-only, accelerator-without-runtime, failed-health-probe.
+- [ ] Полный перенос остальных исходников и тестов из read-only источника.
+- [ ] Полный unit/regression test suite.
+- [ ] CI на целевых ОС/архитектурах, где доступны runner/эмуляция.
+- [ ] Windows frozen smoke-test.
+- [ ] Финальная сборка установщика и GitHub Release.
+
+## Правило готовности
+
+1.10.3 не считается готовой, если современный AI-ускоритель обнаруживается системой, но Леший молча игнорирует его, либо если отказ ускорителя блокирует пользовательский чат. Релиз также не считается готовым без согласованного интерфейса, офлайн-голоса и прохождения релизных тестов.
