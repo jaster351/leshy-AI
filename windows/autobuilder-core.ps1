@@ -4,9 +4,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Set-Location (Resolve-Path (Join-Path $PSScriptRoot '..'))
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+Set-Location -LiteralPath $RepoRoot
 
-$RepoRoot = (Get-Location).Path
 $RuntimeRoot = Join-Path $RepoRoot '.autobuild'
 $LogsRoot = Join-Path $RuntimeRoot 'logs'
 $LiveRoot = Join-Path $RepoRoot 'dist\Leshy'
@@ -58,7 +58,11 @@ function Initialize-Environment {
             break
         }
     }
-    foreach ($dir in @('C:\Program Files\Git\cmd', (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd'))) {
+    foreach ($dir in @(
+        'C:\Program Files\Git\cmd',
+        'C:\Program Files\Git\bin',
+        (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd')
+    )) {
         if ($dir -and (Test-Path (Join-Path $dir 'git.exe'))) {
             $prepend.Add($dir)
             break
@@ -72,27 +76,95 @@ function Initialize-Environment {
 function Get-Git {
     Initialize-Environment
     $cmd = Get-Command git.exe -ErrorAction SilentlyContinue
-    if (-not $cmd) { throw 'Git for Windows was not found.' }
-    return $cmd.Source
+    if ($cmd) { return $cmd.Source }
+    foreach ($candidate in @(
+        'C:\Program Files\Git\cmd\git.exe',
+        'C:\Program Files\Git\bin\git.exe',
+        (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.exe')
+    )) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+    }
+    throw 'Git for Windows was not found.'
 }
 
-function Assert-CleanMain {
-    param([string]$Git)
-    $branch = (& $Git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or -not $branch) { throw 'Could not read current Git branch.' }
-    if ($branch.Trim() -ne 'main') { throw ('AutoBuilder requires main branch. Current: ' + $branch.Trim()) }
-    $changes = @(& $Git -C $RepoRoot status --porcelain 2>$null)
-    if ($LASTEXITCODE -ne 0) { throw 'Could not read Git status.' }
-    if ($changes.Count -gt 0) {
-        throw ('Local repository changes are present. AutoBuilder will not overwrite them: ' + (($changes | Select-Object -First 8) -join ' | '))
+function Invoke-GitCapture {
+    param(
+        [string]$Git,
+        [string[]]$Arguments,
+        [switch]$AllowFailure
+    )
+    $raw = @(& $Git -C $RepoRoot @Arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+    $lines = @($raw | ForEach-Object { [string]$_ })
+    $text = ($lines -join [Environment]::NewLine).Trim()
+    if ($exitCode -ne 0 -and -not $AllowFailure) {
+        $detail = if ($text) { ': ' + ($text -replace '[\r\n]+',' | ') } else { '' }
+        throw ('git ' + ($Arguments -join ' ') + ' failed with exit code ' + $exitCode + $detail)
+    }
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Lines = $lines
+        Text = $text
     }
 }
 
 function Get-HeadSha {
-    param([string]$Git, [string]$Ref = 'HEAD')
-    $sha = (& $Git -C $RepoRoot rev-parse $Ref 2>$null | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or -not $sha) { throw ('Could not resolve Git ref: ' + $Ref) }
-    return $sha.Trim()
+    param([string]$Git, [string]$Ref = 'HEAD', [switch]$AllowMissing)
+    $result = Invoke-GitCapture -Git $Git -Arguments @('rev-parse','--verify',$Ref) -AllowFailure:$AllowMissing
+    if ($result.ExitCode -ne 0 -or -not $result.Text) {
+        if ($AllowMissing) { return '' }
+        throw ('Could not resolve Git ref: ' + $Ref)
+    }
+    return (($result.Lines | Select-Object -First 1).Trim())
+}
+
+function Get-CurrentBranch {
+    param([string]$Git)
+    $result = Invoke-GitCapture -Git $Git -Arguments @('branch','--show-current') -AllowFailure
+    if ($result.ExitCode -eq 0 -and $result.Text) {
+        return (($result.Lines | Select-Object -First 1).Trim())
+    }
+    $fallback = Invoke-GitCapture -Git $Git -Arguments @('symbolic-ref','--quiet','--short','HEAD') -AllowFailure
+    if ($fallback.ExitCode -eq 0 -and $fallback.Text) {
+        return (($fallback.Lines | Select-Object -First 1).Trim())
+    }
+    return ''
+}
+
+function Assert-CleanMain {
+    param([string]$Git)
+
+    $inside = Invoke-GitCapture -Git $Git -Arguments @('rev-parse','--is-inside-work-tree') -AllowFailure
+    if ($inside.ExitCode -ne 0 -or $inside.Text.Trim().ToLowerInvariant() -ne 'true') {
+        throw ('AutoBuilder repository is not a Git work tree: ' + $RepoRoot)
+    }
+
+    $status = Invoke-GitCapture -Git $Git -Arguments @('status','--porcelain')
+    $changes = @($status.Lines | Where-Object { $_.Trim() })
+    if ($changes.Count -gt 0) {
+        throw ('Local repository changes are present. AutoBuilder will not overwrite them: ' + (($changes | Select-Object -First 8) -join ' | '))
+    }
+
+    $branch = Get-CurrentBranch -Git $Git
+    if (-not $branch) {
+        $head = Get-HeadSha -Git $Git
+        $localMain = Get-HeadSha -Git $Git -Ref 'refs/heads/main' -AllowMissing
+        if ($localMain -and $head -eq $localMain) {
+            $switchResult = Invoke-GitCapture -Git $Git -Arguments @('switch','main') -AllowFailure
+            if ($switchResult.ExitCode -eq 0) {
+                $branch = Get-CurrentBranch -Git $Git
+                Write-CoreLog 'Repository was on detached HEAD at main; attached back to main.' 'WARN'
+            }
+        }
+    }
+
+    if (-not $branch) {
+        $head = Get-HeadSha -Git $Git -AllowMissing
+        throw ('Could not determine current Git branch. Repository=' + $RepoRoot + '; HEAD=' + $head)
+    }
+    if ($branch -ne 'main') {
+        throw ('AutoBuilder requires main branch. Current: ' + $branch)
+    }
 }
 
 function Invoke-RepoUpdate {
@@ -100,12 +172,17 @@ function Invoke-RepoUpdate {
     Assert-CleanMain -Git $git
     $before = Get-HeadSha -Git $git
     Write-UiStatus -State 'repo-update' -Message 'Fetching origin/main' -Sha $before
-    & $git -C $RepoRoot fetch origin main --quiet
-    if ($LASTEXITCODE -ne 0) { throw 'git fetch origin main failed.' }
+
+    $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch','origin','main','--quiet') -AllowFailure
+    if ($fetch.ExitCode -ne 0) {
+        throw ('git fetch origin main failed: ' + $fetch.Text)
+    }
     $remote = Get-HeadSha -Git $git -Ref 'origin/main'
     if ($remote -ne $before) {
-        & $git -C $RepoRoot pull --ff-only origin main | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw 'git pull --ff-only origin main failed.' }
+        $pull = Invoke-GitCapture -Git $git -Arguments @('pull','--ff-only','origin','main') -AllowFailure
+        if ($pull.ExitCode -ne 0) {
+            throw ('git pull --ff-only origin main failed: ' + $pull.Text)
+        }
     }
     $after = Get-HeadSha -Git $git
     Write-CoreLog ('Repository update: ' + $before.Substring(0,8) + ' -> ' + $after.Substring(0,8))
@@ -286,16 +363,24 @@ function Get-CoreStatus {
     $git = $null
     $head = ''
     $remote = ''
+    $branch = ''
+    $errorText = ''
     try {
         $git = Get-Git
-        $head = Get-HeadSha -Git $git
-        & $git -C $RepoRoot fetch origin main --quiet 2>$null
-        if ($LASTEXITCODE -eq 0) { $remote = Get-HeadSha -Git $git -Ref 'origin/main' }
-    } catch { }
+        $head = Get-HeadSha -Git $git -AllowMissing
+        $branch = Get-CurrentBranch -Git $git
+        $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch','origin','main','--quiet') -AllowFailure
+        if ($fetch.ExitCode -eq 0) { $remote = Get-HeadSha -Git $git -Ref 'origin/main' -AllowMissing }
+        elseif ($fetch.Text) { $errorText = $fetch.Text }
+    } catch {
+        $errorText = $_.Exception.Message
+    }
     $state = Read-LiveState
     [ordered]@{
         repo_sha = $head
         remote_sha = $remote
+        branch = $branch
+        git_error = $errorText
         deployed_sha = if ($state) { [string]$state.sha } else { '' }
         deployed_version = if ($state) { [string]$state.version } else { '' }
         live_exists = (Test-Path -LiteralPath $LiveExe)
