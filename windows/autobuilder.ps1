@@ -80,7 +80,7 @@ function Get-GitExecutable {
     Initialize-BuildEnvironment
     $cmd = Get-Command git.exe -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
-    throw 'Git не найден. Установите Git for Windows и повторите запуск AutoBuilder.'
+    throw 'Git was not found. Install Git for Windows and start AutoBuilder again.'
 }
 
 function Read-State {
@@ -88,7 +88,7 @@ function Read-State {
     try {
         return Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
     } catch {
-        Write-AutoLog "Не удалось прочитать state.json: $($_.Exception.Message)" 'WARN'
+        Write-AutoLog "Could not read state.json: $($_.Exception.Message)" 'WARN'
         return $null
     }
 }
@@ -116,24 +116,24 @@ function Save-State {
 function Test-RepositoryClean {
     param([string]$Git)
     $lines = @(& $Git -C $RepoRoot status --porcelain 2>$null)
-    if ($LASTEXITCODE -ne 0) { throw 'Не удалось получить git status.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read git status.' }
     if ($lines.Count -eq 0) { return $true }
-    Write-AutoLog ('Локальные изменения не трогаю. AutoBuilder ждёт чистый main: ' + (($lines | Select-Object -First 8) -join ' | ')) 'WARN'
-    Write-StatusFile "PAUSED: в репозитории есть локальные изменения.`n`n$($lines -join [Environment]::NewLine)"
+    Write-AutoLog ('Local changes detected. AutoBuilder will not touch them: ' + (($lines | Select-Object -First 8) -join ' | ')) 'WARN'
+    Write-StatusFile "PAUSED: local repository changes are present.`n`n$($lines -join [Environment]::NewLine)"
     return $false
 }
 
 function Get-HeadSha {
     param([string]$Git, [string]$Ref = 'HEAD')
     $value = (& $Git -C $RepoRoot rev-parse $Ref 2>$null | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or -not $value) { throw "Не удалось определить SHA: $Ref" }
+    if ($LASTEXITCODE -ne 0 -or -not $value) { throw "Could not resolve SHA: $Ref" }
     return $value.Trim()
 }
 
 function Update-RemoteMain {
     param([string]$Git)
     & $Git -C $RepoRoot fetch origin main --quiet
-    if ($LASTEXITCODE -ne 0) { throw 'git fetch origin main завершился ошибкой.' }
+    if ($LASTEXITCODE -ne 0) { throw 'git fetch origin main failed.' }
     return Get-HeadSha -Git $Git -Ref 'origin/main'
 }
 
@@ -145,7 +145,7 @@ function Wait-RemoteSettle {
         Start-Sleep -Seconds $SettleSeconds
         $next = Update-RemoteMain -Git $Git
         if ($next -eq $current) { return $next }
-        Write-AutoLog "Во время ожидания появился ещё один commit: $($next.Substring(0,8)). Жду стабилизации main."
+        Write-AutoLog "Another commit arrived during settle delay: $($next.Substring(0,8)). Waiting again."
         $current = $next
     }
     return $current
@@ -155,13 +155,13 @@ function Pull-MainFastForward {
     param([string]$Git)
     $branch = (& $Git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null | Select-Object -First 1).Trim()
     if ($branch -ne 'main') {
-        throw "AutoBuilder работает только с main. Текущая ветка: $branch"
+        throw "AutoBuilder works only on main. Current branch: $branch"
     }
     if (-not (Test-RepositoryClean -Git $Git)) { return $false }
 
     & $Git -C $RepoRoot pull --ff-only origin main
     if ($LASTEXITCODE -ne 0) {
-        throw 'git pull --ff-only не выполнен. AutoBuilder не будет делать merge/rebase автоматически.'
+        throw 'git pull --ff-only failed. AutoBuilder will not merge or rebase automatically.'
     }
     return $true
 }
@@ -175,7 +175,7 @@ function Invoke-LeshyBuild {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $buildLog = Join-Path $LogsRoot ("build-{0}-{1}-{2}.log" -f $version, $shortSha, $stamp)
 
-    Write-AutoLog "Начинаю сборку Leshy $version, commit $shortSha"
+    Write-AutoLog "Starting Leshy $version build, commit $shortSha"
     Write-StatusFile "BUILDING: Leshy $version`nCommit: $Sha`nLog: $buildLog"
 
     $exitCode = 1
@@ -188,7 +188,7 @@ function Invoke-LeshyBuild {
     }
 
     if ($exitCode -ne 0) {
-        $message = "Сборка commit $shortSha завершилась ошибкой. Код: $exitCode. Лог: $buildLog"
+        $message = "Build for commit $shortSha failed. Exit code: $exitCode. Log: $buildLog"
         Write-AutoLog $message 'ERROR'
         Save-State -Sha $Sha -Result 'failure' -Version $version -ErrorText $message
         Write-StatusFile "FAILED: Leshy $version`nCommit: $Sha`nLog: $buildLog"
@@ -197,10 +197,10 @@ function Invoke-LeshyBuild {
 
     $installer = Join-Path $RepoRoot ("dist\LeshySetup-{0}.exe" -f $version)
     if (-not (Test-Path $installer)) {
-        $message = "build.ps1 завершился без ошибки, но установщик не найден: $installer"
+        $message = "build.ps1 succeeded but installer was not found: $installer"
         Write-AutoLog $message 'ERROR'
         Save-State -Sha $Sha -Result 'failure' -Version $version -ErrorText $message
-        Write-StatusFile "FAILED: установщик не найден.`nExpected: $installer`nLog: $buildLog"
+        Write-StatusFile "FAILED: installer was not found.`nExpected: $installer`nLog: $buildLog"
         return $false
     }
 
@@ -220,7 +220,7 @@ function Invoke-LeshyBuild {
 
     Save-State -Sha $Sha -Result 'success' -Version $version -Installer $installer
     Write-StatusFile $readyText
-    Write-AutoLog "Готов Leshy $version ($shortSha): $installer"
+    Write-AutoLog "Ready: Leshy $version ($shortSha): $installer"
     return $true
 }
 
@@ -248,11 +248,11 @@ function Invoke-CheckAndBuild {
     $remoteSha = Update-RemoteMain -Git $git
 
     if ($remoteSha -ne $localSha) {
-        Write-AutoLog "Обнаружены изменения main: local $($localSha.Substring(0,8)) -> remote $($remoteSha.Substring(0,8))"
+        Write-AutoLog "main changed: local $($localSha.Substring(0,8)) -> remote $($remoteSha.Substring(0,8))"
         $remoteSha = Wait-RemoteSettle -Git $git -InitialSha $remoteSha
         if (-not (Pull-MainFastForward -Git $git)) { return }
         $localSha = Get-HeadSha -Git $git
-        Write-AutoLog "main обновлён до $($localSha.Substring(0,8))"
+        Write-AutoLog "main updated to $($localSha.Substring(0,8))"
     }
 
     $state = Read-State
@@ -268,7 +268,7 @@ function Invoke-CheckAndBuild {
 
 function Install-AutoBuilderTask {
     if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
-        throw 'Модуль ScheduledTasks недоступен в этой Windows.'
+        throw 'Windows ScheduledTasks module is not available.'
     }
     $quotedScript = '"' + $PSCommandPath + '"'
     $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $quotedScript -Mode watch -IntervalSeconds $IntervalSeconds -FailureRetryMinutes $FailureRetryMinutes -SettleSeconds $SettleSeconds"
@@ -276,9 +276,9 @@ function Install-AutoBuilderTask {
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description 'Следит за origin/main проекта Леший, делает fast-forward pull и автоматически собирает проверенный Windows installer.' -Force | Out-Null
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description 'Watches origin/main, performs safe fast-forward pulls, and builds the verified Leshy Windows installer.' -Force | Out-Null
     Start-ScheduledTask -TaskName $TaskName
-    Write-AutoLog "Задача '$TaskName' установлена и запущена. Проверка каждые $IntervalSeconds сек."
+    Write-AutoLog "Task '$TaskName' installed and started. Check interval: $IntervalSeconds sec."
     Write-StatusFile "RUNNING AS SCHEDULED TASK`nTask: $TaskName`nInterval: $IntervalSeconds sec"
 }
 
@@ -287,9 +287,9 @@ function Uninstall-AutoBuilderTask {
     if ($task) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-        Write-AutoLog "Задача '$TaskName' удалена."
+        Write-AutoLog "Task '$TaskName' removed."
     } else {
-        Write-Host "Задача '$TaskName' не установлена."
+        Write-Host "Task '$TaskName' is not installed."
     }
 }
 
@@ -304,11 +304,11 @@ function Show-AutoBuilderStatus {
         Write-Host ''
         Get-Content -LiteralPath $StatusPath -Encoding UTF8
     } else {
-        Write-Host 'Сборок AutoBuilder ещё не выполнял.'
+        Write-Host 'AutoBuilder has not completed a build yet.'
     }
 }
 
-# Защита от двух одновременно запущенных наблюдателей.
+# Prevent two watch processes from running at the same time.
 $mutexName = 'Local\LeshyAutoBuilder-main'
 $mutex = New-Object System.Threading.Mutex($false, $mutexName)
 $hasMutex = $false
@@ -316,7 +316,7 @@ try {
     if ($Mode -in @('watch','once')) {
         $hasMutex = $mutex.WaitOne(0)
         if (-not $hasMutex) {
-            throw 'AutoBuilder уже запущен в другом процессе.'
+            throw 'AutoBuilder is already running in another process.'
         }
     }
 
@@ -338,7 +338,7 @@ try {
             break
         }
         'watch' {
-            Write-AutoLog "AutoBuilder запущен. Репозиторий: $RepoRoot; интервал: $IntervalSeconds сек."
+            Write-AutoLog "AutoBuilder started. Repository: $RepoRoot; interval: $IntervalSeconds sec."
             while ($true) {
                 try {
                     Invoke-CheckAndBuild
