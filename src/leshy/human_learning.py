@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 import threading
 import time
+from pathlib import Path
 from typing import Any
+from urllib import request
 from urllib.parse import urlparse
 
 from .diagnostics import event, problem
 from .storage import Storage, utcnow
+from .video_knowledge import VideoKnowledgeIngestor, VideoSegment, VideoSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,10 +53,10 @@ def detect_source_kind(source: str) -> str:
 class HumanLearningCoordinator:
     """Очередь материалов и постоянное наблюдение за авторами/каналами.
 
-    Цель слоя — единая модель поведения для YouTube, X, VK, Twitch, сайтов и
-    локальных материалов: обнаружить -> изучить -> сохранить происхождение ->
+    Единая модель: обнаружить -> изучить -> сохранить происхождение ->
     перепроверить -> уведомить владельца -> при явном разрешении выполнить
-    реакцию. Само наличие подписки не разрешает реакции от имени пользователя.
+    реакцию. Разрешение на реакции хранится для конкретной подписки и не
+    распространяется на другие сайты или аккаунты.
     """
 
     MIN_MONITOR_SECONDS = 60
@@ -138,6 +142,12 @@ class HumanLearningCoordinator:
                 (owner, source),
             ).fetchone()
             if row is not None:
+                if str(row["status"]) in {"failed", "blocked"}:
+                    conn.execute(
+                        "UPDATE learning_materials SET status='queued',last_error=NULL,updated_at=? WHERE id=?",
+                        (now, int(row["id"])),
+                    )
+                    row = conn.execute("SELECT * FROM learning_materials WHERE id=?", (int(row["id"]),)).fetchone()
                 return dict(row)
             cur = conn.execute(
                 "INSERT INTO learning_materials(owner_id,source,source_kind,title,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
@@ -154,6 +164,52 @@ class HumanLearningCoordinator:
         if row is None:
             raise KeyError("Материал не найден")
         return dict(row)
+
+    def next_material(self) -> dict[str, Any] | None:
+        with self.storage.connection() as conn:
+            row = conn.execute("SELECT * FROM learning_materials WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+            if row is None:
+                return None
+            material_id = int(row["id"])
+            conn.execute(
+                "UPDATE learning_materials SET status='processing',updated_at=?,last_error=NULL WHERE id=?",
+                (utcnow(), material_id),
+            )
+            row = conn.execute("SELECT * FROM learning_materials WHERE id=?", (material_id,)).fetchone()
+        return dict(row)
+
+    def finish_material(
+        self,
+        material_id: int,
+        *,
+        status: str,
+        summary: str,
+        title: str = "",
+        author: str = "",
+        external_id: str = "",
+        metadata: dict[str, Any] | None = None,
+        error: str = "",
+    ) -> None:
+        if status not in {"done", "blocked", "failed"}:
+            raise ValueError("Некорректный итоговый статус материала")
+        with self.storage.connection() as conn:
+            conn.execute(
+                "UPDATE learning_materials SET status=?,summary=?,title=CASE WHEN ?<>'' THEN ? ELSE title END,"
+                "author=CASE WHEN ?<>'' THEN ? ELSE author END,external_id=CASE WHEN ?<>'' THEN ? ELSE external_id END,"
+                "metadata_json=?,updated_at=?,learned_at=?,last_error=? WHERE id=?",
+                (
+                    status,
+                    str(summary or "")[:4000],
+                    str(title or ""), str(title or "")[:500],
+                    str(author or ""), str(author or "")[:500],
+                    str(external_id or ""), str(external_id or "")[:500],
+                    json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+                    utcnow(),
+                    utcnow() if status == "done" else None,
+                    str(error or "")[:1000] or None,
+                    int(material_id),
+                ),
+            )
 
     def subscribe(
         self,
@@ -216,7 +272,7 @@ class HumanLearningCoordinator:
         now_epoch = float(time.time() if now_epoch is None else now_epoch)
         with self.storage.connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM social_subscriptions WHERE status='active' AND next_check_at<=? ORDER BY next_check_at,id LIMIT ?",
+                "SELECT * FROM social_subscriptions WHERE status IN ('active','error') AND next_check_at<=? ORDER BY next_check_at,id LIMIT ?",
                 (now_epoch, max(1, min(int(limit), 100))),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -224,14 +280,29 @@ class HumanLearningCoordinator:
     def mark_checked(self, subscription_id: int, *, error: str = "") -> None:
         sub = self.subscription(subscription_id)
         interval = max(self.MIN_MONITOR_SECONDS, int(sub["monitor_interval_seconds"]))
-        state = "error" if error else "active"
         with self.storage.connection() as conn:
             conn.execute(
                 "UPDATE social_subscriptions SET status=?,last_checked_at=?,next_check_at=?,last_error=?,updated_at=? WHERE id=?",
-                (state, utcnow(), time.time() + interval, str(error or "")[:1000] or None, utcnow(), int(subscription_id)),
+                ("error" if error else "active", utcnow(), time.time() + interval, str(error or "")[:1000] or None, utcnow(), int(subscription_id)),
             )
 
-    def record_item(self, subscription_id: int, *, external_id: str, url: str, title: str = "", published_at: str = "") -> tuple[dict[str, Any], bool]:
+    def set_last_seen(self, subscription_id: int, external_id: str) -> None:
+        with self.storage.connection() as conn:
+            conn.execute(
+                "UPDATE social_subscriptions SET last_seen_external_id=?,updated_at=? WHERE id=?",
+                (str(external_id or "")[:500], utcnow(), int(subscription_id)),
+            )
+
+    def record_item(
+        self,
+        subscription_id: int,
+        *,
+        external_id: str,
+        url: str,
+        title: str = "",
+        published_at: str = "",
+        notified: bool = False,
+    ) -> tuple[dict[str, Any], bool]:
         external_id = str(external_id or url).strip()[:500]
         now = utcnow()
         created = False
@@ -242,8 +313,8 @@ class HumanLearningCoordinator:
             ).fetchone()
             if row is None:
                 cur = conn.execute(
-                    "INSERT INTO social_items(subscription_id,external_id,url,title,published_at,created_at) VALUES(?,?,?,?,?,?)",
-                    (int(subscription_id), external_id, str(url)[:2000], str(title or "")[:500], str(published_at or "")[:100], now),
+                    "INSERT INTO social_items(subscription_id,external_id,url,title,published_at,notified,created_at) VALUES(?,?,?,?,?,?,?)",
+                    (int(subscription_id), external_id, str(url)[:2000], str(title or "")[:500], str(published_at or "")[:100], int(bool(notified)), now),
                 )
                 item_id = int(cur.lastrowid)
                 created = True
@@ -256,6 +327,37 @@ class HumanLearningCoordinator:
     def attach_material_to_item(self, item_id: int, material_id: int) -> None:
         with self.storage.connection() as conn:
             conn.execute("UPDATE social_items SET learned_material_id=? WHERE id=?", (int(material_id), int(item_id)))
+
+    def pending_notifications(self, owner_id: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        with self.storage.connection() as conn:
+            rows = conn.execute(
+                "SELECT i.*,s.platform,s.target_name,s.target_url,s.notify_new FROM social_items i "
+                "JOIN social_subscriptions s ON s.id=i.subscription_id "
+                "WHERE s.owner_id=? AND i.notified=0 AND s.notify_new=1 ORDER BY i.id LIMIT ?",
+                (str(owner_id or "local")[:200], max(1, min(int(limit), 100))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_notified(self, item_id: int) -> None:
+        with self.storage.connection() as conn:
+            conn.execute("UPDATE social_items SET notified=1 WHERE id=?", (int(item_id),))
+
+    def set_screenshot(self, item_id: int, screenshot_path: str) -> None:
+        with self.storage.connection() as conn:
+            conn.execute(
+                "UPDATE social_items SET screenshot_path=? WHERE id=?",
+                (str(screenshot_path or "")[:2000], int(item_id)),
+            )
+
+    def set_reaction(self, item_id: int, reaction: str, *, applied: bool = False) -> None:
+        reaction = str(reaction or "none").lower()
+        if reaction not in {"none", "like", "dislike"}:
+            raise ValueError("Некорректная реакция")
+        with self.storage.connection() as conn:
+            conn.execute(
+                "UPDATE social_items SET reaction=?,reaction_applied=? WHERE id=?",
+                (reaction, int(bool(applied)), int(item_id)),
+            )
 
     @staticmethod
     def reaction_for_score(score: float, *, allowed: bool) -> str:
@@ -271,11 +373,13 @@ class HumanLearningCoordinator:
     def status(self) -> dict[str, Any]:
         with self.storage.connection() as conn:
             queued = int(conn.execute("SELECT COUNT(*) c FROM learning_materials WHERE status='queued'").fetchone()["c"])
+            processing = int(conn.execute("SELECT COUNT(*) c FROM learning_materials WHERE status='processing'").fetchone()["c"])
             done = int(conn.execute("SELECT COUNT(*) c FROM learning_materials WHERE status='done'").fetchone()["c"])
-            active = int(conn.execute("SELECT COUNT(*) c FROM social_subscriptions WHERE status='active'").fetchone()["c"])
+            active = int(conn.execute("SELECT COUNT(*) c FROM social_subscriptions WHERE status IN ('active','error')").fetchone()["c"])
             pending = int(conn.execute("SELECT COUNT(*) c FROM social_items WHERE notified=0").fetchone()["c"])
         return {
             "queued_materials": queued,
+            "processing_materials": processing,
             "learned_materials": done,
             "active_subscriptions": active,
             "pending_notifications": pending,
@@ -283,12 +387,286 @@ class HumanLearningCoordinator:
         }
 
 
+class MaterialLearningWorker:
+    """Фоновое изучение явных материалов и публикаций из подписок.
+
+    Текст и доступные субтитры изучаются уже сейчас. Если субтитров нет, задача
+    остаётся blocked с явной причиной: нужен локальный ASR/vision слой. Это лучше,
+    чем притворяться, что Леший понял видео только по заголовку.
+    """
+
+    def __init__(self, coordinator: HumanLearningCoordinator, knowledge, web_fetcher):
+        self.coordinator = coordinator
+        self.knowledge = knowledge
+        self.web_fetcher = web_fetcher
+        self.video_ingestor = VideoKnowledgeIngestor(knowledge)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_error = ""
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="leshy-material-learning", daemon=True)
+        self._thread.start()
+        event("material_learning_worker_started")
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "running": bool(self._thread and self._thread.is_alive()),
+            "last_error": self._last_error,
+        }
+
+    @staticmethod
+    def _claims(text: str, *, limit: int = 80) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for chunk in re.split(r"(?<=[.!?])\s+", " ".join(str(text or "").split())):
+            value = chunk.strip()
+            if 35 <= len(value) <= 500 and value not in seen:
+                seen.add(value)
+                out.append(value)
+            if len(out) >= limit:
+                break
+        return out
+
+    def _ingest_text(self, *, topic: str, source: str, title: str, source_type: str, text: str) -> int:
+        accepted = 0
+        for claim in self._claims(text):
+            self.knowledge.add_candidate(
+                topic=topic,
+                claim=claim,
+                source_url=source,
+                source_title=title,
+                source_type=source_type,
+                metadata_json={"human_learning": True, "captured_via": source_type},
+            )
+            accepted += 1
+        if accepted:
+            self.knowledge.verify_topic(topic)
+        return accepted
+
+    @staticmethod
+    def _yt_info(url: str) -> dict[str, Any]:
+        try:
+            import yt_dlp
+        except ImportError as exc:
+            raise RuntimeError("Для видеоплатформ требуется пакет yt-dlp") from exc
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if not isinstance(info, dict):
+            raise RuntimeError("Видеоплатформа не вернула метаданные")
+        return info
+
+    @staticmethod
+    def _subtitle_candidates(info: dict[str, Any]) -> list[dict[str, Any]]:
+        candidates: list[tuple[int, int, dict[str, Any]]] = []
+        for bucket_name in ("subtitles", "automatic_captions"):
+            bucket = info.get(bucket_name) or {}
+            if not isinstance(bucket, dict):
+                continue
+            for lang, rows in bucket.items():
+                if not isinstance(rows, list):
+                    continue
+                lang_rank = 0 if str(lang).lower().startswith("ru") else 1 if str(lang).lower().startswith("en") else 2
+                for row in rows:
+                    if not isinstance(row, dict) or not row.get("url"):
+                        continue
+                    ext = str(row.get("ext") or "").lower()
+                    ext_rank = 0 if ext == "vtt" else 1 if ext in {"srv1", "srv2", "srv3"} else 2
+                    candidates.append((lang_rank, ext_rank, row))
+        return [row for _, _, row in sorted(candidates, key=lambda item: (item[0], item[1]))]
+
+    @staticmethod
+    def _parse_vtt(text: str, duration_seconds: float) -> list[VideoSegment]:
+        def to_seconds(value: str) -> float:
+            parts = value.replace(",", ".").split(":")
+            try:
+                if len(parts) == 3:
+                    return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+                if len(parts) == 2:
+                    return float(parts[0]) * 60 + float(parts[1])
+            except ValueError:
+                return 0.0
+            return 0.0
+
+        segments: list[VideoSegment] = []
+        blocks = re.split(r"\n\s*\n", str(text or "").replace("\r\n", "\n"))
+        for block in blocks:
+            lines = [line.strip() for line in block.splitlines() if line.strip()]
+            timing_index = next((i for i, line in enumerate(lines) if "-->" in line), -1)
+            if timing_index < 0:
+                continue
+            timing = lines[timing_index].split("-->", 1)
+            start = to_seconds(timing[0].strip().split()[0])
+            end = to_seconds(timing[1].strip().split()[0])
+            speech = " ".join(re.sub(r"<[^>]+>", " ", line) for line in lines[timing_index + 1:])
+            speech = " ".join(speech.split())
+            if speech:
+                segments.append(VideoSegment(start, max(end, start), transcript=speech))
+        if not segments and text.strip():
+            cleaned = re.sub(r"<[^>]+>", " ", text)
+            cleaned = re.sub(r"(?m)^WEBVTT.*$", " ", cleaned)
+            cleaned = " ".join(cleaned.split())
+            if cleaned:
+                segments.append(VideoSegment(0.0, max(0.0, duration_seconds), transcript=cleaned))
+        return segments[:5000]
+
+    def _fetch_segments(self, info: dict[str, Any]) -> list[VideoSegment]:
+        duration = float(info.get("duration") or 0.0)
+        for row in self._subtitle_candidates(info):
+            try:
+                req = request.Request(str(row["url"]), headers={"User-Agent": "Mozilla/5.0"})
+                with request.urlopen(req, timeout=20) as response:
+                    raw = response.read(5_000_000)
+                text = raw.decode("utf-8", errors="replace")
+                segments = self._parse_vtt(text, duration)
+                if segments:
+                    return segments
+            except Exception:
+                continue
+        return []
+
+    def _process_video(self, row: dict[str, Any]) -> None:
+        material_id = int(row["id"])
+        source = str(row["source"])
+        kind = str(row["source_kind"])
+        info = self._yt_info(source)
+        title = str(info.get("title") or row.get("title") or source)[:500]
+        author = str(info.get("uploader") or info.get("channel") or info.get("creator") or "")[:500]
+        external_id = str(info.get("id") or "")[:500]
+        duration = float(info.get("duration") or 0.0)
+        segments = self._fetch_segments(info)
+        metadata = {
+            "extractor": str(info.get("extractor_key") or info.get("extractor") or ""),
+            "webpage_url": str(info.get("webpage_url") or source),
+            "channel_url": str(info.get("channel_url") or info.get("uploader_url") or ""),
+            "duration_seconds": duration,
+            "subtitle_segments": len(segments),
+            "asr_pending": not bool(segments),
+            "vision_pending": True,
+        }
+        if not segments:
+            self.coordinator.finish_material(
+                material_id,
+                status="blocked",
+                title=title,
+                author=author,
+                external_id=external_id,
+                metadata=metadata,
+                summary="Метаданные получены, но доступных субтитров нет. Нужен локальный ASR и visual-анализ.",
+            )
+            return
+        result = self.video_ingestor.ingest(
+            topic=title,
+            source=VideoSource(external_id or str(material_id), source, title, source_kind=kind),
+            segments=segments,
+            verify=True,
+        )
+        self.coordinator.finish_material(
+            material_id,
+            status="done",
+            title=title,
+            author=author,
+            external_id=external_id,
+            metadata=metadata,
+            summary=(
+                f"Изучены доступные субтитры: {len(segments)} фрагментов; "
+                f"извлечено утверждений: {int(result.get('accepted_claims') or 0)}. "
+                "Визуальный слой будет дополнен локальной vision-моделью."
+            ),
+        )
+
+    def _process_web(self, row: dict[str, Any]) -> None:
+        material_id = int(row["id"])
+        source = str(row["source"])
+        text = self.web_fetcher.fetch_text(source)
+        title = str(row.get("title") or urlparse(source).hostname or source)[:500]
+        accepted = self._ingest_text(topic=title, source=source, title=title, source_type="material-web", text=text)
+        self.coordinator.finish_material(
+            material_id,
+            status="done",
+            title=title,
+            metadata={"characters": len(text), "vision_pending": False, "asr_pending": False},
+            summary=f"Веб-материал прочитан; извлечено утверждений: {accepted}.",
+        )
+
+    def _process_local_text(self, row: dict[str, Any]) -> None:
+        material_id = int(row["id"])
+        source = str(row["source"])
+        path = Path(source).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(source)
+        if path.suffix.lower() not in {".txt", ".md"}:
+            self.coordinator.finish_material(
+                material_id,
+                status="blocked",
+                summary="Файл зарегистрирован. Для этого формата ещё нужен специализированный локальный адаптер.",
+                metadata={"adapter_pending": True, "suffix": path.suffix.lower()},
+            )
+            return
+        text = path.read_text(encoding="utf-8", errors="replace")[:2_000_000]
+        title = str(row.get("title") or path.name)[:500]
+        accepted = self._ingest_text(topic=title, source=path.as_uri(), title=title, source_type="material-local-text", text=text)
+        self.coordinator.finish_material(
+            material_id,
+            status="done",
+            title=title,
+            metadata={"characters": len(text), "local": True},
+            summary=f"Локальный текстовый материал изучен; извлечено утверждений: {accepted}.",
+        )
+
+    def _process(self, row: dict[str, Any]) -> None:
+        material_id = int(row["id"])
+        kind = str(row["source_kind"])
+        event("material_learning_started", material_id=material_id, source_kind=kind)
+        try:
+            if kind in {"youtube", "x", "vk", "twitch"}:
+                self._process_video(row)
+            elif kind == "web":
+                self._process_web(row)
+            elif kind == "document-file":
+                self._process_local_text(row)
+            else:
+                self.coordinator.finish_material(
+                    material_id,
+                    status="blocked",
+                    summary="Источник поставлен в очередь, но для этого типа ещё нужен ASR/vision/document адаптер.",
+                    metadata={"adapter_pending": True, "source_kind": kind},
+                )
+            self._last_error = ""
+        except Exception as exc:
+            self._last_error = str(exc)[:1000]
+            problem("material_learning_failed", self._last_error, material_id=material_id, source_kind=kind)
+            self.coordinator.finish_material(
+                material_id,
+                status="failed",
+                summary="Не удалось изучить материал.",
+                error=self._last_error,
+            )
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            row = self.coordinator.next_material()
+            if row is None:
+                self._stop.wait(2.0)
+                continue
+            self._process(row)
+            self._stop.wait(0.2)
+
+
 class SocialWatchWorker:
     """Фоновое обнаружение новых публикаций.
 
-    На первом этапе yt-dlp используется только для публичных метаданных. Вход в
-    аккаунт, подписка и реакции выполняются отдельным Computer Use адаптером,
-    который обязан визуально подтвердить действие до фиксации результата.
+    yt-dlp используется для публичных метаданных. Вход в аккаунт, настоящая
+    подписка и реакции выполняются отдельным Computer Use адаптером, который
+    должен сначала понять экран, затем выполнить действие и визуально подтвердить
+    результат. На первом запуске создаётся baseline, чтобы не объявлять старые
+    ролики как новые.
     """
 
     def __init__(self, coordinator: HumanLearningCoordinator):
@@ -337,11 +715,7 @@ class SocialWatchWorker:
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
-            item_url = str(entry.get("url") or entry.get("webpage_url") or "")
-            if item_url and not item_url.startswith(("http://", "https://")):
-                webpage = entry.get("webpage_url")
-                if webpage:
-                    item_url = str(webpage)
+            item_url = str(entry.get("webpage_url") or entry.get("url") or "")
             result.append({
                 "id": str(entry.get("id") or item_url),
                 "url": item_url,
@@ -354,6 +728,8 @@ class SocialWatchWorker:
         subscription_id = int(sub["id"])
         try:
             discovered = self._discover(str(sub["target_url"]))
+            newest_id = str(discovered[0]["id"]) if discovered else ""
+            baseline = not bool(str(sub.get("last_seen_external_id") or "").strip())
             new_items: list[dict[str, Any]] = []
             for item in reversed(discovered):
                 if not item["url"]:
@@ -364,15 +740,20 @@ class SocialWatchWorker:
                     url=item["url"],
                     title=item["title"],
                     published_at=item["published_at"],
+                    notified=baseline,
                 )
-                if created:
+                if created and not baseline:
                     new_items.append(saved)
                     if bool(sub["auto_learn"]):
                         material = self.coordinator.queue_material(str(sub["owner_id"]), item["url"], title=item["title"])
                         self.coordinator.attach_material_to_item(int(saved["id"]), int(material["id"]))
+            if newest_id:
+                self.coordinator.set_last_seen(subscription_id, newest_id)
             self.coordinator.mark_checked(subscription_id)
             self._last_error = ""
-            if new_items:
+            if baseline:
+                event("social_watch_baseline_created", subscription_id=subscription_id, items=len(discovered))
+            elif new_items:
                 event("social_watch_new_items", subscription_id=subscription_id, count=len(new_items))
         except Exception as exc:
             self._last_error = str(exc)[:1000]
@@ -392,4 +773,10 @@ class SocialWatchWorker:
             self._stop.wait(1.0)
 
 
-__all__ = ["HumanLearningCoordinator", "MaterialRef", "SocialWatchWorker", "detect_source_kind"]
+__all__ = [
+    "HumanLearningCoordinator",
+    "MaterialLearningWorker",
+    "MaterialRef",
+    "SocialWatchWorker",
+    "detect_source_kind",
+]
