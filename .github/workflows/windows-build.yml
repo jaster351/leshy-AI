@@ -23,7 +23,12 @@ jobs:
       - name: Validate Windows PowerShell 5.1 scripts
         shell: powershell
         run: |
-          foreach ($file in @('.\windows\autobuilder.ps1','.\windows\publish-build-logs.ps1')) {
+          foreach ($file in @(
+            '.\windows\autobuilder.ps1',
+            '.\windows\autobuilder-core.ps1',
+            '.\windows\autobuilder-ui.ps1',
+            '.\windows\publish-build-logs.ps1'
+          )) {
             $path = (Resolve-Path $file).Path
             $bytes = [System.IO.File]::ReadAllBytes($path)
             if (($bytes | Where-Object { $_ -gt 127 }).Count -gt 0) {
@@ -37,6 +42,7 @@ jobs:
               throw "Windows PowerShell 5.1 parser rejected $file."
             }
           }
+          Get-Content '.\windows\autobuilder-ui.ru.json' -Raw -Encoding UTF8 | ConvertFrom-Json | Out-Null
       - name: Версия
         id: version
         shell: pwsh
