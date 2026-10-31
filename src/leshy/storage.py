@@ -72,8 +72,14 @@ class Storage:
             self._ensure_column(conn, "sessions", "title_source", "TEXT NOT NULL DEFAULT 'auto'")
             self._ensure_column(conn, "messages", "edited_at", "TEXT")
             self._ensure_column(conn, "memories", "owner_id", "TEXT NOT NULL DEFAULT 'shared'")
+            # Freshness metadata is intentionally additive so existing LeshyBrain databases
+            # migrate in place without rebuilding or losing knowledge/vector identifiers.
+            self._ensure_column(conn, "knowledge", "data_class", "TEXT NOT NULL DEFAULT 'static'")
+            self._ensure_column(conn, "knowledge", "checked_at", "TEXT")
+            self._ensure_column(conn, "knowledge", "ttl_seconds", "INTEGER")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_owner_updated ON sessions(owner_id,updated_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_memories_owner_importance ON memories(owner_id,importance DESC,id DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS ix_knowledge_freshness ON knowledge(data_class,status,checked_at)")
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
