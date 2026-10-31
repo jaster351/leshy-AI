@@ -12,14 +12,17 @@ MAX_PLUGIN_RESPONSE = 2 * 1024 * 1024
 
 
 class MarketplacePluginRuntime:
-    """Исполняет декларативные HTTPS-инструменты включённых Marketplace plugins.
+    """Исполняет инструменты включённых Marketplace plugins.
 
-    Плагин не импортируется как произвольный Python-код внутрь процесса Лешего.
-    Инструменты описываются в `plugin.tools` манифеста и вызываются как HTTPS JSON API.
+    Внешние plugins остаются декларативными HTTPS JSON API. Официальные локальные
+    plugins могут использовать только заранее зарегистрированный builtin service;
+    произвольный Python-код из установленного пакета внутрь процесса Лешего не
+    импортируется.
     """
 
-    def __init__(self, marketplace):
+    def __init__(self, marketplace, *, builtin_services: dict[str, Any] | None = None):
         self.marketplace = marketplace
+        self.builtin_services = dict(builtin_services or {})
 
     @staticmethod
     def _words(text: str) -> set[str]:
@@ -37,11 +40,19 @@ class MarketplacePluginRuntime:
                     continue
                 name = str(tool.get("name") or "").strip()
                 endpoint = str(tool.get("endpoint") or tool.get("url") or "").strip()
-                if not name or not endpoint:
+                builtin = str(tool.get("builtin") or "").strip().lower()
+                if not name:
                     continue
-                parsed = parse.urlparse(endpoint)
-                if parsed.scheme != "https" or not parsed.netloc:
-                    continue
+                if builtin:
+                    if builtin not in self.builtin_services:
+                        continue
+                    endpoint = ""
+                else:
+                    if not endpoint:
+                        continue
+                    parsed = parse.urlparse(endpoint)
+                    if parsed.scheme != "https" or not parsed.netloc:
+                        continue
                 rows.append({
                     "ref": f"{ext['id']}.{name}",
                     "plugin_id": str(ext["id"]),
@@ -49,6 +60,7 @@ class MarketplacePluginRuntime:
                     "name": name,
                     "description": str(tool.get("description") or "")[:1000],
                     "endpoint": endpoint,
+                    "builtin": builtin,
                     "method": str(tool.get("method") or "POST").upper(),
                     "input_field": str(tool.get("input_field") or "query")[:80],
                     "triggers": [str(x).lower().strip() for x in (tool.get("triggers") or []) if str(x).strip()][:50],
@@ -100,6 +112,23 @@ class MarketplacePluginRuntime:
             }
 
     def execute(self, tool: dict[str, Any], message: str) -> dict[str, Any]:
+        builtin = str(tool.get("builtin") or "").strip().lower()
+        if builtin:
+            service = self.builtin_services.get(builtin)
+            executor = getattr(service, "execute", None)
+            if not callable(executor):
+                raise RuntimeError(f"Встроенный сервис {builtin} недоступен")
+            event("marketplace_plugin_tool_started", tool=tool["ref"], builtin=builtin)
+            result = executor(str(message))
+            if not isinstance(result, dict):
+                result = {"ok": True, "text": str(result)}
+            result.setdefault("ok", True)
+            result.setdefault("text", "")
+            result["tool"] = tool["ref"]
+            result["plugin_id"] = tool["plugin_id"]
+            result["plugin_name"] = tool["plugin_name"]
+            return result
+
         endpoint = str(tool["endpoint"])
         field = str(tool.get("input_field") or "query")
         payload = {field: str(message)}
