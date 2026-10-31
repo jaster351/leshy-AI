@@ -55,8 +55,6 @@ class LocalModelVerifier:
         raise RuntimeError(str(status.get("error") or "Локальная GGUF-модель не готова"))
 
     def start(self, *, force: bool = False) -> dict[str, Any]:
-        # Пользовательские модели не скачиваются автоматически: файл уже должен
-        # находиться в LeshyBrain/models или быть загружен через Web UI.
         return self.status()
 
 
@@ -84,10 +82,17 @@ class LocalModelCatalog:
         except OSError:
             return False, None
 
+    @staticmethod
+    def is_projector_name(name: str) -> bool:
+        lowered = Path(str(name or "")).name.lower()
+        return lowered.startswith("mmproj-") or lowered.startswith("mmproj_") or ".mmproj." in lowered
+
     def _safe_path(self, name: str) -> Path:
         candidate_name = Path(str(name or "")).name
         if not candidate_name.lower().endswith(".gguf") or candidate_name in {".gguf", ""}:
             raise ValueError("Можно выбрать только файл модели .gguf")
+        if self.is_projector_name(candidate_name):
+            raise ValueError("mmproj является vision-проектором и не может быть выбран как основная LLM")
         path = (self.models_dir / candidate_name).resolve()
         root = self.models_dir.resolve()
         if path.parent != root:
@@ -105,7 +110,7 @@ class LocalModelCatalog:
         except Exception:
             pass
         default = self.models_dir / self.default_name
-        if default.is_file():
+        if default.is_file() and not self.is_projector_name(default.name):
             return default.name
         models = self.list_models()
         return str(models[0]["name"]) if models else self.default_name
@@ -117,7 +122,7 @@ class LocalModelCatalog:
         active = self.selected_name_from_file()
         rows: list[dict[str, Any]] = []
         for path in sorted(self.models_dir.glob("*.gguf"), key=lambda p: p.name.lower()):
-            if not path.is_file():
+            if not path.is_file() or self.is_projector_name(path.name):
                 continue
             valid, version = self.inspect_gguf(path)
             try:
@@ -140,7 +145,8 @@ class LocalModelCatalog:
     def selected_name_from_file(self) -> str:
         try:
             payload = json.loads(self.selection_path.read_text(encoding="utf-8"))
-            return Path(str(payload.get("active_model") or "")).name
+            name = Path(str(payload.get("active_model") or "")).name
+            return "" if self.is_projector_name(name) else name
         except Exception:
             return ""
 
@@ -168,11 +174,17 @@ class LocalModelCatalog:
         items = self.list_models()
         for item in items:
             item["active"] = item["name"] == active
+        projectors = []
+        for path in sorted(self.models_dir.glob("*.gguf"), key=lambda p: p.name.lower()):
+            if path.is_file() and self.is_projector_name(path.name):
+                valid, version = self.inspect_gguf(path)
+                projectors.append({"name": path.name, "size": path.stat().st_size, "valid_gguf": valid, "gguf_version": version})
         return {
             "models_dir": str(self.models_dir),
             "active_model": active,
             "count": len(items),
             "items": items,
+            "vision_projectors": projectors,
             "supports_upload": True,
             "format": "GGUF",
         }
@@ -182,6 +194,8 @@ class LocalModelCatalog:
             raise ValueError("Пустой файл модели")
         if length > MAX_MODEL_UPLOAD_BYTES:
             raise ValueError("Файл модели превышает лимит 128 ГБ")
+        if self.is_projector_name(filename):
+            raise ValueError("Vision mmproj загружается через каталог мультимодальной модели, а не как основная LLM")
         target = self._safe_path(filename)
         if target.exists():
             raise FileExistsError(f"Файл {target.name} уже существует")
@@ -206,12 +220,7 @@ class LocalModelCatalog:
                 raise ValueError("Загруженный файл не является GGUF-моделью")
             os.replace(temporary, target)
             event("local_model_uploaded", model=target.name, size=written, gguf_version=version)
-            return {
-                "name": target.name,
-                "size": written,
-                "valid_gguf": True,
-                "gguf_version": version,
-            }
+            return {"name": target.name, "size": written, "valid_gguf": True, "gguf_version": version}
         except Exception:
             temporary.unlink(missing_ok=True)
             raise
