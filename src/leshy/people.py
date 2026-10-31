@@ -35,6 +35,9 @@ class PersonProfile:
     notes: str = ""
     birthday_greetings_enabled: bool = True
     last_birthday_greeting_year: int | None = None
+    holiday_calendars: list[str] = field(default_factory=list)
+    holiday_greetings_enabled: bool = True
+    greeted_holiday_events: list[str] = field(default_factory=list)
     identities: list[InterfaceIdentity] = field(default_factory=list)
 
     @property
@@ -83,6 +86,8 @@ class PeopleStore:
     def _decode(raw: dict[str, Any]) -> PersonProfile:
         value = dict(raw)
         value["identities"] = [InterfaceIdentity(**item) for item in value.get("identities", []) if isinstance(item, dict)]
+        value["holiday_calendars"] = [str(item).strip().upper() for item in value.get("holiday_calendars", []) if str(item).strip()]
+        value["greeted_holiday_events"] = [str(item) for item in value.get("greeted_holiday_events", []) if str(item)]
         return PersonProfile(**value)
 
     def get(self, person_id: str) -> PersonProfile | None:
@@ -168,11 +173,14 @@ class PeopleStore:
         allowed = {
             "first_name", "last_name", "patronymic", "preferred_name", "language_code",
             "birthday_day", "birthday_month", "birthday_year", "timezone", "notes",
-            "birthday_greetings_enabled",
+            "birthday_greetings_enabled", "holiday_calendars", "holiday_greetings_enabled",
         }
         for key, value in fields.items():
-            if key in allowed:
-                setattr(person, key, value)
+            if key not in allowed:
+                continue
+            if key == "holiday_calendars":
+                value = sorted({str(item).strip().upper() for item in (value or []) if str(item).strip()})
+            setattr(person, key, value)
         self.save(person)
         return person
 
@@ -210,6 +218,20 @@ class PeopleStore:
         person.last_birthday_greeting_year = int(year)
         self.save(person)
 
+    def was_holiday_greeted(self, person_id: str, event_id: str) -> bool:
+        person = self.get(person_id)
+        return bool(person and str(event_id) in person.greeted_holiday_events)
+
+    def mark_holiday_greeted(self, person_id: str, event_id: str) -> None:
+        person = self.get(person_id)
+        if person is None:
+            return
+        event_id = str(event_id)
+        if event_id not in person.greeted_holiday_events:
+            person.greeted_holiday_events.append(event_id)
+            person.greeted_holiday_events = person.greeted_holiday_events[-512:]
+            self.save(person)
+
     def prompt_context(self, person_id: str) -> str:
         person = self.get(person_id)
         if person is None:
@@ -222,6 +244,8 @@ class PeopleStore:
             if person.birthday_year:
                 birthday += f".{person.birthday_year}"
             fields.append(f"День рождения: {birthday}.")
+        if person.holiday_calendars:
+            fields.append(f"Календари национальных праздников: {', '.join(person.holiday_calendars)}.")
         if person.notes:
             fields.append(f"Заметки: {person.notes}")
         return " ".join(fields)
