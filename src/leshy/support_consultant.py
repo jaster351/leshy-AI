@@ -10,6 +10,7 @@ from typing import Protocol
 from .llm import ChatMessage, LLM
 from .logging_paths import central_log_path
 from .modules import ModuleManifest, ModuleRequest, ModuleResponse
+from .work_schedule import WorkAssistancePolicy, parse_event_time, truthy
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,10 +116,11 @@ class SupportConsultantModule:
     diagnostics: DiagnosticProvider
     llm: LLM
     brain_dir: Path | None = None
+    work_policy: WorkAssistancePolicy = field(default_factory=WorkAssistancePolicy)
     manifest: ModuleManifest = field(
         default_factory=lambda: ModuleManifest(
             name="support-consultant",
-            version="0.1.0",
+            version="0.2.0",
             description="Собирает контекст заявки, выполняет проверки и готовит варианты ответа",
             priority=500,
         )
@@ -134,6 +136,13 @@ class SupportConsultantModule:
             client_id=str(request.metadata.get("client_id") or "").strip(),
             email=str(request.metadata.get("email") or "").strip(),
             question=str(request.metadata.get("question") or request.text or "").strip(),
+        )
+
+    def _work_assistance_allowed(self, request: ModuleRequest) -> bool:
+        return self.work_policy.allows(
+            now=parse_event_time(request.metadata.get("event_time")),
+            workstation_active=truthy(request.metadata.get("workstation_active")),
+            manual_work_mode=truthy(request.metadata.get("manual_work_mode")),
         )
 
     @staticmethod
@@ -170,6 +179,13 @@ class SupportConsultantModule:
         return "\n".join(f"- {item.name}: {item.status}. {item.details}" for item in results) or "Проверки не выполнялись."
 
     def handle(self, request: ModuleRequest) -> ModuleResponse:
+        if not self._work_assistance_allowed(request):
+            return ModuleResponse(
+                handled=True,
+                text="",
+                metadata={"status": "work_assistance_suppressed", "notify": False, "read_only": True},
+            )
+
         notice = self._notice(request)
         if not notice.ticket_id and not notice.client_id and not notice.email:
             return ModuleResponse(
@@ -221,5 +237,6 @@ class SupportConsultantModule:
                     for item in diagnostic_results
                 ],
                 "read_only": True,
+                "notify": True,
             },
         )
