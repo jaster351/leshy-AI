@@ -1,6 +1,13 @@
+from pathlib import Path
+import tempfile
 import unittest
 
-from leshy.voice_preferences import DEFAULT_VOICE_GENDER, VoicePreference, normalize_voice_gender
+from leshy.voice_preferences import (
+    DEFAULT_VOICE_GENDER,
+    VoicePreference,
+    VoicePreferenceStore,
+    normalize_voice_gender,
+)
 
 
 class VoicePreferenceTests(unittest.TestCase):
@@ -16,6 +23,24 @@ class VoicePreferenceTests(unittest.TestCase):
     def test_explicit_female_choice_is_preserved(self):
         self.assertEqual(normalize_voice_gender("female"), "female")
         self.assertEqual(VoicePreference("female").effective_gender, "female")
+
+    def test_saved_choice_survives_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            brain = Path(tmp) / "LeshyBrain"
+            first_process = VoicePreferenceStore(brain)
+            self.assertEqual(first_process.effective_gender(), "male")
+            first_process.save("female")
+
+            second_process = VoicePreferenceStore(brain)
+            self.assertEqual(second_process.effective_gender(), "female")
+
+    def test_user_choice_can_be_changed_back_to_male(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            brain = Path(tmp) / "LeshyBrain"
+            store = VoicePreferenceStore(brain)
+            store.save("female")
+            store.save("male")
+            self.assertEqual(VoicePreferenceStore(brain).effective_gender(), "male")
 
 
 if __name__ == "__main__":
