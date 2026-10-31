@@ -23,6 +23,22 @@ $liveRoot = Join-Path $repoRoot 'dist\Leshy'
 $liveExe = Join-Path $liveRoot 'Leshy.exe'
 $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 
+# When AutoBuilder launches this script it owns live deployment/rollback itself.
+# Direct/manual build.ps1 runs publish immediately to dist\Leshy.
+if (-not $StageOnly) {
+  try {
+    $self = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $PID) -ErrorAction Stop
+    if ($self.ParentProcessId) {
+      $parent = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$self.ParentProcessId) -ErrorAction Stop
+      $parentCommand = [string]$parent.CommandLine
+      if ($parentCommand -and $parentCommand.IndexOf('autobuilder-core.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        $StageOnly = $true
+        Write-Host 'AutoBuilder parent detected: staging package first; AutoBuilder will publish it safely to dist\Leshy.'
+      }
+    }
+  } catch { }
+}
+
 python -m pip install --upgrade pip
 python -m pip install -e "."
 python -m pip install "pyinstaller>=6.11,<7"
@@ -30,7 +46,7 @@ python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://
 
 # .autobuild is disposable compiler workspace only. Finished output is published
 # to dist\Leshy either here (manual build) or by AutoBuilder after it creates its
-# rollback backup (StageOnly mode).
+# rollback backup (StageOnly/AutoBuilder mode).
 Remove-Item -Recurse -Force $packageDist, $packageWork -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
 
