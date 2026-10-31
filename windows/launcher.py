@@ -10,6 +10,7 @@ import webbrowser
 
 
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+_STARTUP_THROTTLE_SECONDS = 60
 
 
 def _install_root() -> Path:
@@ -60,17 +61,16 @@ def _cleanup_stale_llama_servers(brain_root: Path) -> None:
             check=False,
         )
     except Exception:
-        # Очистка является страховкой. Ошибка здесь не должна блокировать запуск UI.
         pass
 
 
 def _start_llama_watchdog(brain_root: Path) -> None:
-    """Следит за Leshy.exe и закрывает только его дочерние llama-server.
+    """Следит за дочерними llama-server, смягчает старт и закрывает их вместе с Leshy.exe.
 
-    Watchdog — отдельный скрытый PowerShell-процесс. Поэтому он остаётся жив даже
-    при аварийном завершении Python/PyInstaller и освобождает модель и log-файлы.
-    Фильтр ParentProcessId не затрагивает llama-server других приложений или уже
-    запущенного нового экземпляра Лешего.
+    Первую минуту llama-server получает BelowNormal, чтобы загрузка GGUF не
+    вытесняла браузер и системные процессы. После стартового окна приоритет
+    возвращается Normal. Watchdog также остаётся страховкой от сиротских
+    llama-server после аварийного завершения Лешего.
     """
     if os.name != "nt":
         return
@@ -79,6 +79,16 @@ def _start_llama_watchdog(brain_root: Path) -> None:
     script = (
         "$parentId=" + str(parent_pid) + ";"
         "$root=" + _ps_quote(runtime_root) + ";"
+        "$deadline=(Get-Date).AddSeconds(" + str(_STARTUP_THROTTLE_SECONDS) + ");"
+        "while((Get-Date)-lt $deadline){"
+        "$parent=Get-Process -Id $parentId -ErrorAction SilentlyContinue;if(-not $parent){break};"
+        "Get-CimInstance Win32_Process -Filter \"Name='llama-server.exe'\" -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.ParentProcessId -eq $parentId -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root,[System.StringComparison]::OrdinalIgnoreCase) } | "
+        "ForEach-Object { try { (Get-Process -Id $_.ProcessId -ErrorAction Stop).PriorityClass='BelowNormal' } catch {} };"
+        "Start-Sleep -Milliseconds 300};"
+        "Get-CimInstance Win32_Process -Filter \"Name='llama-server.exe'\" -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.ParentProcessId -eq $parentId -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root,[System.StringComparison]::OrdinalIgnoreCase) } | "
+        "ForEach-Object { try { (Get-Process -Id $_.ProcessId -ErrorAction Stop).PriorityClass='Normal' } catch {} };"
         "try { $p=Get-Process -Id $parentId -ErrorAction SilentlyContinue; if($p){$p.WaitForExit()} } catch {};"
         "Start-Sleep -Milliseconds 250;"
         "Get-CimInstance Win32_Process -Filter \"Name='llama-server.exe'\" -ErrorAction SilentlyContinue | "
@@ -94,7 +104,6 @@ def _start_llama_watchdog(brain_root: Path) -> None:
             creationflags=_CREATE_NO_WINDOW,
         )
     except Exception:
-        # Основной close() runtime остаётся первым уровнем защиты.
         pass
 
 
@@ -109,13 +118,9 @@ def main() -> None:
     brain_root = _brain_root()
     legacy_brain = _legacy_brain()
 
-    # Пользователь выбирает место установки. Все изменяемые данные Лешего
-    # живут только относительно Leshy.exe: .\\LeshyBrain\\...
     os.environ["LESHY_INSTALL_ROOT"] = str(install_root)
     os.environ["LESHY_BRAIN_DIR"] = str(brain_root)
 
-    # Без потери данных: старое AppData-хранилище копируется один раз в новую
-    # относительную папку. После успешной проверки источник не удаляется.
     if legacy_brain.exists() and not brain_root.exists():
         os.environ["LESHY_LEGACY_BRAIN_DIR"] = str(legacy_brain)
     else:
@@ -124,9 +129,7 @@ def main() -> None:
     os.environ["LESHY_HOST"] = args.host
     os.environ["LESHY_PORT"] = str(args.port)
 
-    # Сначала освобождаем runtime/log-файлы, которые мог оставить старый процесс.
     _cleanup_stale_llama_servers(brain_root)
-    # Затем создаём независимую страховку на весь срок жизни этого Leshy.exe.
     _start_llama_watchdog(brain_root)
 
     from leshy.diagnostic_publisher import DiagnosticPublisher
