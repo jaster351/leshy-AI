@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .diagnostics import event, problem
@@ -32,6 +33,49 @@ def _pending_sessions(app, *, limit: int = 50) -> list[dict[str, Any]]:
             (max(1, min(int(limit), 500)),),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _interactive_llm_busy(app) -> bool:
+    """Не давать recovery конкурировать с Web/Telegram за resident LLM slot."""
+    llm = getattr(app, "llm", None)
+    states = list(getattr(llm, "_states", []) or [])
+    providers = [getattr(state, "provider", None) for state in states]
+    if not providers:
+        providers = [llm]
+    for provider in providers:
+        lock = getattr(provider, "_chat_lock", None)
+        try:
+            if lock is not None and lock.locked():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _wait_for_interactive_idle(app, *, quiet_seconds: float = 3.0, max_wait_seconds: float = 300.0) -> bool:
+    """Ждать устойчивого простоя LLM, не замедляя пользовательские запросы."""
+    started = time.monotonic()
+    idle_since: float | None = None
+    while time.monotonic() - started < max_wait_seconds:
+        if _interactive_llm_busy(app):
+            idle_since = None
+            time.sleep(0.2)
+            continue
+        now = time.monotonic()
+        if idle_since is None:
+            idle_since = now
+        if now - idle_since >= quiet_seconds:
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _llm_answer(app, messages: list[ChatMessage]) -> str:
+    """Recovery использует потоковый backend, чтобы получить ту же защиту контекста, что Web/Telegram."""
+    streamer = getattr(app.llm, "stream_chat", None)
+    if callable(streamer):
+        return "".join(str(part or "") for part in streamer(messages)).strip()
+    return str(app.llm.chat(messages) or "").strip()
 
 
 def _build_answer(app, owner_id: str, session_id: str, message: str) -> str:
@@ -93,19 +137,20 @@ def _build_answer(app, owner_id: str, session_id: str, message: str) -> str:
         ).fetchall()
     history = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
 
-    answer = app.llm.chat(context + history)
+    answer = _llm_answer(app, context + history)
     if app._answer_needs_research(answer):
         if not search_attempted:
             append_live_search("модель обнаружила пробел в знаниях")
         if sources:
-            answer = app.llm.chat(
+            answer = _llm_answer(
+                app,
                 context
                 + [ChatMessage(
                     "system",
                     "Предыдущий черновик ошибочно сообщил об отсутствии данных или интернета. "
                     "Сформируй новый ответ по найденным источникам.",
                 )]
-                + history
+                + history,
             )
         elif search_attempted and search_error:
             answer = "Не удалось получить актуальные данные из интернета прямо сейчас: " + search_error
@@ -133,9 +178,9 @@ def _notify_telegram(app, owner_id: str, session_id: str, answer: str) -> None:
 def recover_unanswered(app, *, limit: int = 50) -> dict[str, int]:
     """Ответить на сообщения, которые остались последними в диалоге без assistant-ответа.
 
-    Вызывать только после стартовой паузы. Перед генерацией и перед сохранением
-    выполняется повторная проверка последнего message id, поэтому восстановление
-    не создаёт второй ответ, если диалог уже продолжился после запуска.
+    Recovery является фоновой работой: перед каждой генерацией он ждёт устойчивого
+    простоя локальной LLM и никогда намеренно не стартует поверх активного Web/Telegram
+    запроса. Контекст обрабатывается тем же streaming backend, что интерактивный чат.
     """
 
     recovered = 0
@@ -151,6 +196,10 @@ def recover_unanswered(app, *, limit: int = 50) -> dict[str, int]:
         if latest is None or int(latest["id"]) != message_id or str(latest["role"]) != "user":
             skipped += 1
             continue
+
+        if not _wait_for_interactive_idle(app):
+            event("startup_recovery_deferred_busy", session_id=session_id, owner_id=owner_id, message_id=message_id)
+            break
 
         try:
             event("startup_recovery_started", session_id=session_id, owner_id=owner_id, message_id=message_id)
