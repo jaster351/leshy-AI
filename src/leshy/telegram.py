@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import threading
-import time
 from typing import Iterable
 from urllib import parse, request, error
+
+from .diagnostics import event, problem
+from .secret_store import load_secret, save_secret
 
 
 class TelegramBridge:
@@ -14,7 +17,8 @@ class TelegramBridge:
         self.brain_dir = Path(brain_dir)
         self.secrets_dir = self.brain_dir / "secrets"
         self.secrets_dir.mkdir(parents=True, exist_ok=True)
-        self.token_path = self.secrets_dir / "telegram_token.txt"
+        self.token_path = self.secrets_dir / "telegram_token.dat"
+        self.legacy_token_path = self.secrets_dir / "telegram_token.txt"
         self.allowed_path = self.secrets_dir / "telegram_allowed_users.txt"
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -22,9 +26,23 @@ class TelegramBridge:
         self._offset = 0
 
     def _token(self) -> str:
-        if not self.token_path.is_file():
-            return ""
-        return self.token_path.read_text(encoding="utf-8").strip()
+        try:
+            value = load_secret(self.token_path)
+            if value:
+                return value
+            if self.legacy_token_path.is_file():
+                legacy = self.legacy_token_path.read_text(encoding="utf-8").strip()
+                if legacy:
+                    save_secret(self.token_path, legacy)
+                    try:
+                        self.legacy_token_path.unlink()
+                    except OSError:
+                        pass
+                    event("telegram_secret_migrated")
+                    return legacy
+        except Exception as exc:
+            problem("telegram_secret_load_failed", str(exc))
+        return ""
 
     def _allowed(self) -> set[str]:
         if not self.allowed_path.is_file():
@@ -34,9 +52,14 @@ class TelegramBridge:
     def configure(self, token: str, allowed_users: Iterable[str | int]) -> None:
         token = str(token or "").strip()
         if token:
-            self.token_path.write_text(token, encoding="utf-8")
+            save_secret(self.token_path, token)
         allowed = sorted({str(value).strip() for value in allowed_users if str(value).strip()})
         self.allowed_path.write_text("\n".join(allowed) + ("\n" if allowed else ""), encoding="utf-8")
+        try:
+            os.chmod(self.allowed_path, 0o600)
+        except OSError:
+            pass
+        event("telegram_configured", allowed_users=len(allowed), token_present=bool(self._token()))
 
     def status(self) -> dict:
         return {
@@ -54,10 +77,12 @@ class TelegramBridge:
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="leshy-telegram", daemon=True)
         self._thread.start()
+        event("telegram_started")
         return True
 
     def stop(self) -> None:
         self._stop.set()
+        event("telegram_stopped")
 
     def _api(self, method: str, payload: dict | None = None, timeout: int = 40):
         token = self._token()
@@ -68,7 +93,12 @@ class TelegramBridge:
         if payload is not None:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        req = request.Request(f"https://api.telegram.org/bot{token}/{method}", data=data, headers=headers, method="POST" if data else "GET")
+        req = request.Request(
+            f"https://api.telegram.org/bot{token}/{method}",
+            data=data,
+            headers=headers,
+            method="POST" if data else "GET",
+        )
         with request.urlopen(req, timeout=timeout) as response:
             body = json.loads(response.read().decode("utf-8"))
         if not body.get("ok"):
@@ -88,11 +118,16 @@ class TelegramBridge:
             return
         allowed = self._allowed()
         if not allowed or user_id not in allowed:
+            problem("telegram_access_denied", "Telegram ID не разрешён", telegram_user_id=user_id)
             self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
             return
         if text == "/status":
             status = self.app.status()
-            self._send(chat_id, f"Леший {status['version']}\nМодель: {status['model']}\nСамообучение: {'ВКЛ' if status['learning_enabled'] else 'ВЫКЛ'}")
+            self._send(
+                chat_id,
+                f"Леший {status['version']}\nМодель: {status['model']}\n"
+                f"Самообучение: {'ВКЛ' if status['learning_enabled'] else 'ВЫКЛ'}",
+            )
             return
         if text == "/learning_on":
             self.app.set_learning(True)
@@ -103,16 +138,23 @@ class TelegramBridge:
             self._send(chat_id, "Самообучение выключено.")
             return
         try:
-            result = self.app.chat(text, owner_id=f"telegram:{user_id}", session_id=f"telegram:{chat_id}:{user_id}")
+            result = self.app.chat(
+                text,
+                owner_id=f"telegram:{user_id}",
+                session_id=f"telegram:{chat_id}:{user_id}",
+            )
             self._send(chat_id, result["answer"])
         except Exception as exc:
+            problem("telegram_chat_failed", str(exc), telegram_user_id=user_id)
             self._send(chat_id, f"Не удалось получить ответ Лешего: {exc}")
 
     def _run(self) -> None:
         backoff = 2
         while not self._stop.is_set():
             try:
-                query = parse.urlencode({"timeout": 30, "offset": self._offset, "allowed_updates": json.dumps(["message"])} )
+                query = parse.urlencode(
+                    {"timeout": 30, "offset": self._offset, "allowed_updates": json.dumps(["message"])}
+                )
                 result = self._api("getUpdates?" + query, timeout=40) or []
                 for update in result:
                     self._offset = max(self._offset, int(update.get("update_id", 0)) + 1)
@@ -123,8 +165,10 @@ class TelegramBridge:
                 backoff = 2
             except (error.URLError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError) as exc:
                 self._last_error = str(exc)[:500]
+                problem("telegram_poll_failed", self._last_error, retry_seconds=backoff)
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, 30)
             except Exception as exc:  # pragma: no cover
                 self._last_error = str(exc)[:500]
+                problem("telegram_unexpected_error", self._last_error)
                 self._stop.wait(5)
