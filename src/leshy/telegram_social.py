@@ -9,6 +9,7 @@ from typing import Any
 _LESHEY_NAME_RE = re.compile(
     r"(?iu)(?:^|[\s,.:;!?()\[\]{}\-—])(?:леший|л[её]ша)(?=$|[\s,.:;!?()\[\]{}\-—])"
 )
+_DIRECT_NAME_START_RE = re.compile(r"(?iu)^\s*(?:леший|л[её]ша)(?:\s|[,.:;!?\-—]|$)")
 _FOLLOW_UP_RE = re.compile(
     r"(?iu)^\s*(?:а\s+|и\s+|но\s+|тогда\s+|то\s+есть\s+|почему\b|зачем\b|как\b|что\b|где\b|когда\b|"
     r"можешь\b|можно\b|получается\b|понял\b|поняла\b|ясно\b|спасибо\b|нет\b|да\b|верно\b|правильно\b)"
@@ -20,6 +21,7 @@ _HELPFUL_RE = re.compile(
 _POSITIVE_RE = re.compile(
     r"(?iu)(?:спасибо|благодарю|отлично|супер|класс|круто|молодец|получилось|сработало|готово|верно|правильно)"
 )
+_PRAISE_RE = re.compile(r"(?iu)(?:красавчик|умница|молодец|ты лучший|ты крутой|хорошая работа|отличная работа|люблю тебя)")
 _FUN_RE = re.compile(r"(?iu)(?:ахаха|хаха|лол|смешно|😂|🤣)")
 _CELEBRATE_RE = re.compile(r"(?iu)(?:ура\b|победа|заработало|починили|готово!|получилось!)")
 
@@ -29,8 +31,8 @@ class TelegramSocialPolicy:
 
     В группе политика намеренно консервативна: Леший отвечает только когда обращение
     адресовано ему или является коротким продолжением уже начатого с ним диалога.
-    Просто упоминание Лешего в разговоре людей не считается приглашением вмешиваться,
-    если рядом нет вопроса/обращения к нему.
+    Просто упоминание Лешего внутри разговора людей не считается приглашением
+    вмешиваться, если это не прямая реплика ему.
     """
 
     ACTIVE_DIALOGUE_SECONDS = 180.0
@@ -70,6 +72,8 @@ class TelegramSocialPolicy:
         value = str(text or "").strip()
         if not value:
             return False
+        if _DIRECT_NAME_START_RE.search(value):
+            return True
         if "?" in value:
             return True
         lowered = value.lower()
@@ -136,12 +140,12 @@ class TelegramSocialPolicy:
             return "😂"
         if _CELEBRATE_RE.search(text):
             return "🎉"
+        if _PRAISE_RE.search(text):
+            return "❤️"
         if _HELPFUL_RE.search(text):
             return "👍"
         if _POSITIVE_RE.search(text) and len(text) <= 500:
             return "👍"
-        # Если пользователь дал содержательное пояснение, а ответ Лешего признаёт,
-        # что оно помогло/уточнило знание, положительная реакция естественна.
         low_answer = str(answer or "").lower()
         if len(text) >= 80 and any(token in low_answer for token in ("спасибо", "понял", "учту", "уточнение")):
             return "👍"
