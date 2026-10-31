@@ -61,6 +61,11 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --collect-all llama_cpp `
   --collect-all ddgs `
   --collect-all tzdata `
+  --collect-all faster_whisper `
+  --collect-all ctranslate2 `
+  --collect-all av `
+  --collect-all tokenizers `
+  --collect-all huggingface_hub `
   --add-data "web;web" `
   --add-data "VERSION;." `
   windows/launcher.py
