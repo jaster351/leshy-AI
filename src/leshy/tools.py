@@ -10,6 +10,7 @@ from .memory import MemoryStore
 from .permissions import PermissionPolicy
 from .research import ResearchEngine
 from .storage import Storage
+from .version import VERSION
 from .workspace import ShellExecutor, Workspace
 
 
@@ -158,6 +159,7 @@ def build_default_tools(
         counts = knowledge.counts()
         with storage.connection() as conn:
             return {
+                "version": VERSION,
                 "sessions": conn.execute("SELECT count(*) n FROM sessions").fetchone()["n"],
                 "knowledge_total": counts["total"],
                 "candidate_knowledge": counts["candidate"],
