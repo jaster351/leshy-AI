@@ -11,6 +11,7 @@ from .diagnostics import problem
 from .hf_settings import HuggingFaceSettings
 from .marketplace import MarketplaceManager
 from .marketplace_chat import install_marketplace_chat_bridge
+from .marketplace_plugin_runtime import MarketplacePluginRuntime
 from .model_catalog import apply_saved_model_to_settings, configure_app_model_verifier
 from .os_control_approval import install_os_control
 from .runtime_compat import CompatibleRuntimeManager
@@ -23,6 +24,7 @@ def make_handler(app, telegram, settings, model_catalog):
     if marketplace is None:
         marketplace = MarketplaceManager(settings.brain_dir)
         app.marketplace = marketplace
+        app.marketplace_plugin_runtime = MarketplacePluginRuntime(marketplace)
     Parent = previous.make_handler(app, telegram, settings, model_catalog)
 
     class Handler(Parent):
@@ -99,6 +101,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     install_streaming_backends(app.llm)
     install_os_control(app)
     app.marketplace = MarketplaceManager(settings.brain_dir)
+    app.marketplace_plugin_runtime = MarketplacePluginRuntime(app.marketplace)
     install_marketplace_chat_bridge()
 
     telegram = FastTelegramBridge(app, settings.brain_dir)
