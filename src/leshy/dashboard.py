@@ -96,7 +96,6 @@ class DashboardService:
                 )
             self.storage.audit("session.auto_titled", {"session_id": session_id, "owner_id": owner, "title": title})
         except Exception:
-            # Название — косметическая функция и не должно ломать список чатов.
             return
 
     def _schedule_auto_title(self, owner: str, rows: list[Any]) -> None:
@@ -252,3 +251,29 @@ class DashboardService:
             "lines": lines,
             "problems": recent_problems(self._limit(limit, 50, 500)),
         }
+
+    def clear_logs(self) -> dict[str, Any]:
+        """Очистить только runtime-логи внутри LeshyBrain/logs.
+
+        Каталог, база данных, память, модели, настройки и другие пользовательские
+        данные не затрагиваются. Файлы обнуляются, где это возможно, чтобы открытые
+        дескрипторы текущего процесса могли продолжить писать в те же пути.
+        """
+        log_dir = (Path(self.app.settings.brain_dir) / "logs").resolve()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        cleared = 0
+        failed: list[str] = []
+        for path in log_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                resolved = path.resolve()
+                if log_dir not in resolved.parents:
+                    continue
+                with path.open("w", encoding="utf-8"):
+                    pass
+                cleared += 1
+            except OSError as exc:
+                failed.append(f"{path.name}: {exc}")
+        self.storage.audit("logs.cleared", {"files": cleared, "failed": len(failed)})
+        return {"cleared_files": cleared, "failed": failed[:20], "path": str(log_dir)}
