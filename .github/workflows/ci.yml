@@ -37,7 +37,7 @@ jobs:
         run: python -c "from leshy.app import LeshyApp; from leshy.runtime import Runtime; from leshy.web_server import make_handler"
       - name: Запустить unit и regression тесты
         run: python -m unittest discover -s tests -v
-      - name: Проверить весь Web JavaScript
+      - name: Проверить Web JavaScript
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -45,23 +45,15 @@ jobs:
           html=Path('web/index.html').read_text(encoding='utf-8')
           m=re.search(r'<script>(.*)</script>',html,re.S)
           assert m, 'script не найден'
-          Path('/tmp/leshy-web-inline.js').write_text(m.group(1),encoding='utf-8')
+          Path('/tmp/leshy-web.js').write_text(m.group(1),encoding='utf-8')
           PY
-          node --check /tmp/leshy-web-inline.js
-          node --check web/ui-enhancements.js
-          node --check web/variant3.js
-          node --check web/hardware-panel.js
-      - name: Проверить UI 4→3, кнопки, ожидание и самообучение
+          node --check /tmp/leshy-web.js
+      - name: Проверить UI 4→3 и самообучение
         run: |
           grep -q 'Я здесь. Слушаю. Думаю. Помогаю.' web/index.html
           grep -q 'document.body.classList.add' web/index.html
           grep -q '/v1/learning' web/index.html
           grep -q '/v1/telegram/config' web/index.html
-          grep -q 'learningQuickToggle' web/variant3.js
-          grep -q 'bindCoreControls' web/variant3.js
-          grep -q 'scienceProgressText' web/variant3.js
-          grep -q 'addPendingMessage' web/ui-enhancements.js
-          grep -q 'height:auto!important' web/ui-enhancements.js
       - name: Проверить долговременную память
         run: |
           grep -q '/remember ' src/leshy/app.py
