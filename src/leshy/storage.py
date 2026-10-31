@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS learning_history(id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE INDEX IF NOT EXISTS ix_learning_history_started ON learning_history(started_at DESC,id DESC);
 CREATE TABLE IF NOT EXISTS sync_packages(package_hash TEXT PRIMARY KEY,source TEXT NOT NULL,remote_instance TEXT NOT NULL DEFAULT '',imported_count INTEGER NOT NULL DEFAULT 0,imported_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_sync_packages_imported ON sync_packages(imported_at DESC);
+CREATE TABLE IF NOT EXISTS user_tasks(id INTEGER PRIMARY KEY AUTOINCREMENT,owner_id TEXT NOT NULL,title TEXT NOT NULL,details TEXT NOT NULL DEFAULT '',status TEXT NOT NULL CHECK(status IN ('open','in_progress','done','cancelled')),priority INTEGER NOT NULL DEFAULT 0,due_at TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_user_tasks_owner_status ON user_tasks(owner_id,status,priority DESC,updated_at DESC);
+CREATE TABLE IF NOT EXISTS user_preferences(owner_id TEXT NOT NULL,key TEXT NOT NULL,value_json TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(owner_id,key));
+CREATE INDEX IF NOT EXISTS ix_user_preferences_owner ON user_preferences(owner_id,key);
 """
 
 
