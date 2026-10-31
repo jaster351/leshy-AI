@@ -47,6 +47,19 @@ class AppRuntimeTests(unittest.TestCase):
             app.set_learning(True)
             restarted = LeshyApp(settings)
             self.assertTrue(restarted.learning.is_enabled())
+            app.stop_background()
+
+    def test_explicit_memory_is_persistent_and_isolated(self):
+        with tempfile.TemporaryDirectory() as temp:
+            settings = self.make_settings(Path(temp))
+            app = LeshyApp(settings)
+            saved = app.chat("/remember Любимый редактор — VS Code", owner_id="one", session_id="m1")
+            self.assertIn("Запомнил", saved["answer"])
+            restarted = LeshyApp(settings)
+            items = restarted.memories("one")
+            self.assertEqual(len(items), 1)
+            self.assertIn("VS Code", items[0]["content"])
+            self.assertEqual(restarted.memories("two"), [])
 
 
 if __name__ == "__main__":

@@ -26,10 +26,15 @@ def _default_brain() -> Path:
 
 def _resolve_brain(cli_value: str | None) -> Path:
     locator = _locator_file()
+    env_value = os.getenv("LESHY_BRAIN_DIR", "").strip()
     if cli_value:
         chosen = Path(cli_value).expanduser().resolve()
         chosen.mkdir(parents=True, exist_ok=True)
         locator.write_text(str(chosen), encoding="utf-8")
+        return chosen
+    if env_value:
+        chosen = Path(env_value).expanduser().resolve()
+        chosen.mkdir(parents=True, exist_ok=True)
         return chosen
     if locator.is_file():
         value = locator.read_text(encoding="utf-8").strip()
@@ -50,15 +55,15 @@ def _resolve_brain(cli_value: str | None) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="Leshy")
     parser.add_argument("--data-root", help="Каталог LeshyBrain; выбор сохраняется для следующих запусков")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--host", default=os.getenv("LESHY_HOST", "0.0.0.0"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("LESHY_PORT", "8765")))
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
     os.environ["LESHY_INSTALL_ROOT"] = str(_install_root())
     os.environ["LESHY_BRAIN_DIR"] = str(_resolve_brain(args.data_root))
-    os.environ.setdefault("LESHY_HOST", args.host)
-    os.environ.setdefault("LESHY_PORT", str(args.port))
+    os.environ["LESHY_HOST"] = args.host
+    os.environ["LESHY_PORT"] = str(args.port)
 
     from leshy.web_server import serve
 

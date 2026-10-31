@@ -34,7 +34,7 @@ jobs:
       - name: Проверить Python
         run: python -m compileall -q src tests windows
       - name: Проверить импорт рабочего runtime
-        run: python -c "from leshy.app import LeshyApp; from leshy.web_server import make_handler"
+        run: python -c "from leshy.app import LeshyApp; from leshy.runtime import Runtime; from leshy.web_server import make_handler"
       - name: Запустить unit и regression тесты
         run: python -m unittest discover -s tests -v
       - name: Проверить Web JavaScript
@@ -54,3 +54,7 @@ jobs:
           grep -q 'document.body.classList.add' web/index.html
           grep -q '/v1/learning' web/index.html
           grep -q '/v1/telegram/config' web/index.html
+      - name: Проверить долговременную память
+        run: |
+          grep -q '/remember ' src/leshy/app.py
+          grep -q 'test_explicit_memory_is_persistent_and_isolated' tests/test_app_runtime.py
