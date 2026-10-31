@@ -66,6 +66,10 @@ class MediaDeliveryManager:
     Torrent-файл не считается пиратским сам по себе. Для интернет-источника
     проверяется правовой статус конкретного материала. SMB-доступ восстанавливается
     из постоянных настроек NAS; пароль не попадает в журнал доставки.
+
+    Для torrent-файлов действует безопасный operational fallback: если NAS/SMB
+    недоступен, файл сохраняется в локальную папку Downloads текущего пользователя,
+    а результат явно помечается как fallback, чтобы Леший сообщил об этом владельцу.
     """
 
     MAX_REMOTE_BYTES = 25 * 1024 * 1024 * 1024
@@ -87,6 +91,28 @@ class MediaDeliveryManager:
             if result.get("attempted") and not result.get("connected"):
                 raise RuntimeError(str(result.get("error") or "Не удалось подключиться к NAS по SMB"))
         self.refresh_paths()
+
+    @staticmethod
+    def _downloads_dir() -> Path:
+        base = Path(os.environ.get("USERPROFILE") or Path.home()).expanduser()
+        downloads = base / "Downloads"
+        downloads.mkdir(parents=True, exist_ok=True)
+        return downloads
+
+    def _destination_dir_with_fallback(self, kind: str) -> tuple[Path, bool, str]:
+        try:
+            return self._destination_dir(kind), False, ""
+        except Exception as exc:
+            if kind != "torrent":
+                raise
+            fallback = self._downloads_dir()
+            reason = str(exc)[:1000]
+            problem(
+                "nas_torrent_fallback_to_downloads",
+                reason,
+                fallback=str(fallback),
+            )
+            return fallback, True, reason
 
     def _ensure_schema(self) -> None:
         with self.storage.connection() as conn:
@@ -170,6 +196,21 @@ class MediaDeliveryManager:
             )
             return int(cur.lastrowid)
 
+    def _merge_metadata(self, delivery_id: int, extra: dict[str, Any]) -> None:
+        with self.storage.connection() as conn:
+            row = conn.execute("SELECT metadata_json FROM media_deliveries WHERE id=?", (int(delivery_id),)).fetchone()
+            try:
+                current = json.loads(str(row["metadata_json"] or "{}")) if row else {}
+            except (TypeError, json.JSONDecodeError):
+                current = {}
+            if not isinstance(current, dict):
+                current = {}
+            current.update(extra)
+            conn.execute(
+                "UPDATE media_deliveries SET metadata_json=?,updated_at=? WHERE id=?",
+                (json.dumps(current, ensure_ascii=False, sort_keys=True), utcnow(), int(delivery_id)),
+            )
+
     def _finish(self, delivery_id: int, *, status: str, destination: str = "", bytes_written: int = 0, error: str = "") -> None:
         with self.storage.connection() as conn:
             conn.execute(
@@ -193,7 +234,7 @@ class MediaDeliveryManager:
         kind = self.media_kind(destination_name or source.name)
         delivery_id = self._insert(owner_id, str(source), "local", kind, rights, metadata)
         try:
-            destination_dir = self._destination_dir(kind)
+            destination_dir, fallback_used, fallback_reason = self._destination_dir_with_fallback(kind)
             name = Path(destination_name).name if destination_name else source.name
             destination = destination_dir / name
             temporary = destination.with_name(destination.name + ".leshy-part")
@@ -202,8 +243,21 @@ class MediaDeliveryManager:
                 destination.unlink()
             temporary.replace(destination)
             size = destination.stat().st_size
+            if fallback_used:
+                self._merge_metadata(delivery_id, {
+                    "fallback_used": True,
+                    "fallback_kind": "local_downloads",
+                    "fallback_reason": fallback_reason,
+                })
             self._finish(delivery_id, status="copied", destination=str(destination), bytes_written=size)
-            event("nas_media_delivered", delivery_id=delivery_id, kind=kind, destination=str(destination), bytes=size)
+            event(
+                "nas_media_delivered" if not fallback_used else "torrent_delivered_to_downloads_fallback",
+                delivery_id=delivery_id,
+                kind=kind,
+                destination=str(destination),
+                bytes=size,
+                fallback_used=fallback_used,
+            )
             return self.delivery(delivery_id)
         except Exception as exc:
             self._finish(delivery_id, status="failed", error=str(exc))
@@ -228,9 +282,9 @@ class MediaDeliveryManager:
             raise ValueError("Не указано имя файла")
         kind = self.media_kind(safe_name)
         delivery_id = self._insert(owner_id, url, "remote", kind, rights, metadata)
-        destination_dir = self._destination_dir(kind)
-        destination = destination_dir / safe_name
         try:
+            destination_dir, fallback_used, fallback_reason = self._destination_dir_with_fallback(kind)
+            destination = destination_dir / safe_name
             SafeWebFetcher._validate_public_url(url)
             self._finish(delivery_id, status="downloading")
             req = request.Request(url, headers={"User-Agent": "LeshyMediaDelivery/1.0"})
@@ -253,8 +307,20 @@ class MediaDeliveryManager:
             if destination.exists():
                 destination.unlink()
             temp_path.replace(destination)
+            if fallback_used:
+                self._merge_metadata(delivery_id, {
+                    "fallback_used": True,
+                    "fallback_kind": "local_downloads",
+                    "fallback_reason": fallback_reason,
+                })
             self._finish(delivery_id, status="copied", destination=str(destination), bytes_written=destination.stat().st_size)
-            event("nas_media_downloaded", delivery_id=delivery_id, kind=kind, destination=str(destination))
+            event(
+                "nas_media_downloaded" if not fallback_used else "torrent_downloaded_to_downloads_fallback",
+                delivery_id=delivery_id,
+                kind=kind,
+                destination=str(destination),
+                fallback_used=fallback_used,
+            )
             return self.delivery(delivery_id)
         except Exception as exc:
             try:
@@ -271,7 +337,17 @@ class MediaDeliveryManager:
             row = conn.execute("SELECT * FROM media_deliveries WHERE id=?", (int(delivery_id),)).fetchone()
         if row is None:
             raise KeyError("Операция доставки не найдена")
-        return dict(row)
+        result = dict(row)
+        try:
+            metadata = json.loads(str(result.get("metadata_json") or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        result["metadata"] = metadata
+        result["fallback_used"] = bool(metadata.get("fallback_used"))
+        result["fallback_reason"] = str(metadata.get("fallback_reason") or "")
+        return result
 
     def status(self) -> dict[str, Any]:
         self.refresh_paths()
@@ -281,6 +357,7 @@ class MediaDeliveryManager:
             "torrent_watch": str(self.paths.torrent_watch) if self.paths.torrent_watch else "",
             "music": str(self.paths.music) if self.paths.music else "",
             "video": str(self.paths.video) if self.paths.video else "",
+            "fallback_downloads": str(self._downloads_dir()),
             "allowed_rights": sorted(RIGHTS_ALLOWED),
             "torrent_protocol_allowed": True,
         }
