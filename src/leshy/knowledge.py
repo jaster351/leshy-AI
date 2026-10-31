@@ -45,21 +45,20 @@ def source_weight(url: str) -> float:
     if host.endswith(".gov") or host.endswith(".edu"):
         return .92
     if host in ACADEMIC_TRUSTED_HOSTS or any(host.endswith("." + domain) for domain in ACADEMIC_TRUSTED_HOSTS):
-        # Академический домен повышает исходное доверие, но не делает утверждение
-        # trusted автоматически: обычный verify_topic по-прежнему требует либо
-        # высокий вес первичного источника, либо независимое подтверждение.
-        return .90
+        # Высокий provenance, но одиночная статья/препринт не должна стать trusted
+        # только по домену. При .88 verify_topic потребует независимое подтверждение.
+        return .88
     if host in PRIMARY_TRUSTED_HOSTS:
         return .90
     if host.startswith("docs.") or host.startswith("developer."):
         return .75
     if host == "github.com" or host.endswith(".github.com"):
         return .64
-    if host == "www.wikidata.org" or host.endswith(".wikidata.org"):
+    if host == "wikidata.org" or host.endswith(".wikidata.org"):
         return .76
     if host == "wikipedia.org" or host.endswith(".wikipedia.org"):
         return .58
-    if host in {"youtube.com", "www.youtube.com", "youtu.be"}:
+    if host in {"youtube.com", "youtu.be"}:
         return .50
     return .52
 
