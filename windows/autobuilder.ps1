@@ -24,9 +24,26 @@ function Get-UiArguments {
     return $args
 }
 
+function Find-UiProcess {
+    try {
+        foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue)) {
+            if ([int]$proc.ProcessId -eq $PID) { continue }
+            $cmd = [string]$proc.CommandLine
+            if ($cmd -and $cmd.IndexOf('autobuilder-ui.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                return $proc
+            }
+        }
+    } catch { }
+    return $null
+}
+
 function Start-Ui {
     param([bool]$Minimized = $false)
     if (-not (Test-Path -LiteralPath $UiScript)) { throw ('AutoBuilder UI was not found: ' + $UiScript) }
+    if (Find-UiProcess) {
+        Write-Host 'AutoBuilder UI is already running.'
+        return
+    }
     Start-Process -FilePath $PowerShellExe -ArgumentList (Get-UiArguments -Minimized $Minimized) -WorkingDirectory $RepoRoot -WindowStyle Hidden | Out-Null
 }
 
