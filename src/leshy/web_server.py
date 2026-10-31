@@ -21,7 +21,9 @@ from .model_catalog import (
     configure_app_model_verifier,
     switch_app_model,
 )
+from .model_library import ModelLibraryManager
 from .nas_settings import NasSettings, NasSettingsStore
+from .runtime_compat import CompatibleRuntimeManager, RuntimePolicy, RuntimePolicyStore
 from .startup_recovery import recover_unanswered
 from .telegram import TelegramBridge
 
@@ -50,6 +52,7 @@ def _inject_runtime_ui(html: str) -> str:
         '<script src="/ui-enhancements.js"></script>',
         '<script src="/hardware-panel.js"></script>',
         '<script src="/model-panel.js"></script>',
+        '<script src="/model-library-panel.js"></script>',
         '<script src="/nas-panel.js"></script>',
         '<script src="/variant3.js"></script>',
     )
@@ -93,6 +96,8 @@ document.addEventListener('DOMContentLoaded',function(){
 def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings, model_catalog: LocalModelCatalog):
     dashboard = DashboardService(app)
     nas_store = NasSettingsStore(settings.brain_dir)
+    model_library = ModelLibraryManager(settings.native_models_dir)
+    runtime_store = RuntimePolicyStore(settings.brain_dir)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "Leshy/2"
@@ -154,6 +159,7 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings, mo
                 "/ui-enhancements.js": ("ui-enhancements.js", "application/javascript; charset=utf-8"),
                 "/hardware-panel.js": ("hardware-panel.js", "application/javascript; charset=utf-8"),
                 "/model-panel.js": ("model-panel.js", "application/javascript; charset=utf-8"),
+                "/model-library-panel.js": ("model-library-panel.js", "application/javascript; charset=utf-8"),
                 "/nas-panel.js": ("nas-panel.js", "application/javascript; charset=utf-8"),
                 "/variant3.js": ("variant3.js", "application/javascript; charset=utf-8"),
                 "/variant3.css": ("variant3.css", "text/css; charset=utf-8"),
@@ -183,6 +189,10 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings, mo
             if path == "/v1/overview": return self._json(HTTPStatus.OK, dashboard.overview(self._arg(args, "owner_id", "web:local")))
             if path == "/v1/model/status": return self._json(HTTPStatus.OK, app.model_downloader.status())
             if path == "/v1/models": return self._json(HTTPStatus.OK, model_catalog.status(active_path=app.model_path))
+            if path == "/v1/model-library": return self._json(HTTPStatus.OK, model_library.status())
+            if path == "/v1/runtime-policy":
+                runtime_status = app.accelerator_runtime.status() if callable(getattr(app.accelerator_runtime, "status", None)) else {"mode": runtime_store.load().mode}
+                return self._json(HTTPStatus.OK, runtime_status)
             if path == "/v1/nas": return self._json(HTTPStatus.OK, nas_store.public_status(probe=False))
             if path == "/v1/image/status": return self._json(HTTPStatus.OK, app.image_generation.status())
             if path == "/v1/image/job":
@@ -229,6 +239,13 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings, mo
                     config = HardwareConfig(mode=str(body.get("mode") or current.mode).strip().lower(), gpu_layers_mixed=int(body.get("gpu_layers_mixed", current.gpu_layers_mixed)), prefer_npu_for_background=bool(body.get("prefer_npu_for_background", current.prefer_npu_for_background)))
                     store.save(config)
                     return self._json(HTTPStatus.OK, hardware_status(settings.brain_dir))
+                if path == "/v1/runtime-policy":
+                    saved = runtime_store.save(RuntimePolicy(mode=str(body.get("mode") or "auto")))
+                    runtime_status = app.accelerator_runtime.status() if callable(getattr(app.accelerator_runtime, "status", None)) else {"mode": saved.mode}
+                    return self._json(HTTPStatus.OK, runtime_status)
+                if path == "/v1/model-library/download":
+                    result = model_library.download(str(body.get("model_id") or ""), include_vision=bool(body.get("include_vision", True)))
+                    return self._json(HTTPStatus.ACCEPTED, result)
                 if path == "/v1/nas/config":
                     current = nas_store.load()
                     config = NasSettings(root=str(body.get("root", current.root) or ""), torrent_watch=str(body.get("torrent_watch", current.torrent_watch) or ""), music=str(body.get("music", current.music) or ""), video=str(body.get("video", current.video) or ""), smb_server=str(body.get("smb_server", current.smb_server) or ""), smb_username=str(body.get("smb_username", current.smb_username) or ""), smb_domain=str(body.get("smb_domain", current.smb_domain) or ""))
@@ -262,7 +279,7 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings, mo
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Не найдено"})
             except LLMUnavailable as exc:
                 self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc), "code": "model_unavailable"})
-            except (ValueError, PermissionError, FileNotFoundError, FileExistsError, json.JSONDecodeError) as exc:
+            except (ValueError, PermissionError, FileNotFoundError, FileExistsError, KeyError, json.JSONDecodeError) as exc:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             except Exception as exc:
                 self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Внутренняя ошибка: {exc}"})
@@ -298,6 +315,8 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     settings = Settings.from_env()
     model_catalog = apply_saved_model_to_settings(settings)
     app = LeshyApp(settings)
+    app.accelerator_runtime = CompatibleRuntimeManager(settings.brain_dir, model_name_provider=lambda: app.model_path.name)
+    app.llm = app._build_llm()
     configure_app_model_verifier(app, model_catalog)
     telegram = TelegramBridge(app, settings.brain_dir)
     app.telegram = telegram
