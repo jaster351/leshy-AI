@@ -1,3 +1,7 @@
+param(
+  [switch]$StageOnly
+)
+
 $ErrorActionPreference = 'Stop'
 Set-Location (Resolve-Path (Join-Path $PSScriptRoot '..'))
 
@@ -24,8 +28,9 @@ python -m pip install -e "."
 python -m pip install "pyinstaller>=6.11,<7"
 python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 
-# .autobuild is disposable compiler workspace only. The finished program is
-# published below to dist\Leshy, which is the canonical local runtime location.
+# .autobuild is disposable compiler workspace only. Finished output is published
+# to dist\Leshy either here (manual build) or by AutoBuilder after it creates its
+# rollback backup (StageOnly mode).
 Remove-Item -Recurse -Force $packageDist, $packageWork -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
 
@@ -89,7 +94,11 @@ function Publish-LiveProgram {
 #   dist\Leshy\...      compiled runnable program
 #   dist\LeshySetup-*   installer
 # LeshyBrain is persistent user data and is never removed during publication.
-Publish-LiveProgram
+if (-not $StageOnly) {
+  Publish-LiveProgram
+} else {
+  Write-Host 'STAGE ONLY: AutoBuilder will publish the package to dist\Leshy after creating its rollback backup.'
+}
 
 $isccPath = $null
 $cmd = Get-Command iscc.exe -ErrorAction SilentlyContinue
@@ -106,16 +115,17 @@ if (-not $isccPath) {
 }
 if (-not $isccPath) { throw 'Inno Setup 6 (ISCC.exe) was not found' }
 
-# The installer is created from the clean temporary package tree, while the
-# runnable copy has already been published to dist\Leshy above.
+# Installer always comes from the clean staged package and is written to dist.
 & $isccPath "/DMyAppVersion=$version" ("/DMyAppSourceDir=" + $packageRoot) 'windows/installer.iss'
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
 $installer = Join-Path $repoRoot ("dist\LeshySetup-$version.exe")
 if (-not (Test-Path -LiteralPath $installer)) { throw "Installer was not created: $installer" }
 
-Write-Host "READY RUNTIME: $liveRoot"
-Write-Host "READY EXE:     $liveExe"
+if (-not $StageOnly) {
+  Write-Host "READY RUNTIME: $liveRoot"
+  Write-Host "READY EXE:     $liveExe"
+}
 Write-Host "READY SETUP:   $installer"
-Write-Host "DATA SAFE:     $brainRoot was preserved."
+Write-Host "DATA SAFE:     $brainRoot is preserved during live publication."
 Write-Host 'AUTO TESTS:    disabled; manual verification by user.'
