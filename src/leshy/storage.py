@@ -16,7 +16,7 @@ SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL DEFAULT 'standalone',title TEXT NOT NULL DEFAULT '',title_source TEXT NOT NULL DEFAULT 'auto',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL DEFAULT 'standalone',title TEXT NOT NULL DEFAULT '',title_source TEXT NOT NULL DEFAULT 'auto',pinned INTEGER NOT NULL DEFAULT 0,archived INTEGER NOT NULL DEFAULT 0,locked INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL CHECK(role IN ('system','user','assistant','tool')),content TEXT NOT NULL,created_at TEXT NOT NULL,edited_at TEXT);
 CREATE INDEX IF NOT EXISTS ix_messages_session_id ON messages(session_id,id);
 CREATE TABLE IF NOT EXISTS memories(id INTEGER PRIMARY KEY AUTOINCREMENT,owner_id TEXT NOT NULL DEFAULT 'shared',kind TEXT NOT NULL,content TEXT NOT NULL,importance REAL NOT NULL DEFAULT 0.5,source TEXT,created_at TEXT NOT NULL,expires_at TEXT,fingerprint TEXT NOT NULL UNIQUE);
@@ -70,9 +70,13 @@ class Storage:
             self._ensure_column(conn, "sessions", "owner_id", "TEXT NOT NULL DEFAULT 'standalone'")
             self._ensure_column(conn, "sessions", "title", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "sessions", "title_source", "TEXT NOT NULL DEFAULT 'auto'")
+            self._ensure_column(conn, "sessions", "pinned", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "sessions", "archived", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "sessions", "locked", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "messages", "edited_at", "TEXT")
             self._ensure_column(conn, "memories", "owner_id", "TEXT NOT NULL DEFAULT 'shared'")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_owner_updated ON sessions(owner_id,updated_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_owner_archive_pin_updated ON sessions(owner_id,archived,pinned DESC,updated_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_memories_owner_importance ON memories(owner_id,importance DESC,id DESC)")
 
     @staticmethod
