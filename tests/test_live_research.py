@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from leshy.app import LeshyApp
 from leshy.knowledge import KnowledgeBase
 from leshy.research import ResearchEngine, SearchResult
 from leshy.research_policy import research_reason
@@ -25,6 +26,14 @@ class LiveResearchTests(unittest.TestCase):
         reason = research_reason("Какая погода сейчас в Москве?", trusted_count=10, candidate_count=5)
         self.assertEqual(reason, "требуются актуальные данные")
 
+    def test_fresh_video_question_requires_internet_even_with_local_knowledge(self):
+        reason = research_reason(
+            "Какой новый ролик вышел у Марка как он называется",
+            trusted_count=10,
+            candidate_count=5,
+        )
+        self.assertEqual(reason, "требуются актуальные данные")
+
     def test_explicit_web_request_requires_internet(self):
         reason = research_reason("Проверь в интернете последнюю версию Python", trusted_count=20, candidate_count=10)
         self.assertIsNotNone(reason)
@@ -35,6 +44,13 @@ class LiveResearchTests(unittest.TestCase):
 
     def test_small_talk_does_not_force_internet(self):
         self.assertIsNone(research_reason("Привет", trusted_count=0, candidate_count=0))
+
+    def test_model_refusal_is_treated_as_knowledge_gap(self):
+        answer = (
+            "Информации о новых роликах Марка в моих данных нет. "
+            "У меня нет доступа к интернету или текущим новостям."
+        )
+        self.assertTrue(LeshyApp._answer_needs_research(answer))
 
     def test_live_search_immediately_increases_knowledge_base(self):
         with tempfile.TemporaryDirectory() as tmp:
