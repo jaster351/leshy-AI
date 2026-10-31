@@ -7,25 +7,23 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$RuntimeRoot = Join-Path $RepoRoot '.autobuild'
-$LogsRoot = Join-Path $RuntimeRoot 'logs'
+$HostRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$HostRuntimeRoot = Join-Path $HostRepoRoot '.autobuild'
 $CoreScript = Join-Path $PSScriptRoot 'autobuilder-core.ps1'
 $TextPath = Join-Path $PSScriptRoot 'autobuilder-ui.ru.json'
-$SettingsPath = Join-Path $RuntimeRoot 'ui-settings.json'
-$LiveStatePath = Join-Path $RuntimeRoot 'live-state.json'
-$CoreLog = Join-Path $LogsRoot 'autobuilder-gui.log'
-$LiveRoot = Join-Path $RepoRoot 'dist\Leshy'
-$LiveExe = Join-Path $LiveRoot 'Leshy.exe'
+$SettingsPath = Join-Path $HostRuntimeRoot 'ui-settings.json'
 $StartupRoot = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
 $StartupCmd = Join-Path $StartupRoot 'Leshy-AutoBuilder.cmd'
 $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
-New-Item -ItemType Directory -Force -Path $RuntimeRoot, $LogsRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $HostRuntimeRoot | Out-Null
 $T = Get-Content -LiteralPath $TextPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
 function Read-Settings {
     $defaults = [ordered]@{
+        repository_path = $HostRepoRoot
+        remote = 'origin'
+        branch = 'main'
         auto_repo = $true
         repo_seconds = 60
         scheduled_build = $false
@@ -36,7 +34,7 @@ function Read-Settings {
     if (-not (Test-Path -LiteralPath $SettingsPath)) { return [pscustomobject]$defaults }
     try {
         $value = Get-Content -LiteralPath $SettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($key in @('auto_repo','repo_seconds','scheduled_build','build_minutes','last_full_update_utc','last_full_attempt_utc')) {
+        foreach ($key in @('repository_path','remote','branch','auto_repo','repo_seconds','scheduled_build','build_minutes','last_full_update_utc','last_full_attempt_utc')) {
             if ($null -eq $value.$key) { $value | Add-Member -NotePropertyName $key -NotePropertyValue $defaults[$key] }
         }
         return $value
@@ -45,8 +43,29 @@ function Read-Settings {
     }
 }
 
+function Set-RepositoryContext {
+    param([string]$Path, [string]$Remote, [string]$Branch)
+    if ([string]::IsNullOrWhiteSpace($Path)) { $Path = $HostRepoRoot }
+    try { $full = [System.IO.Path]::GetFullPath($Path) } catch { $full = $Path }
+    $script:RepositoryPath = $full.TrimEnd('\')
+    $script:RemoteSpec = if ([string]::IsNullOrWhiteSpace($Remote)) { 'origin' } else { $Remote.Trim() }
+    $script:BranchName = if ([string]::IsNullOrWhiteSpace($Branch)) { 'main' } else { $Branch.Trim() }
+    $script:SelectedRuntimeRoot = Join-Path $script:RepositoryPath '.autobuild'
+    $script:SelectedLogsRoot = Join-Path $script:SelectedRuntimeRoot 'logs'
+    $script:LiveStatePath = Join-Path $script:SelectedRuntimeRoot 'live-state.json'
+    $script:CoreLog = Join-Path $script:SelectedLogsRoot 'autobuilder-gui.log'
+    $script:LiveRoot = Join-Path $script:RepositoryPath 'dist\Leshy'
+    $script:LiveExe = Join-Path $script:LiveRoot 'Leshy.exe'
+    if (Test-Path -LiteralPath $script:RepositoryPath -PathType Container) {
+        New-Item -ItemType Directory -Force -Path $script:SelectedLogsRoot | Out-Null
+    }
+}
+
 function Save-Settings {
     $payload = [ordered]@{
+        repository_path = [string]$script:RepositoryPath
+        remote = [string]$script:RemoteSpec
+        branch = [string]$script:BranchName
         auto_repo = [bool]$autoRepo.Checked
         repo_seconds = [int]$repoSeconds.Value
         scheduled_build = [bool]$scheduledBuild.Checked
@@ -82,7 +101,7 @@ function Normalize-PathText {
 }
 
 function Test-LeshyRunning {
-    $target = Normalize-PathText $LiveExe
+    $target = Normalize-PathText $script:LiveExe
     if (-not $target) { return $false }
     try {
         foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='Leshy.exe'" -ErrorAction SilentlyContinue)) {
@@ -105,25 +124,51 @@ function Get-UiGit {
     return ''
 }
 
+function Test-GitRepository {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+    try {
+        $git = Get-UiGit
+        if (-not $git) { return $false }
+        $raw = @(& $git -C $Path rev-parse --is-inside-work-tree 2>$null)
+        return ($LASTEXITCODE -eq 0 -and $raw.Count -gt 0 -and ([string]$raw[0]).Trim().ToLowerInvariant() -eq 'true')
+    } catch { return $false }
+}
+
+function Get-OriginUrl {
+    param([string]$Path)
+    try {
+        $git = Get-UiGit
+        if (-not $git -or -not (Test-Path -LiteralPath $Path -PathType Container)) { return '' }
+        $raw = @(& $git -C $Path remote get-url origin 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $raw.Count -gt 0) { return ([string]$raw[0]).Trim() }
+    } catch { }
+    return ''
+}
+
 function Get-RepoSha {
     try {
         $git = Get-UiGit
-        if (-not $git) { return '' }
-        $raw = @(& $git -C $RepoRoot rev-parse --verify HEAD 2>$null)
-        $code = $LASTEXITCODE
-        if ($code -eq 0 -and $raw.Count -gt 0) { return ([string]$raw[0]).Trim() }
+        if (-not $git -or -not (Test-Path -LiteralPath $script:RepositoryPath -PathType Container)) { return '' }
+        $raw = @(& $git -C $script:RepositoryPath rev-parse --verify HEAD 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $raw.Count -gt 0) { return ([string]$raw[0]).Trim() }
     } catch { }
     return ''
 }
 
 function Read-LiveState {
-    if (-not (Test-Path -LiteralPath $LiveStatePath)) { return $null }
-    try { return Get-Content -LiteralPath $LiveStatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
+    if (-not (Test-Path -LiteralPath $script:LiveStatePath)) { return $null }
+    try { return Get-Content -LiteralPath $script:LiveStatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
 }
 
 function Tail-Log {
-    if (-not (Test-Path -LiteralPath $CoreLog)) { return '' }
-    try { return (@(Get-Content -LiteralPath $CoreLog -Tail 100 -Encoding UTF8) -join [Environment]::NewLine) } catch { return '' }
+    if (-not (Test-Path -LiteralPath $script:CoreLog)) { return '' }
+    try { return (@(Get-Content -LiteralPath $script:CoreLog -Tail 100 -Encoding UTF8) -join [Environment]::NewLine) } catch { return '' }
+}
+
+function Quote-Argument {
+    param([string]$Value)
+    return '"' + (($Value -replace '"','').Trim()) + '"'
 }
 
 function New-Label {
@@ -161,9 +206,13 @@ function Start-CoreOperation {
         $script:LastFullAttemptUtc = [DateTime]::UtcNow.ToString('o')
         Save-Settings
     }
-    $args = '-NoProfile -ExecutionPolicy Bypass -File "' + $CoreScript + '" -Mode ' + $Mode
+    $args = '-NoProfile -ExecutionPolicy Bypass -File ' + (Quote-Argument $CoreScript) +
+        ' -Mode ' + $Mode +
+        ' -RepositoryPath ' + (Quote-Argument $script:RepositoryPath) +
+        ' -Remote ' + (Quote-Argument $script:RemoteSpec) +
+        ' -Branch ' + (Quote-Argument $script:BranchName)
     try {
-        $script:OperationProcess = Start-Process -FilePath $PowerShellExe -ArgumentList $args -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
+        $script:OperationProcess = Start-Process -FilePath $PowerShellExe -ArgumentList $args -WorkingDirectory $HostRepoRoot -WindowStyle Hidden -PassThru
         $lastActionValue.Text = $Label
         Set-Busy $true
     } catch {
@@ -178,15 +227,97 @@ function Set-Busy {
     $repoUpdate.Enabled = -not $Busy
     $startLeshy.Enabled = -not $Busy
     $stopLeshy.Enabled = -not $Busy
+    $repoSettingsButton.Enabled = -not $Busy
     if ($Busy) { $stateLabel.Text = $T.busy; $stateLabel.ForeColor = [System.Drawing.Color]::FromArgb(240,205,130) }
     else { $stateLabel.Text = $T.ready; $stateLabel.ForeColor = [System.Drawing.Color]::FromArgb(132,221,166) }
+}
+
+function Open-RepositorySettings {
+    $dialog = New-Object System.Windows.Forms.Form
+    $dialog.Text = $T.repository_settings_title
+    $dialog.Size = New-Object System.Drawing.Size(720,340)
+    $dialog.FormBorderStyle = 'FixedDialog'
+    $dialog.MaximizeBox = $false
+    $dialog.MinimizeBox = $false
+    $dialog.StartPosition = 'CenterParent'
+    $dialog.BackColor = [System.Drawing.Color]::FromArgb(6,16,12)
+    $dialog.ForeColor = [System.Drawing.Color]::FromArgb(235,247,239)
+    $dialog.Font = New-Object System.Drawing.Font('Segoe UI',9)
+
+    $pathLabel = New-Label $T.repository_path 20 20 650 22 9 $false
+    $pathBox = New-Object System.Windows.Forms.TextBox
+    $pathBox.Location = New-Object System.Drawing.Point(20,46)
+    $pathBox.Size = New-Object System.Drawing.Size(565,25)
+    $pathBox.Text = $script:RepositoryPath
+    $browse = New-Button $T.browse 595 44 90 29
+
+    $remoteLabel = New-Label $T.remote_repo 20 88 650 22 9 $false
+    $remoteBox = New-Object System.Windows.Forms.TextBox
+    $remoteBox.Location = New-Object System.Drawing.Point(20,114)
+    $remoteBox.Size = New-Object System.Drawing.Size(450,25)
+    $remoteBox.Text = $script:RemoteSpec
+    $branchLabel = New-Label $T.branch 490 88 195 22 9 $false
+    $branchBox = New-Object System.Windows.Forms.TextBox
+    $branchBox.Location = New-Object System.Drawing.Point(490,114)
+    $branchBox.Size = New-Object System.Drawing.Size(195,25)
+    $branchBox.Text = $script:BranchName
+
+    $originCaption = New-Label $T.origin_now 20 154 130 22 8.5 $false
+    $originValue = New-Label '-' 150 154 535 42 8.5 $false
+    $originValue.ForeColor = [System.Drawing.Color]::FromArgb(145,168,154)
+    $hint = New-Label $T.remote_hint 20 202 665 34 8.5 $false
+    $hint.ForeColor = [System.Drawing.Color]::FromArgb(145,168,154)
+
+    $save = New-Button $T.save 465 252 105 34
+    $cancel = New-Button $T.cancel 580 252 105 34
+    $dialog.Controls.AddRange(@($pathLabel,$pathBox,$browse,$remoteLabel,$remoteBox,$branchLabel,$branchBox,$originCaption,$originValue,$hint,$save,$cancel))
+
+    $refreshOrigin = {
+        $origin = Get-OriginUrl -Path $pathBox.Text.Trim()
+        $originValue.Text = if ($origin) { $origin } else { '-' }
+    }
+    & $refreshOrigin
+
+    $browse.Add_Click({
+        $folder = New-Object System.Windows.Forms.FolderBrowserDialog
+        $folder.Description = $T.repository_path
+        if (Test-Path -LiteralPath $pathBox.Text -PathType Container) { $folder.SelectedPath = $pathBox.Text }
+        if ($folder.ShowDialog($dialog) -eq [System.Windows.Forms.DialogResult]::OK) {
+            $pathBox.Text = $folder.SelectedPath
+            & $refreshOrigin
+        }
+        $folder.Dispose()
+    })
+    $pathBox.Add_Leave({ & $refreshOrigin })
+    $cancel.Add_Click({ $dialog.DialogResult = [System.Windows.Forms.DialogResult]::Cancel; $dialog.Close() })
+    $save.Add_Click({
+        $newPath = $pathBox.Text.Trim()
+        $newRemote = $remoteBox.Text.Trim()
+        $newBranch = $branchBox.Text.Trim()
+        if (-not (Test-GitRepository -Path $newPath)) {
+            [void][System.Windows.Forms.MessageBox]::Show($dialog,$T.invalid_repo,$T.repository_settings_title,[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Warning)
+            return
+        }
+        if (-not $newRemote) { $newRemote = 'origin' }
+        if (-not $newBranch) { $newBranch = 'main' }
+        Set-RepositoryContext -Path $newPath -Remote $newRemote -Branch $newBranch
+        Save-Settings
+        Refresh-Ui
+        $dialog.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $dialog.Close()
+    })
+    [void]$dialog.ShowDialog($form)
+    $dialog.Dispose()
 }
 
 function Refresh-Ui {
     $sha = Get-RepoSha
     $state = Read-LiveState
     $running = Test-LeshyRunning
-    $repoValue.Text = if ($sha) { $sha.Substring(0,[Math]::Min(10,$sha.Length)) } else { '-' }
+    $leaf = [System.IO.Path]::GetFileName($script:RepositoryPath.TrimEnd('\'))
+    $short = if ($sha) { $sha.Substring(0,[Math]::Min(10,$sha.Length)) } else { '-' }
+    $repoValue.Text = $short + $(if ($leaf) { '  ' + $leaf } else { '' })
+    $repoToolTip.SetToolTip($repoValue, $T.repository_path + ': ' + $script:RepositoryPath + [Environment]::NewLine + $T.remote_repo + ': ' + $script:RemoteSpec + [Environment]::NewLine + $T.branch + ': ' + $script:BranchName)
     if ($state) {
         $depSha = [string]$state.sha
         $depShort = if ($depSha) { $depSha.Substring(0,[Math]::Min(10,$depSha.Length)) } else { '-' }
@@ -205,6 +336,7 @@ function Refresh-Ui {
 }
 
 $S = Read-Settings
+Set-RepositoryContext -Path ([string]$S.repository_path) -Remote ([string]$S.remote) -Branch ([string]$S.branch)
 $script:OperationProcess = $null
 $script:OperationMode = ''
 $script:OperationLabel = ''
@@ -232,14 +364,16 @@ $stateLabel.ForeColor = [System.Drawing.Color]::FromArgb(132,221,166)
 $form.Controls.AddRange(@($title,$subtitle,$stateLabel))
 
 $repoCaption = New-Label $T.repo_status 26 95 190 22 9 $false
-$repoValue = New-Label '-' 220 95 540 22 9 $true
+$repoValue = New-Label '-' 220 95 380 22 9 $true
+$repoSettingsButton = New-Button $T.repository_settings 610 90 166 31
 $appCaption = New-Label $T.app_status 26 124 190 22 9 $false
 $appValue = New-Label '-' 220 124 540 22 9 $true
 $depCaption = New-Label $T.deployed_status 26 153 190 22 9 $false
 $deployedValue = New-Label '-' 220 153 540 22 9 $true
 $lastCaption = New-Label $T.last_action 26 182 190 22 9 $false
 $lastActionValue = New-Label '-' 220 182 540 40 9 $false
-$form.Controls.AddRange(@($repoCaption,$repoValue,$appCaption,$appValue,$depCaption,$deployedValue,$lastCaption,$lastActionValue))
+$repoToolTip = New-Object System.Windows.Forms.ToolTip
+$form.Controls.AddRange(@($repoCaption,$repoValue,$repoSettingsButton,$appCaption,$appValue,$depCaption,$deployedValue,$lastCaption,$lastActionValue))
 
 $updateNow = New-Button $T.update_now 26 235 180 42
 $repoUpdate = New-Button $T.repo_update 216 235 220 42
@@ -323,6 +457,7 @@ $tray.Add_DoubleClick($showWindow)
 $miUpdate.Add_Click({ Start-CoreOperation 'full-update' $T.full_update_started })
 $miExit.Add_Click({ $script:ReallyExit = $true; $tray.Visible = $false; Save-Settings; $form.Close() })
 
+$repoSettingsButton.Add_Click({ Open-RepositorySettings })
 $updateNow.Add_Click({ Start-CoreOperation 'full-update' $T.full_update_started })
 $repoUpdate.Add_Click({ Start-CoreOperation 'repo-update' $T.repo_updated })
 $startLeshy.Add_Click({ Start-CoreOperation 'launch' $T.start_leshy })
@@ -403,3 +538,4 @@ $form.Add_Shown({
 $timer.Stop()
 $tray.Visible = $false
 $tray.Dispose()
+$repoToolTip.Dispose()
