@@ -17,6 +17,7 @@ from .llm import ChatMessage, EchoLLM, LLMUnavailable, OllamaLLM
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
+from .research_policy import research_reason
 from .self_learning import SelfLearningWorker
 from .storage import Storage, utcnow
 from .version import VERSION
@@ -193,17 +194,36 @@ class LeshyApp:
         value = text.lower()
         markers = (
             "/search ", "найди в интернете", "поищи в интернете", "проверь в интернете",
-            "актуальн", "сегодня", "сейчас", "последние новости", "последняя версия",
-            "текущая цена", "курс валют", "погода",
+            "актуальн", "сегодня", "сейчас", "последн", "новый", "новая", "новое", "новые",
+            "вышел", "вышла", "вышло", "последняя версия", "текущая цена", "курс валют", "погода",
         )
         return any(marker in value for marker in markers)
 
-    def live_search(self, query: str, *, limit: int = 5) -> dict:
+    @staticmethod
+    def _answer_needs_research(answer: str) -> bool:
+        value = " ".join(str(answer or "").lower().split())
+        markers = (
+            "у меня нет доступа к интернету",
+            "нет доступа к интернету",
+            "у меня нет доступа к текущим новостям",
+            "в моих данных нет",
+            "у меня нет информации",
+            "у меня нет актуальной информации",
+            "я не знаю",
+            "не располагаю информацией",
+            "не могу проверить",
+            "не могу узнать",
+            "предложить ресурсы для самостоятельного поиска",
+            "самостоятельного поиска",
+        )
+        return any(marker in value for marker in markers)
+
+    def live_search(self, query: str, *, limit: int = 5, reason: str = "прямой запрос пользователя") -> dict:
         query = " ".join(str(query).replace("/search", "", 1).split()).strip()
         if not query:
             raise ValueError("Пустой поисковый запрос")
-        event("live_search_started", query=query[:500])
-        result = self.research.live_query(query, reason="прямой запрос пользователя", limit=limit)
+        event("live_search_started", query=query[:500], reason=reason[:200])
+        result = self.research.live_query(query, reason=reason, limit=limit)
         event("live_search_finished", query=query[:500], status=result.get("status"), results=len(result.get("results", [])))
         return result
 
@@ -254,19 +274,34 @@ class LeshyApp:
             answer = "Сохранённая память пуста." if not items else "Сохранённая память:\n" + "\n".join(f"• {item['content']}" for item in items)
             return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
 
-        context: list[ChatMessage] = []
+        context: list[ChatMessage] = [
+            ChatMessage(
+                "system",
+                "Интернет-поиск Лешему доступен через приложение. Никогда не утверждай, что доступа к интернету нет, "
+                "и не отправляй пользователя искать информацию самостоятельно. Если приложением переданы результаты "
+                "веб-поиска, используй их для ответа и укажи неопределённость там, где она есть. Если запрос неоднозначен "
+                "и нельзя понять, о каком человеке или объекте речь, задай одно короткое уточнение вместо выдумывания фактов.",
+            )
+        ]
         memory_context = self._memory_context(owner_id)
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
+
         trusted = self.knowledge.search(message, trusted_only=True, limit=5)
+        candidates = self.knowledge.search_candidates(message, limit=5)
         if trusted:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
 
         sources: list[dict[str, str]] = []
-        if self._needs_live_search(message):
+        search_attempted = False
+        search_error = ""
+
+        def append_live_search(reason_text: str) -> None:
+            nonlocal sources, search_attempted, search_error
+            search_attempted = True
             try:
-                search_result = self.live_search(message, limit=5)
+                search_result = self.live_search(message, limit=5, reason=reason_text)
                 sources = [
                     {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
                     for item in search_result.get("results", [])
@@ -278,23 +313,53 @@ class LeshyApp:
                     )
                     context.append(ChatMessage(
                         "system",
-                        "Ниже результаты текущего веб-поиска. Они ещё candidate, не выдавай их как проверенные без оговорки:\n" + snippets,
+                        "Результаты текущего веб-поиска. Они уже сохранены в локальную базу как candidate-знания и "
+                        "поставлены на верификацию. Отвечай по этим данным, не утверждая непроверенное как бесспорный факт:\n"
+                        + snippets,
                     ))
                 elif search_result.get("error"):
-                    context.append(ChatMessage("system", "Текущий веб-поиск недоступен: " + str(search_result["error"])))
+                    search_error = str(search_result["error"])
+                    context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
             except Exception as exc:
-                problem("live_search_failed", str(exc), query=message[:500])
-                context.append(ChatMessage("system", "Текущий веб-поиск не выполнен: " + str(exc)))
+                search_error = str(exc)
+                problem("live_search_failed", search_error, query=message[:500])
+                context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
-        messages = context + [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
+        reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
+        if reason or self._needs_live_search(message):
+            append_live_search(reason or "требуются актуальные данные")
+
+        history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
+        messages = context + history_messages
         event("chat_generation_started", session_id=sid, owner_id=owner_id, context_messages=len(messages))
         try:
             answer = self.llm.chat(messages)
+            if self._answer_needs_research(answer):
+                if not search_attempted:
+                    append_live_search("модель обнаружила пробел в знаниях")
+                if sources:
+                    retry_context = context + [ChatMessage(
+                        "system",
+                        "Предыдущий черновик ответа ошибочно сообщил об отсутствии данных или доступа к интернету. "
+                        "Сформируй новый ответ по найденным веб-источникам. Не советуй пользователю искать самому.",
+                    )]
+                    answer = self.llm.chat(retry_context + history_messages)
+                elif search_attempted and search_error:
+                    answer = "Не удалось получить актуальные данные из интернета прямо сейчас: " + search_error
+                elif search_attempted:
+                    answer = "Я выполнил интернет-поиск, но не нашёл достаточно данных для уверенного ответа. Уточните, пожалуйста, о ком или о чём именно идёт речь."
         except Exception as exc:
             problem("chat_generation_failed", str(exc), session_id=sid, owner_id=owner_id)
             raise
         answered_at = self._save_assistant(sid, answer)
-        event("chat_generation_finished", session_id=sid, owner_id=owner_id, answer_chars=len(answer))
+        event(
+            "chat_generation_finished",
+            session_id=sid,
+            owner_id=owner_id,
+            answer_chars=len(answer),
+            web_search=search_attempted,
+            web_sources=len(sources),
+        )
         return {"session_id": sid, "answer": answer, "created_at": answered_at, "sources": sources}
 
     def set_learning(self, enabled: bool) -> bool:
