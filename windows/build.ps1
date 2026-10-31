@@ -4,6 +4,10 @@ Set-Location (Resolve-Path (Join-Path $PSScriptRoot '..'))
 $version = (Get-Content VERSION -Raw).Trim()
 if (-not ($version -match '^\d+\.\d+\.\d+')) { throw "Invalid VERSION: $version" }
 
+$runtimeLogStage = Join-Path (Get-Location).Path '.autobuild\leshy-runtime-logs\current'
+Remove-Item -Recurse -Force $runtimeLogStage -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $runtimeLogStage | Out-Null
+
 python -m pip install --upgrade pip
 python -m pip install -e .
 python -m pip install "pyinstaller>=6.11,<7"
@@ -33,6 +37,7 @@ if (-not (Test-Path 'dist/Leshy/Leshy.exe')) { throw 'PyInstaller did not create
 $env:LESHY_LLM_BACKEND = 'echo'
 $smokeRoot = (Resolve-Path 'dist/Leshy').Path
 $smokeBrain = Join-Path $smokeRoot 'LeshyBrain'
+$smokeLogs = Join-Path $smokeBrain 'logs'
 Remove-Item -Recurse -Force $smokeBrain -ErrorAction SilentlyContinue
 $proc = Start-Process -FilePath (Resolve-Path 'dist/Leshy/Leshy.exe') -ArgumentList '--no-browser','--host','127.0.0.1','--port','18765' -PassThru -WindowStyle Hidden
 try {
@@ -68,6 +73,17 @@ try {
 } finally {
   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
   Start-Sleep -Milliseconds 300
+  if (Test-Path $smokeLogs) {
+    Get-ChildItem -LiteralPath $smokeLogs -File -ErrorAction SilentlyContinue | ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $runtimeLogStage $_.Name) -Force
+    }
+  }
+  $meta = [ordered]@{
+    version = $version
+    captured_at = (Get-Date).ToString('o')
+    source = 'dist/Leshy/LeshyBrain/logs'
+  }
+  $meta | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runtimeLogStage 'build-metadata.json') -Encoding UTF8
   Remove-Item -Recurse -Force $smokeBrain -ErrorAction SilentlyContinue
 }
 
