@@ -23,6 +23,20 @@ def make_handler(app, telegram, settings, model_catalog):
     class Handler(Parent):
         def do_GET(self):
             parsed = parse.urlparse(self.path)
+            if parsed.path == "/":
+                html = base._inject_runtime_ui(base._web_index(settings).read_text(encoding="utf-8"))
+                marker = '<script src="/chatgpt-shell.js"></script>'
+                if marker not in html:
+                    html = html.replace("</body>", marker + "\n</body>")
+                data = html.encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+                return
+
             if parsed.path == "/chatgpt-shell.js":
                 try:
                     return self._send_asset("chatgpt-shell.js", "application/javascript; charset=utf-8")
