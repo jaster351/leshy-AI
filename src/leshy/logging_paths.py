@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def resolve_brain_root(base_dir: Path) -> Path:
-    """Return the canonical LeshyBrain root for an app/data/brain path."""
+    """Вернуть канонический корень LeshyBrain для пути приложения, данных или мозга."""
     base = Path(base_dir)
     if base.name == "LeshyBrain":
         return base
@@ -15,27 +15,27 @@ def resolve_brain_root(base_dir: Path) -> Path:
 
 
 def central_log_dir(base_dir: Path) -> Path:
-    """Single runtime logging root used by every Leshy component."""
+    """Вернуть единый каталог журналов, которым пользуются все компоненты Лешего."""
     path = resolve_brain_root(Path(base_dir)) / "logs"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def central_log_path(base_dir: Path, filename: str) -> Path:
-    """Return a file inside the central log root and reject nested/absolute paths."""
+    """Вернуть файл внутри единого каталога журналов и запретить вложенные и абсолютные пути."""
     candidate = Path(filename)
     if candidate.is_absolute() or candidate.name != filename or filename in {"", ".", ".."}:
-        raise ValueError("Leshy log files must be direct children of the central logs directory")
+        raise ValueError("Файлы журналов Лешего должны находиться непосредственно в едином каталоге logs")
     return central_log_dir(base_dir) / filename
 
 
 def analysis_log_dir() -> Path | None:
-    """Return the developer-analysis log folder when one is available.
+    """Вернуть каталог для обезличенных копий журналов разработчика, если он доступен.
 
-    The canonical runtime logs remain in LeshyBrain/logs. This secondary destination is
-    used only for sanitized copies that the developer/ChatGPT can inspect. An installed
-    build can opt in with LESHY_ANALYSIS_LOG_DIR; a source checkout is detected by the
-    repository VERSION file plus log/README.md sentinel.
+    Канонические рабочие журналы всегда остаются в LeshyBrain/logs. Вторичный каталог
+    используется только для очищенных от чувствительных данных копий, которые можно
+    анализировать при разработке. Установленная сборка может явно задать
+    LESHY_ANALYSIS_LOG_DIR, а исходный репозиторий определяется по VERSION и log/README.md.
     """
     configured = os.environ.get("LESHY_ANALYSIS_LOG_DIR", "").strip()
     if configured:
