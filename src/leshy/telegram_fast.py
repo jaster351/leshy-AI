@@ -26,8 +26,11 @@ def _partial_text(text: str, limit: int = 3800) -> str:
 class FastTelegramBridge(RichTelegramBridge):
     """Telegram использует тот же потоковый LLM-контур, что и Web UI."""
 
-    edit_interval_seconds = 0.55
-    edit_min_growth = 24
+    # Обновлять текст заметно плавнее, чем раньше, но не на каждый токен,
+    # чтобы не упираться в лимиты Telegram Bot API.
+    edit_interval_seconds = 0.28
+    edit_min_growth = 8
+    foreground_grace_seconds = 0.08
 
     def __init__(self, app, brain_dir):
         super().__init__(app, brain_dir)
@@ -43,6 +46,39 @@ class FastTelegramBridge(RichTelegramBridge):
             "callback_approvals": True,
         })
         return value
+
+    def _llm_busy(self) -> bool:
+        """Проверить, занят ли сейчас любой resident LLM backend.
+
+        Telegram даёт короткую фору Web UI. Если Web уже генерирует ответ,
+        Telegram не пытается одновременно захватить тот же единственный slot.
+        """
+        llm = getattr(self.app, "llm", None)
+        states = list(getattr(llm, "_states", []) or [])
+        providers = [getattr(state, "provider", None) for state in states]
+        if not providers:
+            providers = [llm]
+        for provider in providers:
+            lock = getattr(provider, "_chat_lock", None)
+            try:
+                if lock is not None and lock.locked():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _wait_for_foreground_slot(self) -> None:
+        # Небольшая фора почти не ощущается в Telegram, но позволяет Web-запросу,
+        # пришедшему одновременно, первым занять локальную модель.
+        if self._stop.wait(self.foreground_grace_seconds):
+            return
+        waited = False
+        started = time.monotonic()
+        while not self._stop.is_set() and self._llm_busy():
+            waited = True
+            self._stop.wait(0.05)
+        if waited:
+            event("telegram_waited_for_foreground_llm", latency_ms=int((time.monotonic() - started) * 1000))
 
     def _send_stream_message(self, chat_id, text: str, reply_to_message_id: int | None, *, reply_markup: dict | None = None) -> int:
         payload = {"chat_id": chat_id, "text": _partial_text(text)}
@@ -155,6 +191,7 @@ class FastTelegramBridge(RichTelegramBridge):
         owner_key = f"telegram:{user_id}"
         session_key = f"telegram:{chat_id}:{user_id}"
         try:
+            self._wait_for_foreground_slot()
             for item in self._realtime.stream(text, owner_id=owner_key, session_id=session_key):
                 if item.type == "delta":
                     answer += str(item.data.get("text") or "")
