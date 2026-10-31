@@ -26,15 +26,17 @@ def _partial_text(text: str, limit: int = 3800) -> str:
 class FastTelegramBridge(RichTelegramBridge):
     """Telegram использует тот же потоковый LLM-контур, что и Web UI."""
 
-    # Обновлять текст заметно плавнее, чем раньше, но не на каждый токен,
-    # чтобы не упираться в лимиты Telegram Bot API.
-    edit_interval_seconds = 0.28
-    edit_min_growth = 8
+    # Первый кусок показываем сразу, но не редактируем сообщение на каждый токен.
+    # Частые editMessageText приводят к flood control Telegram и могут скрыть хвост.
+    edit_interval_seconds = 0.9
+    edit_min_growth = 24
     foreground_grace_seconds = 0.08
+    final_retry_delays = (0.8, 1.8, 3.5)
 
     def __init__(self, app, brain_dir):
         super().__init__(app, brain_dir)
         self._realtime = RealtimeChatManager(app)
+        self._telegram_backoff_until = 0.0
 
     def status(self) -> dict:
         value = super().status()
@@ -44,15 +46,12 @@ class FastTelegramBridge(RichTelegramBridge):
             "waits_for_full_answer": False,
             "stream_edit_interval_seconds": self.edit_interval_seconds,
             "callback_approvals": True,
+            "flood_control_safe_finalization": True,
         })
         return value
 
     def _llm_busy(self) -> bool:
-        """Проверить, занят ли сейчас любой resident LLM backend.
-
-        Telegram даёт короткую фору Web UI. Если Web уже генерирует ответ,
-        Telegram не пытается одновременно захватить тот же единственный slot.
-        """
+        """Проверить, занят ли сейчас любой resident LLM backend."""
         llm = getattr(self.app, "llm", None)
         states = list(getattr(llm, "_states", []) or [])
         providers = [getattr(state, "provider", None) for state in states]
@@ -68,8 +67,6 @@ class FastTelegramBridge(RichTelegramBridge):
         return False
 
     def _wait_for_foreground_slot(self) -> None:
-        # Небольшая фора почти не ощущается в Telegram, но позволяет Web-запросу,
-        # пришедшему одновременно, первым занять локальную модель.
         if self._stop.wait(self.foreground_grace_seconds):
             return
         waited = False
@@ -80,6 +77,11 @@ class FastTelegramBridge(RichTelegramBridge):
         if waited:
             event("telegram_waited_for_foreground_llm", latency_ms=int((time.monotonic() - started) * 1000))
 
+    @staticmethod
+    def _is_flood_error(exc: Exception) -> bool:
+        text = str(exc or "").lower()
+        return "429" in text or "too many requests" in text or "retry after" in text or "flood" in text
+
     def _send_stream_message(self, chat_id, text: str, reply_to_message_id: int | None, *, reply_markup: dict | None = None) -> int:
         payload = {"chat_id": chat_id, "text": _partial_text(text)}
         if reply_to_message_id:
@@ -89,9 +91,20 @@ class FastTelegramBridge(RichTelegramBridge):
         result = self._api("sendMessage", payload, timeout=10) or {}
         return int(result.get("message_id") or 0)
 
-    def _edit_stream_message(self, chat_id, telegram_message_id: int, text: str, *, html_mode: bool = False, reply_markup: dict | None = None) -> None:
+    def _edit_stream_message(
+        self,
+        chat_id,
+        telegram_message_id: int,
+        text: str,
+        *,
+        html_mode: bool = False,
+        reply_markup: dict | None = None,
+        final: bool = False,
+    ) -> bool:
         if not telegram_message_id:
-            return
+            return False
+        if not final and time.monotonic() < self._telegram_backoff_until:
+            return False
         payload = {"chat_id": chat_id, "message_id": int(telegram_message_id), "text": text or "…"}
         if html_mode:
             payload["parse_mode"] = "HTML"
@@ -99,9 +112,35 @@ class FastTelegramBridge(RichTelegramBridge):
             payload["reply_markup"] = reply_markup
         try:
             self._api("editMessageText", payload, timeout=10)
+            return True
         except Exception as exc:
-            if "message is not modified" not in str(exc).lower():
-                problem("telegram_stream_edit_failed", str(exc), chat_id=str(chat_id))
+            message = str(exc).lower()
+            if "message is not modified" in message:
+                return True
+            if self._is_flood_error(exc):
+                # Не продолжаем долбить Telegram промежуточными edit-запросами.
+                self._telegram_backoff_until = max(self._telegram_backoff_until, time.monotonic() + 2.0)
+                event("telegram_stream_flood_backoff", chat_id=str(chat_id), final=bool(final))
+            else:
+                problem("telegram_stream_edit_failed", str(exc), chat_id=str(chat_id), final=bool(final))
+            return False
+
+    def _send_with_retry(self, method: str, payload: dict, *, timeout: int = 10) -> dict | list | None:
+        last_error: Exception | None = None
+        for delay in (0.0,) + tuple(self.final_retry_delays):
+            if delay > 0 and self._stop.wait(delay):
+                break
+            try:
+                return self._api(method, payload, timeout=timeout)
+            except Exception as exc:
+                last_error = exc
+                if not self._is_flood_error(exc):
+                    raise
+                self._telegram_backoff_until = max(self._telegram_backoff_until, time.monotonic() + max(1.5, delay))
+                problem("telegram_final_send_rate_limited", str(exc), retry_delay=delay)
+        if last_error is not None:
+            raise last_error
+        return None
 
     @staticmethod
     def _approval_keyboard(approval: dict | None) -> dict | None:
@@ -120,19 +159,46 @@ class FastTelegramBridge(RichTelegramBridge):
         if not chunks:
             chunks = ["…"]
         keyboard = self._approval_keyboard(approval)
+        first_id = telegram_message_id
+
         if telegram_message_id:
-            self._edit_stream_message(chat_id, telegram_message_id, chunks[0], html_mode=True, reply_markup=keyboard)
-            first_id = telegram_message_id
+            edited = False
+            for delay in (0.0,) + tuple(self.final_retry_delays):
+                if delay > 0 and self._stop.wait(delay):
+                    break
+                if self._edit_stream_message(
+                    chat_id,
+                    telegram_message_id,
+                    chunks[0],
+                    html_mode=True,
+                    reply_markup=keyboard,
+                    final=True,
+                ):
+                    edited = True
+                    break
+            if not edited:
+                # Главное правило: финальный ответ не должен потеряться из-за
+                # неудачного editMessageText. Отправляем полный первый chunk новым
+                # сообщением; частичный ранний preview остаётся выше в истории.
+                payload = {"chat_id": chat_id, "text": chunks[0], "parse_mode": "HTML"}
+                if reply_to_message_id:
+                    payload["reply_parameters"] = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
+                if keyboard:
+                    payload["reply_markup"] = keyboard
+                result = self._send_with_retry("sendMessage", payload, timeout=10) or {}
+                first_id = int(result.get("message_id") or 0) if isinstance(result, dict) else 0
+                event("telegram_final_fallback_sent", chat_id=str(chat_id), previous_message_id=int(telegram_message_id))
         else:
             payload = {"chat_id": chat_id, "text": chunks[0], "parse_mode": "HTML"}
             if reply_to_message_id:
                 payload["reply_parameters"] = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
             if keyboard:
                 payload["reply_markup"] = keyboard
-            result = self._api("sendMessage", payload, timeout=10) or {}
-            first_id = int(result.get("message_id") or 0)
+            result = self._send_with_retry("sendMessage", payload, timeout=10) or {}
+            first_id = int(result.get("message_id") or 0) if isinstance(result, dict) else 0
+
         for rendered in chunks[1:]:
-            self._api("sendMessage", {"chat_id": chat_id, "text": rendered, "parse_mode": "HTML"}, timeout=10)
+            self._send_with_retry("sendMessage", {"chat_id": chat_id, "text": rendered, "parse_mode": "HTML"}, timeout=10)
         return first_id
 
     def _handle_message(self, message: dict) -> None:
@@ -204,10 +270,17 @@ class FastTelegramBridge(RichTelegramBridge):
                         last_sent_len = len(visible)
                         typing_stop.set()
                         event("telegram_first_token_visible", latency_ms=int((now - started) * 1000), chat_id=str(chat_id))
-                    elif telegram_message_id and now - last_edit >= self.edit_interval_seconds and len(visible) - last_sent_len >= self.edit_min_growth:
-                        self._edit_stream_message(chat_id, telegram_message_id, visible)
-                        last_edit = now
-                        last_sent_len = len(visible)
+                    elif (
+                        telegram_message_id
+                        and now >= self._telegram_backoff_until
+                        and now - last_edit >= self.edit_interval_seconds
+                        and len(visible) - last_sent_len >= self.edit_min_growth
+                    ):
+                        # Важно: считаем текст отправленным только после успешного
+                        # editMessageText. Раньше здесь терялся хвост при 429/ошибке.
+                        if self._edit_stream_message(chat_id, telegram_message_id, visible):
+                            last_edit = now
+                            last_sent_len = len(visible)
                 elif item.type == "done":
                     done_payload = dict(item.data)
                     answer = str(done_payload.get("answer") or answer)
@@ -233,7 +306,8 @@ class FastTelegramBridge(RichTelegramBridge):
             typing_stop.set()
             problem("telegram_chat_stream_failed", str(exc), telegram_user_id=user_id)
             if telegram_message_id:
-                self._edit_stream_message(chat_id, telegram_message_id, _partial_text(answer + "\n\nОшибка: " + str(exc)))
+                # Ошибка генерации не должна уничтожить уже показанный preview.
+                self._edit_stream_message(chat_id, telegram_message_id, _partial_text(answer + "\n\nОшибка: " + str(exc)), final=True)
             else:
                 self._send(chat_id, f"Не удалось получить ответ Лешего: {exc}")
 
@@ -270,7 +344,7 @@ class FastTelegramBridge(RichTelegramBridge):
             except Exception: pass
         if chat_id is not None and tg_message_id:
             old = str(message.get("text") or message.get("caption") or "").strip()
-            self._edit_stream_message(chat_id, int(tg_message_id), _partial_text(old + "\n\n" + message_text), reply_markup={"inline_keyboard": []})
+            self._edit_stream_message(chat_id, int(tg_message_id), _partial_text(old + "\n\n" + message_text), reply_markup={"inline_keyboard": []}, final=True)
         event("telegram_os_approval_resolved", telegram_user_id=user_id, allowed=allow, approval_id=approval_id, status=str(result.get("status") or ""))
 
     def _run(self) -> None:
