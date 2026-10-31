@@ -53,8 +53,38 @@ class LocalVoiceASR:
         self._model = None
         self._model_lock = threading.RLock()
         self._transcribe_lock = threading.RLock()
+        # Не даём нескольким HTTP request-thread одновременно загружать/декодировать
+        # Whisper. Это особенно важно при ошибке frontend live-dictation.
+        self._request_gate = threading.Lock()
         self._last_error = ""
         self._loaded_at: float | None = None
+        self._pyav_compat_applied = False
+
+    def _apply_pyav_compat(self) -> None:
+        """Совместимость faster-whisper 1.2.x с PyAV 19+.
+
+        PyAV 19 удалил аргумент metadata_errors из av.open(), а опубликованный
+        faster-whisper 1.2.1 всё ещё передаёт его. Новые сборки Лешего пинят
+        av<19, но этот shim позволяет не падать и в уже существующем окружении.
+        """
+        if self._pyav_compat_applied:
+            return
+        try:
+            import av
+            major = int(str(getattr(av, "__version__", "0")).split(".", 1)[0])
+            if major >= 19 and not getattr(av, "_leshy_metadata_errors_compat", False):
+                original_open = av.open
+
+                def compatible_open(*args, **kwargs):
+                    kwargs.pop("metadata_errors", None)
+                    return original_open(*args, **kwargs)
+
+                av.open = compatible_open  # type: ignore[assignment]
+                setattr(av, "_leshy_metadata_errors_compat", True)
+                event("voice_asr_pyav_compat_enabled", pyav_version=str(getattr(av, "__version__", "")))
+        except Exception as exc:
+            problem("voice_asr_pyav_compat_failed", str(exc))
+        self._pyav_compat_applied = True
 
     def _load_model(self):
         with self._model_lock:
@@ -69,6 +99,7 @@ class LocalVoiceASR:
                     "Нужно пересобрать Лешего с voice-зависимостями."
                 ) from exc
 
+            self._apply_pyav_compat()
             started = time.monotonic()
             event(
                 "voice_asr_model_loading",
@@ -85,8 +116,6 @@ class LocalVoiceASR:
                     download_root=str(self.model_root),
                 )
             except Exception as exc:
-                # На CPU int8 является самым совместимым вариантом. Если пользователь
-                # указал неподдерживаемый compute type, один раз откатываемся на int8.
                 if self.device == "cpu" and self.compute_type != "int8":
                     self.compute_type = "int8"
                     self._model = WhisperModel(
@@ -126,11 +155,14 @@ class LocalVoiceASR:
             raise ValueError("Пустая аудиозапись")
         if len(audio) > 24 * 1024 * 1024:
             raise ValueError("Голосовая запись слишком большая (максимум 24 МБ)")
+        if not self._request_gate.acquire(blocking=False):
+            raise RuntimeError("Локальный ASR уже обрабатывает предыдущий фрагмент. Повторите после его завершения.")
 
-        model = self._load_model()
-        started = time.monotonic()
         temp_path: Path | None = None
         try:
+            model = self._load_model()
+            self._apply_pyav_compat()
+            started = time.monotonic()
             fd, raw_path = tempfile.mkstemp(prefix="leshy-voice-", suffix=self._suffix(content_type), dir=self.temp_root)
             os.close(fd)
             temp_path = Path(raw_path)
@@ -169,6 +201,8 @@ class LocalVoiceASR:
         except Exception as exc:
             self._last_error = str(exc)
             problem("voice_asr_transcribe_failed", str(exc), model=self.model_name, audio_bytes=len(audio))
+            if isinstance(exc, RuntimeError) and str(exc).startswith("Локальный ASR уже"):
+                raise
             raise RuntimeError(f"Не удалось распознать речь локально: {exc}") from exc
         finally:
             if temp_path is not None:
@@ -176,6 +210,7 @@ class LocalVoiceASR:
                     temp_path.unlink(missing_ok=True)
                 except OSError:
                     pass
+            self._request_gate.release()
 
     def status(self) -> dict[str, Any]:
         return {
@@ -187,6 +222,7 @@ class LocalVoiceASR:
             "loaded_at": self._loaded_at,
             "model_dir": str(self.model_root),
             "uses_browser_speech_api": False,
+            "busy": self._request_gate.locked(),
             "last_error": self._last_error,
         }
 
