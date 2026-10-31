@@ -22,8 +22,9 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
 if (-not (Test-Path 'dist/Leshy/Leshy.exe')) { throw 'PyInstaller did not create dist/Leshy/Leshy.exe' }
 
 $env:LESHY_LLM_BACKEND = 'echo'
-$env:LESHY_BRAIN_DIR = (Join-Path $env:TEMP 'LeshySmokeBrain')
-Remove-Item -Recurse -Force $env:LESHY_BRAIN_DIR -ErrorAction SilentlyContinue
+$smokeRoot = (Resolve-Path 'dist/Leshy').Path
+$smokeBrain = Join-Path $smokeRoot 'LeshyBrain'
+Remove-Item -Recurse -Force $smokeBrain -ErrorAction SilentlyContinue
 $proc = Start-Process -FilePath (Resolve-Path 'dist/Leshy/Leshy.exe') -ArgumentList '--no-browser','--host','127.0.0.1','--port','18765' -PassThru -WindowStyle Hidden
 try {
   $ok = $false
@@ -35,10 +36,19 @@ try {
     } catch { }
   }
   if (-not $ok) { throw 'Frozen smoke-test did not receive /v1/status' }
+
+  $actualBrain = [System.IO.Path]::GetFullPath([string]$status.brain_dir).TrimEnd('\')
+  $expectedBrain = [System.IO.Path]::GetFullPath($smokeBrain).TrimEnd('\')
+  if ($actualBrain -ne $expectedBrain) {
+    throw "Frozen app uses wrong data root. Expected: $expectedBrain ; Actual: $actualBrain"
+  }
+
   $reply = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/chat' -ContentType 'application/json' -Body '{"message":"smoke","owner_id":"ci","session_id":"ci-smoke"}'
   if (-not $reply.answer) { throw 'Frozen smoke-test chat returned an empty answer' }
 } finally {
   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 300
+  Remove-Item -Recurse -Force $smokeBrain -ErrorAction SilentlyContinue
 }
 
 $isccPath = $null
