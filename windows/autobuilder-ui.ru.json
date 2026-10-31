@@ -1,6 +1,10 @@
 {
   "title": "Леший AutoBuilder",
   "subtitle": "Обновление, сборка и запуск локальной версии",
+  "overview": "Обзор",
+  "repository": "Репозиторий",
+  "build": "Сборка",
+  "settings": "Настройки",
   "repo_status": "Репозиторий",
   "repository_settings": "Репозиторий...",
   "repository_settings_title": "Настройка репозитория",
