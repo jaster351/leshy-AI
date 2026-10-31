@@ -21,7 +21,7 @@ Remove-Item -Recurse -Force $runtimeLogStage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $runtimeLogStage | Out-Null
 
 python -m pip install --upgrade pip
-python -m pip install -e .
+python -m pip install -e ".[test]"
 python -m pip install "pyinstaller>=6.11,<7"
 python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 
