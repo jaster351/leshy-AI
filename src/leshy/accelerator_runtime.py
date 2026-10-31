@@ -224,6 +224,7 @@ class LlamaServerLLM:
             except Exception:
                 try:
                     self._process.kill()
+                    self._process.wait(timeout=3)
                 except Exception:
                     pass
         self._process = None
@@ -262,10 +263,10 @@ class LlamaServerLLM:
                 "-t", str(cpu_threads),
             ]
             if self.backend == "vulkan":
-                # Vulkan намеренно используется как универсальный Windows GPU backend:
-                # AMD Radeon, NVIDIA и Intel. Процесс остаётся запущенным, поэтому
-                # веса модели не выгружаются из VRAM между сообщениями.
-                args += ["-ngl", "all", "-sm", "layer", "--fit", "on"]
+                # --fit сам подбирает число GPU-слоёв по реально свободной VRAM.
+                # Нельзя одновременно задавать -ngl all: свежий llama.cpp в этом
+                # случае отключает fit и снова пытается загрузить всё в видеопамять.
+                args += ["-sm", "layer", "--fit", "on"]
             if self.backend == "openvino":
                 env["GGML_OPENVINO_DEVICE"] = self.device or "NPU"
                 env["GGML_OPENVINO_STATEFUL_EXECUTION"] = "0" if (self.device or "").upper().startswith("NPU") else "1"
@@ -286,7 +287,6 @@ class LlamaServerLLM:
                 log_handle.close()
                 raise
             finally:
-                # Popen inherits the handle; the parent must not keep an extra lock on Windows.
                 try:
                     log_handle.close()
                 except Exception:
@@ -334,8 +334,6 @@ class LlamaServerLLM:
         }
 
     def chat(self, messages: list[ChatMessage]) -> str:
-        # Один llama-server slot не должен получать параллельные запросы от UI,
-        # Telegram и фонового обучения: это одна из причин HTTP 503.
         with self._chat_lock:
             try:
                 base = self._ensure_server()
@@ -359,8 +357,6 @@ class LlamaServerLLM:
                     raise LLMUnavailable("Ускоренный backend вернул пустой ответ")
                 return text
             except error.HTTPError as exc:
-                # Серверные ошибки означают сломанный worker и требуют перезапуска.
-                # Клиентские 4xx не должны выгружать модель из VRAM.
                 if exc.code >= 500:
                     self._stop_process()
                 exception("accelerator_chat_http_failed", exc, backend=self.backend, device=self.device, status=exc.code)
