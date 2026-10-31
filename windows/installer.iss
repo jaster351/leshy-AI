@@ -1,6 +1,9 @@
 #ifndef MyAppVersion
   #define MyAppVersion "1.10.9"
 #endif
+#ifndef MyAppSourceDir
+  #define MyAppSourceDir "..\dist\Leshy"
+#endif
 
 [Setup]
 AppId={{B4F54CC2-AC3C-4A3E-9E38-9A9E53A71D03}
@@ -28,7 +31,7 @@ Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "..\dist\Leshy\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
 Name: "{app}\LeshyBrain"
