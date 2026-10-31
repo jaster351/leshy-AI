@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Protocol
 from urllib import request, error
 
@@ -18,6 +19,75 @@ class LLM(Protocol):
 
 class LLMUnavailable(RuntimeError):
     pass
+
+
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
+_ANALYSIS_FENCE_RE = re.compile(
+    r"```(?:analysis|reasoning|thoughts?)\s*\n.*?```",
+    re.IGNORECASE | re.DOTALL,
+)
+_REASONING_LEAK_MARKERS = (
+    "пользователь просит",
+    "пользователь хочет",
+    "сначала нужно понять",
+    "сначала нужно",
+    "нужно уточнить",
+    "важно учитывать",
+    "нужно понять, что",
+    "нужно объяснить причины",
+    "нужно предложить альтернатив",
+    "the user asks",
+    "the user wants",
+    "first i need to",
+    "i should explain",
+)
+_FINAL_PARAGRAPH_STARTS = (
+    "к сожалению",
+    "я могу",
+    "я не могу",
+    "не могу",
+    "могу",
+    "да,",
+    "нет,",
+    "нашёл",
+    "нашел",
+    "интернет",
+    "для этого",
+    "если хотите",
+    "если вам",
+)
+
+
+def finalize_model_output(text: str) -> str:
+    """Возвращает только пользовательский ответ, скрывая служебное рассуждение модели.
+
+    Некоторые локальные reasoning-модели могут вернуть reasoning отдельным
+    `<think>`-блоком, markdown-блоком `analysis` или обычным русским текстом перед
+    финальным ответом. Служебные рассуждения не являются частью интерфейса Лешего.
+    """
+
+    value = str(text or "").strip()
+    if not value:
+        return ""
+
+    value = _THINK_BLOCK_RE.sub("", value)
+    value = _ANALYSIS_FENCE_RE.sub("", value).strip()
+
+    # Убираем открытые маркеры некоторых chat-template/runtime.
+    value = re.sub(r"(?im)^\s*(?:analysis|reasoning|thoughts?)\s*:\s*", "", value).strip()
+
+    lowered = value.lower()
+    if any(marker in lowered for marker in _REASONING_LEAK_MARKERS):
+        paragraphs = [part.strip() for part in re.split(r"\n\s*\n", value) if part.strip()]
+        final_index: int | None = None
+        for index, paragraph in enumerate(paragraphs):
+            start = paragraph.lower().lstrip("*-—0123456789. )")
+            if index > 0 and any(start.startswith(prefix) for prefix in _FINAL_PARAGRAPH_STARTS):
+                final_index = index
+        if final_index is not None:
+            value = "\n\n".join(paragraphs[final_index:]).strip()
+
+    return value
 
 
 class OllamaLLM:
@@ -39,7 +109,10 @@ class OllamaLLM:
         except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise LLMUnavailable(f"Ollama недоступна: {exc}") from exc
         try:
-            return str(body["message"]["content"]).strip()
+            value = finalize_model_output(str(body["message"]["content"]))
+            if not value:
+                raise LLMUnavailable("Ollama вернула пустой пользовательский ответ")
+            return value
         except (KeyError, TypeError) as exc:
             raise LLMUnavailable("Ollama вернула неожиданный ответ") from exc
 
