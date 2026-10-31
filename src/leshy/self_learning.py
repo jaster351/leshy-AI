@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 
+from .human_learning import HumanLearningCoordinator, MaterialLearningWorker, SocialWatchWorker
 from .scientific_learning import (
     SCIENTIFIC_MATERIAL_TARGET,
     is_academic_url,
@@ -15,14 +16,10 @@ from .storage import Storage
 class SelfLearningWorker:
     """Постоянный фоновый цикл обучения Лешего.
 
-    Пока пользователь разрешает самообучение, worker не ждёт получаса с пустой
-    очередью. Он поддерживает непрерывную научную программу, цель которой —
-    изучить как минимум ~2000 разных академических материалов, а затем продолжать
-    обновлять научную базу. Отдельно он регулярно проверяет свежие новости.
-
-    Пользовательские сообщения сами по себе не отправляются в интернет этим
-    worker'ом: автономные запросы строятся из локального учебного плана и
-    новостных тем. Явно добавленные пользователем темы идут через ту же очередь.
+    Автономная научная программа зависит от пользовательского переключателя
+    самообучения. Явно заданные пользователем материалы и подписки выполняются
+    независимо от этого переключателя: если пользователь сказал «изучи» или
+    «следи за автором», выключенная автономная инициативность не отменяет задачу.
     """
 
     META_SCIENCE_CURSOR = "learning.science_cursor"
@@ -37,6 +34,13 @@ class SelfLearningWorker:
         self.storage = storage
         self.learning_control = learning_control
         self.research = research_engine
+        self.human_learning = HumanLearningCoordinator(storage)
+        self.material_learning = MaterialLearningWorker(
+            self.human_learning,
+            research_engine.knowledge,
+            research_engine.fetcher,
+        )
+        self.social_watch = SocialWatchWorker(self.human_learning)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_error = ""
@@ -45,6 +49,10 @@ class SelfLearningWorker:
         self._next_autonomous_at = 0.0
 
     def start(self) -> None:
+        # Явные пользовательские учебные задачи и подписки должны работать даже
+        # при выключенной автономной инициативе.
+        self.material_learning.start()
+        self.social_watch.start()
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
@@ -53,6 +61,8 @@ class SelfLearningWorker:
 
     def stop(self) -> None:
         self._stop.set()
+        self.material_learning.stop()
+        self.social_watch.stop()
 
     def _meta_int(self, key: str, default: int = 0) -> int:
         with self.storage.connection() as conn:
@@ -92,6 +102,9 @@ class SelfLearningWorker:
             "news_monitoring": True,
             "news_interval_seconds": int(self.NEWS_INTERVAL_SECONDS),
             "last_news_epoch": self._meta_int(self.META_LAST_NEWS_EPOCH, 0),
+            "human_learning": self.human_learning.status(),
+            "material_learning_worker": self.material_learning.status(),
+            "social_watch": self.social_watch.status(),
         }
 
     def queue_topic(self, query: str, reason: str = "тема пользователя") -> int:
@@ -101,6 +114,39 @@ class SelfLearningWorker:
         if len(query) > 500:
             raise ValueError("Тема исследования слишком длинная")
         return self.research.enqueue(query, reason=reason)
+
+    def queue_material(self, owner_id: str, source: str, *, title: str = "") -> dict:
+        self.material_learning.start()
+        return self.human_learning.queue_material(owner_id, source, title=title)
+
+    def subscribe(
+        self,
+        owner_id: str,
+        target_url: str,
+        *,
+        target_name: str = "",
+        interval_seconds: int | None = None,
+        auto_learn: bool = True,
+        notify_new: bool = True,
+        allow_reactions: bool = False,
+    ) -> dict:
+        self.social_watch.start()
+        self.material_learning.start()
+        return self.human_learning.subscribe(
+            owner_id,
+            target_url,
+            target_name=target_name,
+            interval_seconds=interval_seconds,
+            auto_learn=auto_learn,
+            notify_new=notify_new,
+            allow_reactions=allow_reactions,
+        )
+
+    def subscriptions(self, owner_id: str) -> list[dict]:
+        return self.human_learning.subscriptions(owner_id)
+
+    def pending_social_notifications(self, owner_id: str, *, limit: int = 20) -> list[dict]:
+        return self.human_learning.pending_notifications(owner_id, limit=limit)
 
     def _has_queued(self) -> bool:
         with self.storage.connection() as conn:
