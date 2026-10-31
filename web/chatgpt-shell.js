@@ -46,21 +46,13 @@
     if(!parts.length)return;const prefix=input.value.trim();input.value=(prefix+(prefix?'\n\n':'')+parts.join('\n\n')).trimStart();input.focus();notice('Файл добавлен в сообщение',1400);
   }
 
-  function startVoice(input,button){
-    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){notice('Голосовой ввод не поддерживается этим браузером',2600);return}
-    if(button.dataset.listening==='1'){try{button._recognition&&button._recognition.stop()}catch(_e){}return}
-    const r=new SR();button._recognition=r;r.lang='ru-RU';r.interimResults=true;r.continuous=false;button.dataset.listening='1';button.style.background='#444';notice('Слушаю…',10000);let base=input.value.trim();
-    r.onresult=e=>{let final='',interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)final+=t;else interim+=t}input.value=(base+(base?' ':'')+final+interim).trimStart();if(final)base=input.value.trim()};
-    r.onerror=e=>notice('Микрофон: '+(e.error||'ошибка'),2500);r.onend=()=>{delete button.dataset.listening;button.style.background='';notice('Готово',800);input.focus()};try{r.start()}catch(_e){delete button.dataset.listening;notice('Не удалось включить микрофон')}
-  }
-
   function installComposer(){
     const composer=document.querySelector('#pane-chat .chat-compose>.composer');if(!composer||$('chatAttachButton'))return;const input=$('chatInput'),send=$('chatSend');if(!input||!send)return;
     const attach=document.createElement('button');attach.id='chatAttachButton';attach.type='button';attach.title='Добавить текстовый или кодовый файл';attach.innerHTML=I.plus;
-    const mic=document.createElement('button');mic.id='chatMicButton';mic.type='button';mic.title='Голосовой ввод';mic.innerHTML=I.mic;
+    const mic=document.createElement('button');mic.id='chatMicButton';mic.type='button';mic.title='Локальный голосовой режим';mic.innerHTML=I.mic;
     const upload=document.createElement('input');upload.id='chatUploadInput';upload.type='file';upload.multiple=true;upload.accept='.txt,.md,.csv,.json,.log,.py,.js,.ts,.cs,.cpp,.c,.h,.java,.go,.rs,.sh,.ps1,.yaml,.yml,.xml,.sql,.html,.css,text/*';
     const voice=document.createElement('div');voice.id='chatVoiceState';composer.insertBefore(attach,input);composer.insertBefore(mic,send);composer.append(upload,voice);send.innerHTML=I.send;send.title='Отправить';
-    attach.onclick=()=>upload.click();upload.onchange=async()=>{await attachFiles([...upload.files||[]],input);upload.value=''};mic.onclick=()=>startVoice(input,mic);
+    attach.onclick=()=>upload.click();upload.onchange=async()=>{await attachFiles([...upload.files||[]],input);upload.value=''};
     if(!$('chatComposerHint')){const hint=document.createElement('div');hint.id='chatComposerHint';hint.textContent='Леший может ошибаться. Важную информацию лучше перепроверять.';composer.parentElement.appendChild(hint)}
   }
 
