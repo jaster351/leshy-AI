@@ -47,9 +47,12 @@ def test_recheck_of_same_dynamic_claim_refreshes_checked_at_and_ttl(tmp_path):
     assert second_id == first_id
     with storage.connection() as conn:
         row = dict(conn.execute("SELECT * FROM knowledge WHERE id=?", (first_id,)).fetchone())
+        audit = conn.execute("SELECT event_type,payload_json FROM audit_log WHERE event_type='knowledge.dynamic_rechecked' ORDER BY id DESC LIMIT 1").fetchone()
     assert row["checked_at"] == fresh
     assert row["ttl_seconds"] == 600
     assert is_fresh(row)
+    assert audit is not None
+    assert audit["event_type"] == "knowledge.dynamic_rechecked"
 
 
 def test_static_knowledge_does_not_expire_without_ttl(tmp_path):
