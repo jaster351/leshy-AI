@@ -20,6 +20,8 @@ $StatusPath = Join-Path $RuntimeRoot 'STATUS.txt'
 $MainLog = Join-Path $LogsRoot 'autobuilder.log'
 $TaskName = 'Leshy AutoBuilder'
 $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$StartupRoot = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+$StartupCmd = Join-Path $StartupRoot 'Leshy-AutoBuilder.cmd'
 
 New-Item -ItemType Directory -Force -Path $RuntimeRoot, $LogsRoot, $ReleasesRoot | Out-Null
 
@@ -266,39 +268,79 @@ function Invoke-CheckAndBuild {
     [void](Invoke-LeshyBuild -Sha $localSha)
 }
 
-function Install-AutoBuilderTask {
-    if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
-        throw 'Windows ScheduledTasks module is not available.'
-    }
+function Get-WatchArguments {
     $quotedScript = '"' + $PSCommandPath + '"'
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $quotedScript -Mode watch -IntervalSeconds $IntervalSeconds -FailureRetryMinutes $FailureRetryMinutes -SettleSeconds $SettleSeconds"
-    $action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments -WorkingDirectory $RepoRoot
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
+    return "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $quotedScript -Mode watch -IntervalSeconds $IntervalSeconds -FailureRetryMinutes $FailureRetryMinutes -SettleSeconds $SettleSeconds"
+}
 
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description 'Watches origin/main, performs safe fast-forward pulls, and builds the verified Leshy Windows installer.' -Force | Out-Null
-    Start-ScheduledTask -TaskName $TaskName
-    Write-AutoLog "Task '$TaskName' installed and started. Check interval: $IntervalSeconds sec."
-    Write-StatusFile "RUNNING AS SCHEDULED TASK`nTask: $TaskName`nInterval: $IntervalSeconds sec"
+function Install-StartupFallback {
+    New-Item -ItemType Directory -Force -Path $StartupRoot | Out-Null
+    $cmdLine = '@echo off' + [Environment]::NewLine + 'start "" /min powershell.exe ' + (Get-WatchArguments) + [Environment]::NewLine
+    Set-Content -LiteralPath $StartupCmd -Value $cmdLine -Encoding ASCII
+
+    try {
+        Start-Process -FilePath $PowerShellExe -ArgumentList (Get-WatchArguments) -WorkingDirectory $RepoRoot -WindowStyle Hidden
+    } catch {
+        Write-AutoLog "Could not start AutoBuilder immediately: $($_.Exception.Message)" 'WARN'
+    }
+
+    Write-AutoLog "Startup fallback installed without administrator rights: $StartupCmd"
+    Write-StatusFile "RUNNING VIA USER STARTUP`nStartup file: $StartupCmd`nInterval: $IntervalSeconds sec"
+}
+
+function Install-AutoBuilderTask {
+    $installedScheduledTask = $false
+    if (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) {
+        try {
+            $action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument (Get-WatchArguments) -WorkingDirectory $RepoRoot
+            $trigger = New-ScheduledTaskTrigger -AtLogOn
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
+            Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description 'Watches origin/main, performs safe fast-forward pulls, and builds the verified Leshy Windows installer.' -Force | Out-Null
+            Start-ScheduledTask -TaskName $TaskName
+            $installedScheduledTask = $true
+            if (Test-Path $StartupCmd) { Remove-Item -LiteralPath $StartupCmd -Force -ErrorAction SilentlyContinue }
+            Write-AutoLog "Task '$TaskName' installed and started. Check interval: $IntervalSeconds sec."
+            Write-StatusFile "RUNNING AS SCHEDULED TASK`nTask: $TaskName`nInterval: $IntervalSeconds sec"
+        } catch {
+            Write-AutoLog "Scheduled Task install was denied or unavailable: $($_.Exception.Message)" 'WARN'
+        }
+    }
+
+    if (-not $installedScheduledTask) {
+        Install-StartupFallback
+    }
 }
 
 function Uninstall-AutoBuilderTask {
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $task = $null
+    if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    }
     if ($task) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
         Write-AutoLog "Task '$TaskName' removed."
-    } else {
-        Write-Host "Task '$TaskName' is not installed."
+    }
+    if (Test-Path $StartupCmd) {
+        Remove-Item -LiteralPath $StartupCmd -Force
+        Write-AutoLog "Startup fallback removed: $StartupCmd"
+    }
+    if (-not $task -and -not (Test-Path $StartupCmd)) {
+        Write-Host 'AutoBuilder startup registration is not installed.'
     }
 }
 
 function Show-AutoBuilderStatus {
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $task = $null
+    if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    }
     if ($task) {
         Write-Host "Scheduled task: $($task.State)"
+    } elseif (Test-Path $StartupCmd) {
+        Write-Host "Startup fallback: installed ($StartupCmd)"
     } else {
-        Write-Host 'Scheduled task: not installed'
+        Write-Host 'AutoBuilder startup: not installed'
     }
     if (Test-Path $StatusPath) {
         Write-Host ''
