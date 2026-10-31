@@ -38,6 +38,7 @@ def make_handler(app, telegram, settings, model_catalog):
                     '<script src="/right-menu-fix.js"></script>',
                     '<script src="/os-approval-ui.js"></script>',
                     '<script src="/hf-settings-panel.js"></script>',
+                    '<script src="/marketplace-panel.js"></script>',
                     '<script src="/thinking-indicator.js"></script>',
                     '<script src="/stream-activity-bridge.js"></script>',
                     '<script src="/voice-live.js"></script>',
@@ -53,7 +54,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.wfile.write(data)
                 return
 
-            if parsed.path in {"/chatgpt-shell.js", "/right-menu-fix.js", "/os-approval-ui.js", "/hf-settings-panel.js", "/thinking-indicator.js", "/stream-activity-bridge.js", "/voice-live.js"}:
+            if parsed.path in {"/chatgpt-shell.js", "/right-menu-fix.js", "/os-approval-ui.js", "/hf-settings-panel.js", "/marketplace-panel.js", "/thinking-indicator.js", "/stream-activity-bridge.js", "/voice-live.js"}:
                 name = parsed.path.rsplit("/", 1)[-1]
                 try:
                     return self._send_asset(name, "application/javascript; charset=utf-8")
