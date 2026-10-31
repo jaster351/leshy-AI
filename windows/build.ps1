@@ -4,6 +4,12 @@ Set-Location (Resolve-Path (Join-Path $PSScriptRoot '..'))
 $version = (Get-Content VERSION -Raw).Trim()
 if (-not ($version -match '^\d+\.\d+\.\d+')) { throw "Invalid VERSION: $version" }
 
+# Builds and tests must not inherit stale data-root overrides from an older shell.
+# The packaged Windows launcher always derives LeshyBrain from Leshy.exe.
+Remove-Item Env:LESHY_BRAIN_DIR -ErrorAction SilentlyContinue
+Remove-Item Env:LESHY_INSTALL_ROOT -ErrorAction SilentlyContinue
+Remove-Item Env:LESHY_LEGACY_BRAIN_DIR -ErrorAction SilentlyContinue
+
 $runtimeLogStage = Join-Path (Get-Location).Path '.autobuild\leshy-runtime-logs\current'
 Remove-Item -Recurse -Force $runtimeLogStage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $runtimeLogStage | Out-Null
@@ -28,6 +34,7 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --paths src `
   --collect-all llama_cpp `
   --collect-all ddgs `
+  --collect-all tzdata `
   --add-data "web;web" `
   --add-data "VERSION;." `
   windows/launcher.py
