@@ -36,9 +36,11 @@ def research_reason(
     """Возвращает причину обязательного live-search либо None.
 
     Политика детерминированная: модель не решает сама, нужен ли интернет для
-    свежих данных. При явной просьбе о веб-поиске он также обязателен. Если
-    локальная БЗ не содержит релевантного знания, информационный вопрос
-    считается пробелом знаний и тоже уходит в live-search.
+    свежих данных. При явной просьбе о веб-поиске он также обязателен.
+
+    Важно: непроверенные candidate-знания не считаются достаточным основанием
+    отказаться от интернета. Если для информационного запроса нет релевантного
+    trusted-знания, Леший обязан выполнить live-search и только затем отвечать.
     """
     q = normalize_query(query)
     if not q:
@@ -50,7 +52,7 @@ def research_reason(
     if any(q == marker or q.startswith(marker + " ") for marker in _SMALL_TALK):
         return None
 
-    if trusted_count <= 0 and candidate_count <= 0:
+    if trusted_count <= 0:
         # Не отправляем в интернет очевидную арифметику и совсем короткие реплики.
         if re.fullmatch(r"[\d\s+\-*/().,=]+", q):
             return None
@@ -63,6 +65,8 @@ def research_reason(
             ))
         )
         if looks_informational:
+            if candidate_count > 0:
+                return "есть только непроверенные candidate-знания"
             return "пробел в локальной базе знаний"
     return None
 

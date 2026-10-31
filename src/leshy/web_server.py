@@ -13,6 +13,7 @@ from .app import LeshyApp, LLMUnavailable
 from .config import Settings
 from .dashboard import DashboardService
 from .diagnostics import event, problem
+from .hardware import HardwareConfig, HardwareConfigStore, hardware_status
 from .telegram import TelegramBridge
 
 
@@ -89,10 +90,13 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 if css_marker not in html:
                     html = html.replace("</head>", css_marker + "\n</head>")
                 enhancement_marker = '<script src="/ui-enhancements.js"></script>'
+                hardware_marker = '<script src="/hardware-panel.js"></script>'
                 variant_marker = '<script src="/variant3.js"></script>'
                 scripts = ""
                 if enhancement_marker not in html:
                     scripts += enhancement_marker + "\n"
+                if hardware_marker not in html:
+                    scripts += hardware_marker + "\n"
                 if variant_marker not in html:
                     scripts += variant_marker + "\n"
                 if scripts:
@@ -107,6 +111,9 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 return
             if parsed.path == "/ui-enhancements.js":
                 self._send_asset(_web_asset(settings, "ui-enhancements.js"), "application/javascript; charset=utf-8")
+                return
+            if parsed.path == "/hardware-panel.js":
+                self._send_asset(_web_asset(settings, "hardware-panel.js"), "application/javascript; charset=utf-8")
                 return
             if parsed.path == "/variant3.js":
                 self._send_asset(_web_asset(settings, "variant3.js"), "application/javascript; charset=utf-8")
@@ -132,6 +139,9 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 return
             if parsed.path == "/v1/status":
                 self._json(HTTPStatus.OK, app.status())
+                return
+            if parsed.path == "/v1/hardware":
+                self._json(HTTPStatus.OK, hardware_status(settings.brain_dir))
                 return
             if parsed.path == "/v1/overview":
                 self._json(HTTPStatus.OK, dashboard.overview(self._arg(args, "owner_id", "web:local")))
@@ -203,6 +213,17 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                         session_id=str(body.get("session_id") or "") or None,
                     )
                     self._json(HTTPStatus.OK, result)
+                    return
+                if self.path == "/v1/hardware/config":
+                    store = HardwareConfigStore(settings.brain_dir)
+                    current = store.load()
+                    config = HardwareConfig(
+                        mode=str(body.get("mode") or current.mode).strip().lower(),
+                        gpu_layers_mixed=int(body.get("gpu_layers_mixed", current.gpu_layers_mixed)),
+                        prefer_npu_for_background=bool(body.get("prefer_npu_for_background", current.prefer_npu_for_background)),
+                    )
+                    store.save(config)
+                    self._json(HTTPStatus.OK, hardware_status(settings.brain_dir))
                     return
                 if self.path == "/v1/image/generate":
                     job = app.image_generation.enqueue(
@@ -286,8 +307,6 @@ def _warm_local_llm(app: LeshyApp) -> None:
         backend = warmer()
         event("llm_background_warmup_finished", backend=backend or "none")
     except Exception as exc:
-        # Warmup is an optimization; the normal adaptive request path still
-        # performs failover if every prewarm attempt fails.
         problem("llm_background_warmup_failed", str(exc))
 
 

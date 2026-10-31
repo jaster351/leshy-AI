@@ -8,6 +8,24 @@ from urllib.parse import urlparse
 from .storage import Storage, utcnow
 
 PRIMARY_TRUSTED_HOSTS = {"docs.python.org", "learn.microsoft.com", "developer.mozilla.org", "docs.github.com"}
+ACADEMIC_TRUSTED_HOSTS = {
+    "arxiv.org",
+    "pubmed.ncbi.nlm.nih.gov",
+    "pmc.ncbi.nlm.nih.gov",
+    "nature.com",
+    "science.org",
+    "plos.org",
+    "biorxiv.org",
+    "medrxiv.org",
+    "jmlr.org",
+    "openreview.net",
+    "ieeexplore.ieee.org",
+    "dl.acm.org",
+    "journals.aps.org",
+    "frontiersin.org",
+    "royalsocietypublishing.org",
+    "copernicus.org",
+}
 
 
 def normalize_claim(text: str) -> str:
@@ -22,19 +40,25 @@ def source_weight(url: str) -> float:
     host = (urlparse(url).hostname or "").lower().rstrip(".")
     if not host:
         return .20
+    if host.startswith("www."):
+        host = host[4:]
     if host.endswith(".gov") or host.endswith(".edu"):
         return .92
+    if host in ACADEMIC_TRUSTED_HOSTS or any(host.endswith("." + domain) for domain in ACADEMIC_TRUSTED_HOSTS):
+        # Высокий provenance, но одиночная статья/препринт не должна стать trusted
+        # только по домену. При .88 verify_topic потребует независимое подтверждение.
+        return .88
     if host in PRIMARY_TRUSTED_HOSTS:
         return .90
     if host.startswith("docs.") or host.startswith("developer."):
         return .75
     if host == "github.com" or host.endswith(".github.com"):
         return .64
-    if host == "www.wikidata.org" or host.endswith(".wikidata.org"):
+    if host == "wikidata.org" or host.endswith(".wikidata.org"):
         return .76
     if host == "wikipedia.org" or host.endswith(".wikipedia.org"):
         return .58
-    if host in {"youtube.com", "www.youtube.com", "youtu.be"}:
+    if host in {"youtube.com", "youtu.be"}:
         return .50
     return .52
 

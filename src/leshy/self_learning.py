@@ -3,30 +3,35 @@ from __future__ import annotations
 import threading
 import time
 
+from .scientific_learning import (
+    SCIENTIFIC_MATERIAL_TARGET,
+    is_academic_url,
+    news_query,
+    scientific_query,
+)
 from .storage import Storage
 
 
-_SAFE_CURRICULUM = (
-    "Python standard library and packaging best practices",
-    "Linux system administration fundamentals",
-    "Windows system administration fundamentals",
-    "computer networking fundamentals",
-    "SQLite reliability backup and recovery",
-    "local LLM inference llama.cpp GGUF",
-    "information retrieval provenance and source verification",
-    "cybersecurity defensive hardening fundamentals",
-)
-
-
 class SelfLearningWorker:
-    """Фоновый безопасный цикл обучения.
+    """Постоянный фоновый цикл обучения Лешего.
 
-    Он не отправляет пользовательские сообщения в интернет автоматически. Когда очередь пуста,
-    берёт следующую нейтральную тему из локального учебного плана. Явно добавленные пользователем
-    темы исследуются через ту же очередь.
+    Пока пользователь разрешает самообучение, worker не ждёт получаса с пустой
+    очередью. Он поддерживает непрерывную научную программу, цель которой —
+    изучить как минимум ~2000 разных академических материалов, а затем продолжать
+    обновлять научную базу. Отдельно он регулярно проверяет свежие новости.
+
+    Пользовательские сообщения сами по себе не отправляются в интернет этим
+    worker'ом: автономные запросы строятся из локального учебного плана и
+    новостных тем. Явно добавленные пользователем темы идут через ту же очередь.
     """
 
-    META_CURSOR = "learning.curriculum_cursor"
+    META_SCIENCE_CURSOR = "learning.science_cursor"
+    META_NEWS_CURSOR = "learning.news_cursor"
+    META_LAST_NEWS_EPOCH = "learning.last_news_epoch"
+
+    AUTONOMOUS_INTERVAL_SECONDS = 45.0
+    NEWS_INTERVAL_SECONDS = 15 * 60.0
+    ERROR_BACKOFF_SECONDS = 90.0
 
     def __init__(self, storage: Storage, learning_control, research_engine):
         self.storage = storage
@@ -37,6 +42,7 @@ class SelfLearningWorker:
         self._last_error = ""
         self._last_result: dict | None = None
         self._state = "stopped"
+        self._next_autonomous_at = 0.0
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -48,13 +54,44 @@ class SelfLearningWorker:
     def stop(self) -> None:
         self._stop.set()
 
+    def _meta_int(self, key: str, default: int = 0) -> int:
+        with self.storage.connection() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        try:
+            return int(str(row["value"])) if row else int(default)
+        except (TypeError, ValueError):
+            return int(default)
+
+    def _set_meta(self, key: str, value: int | float | str) -> None:
+        with self.storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, str(value)),
+            )
+
+    def _scientific_material_count(self) -> int:
+        with self.storage.connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT source_url FROM knowledge WHERE source_url<>''"
+            ).fetchall()
+        return sum(1 for row in rows if is_academic_url(str(row["source_url"])))
+
     def status(self) -> dict:
+        scientific_materials = self._scientific_material_count()
+        target = SCIENTIFIC_MATERIAL_TARGET
         return {
             "running": bool(self._thread and self._thread.is_alive()),
             "state": self._state,
             "enabled": bool(self.learning_control.is_enabled()),
             "last_error": self._last_error,
             "last_result": self._last_result,
+            "scientific_materials": scientific_materials,
+            "scientific_target": target,
+            "scientific_goal_reached": scientific_materials >= target,
+            "scientific_progress_percent": round(min(100.0, scientific_materials * 100.0 / target), 1),
+            "news_monitoring": True,
+            "news_interval_seconds": int(self.NEWS_INTERVAL_SECONDS),
+            "last_news_epoch": self._meta_int(self.META_LAST_NEWS_EPOCH, 0),
         }
 
     def queue_topic(self, query: str, reason: str = "тема пользователя") -> int:
@@ -65,48 +102,73 @@ class SelfLearningWorker:
             raise ValueError("Тема исследования слишком длинная")
         return self.research.enqueue(query, reason=reason)
 
-    def _next_curriculum_topic(self) -> str:
-        with self.storage.connection() as conn:
-            row = conn.execute("SELECT value FROM meta WHERE key=?", (self.META_CURSOR,)).fetchone()
-            cursor = int(row["value"]) if row and str(row["value"]).isdigit() else 0
-            topic = _SAFE_CURRICULUM[cursor % len(_SAFE_CURRICULUM)]
-            conn.execute(
-                "INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (self.META_CURSOR, str(cursor + 1)),
-            )
-        return topic
-
     def _has_queued(self) -> bool:
         with self.storage.connection() as conn:
             row = conn.execute("SELECT 1 FROM research_tasks WHERE status='queued' LIMIT 1").fetchone()
         return row is not None
 
+    def _news_due(self, now_epoch: float) -> bool:
+        last = float(self._meta_int(self.META_LAST_NEWS_EPOCH, 0))
+        return last <= 0 or now_epoch - last >= self.NEWS_INTERVAL_SECONDS
+
+    def _queue_news(self, now_epoch: float) -> int:
+        cursor = self._meta_int(self.META_NEWS_CURSOR, 0)
+        query = news_query(cursor)
+        task_id = self.research.enqueue(query, reason="автономный мониторинг свежих новостей")
+        self._set_meta(self.META_NEWS_CURSOR, cursor + 1)
+        self._set_meta(self.META_LAST_NEWS_EPOCH, int(now_epoch))
+        return task_id
+
+    def _queue_science(self) -> int:
+        cursor = self._meta_int(self.META_SCIENCE_CURSOR, 0)
+        item = scientific_query(cursor)
+        learned = self._scientific_material_count()
+        reason = (
+            f"научная программа: академический материал {learned}/{SCIENTIFIC_MATERIAL_TARGET}; "
+            f"приоритет источника {item.domain}"
+            if learned < SCIENTIFIC_MATERIAL_TARGET
+            else f"непрерывное научное обновление после достижения цели {SCIENTIFIC_MATERIAL_TARGET}; {item.domain}"
+        )
+        task_id = self.research.enqueue(item.query, reason=reason)
+        self._set_meta(self.META_SCIENCE_CURSOR, cursor + 1)
+        return task_id
+
+    def _queue_autonomous_work(self, now_epoch: float) -> int:
+        if self._news_due(now_epoch):
+            return self._queue_news(now_epoch)
+        return self._queue_science()
+
     def _run(self) -> None:
         self._state = "idle"
-        idle_rounds = 0
         while not self._stop.is_set():
             if not self.learning_control.is_enabled():
                 self._state = "disabled"
+                self._next_autonomous_at = 0.0
                 self._stop.wait(2.0)
                 continue
+
             try:
-                self._state = "learning"
+                now = time.time()
                 if not self._has_queued():
-                    idle_rounds += 1
-                    # Не создавать новые темы каждую секунду: новый автономный цикл примерно раз в 30 минут.
-                    if idle_rounds >= 900:
-                        self.research.enqueue(self._next_curriculum_topic(), reason="автономный учебный план")
-                        idle_rounds = 0
-                    else:
-                        self._state = "idle"
-                        self._stop.wait(2.0)
+                    if self._next_autonomous_at > now:
+                        self._state = "waiting_rate_limit"
+                        self._stop.wait(min(2.0, max(0.1, self._next_autonomous_at - now)))
                         continue
+                    self._queue_autonomous_work(now)
+
+                self._state = "learning"
                 result = self.research.run_next()
                 self._last_result = result
                 self._last_error = ""
-                self._state = "idle"
-                self._stop.wait(5.0)
+                if result and result.get("error"):
+                    self._next_autonomous_at = time.time() + self.ERROR_BACKOFF_SECONDS
+                    self._state = "backoff"
+                else:
+                    self._next_autonomous_at = time.time() + self.AUTONOMOUS_INTERVAL_SECONDS
+                    self._state = "idle"
+                self._stop.wait(2.0)
             except Exception as exc:
                 self._last_error = str(exc)[:1000]
                 self._state = "error"
+                self._next_autonomous_at = time.time() + self.ERROR_BACKOFF_SECONDS
                 self._stop.wait(15.0)
