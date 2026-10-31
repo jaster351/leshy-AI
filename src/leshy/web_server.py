@@ -31,8 +31,10 @@ def _web_asset(settings: Settings, name: str) -> Path:
     bundle = getattr(sys, "_MEIPASS", "")
     if bundle:
         candidates.append(Path(bundle) / "web" / name)
-    candidates.append(settings.install_root / "web" / name)
-    candidates.append(Path(__file__).resolve().parents[2] / "web" / name)
+    candidates.extend((
+        settings.install_root / "web" / name,
+        Path(__file__).resolve().parents[2] / "web" / name,
+    ))
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -43,12 +45,7 @@ def _web_index(settings: Settings) -> Path:
     return _web_asset(settings, "index.html")
 
 
-def make_handler(
-    app: LeshyApp,
-    telegram: TelegramBridge,
-    settings: Settings,
-    model_catalog: LocalModelCatalog,
-):
+def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings, model_catalog: LocalModelCatalog):
     dashboard = DashboardService(app)
     nas_store = NasSettingsStore(settings.brain_dir)
 
@@ -60,9 +57,7 @@ def make_handler(
 
         def _authorized(self) -> bool:
             expected = os.getenv("LESHY_API_TOKEN", "").strip()
-            if not expected:
-                return True
-            return self.headers.get("Authorization", "") == f"Bearer {expected}"
+            return not expected or self.headers.get("Authorization", "") == f"Bearer {expected}"
 
         def _json(self, status: int, payload: dict | list):
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -87,8 +82,8 @@ def make_handler(
         def _arg(args: dict[str, list[str]], name: str, default: str = "") -> str:
             return str((args.get(name) or [default])[0]).strip()
 
-        def _send_asset(self, path: Path, content_type: str) -> None:
-            data = path.read_bytes()
+        def _send_asset(self, name: str, content_type: str) -> None:
+            data = _web_asset(settings, name).read_bytes()
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
@@ -99,7 +94,9 @@ def make_handler(
         def do_GET(self):
             parsed = parse.urlparse(self.path)
             args = parse.parse_qs(parsed.query)
-            if parsed.path == "/":
+            path = parsed.path
+
+            if path == "/":
                 html = _web_index(settings).read_text(encoding="utf-8")
                 css_marker = '<link rel="stylesheet" href="/variant3.css">'
                 if css_marker not in html:
@@ -122,26 +119,22 @@ def make_handler(
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            if parsed.path == "/ui-enhancements.js":
-                self._send_asset(_web_asset(settings, "ui-enhancements.js"), "application/javascript; charset=utf-8")
+
+            assets = {
+                "/ui-enhancements.js": ("ui-enhancements.js", "application/javascript; charset=utf-8"),
+                "/hardware-panel.js": ("hardware-panel.js", "application/javascript; charset=utf-8"),
+                "/model-panel.js": ("model-panel.js", "application/javascript; charset=utf-8"),
+                "/nas-panel.js": ("nas-panel.js", "application/javascript; charset=utf-8"),
+                "/variant3.js": ("variant3.js", "application/javascript; charset=utf-8"),
+                "/variant3.css": ("variant3.css", "text/css; charset=utf-8"),
+            }
+            if path in assets:
+                name, content_type = assets[path]
+                self._send_asset(name, content_type)
                 return
-            if parsed.path == "/hardware-panel.js":
-                self._send_asset(_web_asset(settings, "hardware-panel.js"), "application/javascript; charset=utf-8")
-                return
-            if parsed.path == "/model-panel.js":
-                self._send_asset(_web_asset(settings, "model-panel.js"), "application/javascript; charset=utf-8")
-                return
-            if parsed.path == "/nas-panel.js":
-                self._send_asset(_web_asset(settings, "nas-panel.js"), "application/javascript; charset=utf-8")
-                return
-            if parsed.path == "/variant3.js":
-                self._send_asset(_web_asset(settings, "variant3.js"), "application/javascript; charset=utf-8")
-                return
-            if parsed.path == "/variant3.css":
-                self._send_asset(_web_asset(settings, "variant3.css"), "text/css; charset=utf-8")
-                return
-            if parsed.path.startswith("/generated/"):
-                target = app.image_generation.resolve_generated(parsed.path.rsplit("/", 1)[-1])
+
+            if path.startswith("/generated/"):
+                target = app.image_generation.resolve_generated(path.rsplit("/", 1)[-1])
                 if not target:
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
@@ -153,81 +146,56 @@ def make_handler(
                 self.end_headers()
                 self.wfile.write(data)
                 return
+
             if not self._authorized():
                 self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
                 return
-            if parsed.path == "/v1/status":
-                self._json(HTTPStatus.OK, app.status())
-                return
-            if parsed.path == "/v1/hardware":
-                self._json(HTTPStatus.OK, hardware_status(settings.brain_dir))
-                return
-            if parsed.path == "/v1/overview":
-                self._json(HTTPStatus.OK, dashboard.overview(self._arg(args, "owner_id", "web:local")))
-                return
-            if parsed.path == "/v1/model/status":
-                self._json(HTTPStatus.OK, app.model_downloader.status())
-                return
-            if parsed.path == "/v1/models":
-                self._json(HTTPStatus.OK, model_catalog.status(active_path=app.model_path))
-                return
-            if parsed.path == "/v1/nas":
-                self._json(HTTPStatus.OK, nas_store.public_status(probe=False))
-                return
-            if parsed.path == "/v1/image/status":
-                self._json(HTTPStatus.OK, app.image_generation.status())
-                return
-            if parsed.path == "/v1/image/job":
-                job_id = self._arg(args, "job_id")
-                job = app.image_generation.job(job_id)
-                if not job:
-                    self._json(HTTPStatus.NOT_FOUND, {"error": "Задача генерации изображения не найдена"})
-                else:
-                    self._json(HTTPStatus.OK, job)
-                return
-            if parsed.path == "/v1/telegram/status":
-                self._json(HTTPStatus.OK, telegram.status())
-                return
-            if parsed.path == "/v1/history":
+
+            if path == "/v1/status":
+                return self._json(HTTPStatus.OK, app.status())
+            if path == "/v1/hardware":
+                return self._json(HTTPStatus.OK, hardware_status(settings.brain_dir))
+            if path == "/v1/overview":
+                return self._json(HTTPStatus.OK, dashboard.overview(self._arg(args, "owner_id", "web:local")))
+            if path == "/v1/model/status":
+                return self._json(HTTPStatus.OK, app.model_downloader.status())
+            if path == "/v1/models":
+                return self._json(HTTPStatus.OK, model_catalog.status(active_path=app.model_path))
+            if path == "/v1/nas":
+                return self._json(HTTPStatus.OK, nas_store.public_status(probe=False))
+            if path == "/v1/image/status":
+                return self._json(HTTPStatus.OK, app.image_generation.status())
+            if path == "/v1/image/job":
+                job = app.image_generation.job(self._arg(args, "job_id"))
+                return self._json(HTTPStatus.OK if job else HTTPStatus.NOT_FOUND, job or {"error": "Задача генерации изображения не найдена"})
+            if path == "/v1/telegram/status":
+                return self._json(HTTPStatus.OK, telegram.status())
+            if path == "/v1/history":
                 session_id = self._arg(args, "session_id")
                 owner_id = self._arg(args, "owner_id", "web:local")
                 if not session_id:
-                    self._json(HTTPStatus.BAD_REQUEST, {"error": "session_id обязателен"})
-                    return
-                try:
-                    self._json(HTTPStatus.OK, {"items": app.history(owner_id, session_id)})
-                except Exception as exc:
-                    self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-                return
-            if parsed.path == "/v1/sessions":
-                self._json(HTTPStatus.OK, {"items": dashboard.sessions(self._arg(args, "owner_id", "web:local"), self._arg(args, "limit", "50"))})
-                return
-            if parsed.path == "/v1/memories":
-                self._json(HTTPStatus.OK, {"items": dashboard.memories(self._arg(args, "owner_id", "web:local"), self._arg(args, "limit", "100"))})
-                return
-            if parsed.path == "/v1/knowledge":
-                self._json(HTTPStatus.OK, {"items": dashboard.knowledge(self._arg(args, "status", "all"), self._arg(args, "limit", "100"))})
-                return
-            if parsed.path == "/v1/research/tasks":
-                self._json(HTTPStatus.OK, {"items": dashboard.research_tasks(self._arg(args, "limit", "100"))})
-                return
-            if parsed.path == "/v1/learning/history":
-                self._json(HTTPStatus.OK, {"items": dashboard.learning_history(self._arg(args, "limit", "100"))})
-                return
-            if parsed.path == "/v1/tasks":
-                self._json(HTTPStatus.OK, {"items": dashboard.tasks(self._arg(args, "owner_id", "web:local"), self._arg(args, "status", "all"), self._arg(args, "limit", "100"))})
-                return
-            if parsed.path == "/v1/capabilities":
-                self._json(HTTPStatus.OK, {"items": dashboard.capabilities()})
-                return
-            if parsed.path == "/v1/logs":
-                self._json(HTTPStatus.OK, dashboard.logs(self._arg(args, "limit", "120")))
-                return
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "session_id обязателен"})
+                return self._json(HTTPStatus.OK, {"items": app.history(owner_id, session_id)})
+            if path == "/v1/sessions":
+                return self._json(HTTPStatus.OK, {"items": dashboard.sessions(self._arg(args, "owner_id", "web:local"), self._arg(args, "limit", "50"))})
+            if path == "/v1/memories":
+                return self._json(HTTPStatus.OK, {"items": dashboard.memories(self._arg(args, "owner_id", "web:local"), self._arg(args, "limit", "100"))})
+            if path == "/v1/knowledge":
+                return self._json(HTTPStatus.OK, {"items": dashboard.knowledge(self._arg(args, "status", "all"), self._arg(args, "limit", "100"))})
+            if path == "/v1/research/tasks":
+                return self._json(HTTPStatus.OK, {"items": dashboard.research_tasks(self._arg(args, "limit", "100"))})
+            if path == "/v1/learning/history":
+                return self._json(HTTPStatus.OK, {"items": dashboard.learning_history(self._arg(args, "limit", "100"))})
+            if path == "/v1/tasks":
+                return self._json(HTTPStatus.OK, {"items": dashboard.tasks(self._arg(args, "owner_id", "web:local"), self._arg(args, "status", "all"), self._arg(args, "limit", "100"))})
+            if path == "/v1/capabilities":
+                return self._json(HTTPStatus.OK, {"items": dashboard.capabilities()})
+            if path == "/v1/logs":
+                return self._json(HTTPStatus.OK, dashboard.logs(self._arg(args, "limit", "120")))
             self._json(HTTPStatus.NOT_FOUND, {"error": "Не найдено"})
 
         def _upload_model(self) -> None:
-            raw_name = self.headers.get("X-Leshy-Filename", "").strip()
-            filename = parse.unquote(raw_name)
+            filename = parse.unquote(self.headers.get("X-Leshy-Filename", "").strip())
             if not filename:
                 raise ValueError("Не передано имя GGUF-файла")
             length = int(self.headers.get("Content-Length", "0") or "0")
@@ -242,19 +210,18 @@ def make_handler(
                 return
             try:
                 if self.path == "/v1/models/upload":
-                    self._upload_model()
-                    return
+                    return self._upload_model()
 
                 body = self._body()
-                if self.path == "/v1/chat":
+                path = self.path
+                if path == "/v1/chat":
                     result = app.chat(
                         str(body.get("message") or ""),
                         owner_id=str(body.get("owner_id") or "web:local"),
                         session_id=str(body.get("session_id") or "") or None,
                     )
-                    self._json(HTTPStatus.OK, result)
-                    return
-                if self.path == "/v1/hardware/config":
+                    return self._json(HTTPStatus.OK, result)
+                if path == "/v1/hardware/config":
                     store = HardwareConfigStore(settings.brain_dir)
                     current = store.load()
                     config = HardwareConfig(
@@ -263,9 +230,8 @@ def make_handler(
                         prefer_npu_for_background=bool(body.get("prefer_npu_for_background", current.prefer_npu_for_background)),
                     )
                     store.save(config)
-                    self._json(HTTPStatus.OK, hardware_status(settings.brain_dir))
-                    return
-                if self.path == "/v1/nas/config":
+                    return self._json(HTTPStatus.OK, hardware_status(settings.brain_dir))
+                if path == "/v1/nas/config":
                     current = nas_store.load()
                     config = NasSettings(
                         root=str(body.get("root", current.root) or ""),
@@ -280,37 +246,31 @@ def make_handler(
                     saved = nas_store.save(config, password=str(body.get("password") or "") if password_supplied else None)
                     if bool(body.get("clear_password")) or not saved.smb_username:
                         nas_store.clear_password()
-                    self._json(HTTPStatus.OK, nas_store.public_status(probe=False))
-                    return
-                if self.path == "/v1/nas/test":
-                    self._json(HTTPStatus.OK, nas_store.public_status(probe=True))
-                    return
-                if self.path == "/v1/image/generate":
+                    return self._json(HTTPStatus.OK, nas_store.public_status(probe=False))
+                if path == "/v1/nas/test":
+                    return self._json(HTTPStatus.OK, nas_store.public_status(probe=True))
+                if path == "/v1/logs/clear":
+                    return self._json(HTTPStatus.OK, dashboard.clear_logs())
+                if path == "/v1/image/generate":
                     job = app.image_generation.enqueue(
                         str(body.get("prompt") or ""),
                         width=int(body.get("width") or 512),
                         height=int(body.get("height") or 512),
                         steps=int(body.get("steps") or 20),
                     )
-                    self._json(HTTPStatus.ACCEPTED, job)
-                    return
-                if self.path == "/v1/search":
-                    self._json(HTTPStatus.OK, app.live_search(str(body.get("query") or ""), limit=int(body.get("limit") or 5)))
-                    return
-                if self.path == "/v1/research/queue":
+                    return self._json(HTTPStatus.ACCEPTED, job)
+                if path == "/v1/search":
+                    return self._json(HTTPStatus.OK, app.live_search(str(body.get("query") or ""), limit=int(body.get("limit") or 5)))
+                if path == "/v1/research/queue":
                     task_id = app.queue_research(str(body.get("query") or ""))
-                    self._json(HTTPStatus.ACCEPTED, {"task_id": task_id, "queued": True})
-                    return
-                if self.path == "/v1/learning":
-                    enabled = app.set_learning(bool(body.get("enabled")))
-                    self._json(HTTPStatus.OK, {"enabled": enabled})
-                    return
-                if self.path == "/v1/memory":
+                    return self._json(HTTPStatus.ACCEPTED, {"task_id": task_id, "queued": True})
+                if path == "/v1/learning":
+                    return self._json(HTTPStatus.OK, {"enabled": app.set_learning(bool(body.get("enabled")))})
+                if path == "/v1/memory":
                     owner_id = str(body.get("owner_id") or "web:local")
                     memory_id = app.remember(owner_id, str(body.get("content") or ""), importance=float(body.get("importance") or .8))
-                    self._json(HTTPStatus.CREATED, {"id": memory_id})
-                    return
-                if self.path == "/v1/tasks":
+                    return self._json(HTTPStatus.CREATED, {"id": memory_id})
+                if path == "/v1/tasks":
                     task = dashboard.create_task(
                         owner_id=str(body.get("owner_id") or "web:local"),
                         title=str(body.get("title") or ""),
@@ -318,23 +278,18 @@ def make_handler(
                         priority=int(body.get("priority") or 0),
                         due_at=str(body.get("due_at") or "") or None,
                     )
-                    self._json(HTTPStatus.CREATED, task)
-                    return
-                if self.path == "/v1/tasks/update":
+                    return self._json(HTTPStatus.CREATED, task)
+                if path == "/v1/tasks/update":
                     task_id = int(body.get("id") or 0)
                     if task_id <= 0:
                         raise ValueError("id задачи обязателен")
                     changes = {key: body[key] for key in ("title", "details", "status", "priority", "due_at") if key in body}
-                    task = dashboard.update_task(owner_id=str(body.get("owner_id") or "web:local"), task_id=task_id, **changes)
-                    self._json(HTTPStatus.OK, task)
-                    return
-                if self.path == "/v1/model/download":
-                    self._json(HTTPStatus.ACCEPTED, app.model_downloader.start())
-                    return
-                if self.path == "/v1/models/select":
-                    self._json(HTTPStatus.OK, switch_app_model(app, model_catalog, str(body.get("name") or "")))
-                    return
-                if self.path == "/v1/telegram/config":
+                    return self._json(HTTPStatus.OK, dashboard.update_task(owner_id=str(body.get("owner_id") or "web:local"), task_id=task_id, **changes))
+                if path == "/v1/model/download":
+                    return self._json(HTTPStatus.ACCEPTED, app.model_downloader.start())
+                if path == "/v1/models/select":
+                    return self._json(HTTPStatus.OK, switch_app_model(app, model_catalog, str(body.get("name") or "")))
+                if path == "/v1/telegram/config":
                     users = body.get("allowed_users") or []
                     if isinstance(users, str):
                         users = [part.strip() for part in users.replace(",", "\n").splitlines() if part.strip()]
@@ -345,8 +300,7 @@ def make_handler(
                         owner_id=str(body.get("owner_id") or ""),
                     )
                     telegram.start()
-                    self._json(HTTPStatus.OK, telegram.status())
-                    return
+                    return self._json(HTTPStatus.OK, telegram.status())
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Не найдено"})
             except LLMUnavailable as exc:
                 self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc), "code": "model_unavailable"})
@@ -374,7 +328,6 @@ def _warm_local_llm(app: LeshyApp) -> None:
 
 
 def _delayed_recovery(app: LeshyApp, telegram: TelegramBridge, delay_seconds: float = 30.0) -> None:
-    """После старта дать системе 30 секунд, затем восстановить каналы/ответы."""
     time.sleep(max(0.0, float(delay_seconds)))
     try:
         telegram.start()
@@ -396,12 +349,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     app.telegram = telegram
     app.start_background()
     threading.Thread(target=_warm_local_llm, args=(app,), name="leshy-llm-warmup", daemon=True).start()
-    threading.Thread(
-        target=_delayed_recovery,
-        args=(app, telegram, 30.0),
-        name="leshy-startup-recovery",
-        daemon=True,
-    ).start()
+    threading.Thread(target=_delayed_recovery, args=(app, telegram, 30.0), name="leshy-startup-recovery", daemon=True).start()
     bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0")
     bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
     server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
