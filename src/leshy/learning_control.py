@@ -4,10 +4,10 @@ from .storage import Storage
 
 
 class LearningControl:
-    """Persistent on/off switch for autonomous internet learning.
+    """Постоянный переключатель автономного интернет-обучения.
 
-    The state lives in LeshyBrain's SQLite database so a restart or application
-    update cannot silently reset the user's choice.
+    Состояние хранится в SQLite-базе `LeshyBrain`, поэтому перезапуск или
+    обновление приложения не могут незаметно сбросить выбор пользователя.
     """
 
     META_KEY = "idle_learning_enabled"
@@ -27,7 +27,7 @@ class LearningControl:
             row = conn.execute("SELECT value FROM meta WHERE key=?", (self.META_KEY,)).fetchone()
         return bool(row and str(row["value"]).strip().lower() in {"1", "true", "yes", "on"})
 
-    def set_enabled(self, enabled: bool, *, reason: str = "user") -> bool:
+    def set_enabled(self, enabled: bool, *, reason: str = "пользователь") -> bool:
         value = "1" if bool(enabled) else "0"
         with self.storage.connection() as conn:
             conn.execute(
@@ -40,7 +40,7 @@ class LearningControl:
         )
         return bool(enabled)
 
-    def toggle(self, *, reason: str = "user") -> bool:
+    def toggle(self, *, reason: str = "пользователь") -> bool:
         return self.set_enabled(not self.is_enabled(), reason=reason)
 
     @property
