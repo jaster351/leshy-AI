@@ -3,6 +3,7 @@ build/
 dist/
 Leshy.spec
 LeshyBrain/
+/log/leshy-auto.log
 __pycache__/
 *.py[cod]
 *.egg-info/
