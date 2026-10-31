@@ -132,6 +132,51 @@ class RealtimeChatManager:
         history = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
         return context + history, sources, search_attempted
 
+    def _stream_os_action(
+        self,
+        message: str,
+        *,
+        owner_id: str,
+        session_id: str | None,
+        request_id: str | None,
+    ) -> Iterator[StreamEvent]:
+        controller = getattr(self.app, "os_control", None)
+        rid, cancel = self._register(request_id)
+        sid = ""
+        started = time.monotonic()
+        try:
+            sid, _rows = self._save_user_and_history(message, owner_id, session_id)
+            yield StreamEvent("start", {"request_id": rid, "session_id": sid, "os_action": True})
+            if cancel.is_set():
+                yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True, "os_action": True})
+                return
+            answer = str(controller.handle_user_request(message, owner_id=owner_id) or "Системное действие не распознано.")
+            if not cancel.is_set() and answer:
+                # Системный результат обычно короткий, но отдаём частями, чтобы Web/Telegram
+                # использовали тот же realtime-протокол.
+                for chunk in self._chunk_fallback(answer, 160):
+                    if cancel.is_set():
+                        break
+                    yield StreamEvent("delta", {"text": chunk})
+            stopped = cancel.is_set()
+            saved_answer = answer if not stopped else answer
+            answered_at = self.app._save_assistant(sid, saved_answer) if saved_answer else utcnow()
+            yield StreamEvent("done", {
+                "request_id": rid,
+                "session_id": sid,
+                "answer": saved_answer,
+                "created_at": answered_at,
+                "sources": [],
+                "stopped": stopped,
+                "os_action": True,
+                "latency_ms": int((time.monotonic() - started) * 1000),
+            })
+        except Exception as exc:
+            problem("chat_stream_os_failed", str(exc), request_id=rid, owner_id=owner_id)
+            yield StreamEvent("error", {"request_id": rid, "session_id": sid, "error": str(exc), "os_action": True})
+        finally:
+            self._unregister(rid)
+
     def stream(
         self,
         message: str,
@@ -146,6 +191,16 @@ class RealtimeChatManager:
             raise ValueError("Сообщение пустое")
         if len(message) > 32000:
             raise ValueError("Сообщение слишком длинное")
+
+        controller = getattr(self.app, "os_control", None)
+        if controller is not None and controller.is_request(message):
+            yield from self._stream_os_action(
+                message,
+                owner_id=owner_id,
+                session_id=session_id,
+                request_id=request_id,
+            )
+            return
 
         # Служебные команды и image-job пока используют канонический app.chat,
         # но интерфейс остаётся совместимым с тем же SSE протоколом.
