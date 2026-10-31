@@ -17,6 +17,7 @@ import zipfile
 
 from .diagnostics import event, exception
 from .llm import ChatMessage, LLMUnavailable
+from .logging_paths import central_log_path
 
 _GITHUB_RELEASES = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15"
 _RUNTIME_LOCK = threading.RLock()
@@ -36,8 +37,12 @@ class LlamaCppRuntimeManager:
     """Управляет официальными локальными llama.cpp runtime внутри LeshyBrain."""
 
     def __init__(self, brain_dir: Path):
-        self.root = Path(brain_dir) / "runtime" / "llama.cpp"
+        self.brain_dir = Path(brain_dir)
+        self.root = self.brain_dir / "runtime" / "llama.cpp"
         self.root.mkdir(parents=True, exist_ok=True)
+
+    def server_log_path(self, backend: str) -> Path:
+        return central_log_path(self.brain_dir, f"{backend}-server.log")
 
     def _asset_match(self, backend: str, name: str) -> bool:
         lowered = name.lower()
@@ -263,7 +268,7 @@ class LlamaServerLLM:
                 env["GGML_OPENVINO_STATEFUL_EXECUTION"] = "0" if (self.device or "").upper().startswith("NPU") else "1"
                 if (self.device or "").upper().startswith("NPU"):
                     args[args.index("-c") + 1] = str(min(max(512, self.n_ctx), 2048))
-            log_path = self.manager.root / f"{self.backend}-server.log"
+            log_path = self.manager.server_log_path(self.backend)
             log_handle = log_path.open("ab")
             try:
                 self._process = subprocess.Popen(
