@@ -13,6 +13,7 @@ from .secret_store import load_secret, save_secret
 
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_GITHUB_URL_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", re.IGNORECASE)
 _PATH_RE = re.compile(
     r"(?P<path>(?:src|web|windows|tests|docs|\.github|models)/[A-Za-z0-9_./()\-]+|[A-Za-z0-9_.-]+\.(?:py|js|css|html|md|json|ps1|yml|yaml|toml|txt))",
     re.IGNORECASE,
@@ -23,12 +24,7 @@ _DEFAULT_REPOSITORY = "jaster351/leshy-AI"
 
 
 class GitHubPluginService:
-    """Безопасный GitHub-коннектор для официального Marketplace-плагина.
-
-    Чатовый инструмент намеренно работает только на чтение. Репозитории должны
-    быть явно разрешены в локальной конфигурации. GitHub token хранится отдельно
-    от репозитория через secret_store (DPAPI в Windows).
-    """
+    """Read-only GitHub connector для официального Marketplace-плагина Лешего."""
 
     def __init__(self, brain_dir: Path | str):
         self.brain_dir = Path(brain_dir)
@@ -59,7 +55,7 @@ class GitHubPluginService:
         )
         if not isinstance(value, dict):
             value = {}
-        repos = []
+        repos: list[str] = []
         for item in value.get("repositories") or [_DEFAULT_REPOSITORY]:
             repo = str(item or "").strip()
             if _REPO_RE.fullmatch(repo) and repo not in repos:
@@ -77,11 +73,11 @@ class GitHubPluginService:
 
     def status(self) -> dict[str, Any]:
         config = self._config()
-        token_present = False
         try:
             token_present = bool(load_secret(self.token_path))
         except Exception as exc:
             problem("github_plugin_secret_load_failed", str(exc))
+            token_present = False
         return {
             "installed": True,
             "enabled": True,
@@ -191,12 +187,21 @@ class GitHubPluginService:
     def _allowed_repo(self, message: str) -> str:
         config = self._config()
         allowed = list(config["repositories"])
-        candidates = re.findall(r"(?<![\w.-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?![\w./-])", str(message or ""))
-        for candidate in candidates:
-            if candidate in allowed:
-                return candidate
-            if _REPO_RE.fullmatch(candidate):
-                raise PermissionError(f"Репозиторий {candidate} не разрешён в настройках GitHub-плагина")
+        text = str(message or "")
+        lower = text.lower()
+        # Сначала ищем только реально разрешённые owner/repo. Это не путает
+        # web/voice-live.js или src/leshy/app.py с именем репозитория.
+        for repo in allowed:
+            if repo.lower() in lower:
+                return repo
+        # Неизвестный repo блокируем только когда пользователь явно прислал URL GitHub.
+        match = _GITHUB_URL_RE.search(text)
+        if match:
+            candidate = match.group(1)
+            for repo in allowed:
+                if candidate.lower() == repo.lower():
+                    return repo
+            raise PermissionError(f"Репозиторий {candidate} не разрешён в настройках GitHub-плагина")
         return str(config["default_repository"])
 
     @staticmethod
@@ -222,19 +227,17 @@ class GitHubPluginService:
         if not isinstance(data, dict) or str(data.get("type")) != "file":
             raise FileNotFoundError(f"{path} не является файлом")
         content = str(data.get("content") or "").replace("\n", "")
-        encoding = str(data.get("encoding") or "")
-        if encoding == "base64":
+        if str(data.get("encoding") or "") == "base64":
             decoded = base64.b64decode(content).decode("utf-8", errors="replace")
         else:
             decoded = content
-        truncated = len(decoded) > _MAX_FILE_CHARS
         return {
             "repository": repo,
             "path": path,
             "sha": str(data.get("sha") or ""),
             "html_url": str(data.get("html_url") or ""),
             "content": decoded[:_MAX_FILE_CHARS],
-            "truncated": truncated,
+            "truncated": len(decoded) > _MAX_FILE_CHARS,
         }
 
     def list_commits(self, repo: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -264,9 +267,12 @@ class GitHubPluginService:
         result = []
         for row in rows if isinstance(rows, list) else []:
             result.append({
-                "number": row.get("number"), "title": row.get("title"), "state": row.get("state"),
+                "number": row.get("number"),
+                "title": row.get("title"),
+                "state": row.get("state"),
                 "head": str(((row.get("head") or {}).get("ref")) or ""),
-                "base": str(((row.get("base") or {}).get("ref")) or ""), "url": row.get("html_url"),
+                "base": str(((row.get("base") or {}).get("ref")) or ""),
+                "url": row.get("html_url"),
             })
         return result
 
@@ -315,9 +321,8 @@ class GitHubPluginService:
         return [path for _score, path in scored[:limit]]
 
     def search_code(self, repo: str, message: str, limit: int = 5) -> list[dict[str, Any]]:
-        token = self._token()
         hints = self._search_hints(message)
-        if token and hints:
+        if self._token() and hints:
             try:
                 query = " ".join(hints[:4]) + f" repo:{repo}"
                 data = self._api("/search/code", params={"q": query, "per_page": max(1, min(limit, 10))})
@@ -337,25 +342,25 @@ class GitHubPluginService:
         path = self._path_from_message(text)
         if path:
             result = {"kind": "file", "file": self.read_file(repo, path)}
-        elif any(token in lower for token in ("pull request", "pull-request", "пулл-реквест", " pr ", " pr?", "pr #")):
+        elif any(token in lower for token in ("pull request", "pull-request", "пулл-реквест", " pr ", "pr #")):
             result = {"kind": "pull_requests", "repository": repo, "items": self.list_pulls(repo)}
         elif any(token in lower for token in ("issue", "issues", "ишью", "задач github", "задачи github")):
             result = {"kind": "issues", "repository": repo, "items": self.list_issues(repo)}
         elif any(token in lower for token in ("commit", "commits", "коммит", "история изменений")):
             result = {"kind": "commits", "repository": repo, "items": self.list_commits(repo)}
-        elif any(token in lower for token in ("репозитор", "repository")) and not self._search_hints(text):
+        elif "репозитор" in lower or "repository" in lower:
             result = {"kind": "repository", "repository": self.repository_info(repo)}
         else:
             matches = self.search_code(repo, text, limit=5)
             files = []
             for item in matches[:2]:
-                path = str(item.get("path") or "")
-                if not path:
+                candidate = str(item.get("path") or "")
+                if not candidate:
                     continue
                 try:
-                    files.append(self.read_file(repo, path))
+                    files.append(self.read_file(repo, candidate))
                 except Exception as exc:
-                    files.append({"path": path, "error": str(exc)})
+                    files.append({"path": candidate, "error": str(exc)})
             result = {"kind": "code_search", "repository": repo, "matches": matches, "files": files}
 
         rendered = json.dumps(result, ensure_ascii=False, indent=2)
