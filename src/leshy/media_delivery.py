@@ -10,11 +10,14 @@ from typing import Any
 from urllib import request
 
 from .diagnostics import event, problem
+from .nas_settings import NasSettingsStore
 from .research import SafeWebFetcher
 from .storage import Storage, utcnow
 
 
-RIGHTS_ALLOWED = {"owned", "authorized", "public_domain", "open_license", "official_free"}
+# Проверяется право на сам материал, а не способ доставки. BitTorrent/torrent/magnet
+# являются нейтральными технологиями и не блокируются как класс.
+RIGHTS_ALLOWED = {"owned", "authorized", "public_domain", "open_license", "official_free", "purchased"}
 AUDIO_EXTENSIONS = {".flac", ".alac", ".wav", ".aiff", ".aif", ".m4a", ".aac", ".opus", ".ogg", ".mp3"}
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".webm", ".mov", ".avi", ".ts", ".m2ts"}
 TORRENT_EXTENSIONS = {".torrent"}
@@ -43,6 +46,16 @@ class NasPaths:
             video = video or root / "video"
         return cls(root=root, torrent_watch=torrent_watch, music=music, video=video)
 
+    @classmethod
+    def from_store(cls, brain_dir: Path | str) -> "NasPaths":
+        config = NasSettingsStore(brain_dir).load()
+        return cls(
+            root=Path(config.root) if config.root else None,
+            torrent_watch=Path(config.torrent_watch) if config.torrent_watch else None,
+            music=Path(config.music) if config.music else None,
+            video=Path(config.video) if config.video else None,
+        )
+
     def configured(self) -> bool:
         return any(path is not None for path in (self.root, self.torrent_watch, self.music, self.video))
 
@@ -50,17 +63,30 @@ class NasPaths:
 class MediaDeliveryManager:
     """Доставляет разрешённые медиафайлы и torrent-файлы в NAS.
 
-    NAS рассматривается как уже смонтированная локальная/UNC-папка. Менеджер не
-    хранит логины/пароли SMB и не обходит ограничения доступа. Для материалов,
-    найденных в интернете, вызывающий код обязан передать подтверждённый тип прав.
+    Torrent-файл не считается пиратским сам по себе. Для интернет-источника
+    проверяется правовой статус конкретного материала. SMB-доступ восстанавливается
+    из постоянных настроек NAS; пароль не попадает в журнал доставки.
     """
 
     MAX_REMOTE_BYTES = 25 * 1024 * 1024 * 1024
 
-    def __init__(self, storage: Storage, paths: NasPaths | None = None):
+    def __init__(self, storage: Storage, paths: NasPaths | None = None, *, brain_dir: Path | str | None = None):
         self.storage = storage
-        self.paths = paths or NasPaths.from_env()
+        self.nas_store = NasSettingsStore(brain_dir) if brain_dir is not None else None
+        self.paths = paths or (NasPaths.from_store(brain_dir) if brain_dir is not None else NasPaths.from_env())
         self._ensure_schema()
+
+    def refresh_paths(self) -> NasPaths:
+        if self.nas_store is not None:
+            self.paths = NasPaths.from_store(self.nas_store.brain_dir)
+        return self.paths
+
+    def _ensure_nas_access(self) -> None:
+        if self.nas_store is not None:
+            result = self.nas_store.connect()
+            if result.get("attempted") and not result.get("connected"):
+                raise RuntimeError(str(result.get("error") or "Не удалось подключиться к NAS по SMB"))
+        self.refresh_paths()
 
     def _ensure_schema(self) -> None:
         with self.storage.connection() as conn:
@@ -106,6 +132,7 @@ class MediaDeliveryManager:
         return codec_bonus + max(0, int(bitrate_kbps))
 
     def _destination_dir(self, kind: str) -> Path:
+        self._ensure_nas_access()
         selected = {
             "torrent": self.paths.torrent_watch,
             "music": self.paths.music,
@@ -120,15 +147,13 @@ class MediaDeliveryManager:
     @staticmethod
     def _require_rights(rights_basis: str, *, source_type: str) -> str:
         rights = str(rights_basis or "unknown").strip().lower()
-        # Для файла, который пользователь уже предоставил локально, перенос в его
-        # собственное хранилище допустим как обычная файловая операция. Для
-        # интернет-загрузки требуется известное основание доступа.
         if source_type == "local" and rights == "unknown":
             return "owned"
         if rights not in RIGHTS_ALLOWED:
             raise PermissionError(
-                "Для загрузки найденного в интернете материала нужно подтверждённое право: "
-                "owned/authorized/public_domain/open_license/official_free"
+                "Для интернет-загрузки нужен известный правовой статус материала: "
+                "owned/authorized/public_domain/open_license/official_free/purchased. "
+                "Это ограничение относится к материалу, а не к BitTorrent."
             )
         return rights
 
@@ -249,6 +274,7 @@ class MediaDeliveryManager:
         return dict(row)
 
     def status(self) -> dict[str, Any]:
+        self.refresh_paths()
         return {
             "configured": self.paths.configured(),
             "root": str(self.paths.root) if self.paths.root else "",
@@ -256,6 +282,7 @@ class MediaDeliveryManager:
             "music": str(self.paths.music) if self.paths.music else "",
             "video": str(self.paths.video) if self.paths.video else "",
             "allowed_rights": sorted(RIGHTS_ALLOWED),
+            "torrent_protocol_allowed": True,
         }
 
 
