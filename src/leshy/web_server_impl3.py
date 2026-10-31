@@ -12,6 +12,7 @@ from .diagnostics import event, problem
 from .hf_settings import HuggingFaceSettings
 from .marketplace import MarketplaceManager
 from .marketplace_chat import install_marketplace_chat_bridge
+from .marketplace_discovery import discover as discover_marketplace, install as install_marketplace_item
 from .marketplace_plugin_runtime import MarketplacePluginRuntime
 from .memory_policy import memory_status
 from .model_catalog import apply_saved_model_to_settings, configure_app_model_verifier
@@ -122,9 +123,6 @@ def _delayed_recovery_after_ready(
     shutdown: threading.Event,
     started_monotonic: float,
 ) -> None:
-    # Сохраняем продуктовый контракт: Telegram не обрабатывает накопленные сообщения
-    # раньше чем через 30 секунд после запуска. Если модель ещё грузится, ждём её,
-    # чтобы очередь Telegram не конкурировала с прогревом за RAM/CPU/GPU.
     minimum_remaining = _TELEGRAM_MINIMUM_DELAY_SECONDS - (time.monotonic() - started_monotonic)
     if minimum_remaining > 0 and shutdown.wait(minimum_remaining):
         return
@@ -150,6 +148,26 @@ def _delayed_recovery_after_ready(
         )
 
 
+def _runtime_html(settings) -> bytes:
+    """Единая оболочка Web UI. ChatGPT-подобную компоновку не меняем без явной просьбы пользователя."""
+    html = previous.base._inject_runtime_ui(previous.base._web_index(settings).read_text(encoding="utf-8"))
+    markers = (
+        '<script src="/chatgpt-shell.js"></script>',
+        '<script src="/right-menu-fix.js"></script>',
+        '<script src="/os-approval-ui.js"></script>',
+        '<script src="/hf-settings-panel.js"></script>',
+        '<script src="/marketplace-panel.js"></script>',
+        '<script src="/thinking-indicator.js"></script>',
+        '<script src="/stream-activity-bridge.js"></script>',
+        '<script src="/voice-live.js"></script>',
+        '<script src="/chat-multitask.js"></script>',
+    )
+    for marker in markers:
+        if marker not in html:
+            html = html.replace("</body>", marker + "\n</body>")
+    return html.encode("utf-8")
+
+
 def make_handler(app, telegram, settings, model_catalog):
     marketplace = getattr(app, "marketplace", None)
     if marketplace is None:
@@ -161,17 +179,28 @@ def make_handler(app, telegram, settings, model_catalog):
     class Handler(Parent):
         def do_GET(self):
             parsed = parse.urlparse(self.path)
+            if parsed.path == "/":
+                data = _runtime_html(settings)
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+                return
+
             if parsed.path == "/chatgpt-shell.js":
                 try:
                     return self._send_asset("chatgpt-shell-stable.js", "application/javascript; charset=utf-8")
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": "chatgpt-shell-stable.js не найден"})
 
-            if parsed.path == "/marketplace-panel.js":
+            if parsed.path in {"/marketplace-panel.js", "/chat-multitask.js"}:
+                name = parsed.path.rsplit("/", 1)[-1]
                 try:
-                    return self._send_asset("marketplace-panel.js", "application/javascript; charset=utf-8")
+                    return self._send_asset(name, "application/javascript; charset=utf-8")
                 except FileNotFoundError:
-                    return self._json(HTTPStatus.NOT_FOUND, {"error": "marketplace-panel.js не найден"})
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": f"{name} не найден"})
 
             if parsed.path in {"/v1/marketplace", "/v1/marketplace/status"}:
                 if not self._authorized():
@@ -190,6 +219,8 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
                 try:
                     body = self._body()
+                    if parsed.path == "/v1/marketplace/discover":
+                        return self._json(HTTPStatus.OK, discover_marketplace(marketplace, str(body.get("query") or "")))
                     if parsed.path == "/v1/marketplace/refresh":
                         return self._json(HTTPStatus.OK, marketplace.refresh())
                     if parsed.path == "/v1/marketplace/source/add":
@@ -199,7 +230,7 @@ def make_handler(app, telegram, settings, model_catalog):
                         sources = marketplace.remove_source(str(body.get("url") or ""))
                         return self._json(HTTPStatus.OK, {"ok": True, "sources": sources})
                     if parsed.path == "/v1/marketplace/install":
-                        return self._json(HTTPStatus.OK, marketplace.install(str(body.get("id") or "")))
+                        return self._json(HTTPStatus.OK, install_marketplace_item(marketplace, str(body.get("id") or "")))
                     if parsed.path == "/v1/marketplace/toggle":
                         return self._json(
                             HTTPStatus.OK,
@@ -231,9 +262,6 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     model_catalog = apply_saved_model_to_settings(settings)
     app = previous.base.LeshyApp(settings)
 
-    # LeshyApp создаёт базовый LLM при инициализации. Для совместимого runtime
-    # пересобираем его один раз и сразу закрываем старый набор объектов, чтобы
-    # не оставлять потенциальные ссылки на лишний runtime.
     old_llm = app.llm
     app.accelerator_runtime = CompatibleRuntimeManager(
         settings.brain_dir,
