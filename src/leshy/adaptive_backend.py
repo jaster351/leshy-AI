@@ -7,6 +7,7 @@ from typing import Any
 
 from .diagnostics import event, exception
 from .llm import ChatMessage, LLMUnavailable
+from .persona import with_leshy_identity
 
 
 @dataclass
@@ -70,11 +71,15 @@ class AdaptiveLLM:
             return sorted(cooling, key=lambda state: state.failed_until)[:1]
 
     def chat(self, messages: list[ChatMessage]) -> str:
+        # Личность Лешего задаётся в одном месте и передаётся любому выбранному
+        # backend. Поэтому переключение GPU/NPU/CPU не меняет имя и стиль
+        # ассистента и базовая модель не начинает представляться пользователю.
+        prepared_messages = with_leshy_identity(messages)
         errors: list[str] = []
         for state in self._ordered():
             started = time.monotonic()
             try:
-                text = state.provider.chat(messages)
+                text = state.provider.chat(prepared_messages)
             except Exception as exc:
                 latency_ms = int((time.monotonic() - started) * 1000)
                 with self._lock:
