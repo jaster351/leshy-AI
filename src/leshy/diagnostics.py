@@ -47,6 +47,32 @@ class RedactingFormatter(logging.Formatter):
         return _sanitize_text(super().format(record))
 
 
+class ReleasingRotatingFileHandler(RotatingFileHandler):
+    """Rotating handler that never keeps a Windows log file locked between records.
+
+    Leshy can be recreated many times by tests, updater health checks and embedded
+    runtimes. A normal RotatingFileHandler keeps the file descriptor open until
+    explicit shutdown, which prevents TemporaryDirectory and update staging
+    directories from being removed on Windows. We open lazily for each emit and
+    close immediately afterwards while preserving the standard rotation logic.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            super().emit(record)
+        finally:
+            self.acquire()
+            try:
+                if self.stream is not None:
+                    try:
+                        self.flush()
+                    finally:
+                        self.stream.close()
+                        self.stream = None
+            finally:
+                self.release()
+
+
 def close_diagnostics() -> None:
     global _CONFIGURED, _LOG_DIR, _ANALYSIS_LOG_DIR, _HANDLERS
     logger = logging.getLogger(_LOGGER_NAME)
@@ -86,19 +112,32 @@ def configure_diagnostics(base_dir: Path, version: str) -> logging.Logger:
     _LOG_DIR = log_dir
     _ANALYSIS_LOG_DIR = analysis_dir
     formatter = RedactingFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-    all_handler = RotatingFileHandler(log_dir / "leshy.log", maxBytes=10 * 1024 * 1024, backupCount=10, encoding="utf-8")
+    all_handler = ReleasingRotatingFileHandler(
+        log_dir / "leshy.log",
+        maxBytes=10 * 1024 * 1024,
+        backupCount=10,
+        encoding="utf-8",
+        delay=True,
+    )
     all_handler.setLevel(logging.INFO)
     all_handler.setFormatter(formatter)
-    problem_handler = RotatingFileHandler(log_dir / "problems.log", maxBytes=10 * 1024 * 1024, backupCount=10, encoding="utf-8")
+    problem_handler = ReleasingRotatingFileHandler(
+        log_dir / "problems.log",
+        maxBytes=10 * 1024 * 1024,
+        backupCount=10,
+        encoding="utf-8",
+        delay=True,
+    )
     problem_handler.setLevel(logging.WARNING)
     problem_handler.setFormatter(formatter)
     handlers: list[logging.Handler] = [all_handler, problem_handler]
     if analysis_dir is not None:
-        analysis_handler = RotatingFileHandler(
+        analysis_handler = ReleasingRotatingFileHandler(
             analysis_dir / "leshy-auto.log",
             maxBytes=5 * 1024 * 1024,
             backupCount=4,
             encoding="utf-8",
+            delay=True,
         )
         analysis_handler.setLevel(logging.INFO)
         analysis_handler.setFormatter(formatter)
@@ -217,11 +256,21 @@ def _install_exception_hooks(logger: logging.Logger) -> None:
     previous = sys.excepthook
     if getattr(previous, "_leshy_hook", False):
         return
+
     def sys_hook(exc_type, exc, tb):
         try:
-            payload = {"event": "unhandled_exception", "session": _SESSION_ID, "pid": os.getpid(), "thread": threading.current_thread().name, "error_type": getattr(exc_type, "__name__", str(exc_type)), "error": _sanitize_text(str(exc)), "traceback": _sanitize_text("".join(traceback.format_exception(exc_type, exc, tb)))}
+            payload = {
+                "event": "unhandled_exception",
+                "session": _SESSION_ID,
+                "pid": os.getpid(),
+                "thread": threading.current_thread().name,
+                "error_type": getattr(exc_type, "__name__", str(exc_type)),
+                "error": _sanitize_text(str(exc)),
+                "traceback": _sanitize_text("".join(traceback.format_exception(exc_type, exc, tb))),
+            }
             logger.critical(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         finally:
             previous(exc_type, exc, tb)
+
     sys_hook._leshy_hook = True  # type: ignore[attr-defined]
     sys.excepthook = sys_hook
