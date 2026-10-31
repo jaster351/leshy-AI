@@ -1,3 +1,5 @@
 """Леший — автономный LLM-агент."""
 
-__version__ = "1.10.3"
+from .version import VERSION as __version__
+
+__all__ = ["__version__"]
