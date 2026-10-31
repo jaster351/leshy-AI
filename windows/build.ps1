@@ -84,6 +84,19 @@ try {
     source = 'dist/Leshy/LeshyBrain/logs'
   }
   $meta | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runtimeLogStage 'build-metadata.json') -Encoding UTF8
+
+  if ($env:GITHUB_ACTIONS -ne 'true') {
+    $publisher = Join-Path $PSScriptRoot 'publish-build-logs.ps1'
+    if (Test-Path $publisher) {
+      try {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publisher -Source $runtimeLogStage -Version $version
+        if ($LASTEXITCODE -ne 0) { Write-Warning "Leshy build log upload failed with exit code $LASTEXITCODE" }
+      } catch {
+        Write-Warning "Leshy build log upload failed: $($_.Exception.Message)"
+      }
+    }
+  }
+
   Remove-Item -Recurse -Force $smokeBrain -ErrorAction SilentlyContinue
 }
 
