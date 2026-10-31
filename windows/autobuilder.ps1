@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$UiScript = Join-Path $PSScriptRoot 'autobuilder-ui.ps1'
+$UiScript = Join-Path $PSScriptRoot 'autobuilder-ui-v3.ps1'
 $CoreScript = Join-Path $PSScriptRoot 'autobuilder-core.ps1'
 $SettingsPath = Join-Path (Join-Path $RepoRoot '.autobuild') 'ui-settings.json'
 $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -45,14 +45,20 @@ function Get-CoreTargetArguments {
     return ' -RepositoryPath ' + (Quote-Argument $path) + ' -Remote ' + (Quote-Argument $remote) + ' -Branch ' + (Quote-Argument $branch)
 }
 
+function Is-AutoBuilderUiCommand {
+    param([string]$CommandLine)
+    if (-not $CommandLine) { return $false }
+    return (
+        $CommandLine.IndexOf('autobuilder-ui-v3.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $CommandLine.IndexOf('autobuilder-ui.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    )
+}
+
 function Find-UiProcess {
     try {
         foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue)) {
             if ([int]$proc.ProcessId -eq $PID) { continue }
-            $cmd = [string]$proc.CommandLine
-            if ($cmd -and $cmd.IndexOf('autobuilder-ui.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                return $proc
-            }
+            if (Is-AutoBuilderUiCommand ([string]$proc.CommandLine)) { return $proc }
         }
     } catch { }
     return $null
@@ -72,6 +78,7 @@ function Install-UiStartup {
     New-Item -ItemType Directory -Force -Path $StartupRoot | Out-Null
     $line = '@echo off' + [Environment]::NewLine + 'start "" powershell.exe ' + (Get-UiArguments -Minimized $true) + [Environment]::NewLine
     Set-Content -LiteralPath $StartupCmd -Value $line -Encoding ASCII
+    Stop-UiProcesses
     Start-Ui -Minimized $false
     Write-Host ('AutoBuilder UI installed in user startup: ' + $StartupCmd)
 }
@@ -80,8 +87,7 @@ function Stop-UiProcesses {
     try {
         foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue)) {
             if ([int]$proc.ProcessId -eq $PID) { continue }
-            $cmd = [string]$proc.CommandLine
-            if ($cmd -and $cmd.IndexOf('autobuilder-ui.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            if (Is-AutoBuilderUiCommand ([string]$proc.CommandLine)) {
                 Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction SilentlyContinue
             }
         }
