@@ -150,25 +150,26 @@ class RealtimeChatManager:
             if cancel.is_set():
                 yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True, "os_action": True})
                 return
-            answer = str(controller.handle_user_request(message, owner_id=owner_id) or "Системное действие не распознано.")
+
+            response = controller.handle_user_request(message, owner_id=owner_id, session_id=sid)
+            approval = response.get("approval") if isinstance(response, dict) else None
+            answer = str(response.get("message") or "") if isinstance(response, dict) else str(response or "Системное действие не распознано.")
             if not cancel.is_set() and answer:
-                # Системный результат обычно короткий, но отдаём частями, чтобы Web/Telegram
-                # использовали тот же realtime-протокол.
                 for chunk in self._chunk_fallback(answer, 160):
                     if cancel.is_set():
                         break
                     yield StreamEvent("delta", {"text": chunk})
             stopped = cancel.is_set()
-            saved_answer = answer if not stopped else answer
-            answered_at = self.app._save_assistant(sid, saved_answer) if saved_answer else utcnow()
+            answered_at = self.app._save_assistant(sid, answer) if answer else utcnow()
             yield StreamEvent("done", {
                 "request_id": rid,
                 "session_id": sid,
-                "answer": saved_answer,
+                "answer": answer,
                 "created_at": answered_at,
                 "sources": [],
                 "stopped": stopped,
                 "os_action": True,
+                "approval": approval,
                 "latency_ms": int((time.monotonic() - started) * 1000),
             })
         except Exception as exc:
@@ -202,8 +203,6 @@ class RealtimeChatManager:
             )
             return
 
-        # Служебные команды и image-job пока используют канонический app.chat,
-        # но интерфейс остаётся совместимым с тем же SSE протоколом.
         special = message.lower().startswith(("/remember ", "/memories")) or self.app._image_prompt(message) is not None
         if special:
             rid, cancel = self._register(request_id)
