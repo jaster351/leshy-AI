@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -9,6 +10,7 @@ from urllib import parse
 
 from . import web_server_impl2 as previous
 from .diagnostics import event, problem
+from .github_plugin import GitHubPluginService
 from .hf_settings import HuggingFaceSettings
 from .marketplace import MarketplaceManager
 from .marketplace_chat import install_marketplace_chat_bridge
@@ -26,6 +28,61 @@ _SOFT_WARMUP_DELAY_SECONDS = 2.0
 _BACKGROUND_AFTER_WARMUP_SECONDS = 120.0
 _AUTO_TITLE_QUIET_SECONDS = 180.0
 _TELEGRAM_MINIMUM_DELAY_SECONDS = 30.0
+
+
+_GITHUB_PLUGIN_MANIFEST = {
+    "schema_version": 1,
+    "id": "github",
+    "name": "GitHub",
+    "type": "plugin",
+    "version": "1.0.0",
+    "description": "Официальный плагин Лешего для чтения разрешённых GitHub-репозиториев: исходный код, commits, Issues и Pull Requests.",
+    "developer": {"name": "Leshy AI", "url": "https://github.com/jaster351/leshy-AI"},
+    "homepage": "https://github.com/jaster351/leshy-AI",
+    "license": "GPL-3.0",
+    "permissions": ["github:read", "network:https", "secrets:github-token"],
+    "plugin": {
+        "official_builtin": "github",
+        "tools": [
+            {
+                "name": "github",
+                "builtin": "github",
+                "description": "Читает исходный код, commits, Issues и Pull Requests из разрешённых GitHub-репозиториев.",
+                "triggers": [
+                    "github", "гитхаб", "репозитор", "исходный код", "исходники", "commit", "коммит",
+                    "issue", "pull request", "telegram.py", "voice", "marketplace", "web ui"
+                ],
+            }
+        ],
+    },
+}
+
+
+def _ensure_official_github_plugin(marketplace: MarketplaceManager) -> None:
+    """Установить/обновить только официальный встроенный GitHub manifest.
+
+    Если каталог `plugins/github` уже занят сторонним пакетом, ничего не
+    перезаписываем. Пользовательские секреты и настройки здесь не хранятся.
+    """
+    try:
+        target = marketplace.root / "github"
+        manifest_path = target / "leshy-plugin.json"
+        if manifest_path.is_file():
+            try:
+                current = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                current = None
+            plugin = current.get("plugin") if isinstance(current, dict) and isinstance(current.get("plugin"), dict) else {}
+            if str(plugin.get("official_builtin") or "") != "github":
+                problem("github_plugin_install_skipped", "plugins/github уже занят другим расширением")
+                return
+        target.mkdir(parents=True, exist_ok=True)
+        temporary = manifest_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(_GITHUB_PLUGIN_MANIFEST, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, manifest_path)
+        event("github_plugin_manifest_ready", version=_GITHUB_PLUGIN_MANIFEST["version"])
+    except Exception as exc:
+        problem("github_plugin_manifest_failed", str(exc))
 
 
 def _apply_low_memory_guard(app, settings) -> None:
@@ -157,6 +214,7 @@ def _runtime_html(settings) -> bytes:
         '<script src="/os-approval-ui.js"></script>',
         '<script src="/hf-settings-panel.js"></script>',
         '<script src="/marketplace-panel.js"></script>',
+        '<script src="/github-plugin-panel.js"></script>',
         '<script src="/thinking-indicator.js"></script>',
         '<script src="/stream-activity-bridge.js"></script>',
         '<script src="/voice-live.js"></script>',
@@ -173,7 +231,13 @@ def make_handler(app, telegram, settings, model_catalog):
     if marketplace is None:
         marketplace = MarketplaceManager(settings.brain_dir)
         app.marketplace = marketplace
-        app.marketplace_plugin_runtime = MarketplacePluginRuntime(marketplace)
+        _ensure_official_github_plugin(marketplace)
+    github_plugin = getattr(app, "github_plugin", None)
+    if github_plugin is None:
+        github_plugin = GitHubPluginService(settings.brain_dir)
+        app.github_plugin = github_plugin
+    if getattr(app, "marketplace_plugin_runtime", None) is None:
+        app.marketplace_plugin_runtime = MarketplacePluginRuntime(marketplace, builtin_services={"github": github_plugin})
     Parent = previous.make_handler(app, telegram, settings, model_catalog)
 
     class Handler(Parent):
@@ -195,12 +259,20 @@ def make_handler(app, telegram, settings, model_catalog):
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": "chatgpt-shell-stable.js не найден"})
 
-            if parsed.path in {"/marketplace-panel.js", "/chat-multitask.js"}:
+            if parsed.path in {"/marketplace-panel.js", "/github-plugin-panel.js", "/chat-multitask.js"}:
                 name = parsed.path.rsplit("/", 1)[-1]
                 try:
                     return self._send_asset(name, "application/javascript; charset=utf-8")
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": f"{name} не найден"})
+
+            if parsed.path == "/v1/marketplace/github/status":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                try:
+                    return self._json(HTTPStatus.OK, github_plugin.status())
+                except Exception as exc:
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
             if parsed.path in {"/v1/marketplace", "/v1/marketplace/status"}:
                 if not self._authorized():
@@ -219,6 +291,22 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
                 try:
                     body = self._body()
+                    if parsed.path == "/v1/marketplace/github/config":
+                        repositories = body.get("repositories")
+                        if isinstance(repositories, str):
+                            repositories = [x.strip() for x in repositories.replace(",", "\n").splitlines() if x.strip()]
+                        if repositories is not None and not isinstance(repositories, list):
+                            raise ValueError("repositories должен быть списком")
+                        return self._json(
+                            HTTPStatus.OK,
+                            github_plugin.configure(
+                                repositories=repositories,
+                                default_repository=str(body.get("default_repository") or ""),
+                                token=str(body.get("token") or ""),
+                                clear_token=bool(body.get("clear_token")),
+                                write_enabled=bool(body.get("write_enabled")) if "write_enabled" in body else None,
+                            ),
+                        )
                     if parsed.path == "/v1/marketplace/discover":
                         return self._json(HTTPStatus.OK, discover_marketplace(marketplace, str(body.get("query") or "")))
                     if parsed.path == "/v1/marketplace/refresh":
@@ -282,7 +370,12 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     install_streaming_backends(app.llm)
     install_os_control(app)
     app.marketplace = MarketplaceManager(settings.brain_dir)
-    app.marketplace_plugin_runtime = MarketplacePluginRuntime(app.marketplace)
+    _ensure_official_github_plugin(app.marketplace)
+    app.github_plugin = GitHubPluginService(settings.brain_dir)
+    app.marketplace_plugin_runtime = MarketplacePluginRuntime(
+        app.marketplace,
+        builtin_services={"github": app.github_plugin},
+    )
     install_marketplace_chat_bridge()
 
     telegram = FastTelegramBridge(app, settings.brain_dir)
