@@ -14,17 +14,21 @@ from .dashboard import DashboardService
 from .telegram import TelegramBridge
 
 
-def _web_index(settings: Settings) -> Path:
+def _web_asset(settings: Settings, name: str) -> Path:
     candidates: list[Path] = []
     bundle = getattr(sys, "_MEIPASS", "")
     if bundle:
-        candidates.append(Path(bundle) / "web" / "index.html")
-    candidates.append(settings.install_root / "web" / "index.html")
-    candidates.append(Path(__file__).resolve().parents[2] / "web" / "index.html")
+        candidates.append(Path(bundle) / "web" / name)
+    candidates.append(settings.install_root / "web" / name)
+    candidates.append(Path(__file__).resolve().parents[2] / "web" / name)
     for candidate in candidates:
         if candidate.is_file():
             return candidate
-    raise FileNotFoundError("Не найден web/index.html")
+    raise FileNotFoundError(f"Не найден web/{name}")
+
+
+def _web_index(settings: Settings) -> Path:
+    return _web_asset(settings, "index.html")
 
 
 def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
@@ -65,16 +69,33 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
         def _arg(args: dict[str, list[str]], name: str, default: str = "") -> str:
             return str((args.get(name) or [default])[0]).strip()
 
+        def _send_asset(self, path: Path, content_type: str) -> None:
+            data = path.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
         def do_GET(self):
             parsed = parse.urlparse(self.path)
             args = parse.parse_qs(parsed.query)
             if parsed.path == "/":
-                data = _web_index(settings).read_bytes()
+                html = _web_index(settings).read_text(encoding="utf-8")
+                marker = '<script src="/ui-enhancements.js"></script>'
+                if marker not in html:
+                    html = html.replace("</body>", marker + "\n</body>")
+                data = html.encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(data)
+                return
+            if parsed.path == "/ui-enhancements.js":
+                self._send_asset(_web_asset(settings, "ui-enhancements.js"), "application/javascript; charset=utf-8")
                 return
             if parsed.path.startswith("/generated/"):
                 target = app.image_generation.resolve_generated(parsed.path.rsplit("/", 1)[-1])
