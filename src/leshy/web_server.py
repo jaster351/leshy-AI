@@ -14,6 +14,12 @@ from .config import Settings
 from .dashboard import DashboardService
 from .diagnostics import event, problem
 from .hardware import HardwareConfig, HardwareConfigStore, hardware_status
+from .model_catalog import (
+    LocalModelCatalog,
+    apply_saved_model_to_settings,
+    configure_app_model_verifier,
+    switch_app_model,
+)
 from .telegram import TelegramBridge
 
 
@@ -34,7 +40,12 @@ def _web_index(settings: Settings) -> Path:
     return _web_asset(settings, "index.html")
 
 
-def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
+def make_handler(
+    app: LeshyApp,
+    telegram: TelegramBridge,
+    settings: Settings,
+    model_catalog: LocalModelCatalog,
+):
     dashboard = DashboardService(app)
 
     class Handler(BaseHTTPRequestHandler):
@@ -89,16 +100,12 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 css_marker = '<link rel="stylesheet" href="/variant3.css">'
                 if css_marker not in html:
                     html = html.replace("</head>", css_marker + "\n</head>")
-                enhancement_marker = '<script src="/ui-enhancements.js"></script>'
-                hardware_marker = '<script src="/hardware-panel.js"></script>'
-                variant_marker = '<script src="/variant3.js"></script>'
-                scripts = ""
-                if enhancement_marker not in html:
-                    scripts += enhancement_marker + "\n"
-                if hardware_marker not in html:
-                    scripts += hardware_marker + "\n"
-                if variant_marker not in html:
-                    scripts += variant_marker + "\n"
+                markers = (
+                    '<script src="/ui-enhancements.js"></script>',
+                    '<script src="/hardware-panel.js"></script>',
+                    '<script src="/variant3.js"></script>',
+                )
+                scripts = "".join(marker + "\n" for marker in markers if marker not in html)
                 if scripts:
                     html = html.replace("</body>", scripts + "</body>")
                 data = html.encode("utf-8")
@@ -148,6 +155,9 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 return
             if parsed.path == "/v1/model/status":
                 self._json(HTTPStatus.OK, app.model_downloader.status())
+                return
+            if parsed.path == "/v1/models":
+                self._json(HTTPStatus.OK, model_catalog.status(active_path=app.model_path))
                 return
             if parsed.path == "/v1/image/status":
                 self._json(HTTPStatus.OK, app.image_generation.status())
@@ -200,11 +210,28 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 return
             self._json(HTTPStatus.NOT_FOUND, {"error": "Не найдено"})
 
+        def _upload_model(self) -> None:
+            raw_name = self.headers.get("X-Leshy-Filename", "").strip()
+            filename = parse.unquote(raw_name)
+            if not filename:
+                raise ValueError("Не передано имя GGUF-файла")
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            result = model_catalog.save_upload(self.rfile, length=length, filename=filename)
+            payload = model_catalog.status(active_path=app.model_path)
+            payload["uploaded"] = result
+            self._json(HTTPStatus.CREATED, payload)
+
         def do_POST(self):
             if not self._authorized():
                 self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
                 return
             try:
+                # GGUF-файлы могут занимать десятки гигабайт, поэтому этот endpoint
+                # читает тело потоково и не использует 2-МБ JSON parser.
+                if self.path == "/v1/models/upload":
+                    self._upload_model()
+                    return
+
                 body = self._body()
                 if self.path == "/v1/chat":
                     result = app.chat(
@@ -271,6 +298,9 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 if self.path == "/v1/model/download":
                     self._json(HTTPStatus.ACCEPTED, app.model_downloader.start())
                     return
+                if self.path == "/v1/models/select":
+                    self._json(HTTPStatus.OK, switch_app_model(app, model_catalog, str(body.get("name") or "")))
+                    return
                 if self.path == "/v1/telegram/config":
                     users = body.get("allowed_users") or []
                     if isinstance(users, str):
@@ -287,7 +317,7 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Не найдено"})
             except LLMUnavailable as exc:
                 self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc), "code": "model_unavailable"})
-            except (ValueError, PermissionError, json.JSONDecodeError) as exc:
+            except (ValueError, PermissionError, FileNotFoundError, FileExistsError, json.JSONDecodeError) as exc:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             except Exception as exc:
                 self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Внутренняя ошибка: {exc}"})
@@ -312,7 +342,9 @@ def _warm_local_llm(app: LeshyApp) -> None:
 
 def serve(host: str | None = None, port: int | None = None) -> None:
     settings = Settings.from_env()
+    model_catalog = apply_saved_model_to_settings(settings)
     app = LeshyApp(settings)
+    configure_app_model_verifier(app, model_catalog)
     telegram = TelegramBridge(app, settings.brain_dir)
     app.telegram = telegram
     app.start_background()
@@ -320,7 +352,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     telegram.start()
     bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0")
     bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
-    server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings))
+    server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
     print(f"Леший {app.status()['version']} запущен: http://{bind_host}:{bind_port}")
     try:
         server.serve_forever()
