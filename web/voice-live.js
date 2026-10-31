@@ -5,10 +5,15 @@
   const MAX_RECORDING_MS=90*1000;
   const MAX_BUFFER_BYTES=8*1024*1024;
   const SNAPSHOT_INTERVAL_MS=2500;
+  const SHORT_UTTERANCE_MS=1600;
+  const MEDIUM_UTTERANCE_MS=3500;
+  const SHORT_SILENCE_MS=2400;
+  const MEDIUM_SILENCE_MS=1800;
+  const NORMAL_SILENCE_MS=1350;
   const STOP_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>';
   const state={
     enabled:false,recording:false,speaking:false,stream:null,recorder:null,chunks:[],chunkBytes:0,mime:'',baseText:'',latestText:'',
-    inFlight:false,startedAt:0,speechSeen:false,lastVoiceAt:0,analyser:null,audioContext:null,raf:0,
+    inFlight:false,startedAt:0,speechSeen:false,speechStartedAt:0,lastVoiceAt:0,analyser:null,audioContext:null,raf:0,
     snapshotTimer:0,restartTimer:0,generation:0,playback:null,playbackUrl:'',ttsUnavailable:false,asrFailed:false,
   };
 
@@ -47,7 +52,7 @@
   function clearSnapshotTimer(){if(state.snapshotTimer)clearInterval(state.snapshotTimer);state.snapshotTimer=0}
   function closeAudioGraph(){if(state.raf)cancelAnimationFrame(state.raf);state.raf=0;clearSnapshotTimer();try{state.audioContext&&state.audioContext.close()}catch(_e){}state.audioContext=null;state.analyser=null}
   function stopTracks(){try{for(const track of state.stream?.getTracks?.()||[])track.stop()}catch(_e){}state.stream=null}
-  function clearRecordedAudio(){state.chunks=[];state.chunkBytes=0;state.latestText='';state.baseText=''}
+  function clearRecordedAudio(){state.chunks=[];state.chunkBytes=0;state.latestText='';state.baseText='';state.speechStartedAt=0}
 
   function abortVoiceAfterAsrError(error){
     if(state.asrFailed)return;
@@ -60,7 +65,6 @@
 
   async function transcribeSnapshot(final=false,generation=state.generation){
     if(generation!==state.generation||state.asrFailed||!state.chunks.length)return '';
-    // Никогда не создаём очередь ASR-запросов. Один запрос должен закончиться до следующего.
     if(state.inFlight)return state.latestText;
     const blob=new Blob(state.chunks,{type:state.mime||'audio/webm'});if(blob.size<2500)return state.latestText;
     if(blob.size>MAX_BUFFER_BYTES){abortVoiceAfterAsrError(new Error('аудиобуфер превысил безопасный лимит 8 МБ'));return ''}
@@ -75,7 +79,6 @@
       if(final)notice(text?'Речь распознана локально':'Речь не распознана',1000);else notice('Слушаю · '+(text||'распознаю…'),1300);
       return text;
     }catch(error){
-      // Критично: после ошибки ASR не повторяем запрос каждые несколько секунд.
       if(generation===state.generation)abortVoiceAfterAsrError(error);
       return '';
     }finally{state.inFlight=false}
@@ -113,7 +116,6 @@
     state.recording=false;setButton('processing');closeAudioGraph();const generation=state.generation,recorder=state.recorder;
     await new Promise(resolve=>{if(!recorder||recorder.state==='inactive'){resolve();return}const old=recorder.onstop;recorder.onstop=e=>{try{old&&old.call(recorder,e)}catch(_e){}resolve()};try{recorder.requestData()}catch(_e){}try{recorder.stop()}catch(_e){resolve()}setTimeout(resolve,700)});
     stopTracks();await new Promise(r=>setTimeout(r,80));
-    // Если промежуточный ASR ещё занят, не создаём второй параллельный запрос.
     let waits=0;while(state.inFlight&&waits<80&&generation===state.generation){await new Promise(r=>setTimeout(r,100));waits+=1}
     const text=state.latestText||await transcribeSnapshot(true,generation);state.recorder=null;
     if(send&&text&&generation===state.generation&&!state.asrFailed){
@@ -124,12 +126,21 @@
     clearRecordedAudio();if(keepSession&&state.enabled&&!state.asrFailed)scheduleRestartAfterAnswer();
   }
 
+  function silenceLimitMs(){
+    if(!state.speechSeen||!state.speechStartedAt)return SHORT_SILENCE_MS;
+    const spokenFor=Math.max(0,state.lastVoiceAt-state.speechStartedAt);
+    if(spokenFor<SHORT_UTTERANCE_MS)return SHORT_SILENCE_MS;
+    if(spokenFor<MEDIUM_UTTERANCE_MS)return MEDIUM_SILENCE_MS;
+    return NORMAL_SILENCE_MS;
+  }
+
   function vadLoop(generation){
     if(!state.recording||generation!==state.generation||!state.analyser)return;
     const data=new Float32Array(state.analyser.fftSize);state.analyser.getFloatTimeDomainData(data);let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];const rms=Math.sqrt(sum/data.length),now=performance.now(),threshold=0.022;
-    if(rms>threshold){state.speechSeen=true;state.lastVoiceAt=now}
+    if(rms>threshold){if(!state.speechSeen)state.speechStartedAt=now;state.speechSeen=true;state.lastVoiceAt=now}
     if(now-state.startedAt>MAX_RECORDING_MS){finishTurn({send:true,keepSession:true});return}
-    if(state.speechSeen&&now-state.lastVoiceAt>1150&&now-state.startedAt>900){finishTurn({send:true,keepSession:true});return}
+    const silenceMs=silenceLimitMs();
+    if(state.speechSeen&&now-state.lastVoiceAt>silenceMs&&now-state.startedAt>1800){finishTurn({send:true,keepSession:true});return}
     state.raf=requestAnimationFrame(()=>vadLoop(generation));
   }
 
@@ -138,7 +149,7 @@
     if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){notice('Браузер не умеет передавать аудио с микрофона',3200);state.enabled=false;setButton('unsupported');return}
     try{
       const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});if(!state.enabled){stream.getTracks().forEach(t=>t.stop());return}
-      state.generation+=1;const generation=state.generation;state.stream=stream;state.chunks=[];state.chunkBytes=0;state.latestText='';state.baseText=$('chatInput')?.value.trim()||'';state.speechSeen=false;state.lastVoiceAt=performance.now();state.startedAt=performance.now();state.mime=chooseMime();
+      state.generation+=1;const generation=state.generation;state.stream=stream;state.chunks=[];state.chunkBytes=0;state.latestText='';state.baseText=$('chatInput')?.value.trim()||'';state.speechSeen=false;state.speechStartedAt=0;state.lastVoiceAt=performance.now();state.startedAt=performance.now();state.mime=chooseMime();
       state.recorder=state.mime?new MediaRecorder(stream,{mimeType:state.mime,audioBitsPerSecond:64000}):new MediaRecorder(stream);state.mime=state.recorder.mimeType||state.mime||'audio/webm';
       state.recorder.ondataavailable=e=>{if(generation!==state.generation||!e.data||e.data.size<=0)return;state.chunks.push(e.data);state.chunkBytes+=e.data.size;if(state.chunkBytes>MAX_BUFFER_BYTES)abortVoiceAfterAsrError(new Error('аудиобуфер превысил безопасный лимит 8 МБ'))};
       state.recorder.onerror=e=>abortVoiceAfterAsrError(e.error||new Error('ошибка записи микрофона'));
