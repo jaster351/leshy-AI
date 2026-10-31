@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import re
 import secrets
 from typing import Any
 
@@ -11,6 +12,10 @@ from .storage import utcnow
 
 class ApprovalOperatingSystemController(OperatingSystemController):
     """OS controller, где любое удаление требует отдельного подтверждения владельца."""
+
+    _SHELL_DELETE_RE = re.compile(
+        r"(?i)(?:\bremove-item\b|\bdel(?:ete)?\b|\berase\b|\brm\b|\brmdir\b|\brd\b|\bremove-directory\b)"
+    )
 
     def __init__(self, app):
         super().__init__(app)
@@ -26,10 +31,22 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                 "ON os_action_approvals(owner_id,status,created_at)"
             )
 
+    def is_request(self, message: str) -> bool:
+        text = str(message or "")
+        return bool(super().is_request(text) or re.match(r"(?i)^\s*/os\s+(?:delete|rm)\b", text))
+
     def execute(self, action: str, args: dict[str, Any] | None = None, *, owner_id: str = "web:local", approved_delete: bool = False) -> OSActionResult:
-        if str(action or "").strip().lower() == "delete" and not approved_delete:
+        normalized = str(action or "").strip().lower()
+        values = dict(args or {})
+        if normalized == "delete" and not approved_delete:
             return OSActionResult("delete", False, "Удаление возможно только после отдельного подтверждения владельца")
-        return super().execute(action, args, owner_id=owner_id)
+        if normalized == "powershell" and self._SHELL_DELETE_RE.search(str(values.get("command") or "")):
+            return OSActionResult(
+                "powershell",
+                False,
+                "Удаляющие PowerShell-команды нельзя выполнять напрямую. Попросите Лешего удалить конкретный файл или папку — он покажет кнопки подтверждения.",
+            )
+        return super().execute(action, values, owner_id=owner_id)
 
     def request_delete(self, args: dict[str, Any], *, owner_id: str, session_id: str = "") -> dict[str, Any]:
         path = self._path(args.get("path"))
@@ -131,8 +148,6 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             return {"id": approval_id, "status": "cancelled", "message": message}
 
         args = json.loads(str(row["arguments_json"]) or "{}")
-        # Вызов родительской реализации разрешён только здесь — после проверки
-        # одноразового токена подтверждения.
         result = OperatingSystemController.execute(self, "delete", args, owner_id=owner)
         final_status = "executed" if result.ok else "failed"
         with self.storage.connection() as conn:
@@ -144,10 +159,17 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         self.storage.audit("os.approval_resolved", {"id": approval_id, "owner_id": owner, "allowed": True, "status": final_status})
         return {"id": approval_id, "status": final_status, "message": message, "ok": result.ok}
 
+    def _direct_with_delete(self, message: str) -> tuple[str, dict[str, Any]] | None:
+        text = str(message or "").strip()
+        match = re.match(r"(?is)^/os\s+(?:delete|rm)\s+(.+)$", text)
+        if match:
+            return "delete", {"path": match.group(1).strip(), "recursive": True}
+        return self._direct_command(message)
+
     def handle_user_request(self, message: str, *, owner_id: str = "web:local", session_id: str = "") -> str | dict[str, Any] | None:
         if not self.is_request(message):
             return None
-        direct = self._direct_command(message)
+        direct = self._direct_with_delete(message)
         if direct is not None:
             action, args = direct
         else:
@@ -156,7 +178,8 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             return (
                 "Управление ОС включено. Можно просить естественным языком или использовать `/os`: "
                 "`/os status`, `/os ps`, `/os ls ПУТЬ`, `/os cat ФАЙЛ`, `/os mkdir ПУТЬ`, "
-                "`/os open ПУТЬ`, `/os run PowerShell-команда`. Любое удаление выполняется только после Вашего подтверждения."
+                "`/os open ПУТЬ`, `/os delete ПУТЬ`, `/os run PowerShell-команда`. "
+                "Любое удаление выполняется только после Вашего подтверждения."
             )
         if action == "need_clarification":
             return str(args.get("question") or "Уточните системное действие.")
@@ -178,6 +201,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
     def status(self) -> dict[str, Any]:
         value = super().status()
         value["delete_requires_owner_approval"] = True
+        value["shell_delete_bypass_blocked"] = True
         value["approval_ttl_minutes"] = 10
         return value
 
