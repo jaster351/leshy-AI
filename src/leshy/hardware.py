@@ -8,6 +8,8 @@ import platform
 import subprocess
 from typing import Any
 
+from .memory_policy import memory_status
+
 VALID_MODES = {
     "auto",
     "cpu",
@@ -275,5 +277,6 @@ def hardware_status(brain_dir: Path) -> dict[str, Any]:
         "config": asdict(config),
         "capabilities": asdict(caps),
         "plan": asdict(plan),
+        "memory": memory_status(brain_dir),
         "mode_labels": MODE_LABELS,
     }
