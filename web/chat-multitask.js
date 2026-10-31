@@ -5,7 +5,6 @@
   const SESSION_KEY='leshy.session';
   const streams=new Map();
   const unread=new Set();
-  let archived=false;
 
   async function api(path,options={}){
     const init=Object.assign({},options||{});
@@ -18,7 +17,6 @@
   function sid(){return localStorage.getItem(SESSION_KEY)||''}
   function setSid(id){if(id)localStorage.setItem(SESSION_KEY,id);else localStorage.removeItem(SESSION_KEY);try{window.sessionId=id}catch(_e){};window.dispatchEvent(new CustomEvent('leshy:session-changed',{detail:{session_id:id||''}}))}
   function toast(t){let n=$('shellToast');if(!n){n=document.createElement('div');n.id='shellToast';document.body.appendChild(n)}n.textContent=t;n.classList.add('show');clearTimeout(n._t);n._t=setTimeout(()=>n.classList.remove('show'),2200)}
-  function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 
   function style(){
     if($('leshyMultitaskStyle'))return;
@@ -61,7 +59,7 @@
     setTimeout(()=>requestAnimationFrame(()=>{stream.renderPending=false;updateStreamingBox(stream)}),60);
   }
   function event(type,detail){try{window.dispatchEvent(new CustomEvent('leshy:'+type,{detail:detail||{}}))}catch(_e){}}
-  function stateForCurrent(){const current=streams.get(sid());const s=$('chatState');if(!s)return;if(current)s.textContent=current.activity|| (current.raw?'Леший отвечает…':'Леший думает…');else s.textContent='Готов'}
+  function stateForCurrent(){const current=streams.get(sid());const s=$('chatState');if(!s)return;if(current)s.textContent=current.activity||(current.raw?'Леший отвечает…':'Леший думает…');else s.textContent='Готов'}
 
   function parseSse(buffer,onEvent){let p;while((p=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,p);buffer=buffer.slice(p+2);let type='message',raw='';for(const line of block.split('\n')){if(line.startsWith('event:'))type=line.slice(6).trim();else if(line.startsWith('data:'))raw+=(raw?'\n':'')+line.slice(5).trim()}if(raw){try{onEvent(type,JSON.parse(raw))}catch(_e){}}}return buffer}
 
@@ -74,24 +72,20 @@
   window.stopCurrentLeshyStream=()=>stop(streams.get(sid()));
 
   async function loadHistory(id){
-    setSid(id);unread.delete(id);document.title='Леший';const messages=$('messages');if(messages)messages.textContent='';
+    setSid(id);unread.delete(id);if(!unread.size)document.title='Леший';const messages=$('messages');if(messages)messages.textContent='';
     try{
       const r=await api('/v1/history?session_id='+encodeURIComponent(id)+'&owner_id='+encodeURIComponent(OWNER));
       for(const m of r.items||[])window.addMessage(m.role,m.content);
       const live=streams.get(id);if(live){const ui=makeStreamingBox(live.raw);if(ui){live.box=ui.box;live.body=ui.body}event('activity',{session_id:id,kind:live.activityKind||'',text:live.activity||'Леший думает…'})}
-      if(typeof window.setLocked==='function')window.setLocked(r.session||null);
     }catch(e){if(messages){messages.textContent='';window.addMessage('assistant','Не удалось загрузить историю: '+e.message)}}
     try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}stateForCurrent();decorateSidebar();
   }
   window.loadHistory=loadHistory;
   window.newChat=function(){setSid('');const messages=$('messages');if(messages)messages.textContent='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}const input=$('chatInput');if(input){input.disabled=false;input.focus()}stateForCurrent();decorateSidebar()};
 
-  async function refreshActiveView(stream){
-    if(!stream.sessionId||sid()!==stream.sessionId)return;
-    await loadHistory(stream.sessionId);
-  }
+  async function refreshActiveView(stream){if(!stream.sessionId||sid()!==stream.sessionId)return;await loadHistory(stream.sessionId)}
 
-  async function runStream(text,requestedSession,input){
+  async function runStream(text,requestedSession){
     const requestId=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random());const controller=new AbortController();
     const tempKey=requestedSession||('pending:'+requestId);const stream={requestId,controller,tempKey,sessionId:requestedSession||'',raw:'',activity:'Леший думает…',activityKind:'',renderPending:false,body:null,box:null,meta:null};
     streams.set(tempKey,stream);if(requestedSession)streams.set(requestedSession,stream);
@@ -118,13 +112,14 @@
 
   window.sendFrom=async function(input){
     const current=streams.get(sid());if(current){await stop(current);return}
-    const text=String(input&&input.value||'').trim();if(!text)return;ensureNotifyPermission();const requested=sid();input.value='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}window.addMessage('user',text);runStream(text,requested,input);
+    const text=String(input&&input.value||'').trim();if(!text)return;ensureNotifyPermission();const requested=sid();input.value='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}window.addMessage('user',text);runStream(text,requested);
   };
 
   async function decorateSidebar(){
     const list=$('sessionList');if(!list)return;
     try{
-      const r=await api('/v1/sessions?owner_id='+encodeURIComponent(OWNER)+'&limit=100&archived='+(archived?'1':'0'));const rows=[...list.querySelectorAll('.leshy-session-item,.item')];
+      const archivedView=$('sessionArchiveToggle')?.textContent?.trim()==='Назад';
+      const r=await api('/v1/sessions?owner_id='+encodeURIComponent(OWNER)+'&limit=100&archived='+(archivedView?'1':'0'));const rows=[...list.querySelectorAll('.leshy-session-item,.item')];
       (r.items||[]).forEach((item,i)=>{const row=rows[i];if(!row)return;row.dataset.sessionId=item.id;const open=row.querySelector('.leshy-session-open')||row.querySelector('button');if(!open)return;open.querySelectorAll('.leshy-session-work,.leshy-session-unread').forEach(x=>x.remove());open.classList.remove('is-working','has-unread');if(streams.has(item.id)){const d=document.createElement('i');d.className='leshy-session-work';d.title='Леший отвечает';open.appendChild(d);open.classList.add('is-working')}else if(unread.has(item.id)){const d=document.createElement('i');d.className='leshy-session-unread';d.title='Новый ответ';open.appendChild(d);open.classList.add('has-unread')}});
     }catch(_e){}
   }
@@ -134,6 +129,6 @@
     const wrapped=async function(){const r=await original.apply(this,arguments);await decorateSidebar();return r};wrapped.__multitaskWrapped=true;window.loadSessions=wrapped;
   }
 
-  function boot(){style();wrapSessions();decorateSidebar();stateForCurrent();setInterval(decorateSidebar,1800);window.addEventListener('leshy:session-changed',stateForCurrent)}
+  function boot(){style();wrapSessions();decorateSidebar();stateForCurrent();window.addEventListener('leshy:session-changed',stateForCurrent)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
