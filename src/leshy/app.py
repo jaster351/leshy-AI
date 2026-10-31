@@ -63,11 +63,10 @@ class LeshyApp:
             return None
 
     def _require_model(self) -> Path:
-        if self.model_path.is_file():
-            return self.model_path
-        raise LLMUnavailable(
-            "Локальная модель не загружена. Нажмите «Загрузить Qwen3-8B Q4_K_M» в системной панели."
-        )
+        try:
+            return self.model_downloader.ensure_verified()
+        except RuntimeError as exc:
+            raise LLMUnavailable(str(exc)) from exc
 
     def _build_llm(self):
         backend = self.settings.llm_backend
@@ -79,6 +78,16 @@ class LeshyApp:
             raise ValueError(f"Неизвестный LLM backend: {backend}")
 
         cpu_llm = NativeGGUFLLM(self.model_path, n_ctx=self.settings.native_context_size, n_gpu_layers=0)
+        cpu_server = LlamaServerLLM(
+            self.accelerator_runtime,
+            "cpu",
+            self.model_path,
+            ensure_model=self._require_model,
+            n_ctx=min(self.settings.native_context_size, 4096),
+            n_gpu_layers=0,
+            startup_timeout=45,
+            request_timeout=180,
+        )
         candidates: list[tuple[str, Any]] = []
         caps = self.hardware
 
@@ -116,6 +125,10 @@ class LeshyApp:
                 ),
             ))
 
+        # Надёжный CPU fallback идёт через официальный свежий llama-server.
+        # Встроенный llama-cpp-python остаётся последним резервом, если внешний
+        # runtime по какой-либо причине не удалось загрузить или запустить.
+        candidates.append(("cpu-llama-server", cpu_server))
         candidates.append(("cpu-native", cpu_llm))
         return AdaptiveLLM(
             candidates,
@@ -378,13 +391,14 @@ class LeshyApp:
             }
         hardware = asdict(self.hardware) if self.hardware is not None else {"error": "hardware detection failed"}
         router_status = getattr(self.llm, "status", None)
+        model_status = self.model_downloader.status()
         return {
             "name": "Леший",
             "version": VERSION,
             "backend": self.settings.llm_backend,
             "model": getattr(self.llm, "model", self.settings.ollama_model),
-            "model_ready": bool(self.model_path.is_file()) if self.settings.llm_backend == "native" else True,
-            "model_download": self.model_downloader.status(),
+            "model_ready": bool(model_status.get("exists")) and model_status.get("state") not in {"invalid", "error", "downloading"} if self.settings.llm_backend == "native" else True,
+            "model_download": model_status,
             "brain_dir": str(self.settings.brain_dir),
             "logs_dir": str(self.settings.brain_dir / "logs"),
             "learning_enabled": self.learning.is_enabled(),
