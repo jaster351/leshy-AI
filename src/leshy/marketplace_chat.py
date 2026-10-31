@@ -42,6 +42,22 @@ def install_marketplace_chat_bridge() -> None:
                 "Подключённые плагины Marketplace. Это реальные включённые расширения; не выдумывай отсутствующие инструменты:\n" + plugin_context,
             ))
 
+        runtime = getattr(self.app, "marketplace_plugin_runtime", None)
+        if runtime is not None:
+            try:
+                tool_result = runtime.maybe_execute(message)
+            except Exception:
+                tool_result = None
+            if tool_result:
+                injected.append(ChatMessage(
+                    "system",
+                    "Результат вызванного Marketplace plugin. Используй его как результат внешнего инструмента и явно не придумывай отсутствующие поля:\n"
+                    f"Инструмент: {tool_result.get('tool','')}\n"
+                    f"Плагин: {tool_result.get('plugin_name','')}\n"
+                    f"Успех: {bool(tool_result.get('ok'))}\n"
+                    f"Результат:\n{str(tool_result.get('text') or '')[:200000]}",
+                ))
+
         if injected:
             messages[1:1] = injected
         return messages, sources, search_attempted
