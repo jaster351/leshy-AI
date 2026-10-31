@@ -12,6 +12,13 @@ from leshy.support_consultant import (
 )
 
 
+WORK_METADATA = {
+    "event": "support_ticket_notice",
+    "event_time": "2026-11-02T09:00:00+00:00",  # Понедельник, 12:00 МСК.
+    "manual_work_mode": True,
+}
+
+
 class FakeSource:
     def __init__(self, context: ClientTicketContext):
         self.context = context
@@ -57,6 +64,19 @@ class SupportConsultantTests(unittest.TestCase):
             ),
         )
 
+    def _metadata(self, **extra):
+        value = dict(WORK_METADATA)
+        value.update(
+            {
+                "ticket_id": "1001",
+                "client_id": "42",
+                "email": "client@example.test",
+                "question": "SSH не работает",
+            }
+        )
+        value.update(extra)
+        return value
+
     def test_prepares_answer_only_after_diagnostics(self):
         source = FakeSource(self._context())
         diagnostics = FakeDiagnostics()
@@ -67,19 +87,14 @@ class SupportConsultantTests(unittest.TestCase):
             ModuleRequest(
                 text="Новая заявка",
                 channel="telegram",
-                metadata={
-                    "event": "support_ticket_notice",
-                    "ticket_id": "1001",
-                    "client_id": "42",
-                    "email": "client@example.test",
-                    "question": "SSH не работает",
-                },
+                metadata=self._metadata(),
             )
         )
 
         self.assertTrue(response.handled)
         self.assertEqual(response.metadata["status"], "prepared")
         self.assertTrue(response.metadata["read_only"])
+        self.assertTrue(response.metadata["notify"])
         self.assertEqual(source.calls, 1)
         self.assertEqual(diagnostics.calls, 1)
         self.assertEqual(len(llm.calls), 1)
@@ -95,20 +110,51 @@ class SupportConsultantTests(unittest.TestCase):
         module = SupportConsultantModule(source, diagnostics, llm)
 
         response = module.handle(
-            ModuleRequest(
-                text="Новая заявка",
-                metadata={
-                    "event": "support_ticket_notice",
-                    "ticket_id": "1001",
-                    "client_id": "42",
-                    "email": "client@example.test",
-                },
-            )
+            ModuleRequest(text="Новая заявка", metadata=self._metadata())
         )
 
         self.assertEqual(response.metadata["status"], "identity_conflict")
         self.assertEqual(diagnostics.calls, 0)
         self.assertEqual(llm.calls, [])
+
+    def test_outside_shift_suppresses_everything(self):
+        source = FakeSource(self._context())
+        diagnostics = FakeDiagnostics()
+        llm = FakeLLM()
+        module = SupportConsultantModule(source, diagnostics, llm)
+
+        response = module.handle(
+            ModuleRequest(
+                text="Новая заявка",
+                channel="telegram",
+                metadata=self._metadata(event_time="2026-11-02T19:00:00+00:00"),  # 22:00 МСК.
+            )
+        )
+
+        self.assertEqual(response.text, "")
+        self.assertEqual(response.metadata["status"], "work_assistance_suppressed")
+        self.assertFalse(response.metadata["notify"])
+        self.assertEqual(source.calls, 0)
+        self.assertEqual(diagnostics.calls, 0)
+        self.assertEqual(llm.calls, [])
+
+    def test_without_work_session_suppresses_notifications(self):
+        source = FakeSource(self._context())
+        diagnostics = FakeDiagnostics()
+        llm = FakeLLM()
+        module = SupportConsultantModule(source, diagnostics, llm)
+
+        response = module.handle(
+            ModuleRequest(
+                text="Новая заявка",
+                channel="telegram",
+                metadata=self._metadata(manual_work_mode=False, workstation_active=False),
+            )
+        )
+
+        self.assertEqual(response.metadata["status"], "work_assistance_suppressed")
+        self.assertFalse(response.metadata["notify"])
+        self.assertEqual(source.calls, 0)
 
     def test_audit_uses_only_central_log_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -121,12 +167,7 @@ class SupportConsultantTests(unittest.TestCase):
             module.handle(
                 ModuleRequest(
                     text="Новая заявка",
-                    metadata={
-                        "event": "support_ticket_notice",
-                        "ticket_id": "1001",
-                        "client_id": "42",
-                        "email": "client@example.test",
-                    },
+                    metadata=self._metadata(),
                 )
             )
 
