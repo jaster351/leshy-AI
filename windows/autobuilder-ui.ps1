@@ -31,11 +31,12 @@ function Read-Settings {
         scheduled_build = $false
         build_minutes = 60
         last_full_update_utc = ''
+        last_full_attempt_utc = ''
     }
     if (-not (Test-Path -LiteralPath $SettingsPath)) { return [pscustomobject]$defaults }
     try {
         $value = Get-Content -LiteralPath $SettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($key in @('auto_repo','repo_seconds','scheduled_build','build_minutes','last_full_update_utc')) {
+        foreach ($key in @('auto_repo','repo_seconds','scheduled_build','build_minutes','last_full_update_utc','last_full_attempt_utc')) {
             if ($null -eq $value.$key) { $value | Add-Member -NotePropertyName $key -NotePropertyValue $defaults[$key] }
         }
         return $value
@@ -51,6 +52,7 @@ function Save-Settings {
         scheduled_build = [bool]$scheduledBuild.Checked
         build_minutes = [int]$buildMinutes.Value
         last_full_update_utc = [string]$script:LastFullUpdateUtc
+        last_full_attempt_utc = [string]$script:LastFullAttemptUtc
     }
     $payload | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $SettingsPath -Encoding UTF8
 }
@@ -90,11 +92,26 @@ function Test-LeshyRunning {
     return $false
 }
 
+function Get-UiGit {
+    $cmd = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    foreach ($candidate in @(
+        'C:\Program Files\Git\cmd\git.exe',
+        'C:\Program Files\Git\bin\git.exe',
+        (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.exe')
+    )) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+    }
+    return ''
+}
+
 function Get-RepoSha {
     try {
-        $git = Get-Command git.exe -ErrorAction Stop
-        $value = (& $git.Source -C $RepoRoot rev-parse HEAD 2>$null | Select-Object -First 1)
-        if ($value) { return $value.Trim() }
+        $git = Get-UiGit
+        if (-not $git) { return '' }
+        $raw = @(& $git -C $RepoRoot rev-parse --verify HEAD 2>$null)
+        $code = $LASTEXITCODE
+        if ($code -eq 0 -and $raw.Count -gt 0) { return ([string]$raw[0]).Trim() }
     } catch { }
     return ''
 }
@@ -140,6 +157,10 @@ function Start-CoreOperation {
     if ($script:OperationProcess -and -not $script:OperationProcess.HasExited) { return }
     $script:OperationMode = $Mode
     $script:OperationLabel = $Label
+    if ($Mode -in @('full-update','startup')) {
+        $script:LastFullAttemptUtc = [DateTime]::UtcNow.ToString('o')
+        Save-Settings
+    }
     $args = '-NoProfile -ExecutionPolicy Bypass -File "' + $CoreScript + '" -Mode ' + $Mode
     try {
         $script:OperationProcess = Start-Process -FilePath $PowerShellExe -ArgumentList $args -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
@@ -189,6 +210,7 @@ $script:OperationMode = ''
 $script:OperationLabel = ''
 $script:LastRepoCheck = [DateTime]::MinValue
 $script:LastFullUpdateUtc = [string]$S.last_full_update_utc
+$script:LastFullAttemptUtc = [string]$S.last_full_attempt_utc
 $script:ReallyExit = $false
 $script:StartupTriggered = $false
 
@@ -327,10 +349,12 @@ $timer.Add_Tick({
             $lastActionValue.Text = $T.operation_ok + ': ' + $script:OperationLabel
             if ($script:OperationMode -in @('full-update','startup')) {
                 $script:LastFullUpdateUtc = [DateTime]::UtcNow.ToString('o')
+                $script:LastFullAttemptUtc = $script:LastFullUpdateUtc
                 Save-Settings
             }
         } else {
             $lastActionValue.Text = $T.operation_failed + ': ' + $script:OperationLabel
+            Save-Settings
         }
         $script:OperationProcess.Dispose()
         $script:OperationProcess = $null
@@ -343,11 +367,11 @@ $timer.Add_Tick({
     $now = Get-Date
     if ($scheduledBuild.Checked) {
         $due = $false
-        if (-not $script:LastFullUpdateUtc) { $due = $true }
+        if (-not $script:LastFullAttemptUtc) { $due = $true }
         else {
             try {
-                $last = [DateTime]::Parse($script:LastFullUpdateUtc).ToLocalTime()
-                $due = (($now - $last).TotalMinutes -ge [double]$buildMinutes.Value)
+                $lastAttempt = [DateTime]::Parse($script:LastFullAttemptUtc).ToLocalTime()
+                $due = (($now - $lastAttempt).TotalMinutes -ge [double]$buildMinutes.Value)
             } catch { $due = $true }
         }
         if ($due) {
