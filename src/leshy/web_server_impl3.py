@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer
 from urllib import parse
@@ -20,24 +21,133 @@ from .streaming_backends import install_streaming_backends
 from .telegram_fast import FastTelegramBridge
 
 
+_SOFT_WARMUP_DELAY_SECONDS = 2.0
+_BACKGROUND_AFTER_WARMUP_SECONDS = 120.0
+_AUTO_TITLE_QUIET_SECONDS = 180.0
+_TELEGRAM_MINIMUM_DELAY_SECONDS = 30.0
+
+
 def _apply_low_memory_guard(app, settings) -> None:
-    """Не держать две CPU-копии одной GGUF на системах с небольшим объёмом RAM."""
+    """На небольшом объёме RAM не держать лишнюю CPU-копию и уменьшить KV-контекст."""
     try:
         status = memory_status(settings.brain_dir)
         total = int((status.get("system") or {}).get("ram_total_bytes") or 0)
         states = list(getattr(app.llm, "_states", []) or [])
         if not total or total > 20 * 1024**3 or not states:
             return
+
         has_cpu_server = any(getattr(state, "name", "") == "cpu-llama-server" for state in states)
-        if not has_cpu_server:
-            return
-        kept = [state for state in states if getattr(state, "name", "") != "cpu-native"]
+        kept = [
+            state for state in states
+            if not (has_cpu_server and getattr(state, "name", "") == "cpu-native")
+        ]
         if len(kept) != len(states):
             app.llm._states = kept
             app.llm.model = "adaptive:" + ",".join(str(getattr(state, "name", "")) for state in kept)
-            event("low_memory_cpu_native_disabled", ram_total_bytes=total, remaining_backends=[state.name for state in kept])
+            event(
+                "low_memory_cpu_native_disabled",
+                ram_total_bytes=total,
+                remaining_backends=[state.name for state in kept],
+            )
+
+        capped: list[dict[str, int | str]] = []
+        for state in kept:
+            provider = getattr(state, "provider", None)
+            if provider is None or not hasattr(provider, "n_ctx"):
+                continue
+            name = str(getattr(state, "name", ""))
+            if name not in {"gpu-vulkan", "cpu-llama-server"}:
+                continue
+            before = int(getattr(provider, "n_ctx", 4096) or 4096)
+            after = min(before, 4096)
+            if after != before:
+                provider.n_ctx = after
+                capped.append({"backend": name, "before": before, "after": after})
+        if capped:
+            event("low_memory_context_capped", ram_total_bytes=total, backends=capped)
     except Exception as exc:
         problem("low_memory_guard_failed", str(exc))
+
+
+def _install_startup_title_guard() -> None:
+    """Не запускать скрытую LLM-генерацию названий во время тяжёлого старта."""
+    try:
+        DashboardService = previous.DashboardService
+        if getattr(DashboardService, "_leshy_startup_title_guard", False):
+            return
+        original = DashboardService._schedule_auto_title
+
+        def guarded(self, owner, rows):
+            quiet_until = float(getattr(self.app, "startup_quiet_until_monotonic", 0.0) or 0.0)
+            if quiet_until and time.monotonic() < quiet_until:
+                return
+            return original(self, owner, rows)
+
+        DashboardService._schedule_auto_title = guarded
+        DashboardService._leshy_startup_title_guard = True
+    except Exception as exc:
+        problem("startup_title_guard_failed", str(exc))
+
+
+def _warmup_soft(app, ready: threading.Event, shutdown: threading.Event) -> None:
+    if shutdown.wait(_SOFT_WARMUP_DELAY_SECONDS):
+        ready.set()
+        return
+    try:
+        previous._warm_local_llm(app)
+    finally:
+        ready.set()
+
+
+def _deferred_background(app, ready: threading.Event, shutdown: threading.Event) -> None:
+    while not ready.is_set():
+        if shutdown.wait(0.5):
+            return
+    if shutdown.wait(_BACKGROUND_AFTER_WARMUP_SECONDS):
+        return
+    try:
+        app.start_background()
+        event(
+            "background_deferred_started",
+            delay_after_warmup_seconds=_BACKGROUND_AFTER_WARMUP_SECONDS,
+        )
+    except Exception as exc:
+        problem("background_deferred_start_failed", str(exc))
+
+
+def _delayed_recovery_after_ready(
+    app,
+    telegram,
+    ready: threading.Event,
+    shutdown: threading.Event,
+    started_monotonic: float,
+) -> None:
+    # Сохраняем продуктовый контракт: Telegram не обрабатывает накопленные сообщения
+    # раньше чем через 30 секунд после запуска. Если модель ещё грузится, ждём её,
+    # чтобы очередь Telegram не конкурировала с прогревом за RAM/CPU/GPU.
+    minimum_remaining = _TELEGRAM_MINIMUM_DELAY_SECONDS - (time.monotonic() - started_monotonic)
+    if minimum_remaining > 0 and shutdown.wait(minimum_remaining):
+        return
+    while not ready.is_set():
+        if shutdown.wait(0.5):
+            return
+    try:
+        telegram.start()
+    except Exception as exc:
+        problem("telegram_delayed_start_failed", str(exc))
+    try:
+        result = previous.base.recover_unanswered(app)
+        event(
+            "startup_recovery_cycle_finished",
+            delay_seconds=round(time.monotonic() - started_monotonic, 1),
+            **result,
+        )
+    except Exception as exc:
+        problem(
+            "startup_recovery_cycle_failed",
+            str(exc),
+            delay_seconds=round(time.monotonic() - started_monotonic, 1),
+        )
 
 
 def make_handler(app, telegram, settings, model_catalog):
@@ -115,16 +225,31 @@ def make_handler(app, telegram, settings, model_catalog):
 
 
 def serve(host: str | None = None, port: int | None = None) -> None:
+    started_monotonic = time.monotonic()
     settings = previous.base.Settings.from_env()
     HuggingFaceSettings(settings.brain_dir).apply()
     model_catalog = apply_saved_model_to_settings(settings)
     app = previous.base.LeshyApp(settings)
+
+    # LeshyApp создаёт базовый LLM при инициализации. Для совместимого runtime
+    # пересобираем его один раз и сразу закрываем старый набор объектов, чтобы
+    # не оставлять потенциальные ссылки на лишний runtime.
+    old_llm = app.llm
     app.accelerator_runtime = CompatibleRuntimeManager(
         settings.brain_dir,
         model_name_provider=lambda: app.model_path.name,
     )
     app.llm = app._build_llm()
+    old_close = getattr(old_llm, "close", None)
+    if callable(old_close):
+        try:
+            old_close()
+        except Exception:
+            pass
+
     _apply_low_memory_guard(app, settings)
+    app.startup_quiet_until_monotonic = started_monotonic + _AUTO_TITLE_QUIET_SECONDS
+    _install_startup_title_guard()
     configure_app_model_verifier(app, model_catalog)
     install_streaming_backends(app.llm)
     install_os_control(app)
@@ -134,24 +259,47 @@ def serve(host: str | None = None, port: int | None = None) -> None:
 
     telegram = FastTelegramBridge(app, settings.brain_dir)
     app.telegram = telegram
-    app.start_background()
-    threading.Thread(target=previous._warm_local_llm, args=(app,), name="leshy-llm-warmup", daemon=True).start()
-    threading.Thread(
-        target=previous._delayed_recovery,
-        args=(app, telegram, 30.0),
-        name="leshy-startup-recovery",
-        daemon=True,
-    ).start()
+
+    warmup_ready = threading.Event()
+    shutdown = threading.Event()
 
     bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0")
     bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
     server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
+
+    threading.Thread(
+        target=_warmup_soft,
+        args=(app, warmup_ready, shutdown),
+        name="leshy-llm-warmup",
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_deferred_background,
+        args=(app, warmup_ready, shutdown),
+        name="leshy-background-deferred",
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_delayed_recovery_after_ready,
+        args=(app, telegram, warmup_ready, shutdown, started_monotonic),
+        name="leshy-startup-recovery",
+        daemon=True,
+    ).start()
+
+    event(
+        "soft_start_enabled",
+        warmup_delay_seconds=_SOFT_WARMUP_DELAY_SECONDS,
+        background_delay_after_warmup_seconds=_BACKGROUND_AFTER_WARMUP_SECONDS,
+        auto_title_quiet_seconds=_AUTO_TITLE_QUIET_SECONDS,
+        telegram_minimum_delay_seconds=_TELEGRAM_MINIMUM_DELAY_SECONDS,
+    )
     print(f"Леший {app.status()['version']} запущен: http://{bind_host}:{bind_port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        shutdown.set()
         telegram.stop()
         app.stop_background()
         server.server_close()
