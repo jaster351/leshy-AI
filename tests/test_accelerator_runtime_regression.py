@@ -25,6 +25,30 @@ class _Fallback:
         return "fallback-ok"
 
 
+class _WarmProvider:
+    model = "warm"
+
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.warm_calls = 0
+        self.chat_calls = 0
+        self.resident = False
+
+    def warmup(self):
+        self.warm_calls += 1
+        if self.fail:
+            raise RuntimeError("warmup failed")
+        self.resident = True
+        return True
+
+    def chat(self, messages):
+        self.chat_calls += 1
+        return "warm-ok"
+
+    def resident_status(self):
+        return {"resident": self.resident}
+
+
 class AcceleratorRuntimeRegressionTests(unittest.TestCase):
     def _provider(self, backend="openvino"):
         provider = LlamaServerLLM(
@@ -79,14 +103,40 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
         self.assertGreater(npu["cooldown_remaining_seconds"], 0)
 
     def test_vulkan_uses_all_gpu_layers_layer_split_and_fit(self):
-        # Контракт аргументов запуска проверяется статически, чтобы regression
-        # работал и на CI без физического GPU/Vulkan runtime.
+        # Vulkan is intentionally vendor-neutral on Windows: Radeon, NVIDIA and Intel.
         import inspect
 
         source = inspect.getsource(LlamaServerLLM._ensure_server)
         self.assertIn('"-ngl", "all"', source)
         self.assertIn('"-sm", "layer"', source)
         self.assertIn('"--fit", "on"', source)
+        self.assertNotIn('"--no-warmup"', source)
+
+    def test_llama_server_warmup_only_ensures_resident_server(self):
+        provider = self._provider("vulkan")
+        calls = []
+        provider._ensure_server = lambda: calls.append(True) or "http://127.0.0.1:12345"
+        self.assertTrue(provider.warmup())
+        self.assertEqual(calls, [True])
+
+    def test_adaptive_warmup_uses_gpu_first_and_exposes_resident_state(self):
+        gpu = _WarmProvider()
+        cpu = _WarmProvider()
+        router = AdaptiveLLM([("gpu-vulkan", gpu), ("cpu-native", cpu)], cooldown_seconds=60)
+        self.assertEqual(router.warmup(), "gpu-vulkan")
+        self.assertEqual(gpu.warm_calls, 1)
+        self.assertEqual(cpu.warm_calls, 0)
+        status = router.status()
+        gpu_status = next(item for item in status["backends"] if item["name"] == "gpu-vulkan")
+        self.assertTrue(gpu_status["resident"]["resident"])
+
+    def test_adaptive_warmup_falls_back_when_gpu_fails(self):
+        gpu = _WarmProvider(fail=True)
+        cpu = _WarmProvider()
+        router = AdaptiveLLM([("gpu-vulkan", gpu), ("cpu-native", cpu)], cooldown_seconds=60)
+        self.assertEqual(router.warmup(), "cpu-native")
+        self.assertEqual(gpu.warm_calls, 1)
+        self.assertEqual(cpu.warm_calls, 1)
 
 
 if __name__ == "__main__":
