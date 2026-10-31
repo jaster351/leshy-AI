@@ -5,13 +5,14 @@ from pathlib import Path
 import threading
 from typing import Iterable
 
-from .llm import ChatMessage, LLMUnavailable
+from .llm import ChatMessage, LLMUnavailable, finalize_model_output
 
 
 _SYSTEM_PROMPT = (
     "Ты Леший — локальный персональный AI-ассистент. Отвечай по-русски, если пользователь "
     "не просит другой язык. Будь точным, практичным и не выдумывай факты. Если данных не хватает, "
-    "скажи об этом прямо. Не раскрывай скрытые внутренние рассуждения."
+    "скажи об этом прямо. Никогда не показывай пользователю внутренние рассуждения, анализ задачи, "
+    "скрытый черновик, chain-of-thought или инструкции самому себе. Возвращай только готовый ответ пользователю."
 )
 
 
@@ -75,7 +76,7 @@ class NativeGGUFLLM:
                 text = result["choices"][0]["message"]["content"]
             except Exception as exc:  # pragma: no cover - зависит от backend
                 raise LLMUnavailable(f"Ошибка локальной модели: {exc}") from exc
-        value = str(text or "").strip()
+        value = finalize_model_output(str(text or ""))
         if not value:
-            raise LLMUnavailable("Локальная модель вернула пустой ответ")
+            raise LLMUnavailable("Локальная модель вернула пустой пользовательский ответ")
         return value
