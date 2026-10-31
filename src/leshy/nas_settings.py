@@ -114,6 +114,21 @@ class NasSettingsStore:
             or value.smb_server
         )
 
+    @staticmethod
+    def _path_accessible(path: str) -> bool:
+        if not str(path or "").strip():
+            return False
+        try:
+            return Path(path).exists()
+        except OSError:
+            return False
+
+    def _any_configured_path_accessible(self, config: NasSettings) -> tuple[bool, str]:
+        for value in (config.torrent_watch, config.root, config.music, config.video):
+            if self._path_accessible(value):
+                return True, str(value)
+        return False, ""
+
     def connect(self) -> dict[str, Any]:
         config = self.load()
         server = self.effective_server(config)
@@ -127,11 +142,34 @@ class NasSettingsStore:
                 "error": "Автоматическая SMB-авторизация через Windows доступна только на Windows",
             }
 
+        # Если Windows уже имеет рабочую SMB-сессию к NAS, не разрываем её.
+        # Это особенно важно при ERROR_SESSION_CREDENTIAL_CONFLICT (1219):
+        # повторное подключение под другим логином запрещено Windows, но доступный
+        # UNC-путь уже означает, что Леший может пользоваться NAS прямо сейчас.
+        accessible, accessible_path = self._any_configured_path_accessible(config)
+        if accessible:
+            return {
+                "attempted": False,
+                "connected": True,
+                "server": server,
+                "using_saved_credentials": False,
+                "using_existing_session": True,
+                "accessible_path": accessible_path,
+                "note": "Используется уже активная SMB-сессия Windows; повторная авторизация не требуется.",
+            }
+
         password = self.password()
         username = config.smb_username.strip()
         if not username:
-            # Windows может использовать уже активную сессию/учётные данные профиля.
-            return {"attempted": False, "connected": True, "server": server, "using_saved_credentials": False}
+            # Без логина отдельную SMB-сессию не создаём: Windows использует
+            # текущую учётную запись/гостевой доступ, а доступ проверяется путём.
+            return {
+                "attempted": False,
+                "connected": False,
+                "server": server,
+                "using_saved_credentials": False,
+                "error": "UNC-путь недоступен, а SMB-логин не указан",
+            }
 
         if config.smb_domain.strip() and "\\" not in username and "@" not in username:
             username = f"{config.smb_domain.strip()}\\{username}"
@@ -152,18 +190,37 @@ class NasSettingsStore:
         add = mpr.WNetAddConnection2W
         add.argtypes = [ctypes.POINTER(NETRESOURCEW), wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
         add.restype = wintypes.DWORD
-        cancel = mpr.WNetCancelConnection2W
-        cancel.argtypes = [wintypes.LPCWSTR, wintypes.BOOL, wintypes.BOOL]
-        cancel.restype = wintypes.DWORD
 
         resource = NETRESOURCEW()
         resource.dwType = 1  # RESOURCETYPE_DISK
         resource.lpRemoteName = server
         code = int(add(ctypes.byref(resource), password or None, username, 0))
+
         if code == 1219:
-            # Уже существует подключение к этому серверу с другими данными.
-            cancel(server, False, True)
-            code = int(add(ctypes.byref(resource), password or None, username, 0))
+            # Не разрываем чужие/пользовательские подключения автоматически.
+            # Повторно проверяем путь: если он доступен через существующий сеанс,
+            # Леший может безопасно продолжать работу с ним.
+            accessible, accessible_path = self._any_configured_path_accessible(config)
+            if accessible:
+                return {
+                    "attempted": True,
+                    "connected": True,
+                    "server": server,
+                    "using_saved_credentials": False,
+                    "using_existing_session": True,
+                    "credential_conflict": True,
+                    "accessible_path": accessible_path,
+                    "note": "Windows уже подключена к этому NAS под другими учётными данными. Используется существующая доступная SMB-сессия.",
+                }
+            return {
+                "attempted": True,
+                "connected": False,
+                "server": server,
+                "using_saved_credentials": bool(password),
+                "credential_conflict": True,
+                "error": "Windows error 1219: к этому NAS уже есть подключение под другими учётными данными. Отключите старое SMB-подключение или используйте те же данные.",
+            }
+
         if code not in {0, 85}:
             return {
                 "attempted": True,
@@ -172,11 +229,15 @@ class NasSettingsStore:
                 "using_saved_credentials": bool(password),
                 "error": f"WNetAddConnection2W error {code}",
             }
+
+        accessible, accessible_path = self._any_configured_path_accessible(config)
         return {
             "attempted": True,
-            "connected": True,
+            "connected": bool(accessible),
             "server": server,
             "using_saved_credentials": bool(password),
+            "accessible_path": accessible_path,
+            "error": "" if accessible else "SMB-сессия создана, но настроенный путь пока недоступен",
         }
 
     def public_status(self, *, probe: bool = False) -> dict[str, Any]:
@@ -189,10 +250,10 @@ class NasSettingsStore:
         if probe:
             status["connection"] = self.connect()
             paths = {
-                "torrent_watch_exists": bool(config.torrent_watch and Path(config.torrent_watch).exists()),
-                "root_exists": bool(config.root and Path(config.root).exists()),
-                "music_exists": bool(config.music and Path(config.music).exists()),
-                "video_exists": bool(config.video and Path(config.video).exists()),
+                "torrent_watch_exists": bool(config.torrent_watch and self._path_accessible(config.torrent_watch)),
+                "root_exists": bool(config.root and self._path_accessible(config.root)),
+                "music_exists": bool(config.music and self._path_accessible(config.music)),
+                "video_exists": bool(config.video and self._path_accessible(config.video)),
             }
             status.update(paths)
         return status
