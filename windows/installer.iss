@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "1.10.11"
+  #define MyAppVersion "1.10.12"
 #endif
 #ifndef MyAppSourceDir
   #define MyAppSourceDir "..\dist\Leshy"
