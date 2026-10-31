@@ -68,6 +68,7 @@
     try{fetch('/v1/chat/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:stream.requestId}),keepalive:true})}catch(_e){}
     try{stream.controller.abort()}catch(_e){}
     streams.delete(stream.sessionId||stream.tempKey);stateForCurrent();decorateSidebar();event('done',{session_id:stream.sessionId,stopped:true});
+    return {session_id:stream.sessionId||'',answer:stream.raw||'',stopped:true};
   }
   window.stopCurrentLeshyStream=()=>stop(streams.get(sid()));
 
@@ -113,14 +114,16 @@
         }else if(type==='done')done=data;else if(type==='error')throw new Error(data.error||'Ошибка генерации');
       })}
       const answer=done&&typeof done.answer==='string'?done.answer:stream.raw;stream.raw=answer;streams.delete(stream.sessionId||stream.tempKey);event('done',{session_id:stream.sessionId,answer});notifyDone(stream,answer);await refreshActiveView(stream);stateForCurrent();await Promise.allSettled([window.loadSessions?window.loadSessions():Promise.resolve(),typeof window.refreshStatus==='function'?window.refreshStatus():Promise.resolve()]);
+      return {session_id:stream.sessionId||'',answer,stopped:!!(done&&done.stopped),request_id:requestId};
     }catch(e){
       streams.delete(stream.sessionId||stream.tempKey);if(e.name!=='AbortError'){if(sid()===stream.sessionId||(!stream.sessionId&&sid()===''))window.addMessage('assistant','Ошибка: '+e.message);toast('Ошибка ответа Лешего: '+e.message)}stateForCurrent();decorateSidebar();event('done',{session_id:stream.sessionId,error:e.message||''});
+      return {session_id:stream.sessionId||'',answer:'',error:e.message||'',stopped:e.name==='AbortError',request_id:requestId};
     }
   }
 
   window.sendFrom=async function(input){
-    const current=streams.get(sid());if(current){await stop(current);return}
-    const text=String(input&&input.value||'').trim();if(!text)return;ensureNotifyPermission();const requested=sid();input.value='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}window.addMessage('user',text);runStream(text,requested);
+    const current=streams.get(sid());if(current)return await stop(current);
+    const text=String(input&&input.value||'').trim();if(!text)return null;ensureNotifyPermission();const requested=sid();input.value='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}window.addMessage('user',text);return await runStream(text,requested);
   };
 
   async function decorateSidebar(){
