@@ -12,6 +12,7 @@ from urllib import parse, request, error
 
 from .diagnostics import event, problem
 from .secret_store import load_secret, save_secret
+from .telegram_social import TelegramSocialPolicy
 
 
 _THINK_RE = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
@@ -19,7 +20,7 @@ _ADMIN_COMMANDS = {"/learning_on", "/learning_off"}
 
 
 def _telegram_answer_html(text: str) -> str:
-    """Hide model reasoning behind Telegram's click-to-reveal spoiler UI."""
+    """Возвращает безопасный HTML-ответ Telegram без необработанного reasoning."""
     value = str(text or "")
     parts: list[str] = []
     offset = 0
@@ -27,21 +28,13 @@ def _telegram_answer_html(text: str) -> str:
         visible = value[offset:match.start()]
         if visible:
             parts.append(html.escape(visible))
-        thought = str(match.group(1) or "").strip()
-        if thought:
-            parts.append("<tg-spoiler>" + html.escape(thought) + "</tg-spoiler>")
         offset = match.end()
     tail = value[offset:]
     lower_tail = tail.lower()
     open_index = lower_tail.find("<think>")
     if open_index >= 0:
-        visible = tail[:open_index]
-        thought = tail[open_index + len("<think>"):].replace("</think>", "").strip()
-        if visible:
-            parts.append(html.escape(visible))
-        if thought:
-            parts.append("<tg-spoiler>" + html.escape(thought) + "</tg-spoiler>")
-    elif tail:
+        tail = tail[:open_index]
+    if tail:
         parts.append(html.escape(tail.replace("</think>", "")))
     return "".join(parts).strip()
 
@@ -62,6 +55,9 @@ class TelegramBridge:
         self._queue: queue.Queue[dict | None] = queue.Queue(maxsize=200)
         self._last_error = ""
         self._offset = 0
+        self._social = TelegramSocialPolicy()
+        self._bot_id: int | None = None
+        self._bot_username = ""
 
     def _token(self) -> str:
         try:
@@ -99,7 +95,6 @@ class TelegramBridge:
                     }
             except Exception as exc:
                 problem("telegram_access_load_failed", str(exc))
-        # Legacy migration convenience: one historical allowed ID is treated as owner.
         allowed = self._allowed()
         if len(allowed) == 1:
             default["owner_id"] = next(iter(allowed))
@@ -138,6 +133,8 @@ class TelegramBridge:
         except OSError:
             pass
         self._save_access(allow_all=bool(allow_all), owner_id=owner)
+        self._bot_id = None
+        self._bot_username = ""
         event(
             "telegram_configured",
             allowed_users=len(allowed),
@@ -158,6 +155,11 @@ class TelegramBridge:
             "worker_running": bool(self._worker_thread and self._worker_thread.is_alive()),
             "queue_size": self._queue.qsize(),
             "last_error": self._last_error,
+            "bot_username": self._bot_username,
+            "group_context_aware": True,
+            "natural_name_addressing": True,
+            "message_reactions": True,
+            "privacy_mode_note": "Для чтения обычных сообщений группы без @упоминания Privacy Mode бота должен быть отключён в Telegram.",
         }
 
     def start(self) -> bool:
@@ -202,16 +204,44 @@ class TelegramBridge:
             raise RuntimeError(str(body.get("description") or "Telegram API error"))
         return body.get("result")
 
+    def _refresh_bot_identity(self) -> None:
+        try:
+            me = self._api("getMe", timeout=10) or {}
+            self._bot_id = int(me.get("id") or 0) or None
+            self._bot_username = str(me.get("username") or "").strip()
+            event("telegram_identity_loaded", bot_id=self._bot_id, bot_username=self._bot_username)
+        except Exception as exc:
+            problem("telegram_identity_failed", str(exc))
+
     def _send(self, chat_id: int | str, text: str) -> None:
         self._api("sendMessage", {"chat_id": chat_id, "text": text[:4000]}, timeout=10)
 
-    def _send_answer(self, chat_id: int | str, text: str) -> None:
+    def _send_answer(self, chat_id: int | str, text: str, *, reply_to_message_id: int | None = None) -> None:
         rendered = _telegram_answer_html(text[:3800])
-        self._api(
-            "sendMessage",
-            {"chat_id": chat_id, "text": rendered or "…", "parse_mode": "HTML"},
-            timeout=10,
-        )
+        payload = {"chat_id": chat_id, "text": rendered or "…", "parse_mode": "HTML"}
+        if reply_to_message_id:
+            payload["reply_parameters"] = {"message_id": int(reply_to_message_id), "allow_sending_without_reply": True}
+        self._api("sendMessage", payload, timeout=10)
+
+    def _set_reaction(self, chat_id: int | str, message_id: int | None, emoji: str | None) -> None:
+        if not message_id or not emoji:
+            return
+        try:
+            self._api(
+                "setMessageReaction",
+                {
+                    "chat_id": chat_id,
+                    "message_id": int(message_id),
+                    "reaction": [{"type": "emoji", "emoji": emoji}],
+                    "is_big": False,
+                },
+                timeout=8,
+            )
+            event("telegram_reaction_set", chat_id=str(chat_id), message_id=int(message_id), emoji=emoji)
+        except Exception as exc:
+            # Не все группы/чаты разрешают все реакции. Ошибка реакции не должна
+            # мешать обычному ответу Лешего.
+            problem("telegram_reaction_failed", str(exc), chat_id=str(chat_id), message_id=int(message_id))
 
     def _send_typing(self, chat_id: int | str) -> None:
         try:
@@ -233,14 +263,32 @@ class TelegramBridge:
     def _handle_message(self, message: dict) -> None:
         chat = message.get("chat") or {}
         sender = message.get("from") or {}
-        text = str(message.get("text") or "").strip()
+        text = str(message.get("text") or message.get("caption") or "").strip()
         chat_id = chat.get("id")
         user_id = str(sender.get("id") or "")
+        message_id = message.get("message_id")
         if not text or chat_id is None or not user_id:
             return
+
+        addressed, address_reason = self._social.addressed_to_leshy(
+            message,
+            bot_id=self._bot_id,
+            bot_username=self._bot_username,
+        )
+        if self._social.is_group(message) and not addressed:
+            event(
+                "telegram_group_message_ignored",
+                chat_id=str(chat_id),
+                telegram_user_id=user_id,
+                reason=address_reason,
+            )
+            return
+
         if not self._can_chat(user_id):
             problem("telegram_access_denied", "Telegram ID не разрешён", telegram_user_id=user_id)
-            self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
+            # В группе не засоряем общий разговор сообщениями про права доступа.
+            if not self._social.is_group(message):
+                self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
             return
 
         owner = self._is_owner(user_id)
@@ -283,7 +331,23 @@ class TelegramBridge:
                 owner_id=f"telegram:{user_id}",
                 session_id=f"telegram:{chat_id}:{user_id}",
             )
-            self._send_answer(chat_id, result["answer"])
+            answer = str(result["answer"])
+            self._send_answer(
+                chat_id,
+                answer,
+                reply_to_message_id=int(message_id) if self._social.is_group(message) and message_id else None,
+            )
+            self._social.mark_leshy_answered(message)
+            reaction = self._social.reaction_for(message, addressed=addressed, answer=answer)
+            self._set_reaction(chat_id, int(message_id) if message_id else None, reaction)
+            event(
+                "telegram_message_answered",
+                chat_id=str(chat_id),
+                telegram_user_id=user_id,
+                group=self._social.is_group(message),
+                address_reason=address_reason,
+                reaction=reaction or "",
+            )
         except Exception as exc:
             problem("telegram_chat_failed", str(exc), telegram_user_id=user_id)
             self._send(chat_id, f"Не удалось получить ответ Лешего: {exc}")
@@ -306,9 +370,9 @@ class TelegramBridge:
                 self._queue.task_done()
 
     def _run(self) -> None:
-        # Telegram long polling returns immediately when a message arrives. The
-        # shorter timeout only reduces recovery latency after network problems.
         backoff = 0.5
+        if self._bot_id is None:
+            self._refresh_bot_identity()
         while not self._stop.is_set():
             try:
                 query = parse.urlencode(
