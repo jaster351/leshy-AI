@@ -179,7 +179,15 @@ class PeopleStore:
             if key not in allowed:
                 continue
             if key == "holiday_calendars":
-                value = sorted({str(item).strip().upper() for item in (value or []) if str(item).strip()})
+                calendars: list[str] = []
+                seen: set[str] = set()
+                for item in value or []:
+                    code = str(item).strip().upper()
+                    if not code or code in seen:
+                        continue
+                    seen.add(code)
+                    calendars.append(code)
+                value = calendars
             setattr(person, key, value)
         self.save(person)
         return person
