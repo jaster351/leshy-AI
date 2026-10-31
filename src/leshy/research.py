@@ -11,6 +11,7 @@ from urllib import error, parse, request
 
 from .knowledge import KnowledgeBase
 from .storage import Storage, utcnow
+from .version import VERSION
 
 
 class _TextExtractor(HTMLParser):
@@ -127,7 +128,7 @@ class SafeWebFetcher:
     def fetch_text(self, url: str, timeout: int = 20) -> str:
         self._validate_public_url(url)
         opener = request.build_opener(self._ValidatingRedirectHandler(self._validate_public_url))
-        req = request.Request(url, headers={"User-Agent": "LeshyResearchBot/1.10.3"})
+        req = request.Request(url, headers={"User-Agent": f"LeshyResearchBot/{VERSION}"})
         try:
             with opener.open(req, timeout=timeout) as response:
                 self._validate_public_url(response.geturl())
