@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leshy-ai"
+dynamic = ["version"]
+description = "Леший — локальный автономный AI-ассистент"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "GPL-2.0-only"}
+authors = [{name = "Leshy AI"}]
+dependencies = ["ddgs>=9,<10"]
+
+[project.optional-dependencies]
+native = ["llama-cpp-python>=0.3.27,<0.4"]
+build = ["pyinstaller>=6.11,<7"]
+
+[project.scripts]
+leshy = "leshy.web_server:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "leshy.version.VERSION"}

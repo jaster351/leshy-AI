@@ -1,0 +1,46 @@
+name: Leshy Windows Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: leshy-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+          cache: 'pip'
+      - name: Версия
+        id: version
+        shell: pwsh
+        run: |
+          $v=(Get-Content VERSION -Raw).Trim()
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Сборка и frozen smoke-test
+        shell: pwsh
+        run: ./windows/build.ps1
+      - name: Проверить установщик
+        shell: pwsh
+        run: |
+          $p="dist/LeshySetup-${{ steps.version.outputs.version }}.exe"
+          if (-not (Test-Path $p)) { throw "Не найден $p" }
+          Get-Item $p | Format-List Name,Length,LastWriteTime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LeshySetup-${{ steps.version.outputs.version }}
+          path: dist/LeshySetup-${{ steps.version.outputs.version }}.exe
+          if-no-files-found: error
+          retention-days: 14
