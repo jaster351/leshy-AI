@@ -18,13 +18,23 @@ class _BackendState:
     last_latency_ms: int | None = None
 
 
-class AdaptiveLLM:
-    """Быстрый failover между локальными LLM backend.
+def _hardware_rank(name: str) -> int:
+    lowered = name.lower()
+    if "gpu" in lowered or "vulkan" in lowered or "cuda" in lowered or "rocm" in lowered:
+        return 0
+    if "npu" in lowered or "openvino" in lowered:
+        return 1
+    if "cpu" in lowered or "native" in lowered:
+        return 2
+    return 3
 
-    Ускоритель может быть предпочтительным, но он не имеет права блокировать
-    пользовательский ответ. После ошибки ускорителя проверенный cpu-native путь
-    из стабильной ветки 1.9 получает приоритет перед следующими экспериментальными
-    ускорителями. Неисправный backend временно исключается circuit breaker'ом.
+
+class AdaptiveLLM:
+    """GPU-first failover для интерактивного LLM.
+
+    На каждом новом пользовательском запросе первым выбирается доступный GPU.
+    Если GPU находится в cooldown после реальной ошибки, используется NPU, затем
+    CPU. После окончания cooldown GPU снова автоматически получает приоритет.
     """
 
     def __init__(self, candidates: list[tuple[str, Any]], *, cooldown_seconds: float = 180.0):
@@ -41,17 +51,7 @@ class AdaptiveLLM:
         with self._lock:
             healthy = [state for state in self._states if state.failed_until <= now]
             cooling = [state for state in self._states if state.failed_until > now]
-
-            def priority(state: _BackendState) -> tuple[int, int, str]:
-                if state.name == self._preferred:
-                    rank = 0
-                elif state.name == "cpu-native":
-                    rank = 1
-                else:
-                    rank = 2
-                return (rank, state.failures, state.name)
-
-            healthy.sort(key=priority)
+            healthy.sort(key=lambda state: (_hardware_rank(state.name), state.failures, state.name))
             if healthy:
                 return healthy
             return sorted(cooling, key=lambda state: state.failed_until)[:1]
@@ -85,12 +85,7 @@ class AdaptiveLLM:
                 state.failures = 0
                 state.failed_until = 0.0
                 state.last_latency_ms = latency_ms
-            event(
-                "adaptive_llm_backend_ok",
-                backend=state.name,
-                latency_ms=latency_ms,
-                switched=switched,
-            )
+            event("adaptive_llm_backend_ok", backend=state.name, latency_ms=latency_ms, switched=switched)
             return text
 
         raise LLMUnavailable("Все локальные LLM backend недоступны: " + "; ".join(errors[-3:]))
@@ -122,7 +117,7 @@ class AdaptiveLLM:
 
 
 class AdaptiveEmbeddings:
-    """Failover embeddings между NPU, GPU и CPU с circuit breaker."""
+    """GPU-first failover embeddings: GPU → NPU → CPU."""
 
     def __init__(self, candidates: list[tuple[str, Any]], *, cooldown_seconds: float = 180.0):
         if not candidates:
@@ -153,7 +148,7 @@ class AdaptiveEmbeddings:
         with self._lock:
             healthy = [state for state in self._states if state.failed_until <= now]
             cooling = [state for state in self._states if state.failed_until > now]
-            healthy.sort(key=lambda state: (state.name != self._preferred, state.failures, state.name))
+            healthy.sort(key=lambda state: (_hardware_rank(state.name), state.failures, state.name))
             if healthy:
                 return healthy
             return sorted(cooling, key=lambda state: state.failed_until)[:1]
@@ -187,12 +182,7 @@ class AdaptiveEmbeddings:
                 state.failures = 0
                 state.failed_until = 0.0
                 state.last_latency_ms = latency_ms
-            event(
-                "adaptive_embedding_backend_ok",
-                backend=state.name,
-                latency_ms=latency_ms,
-                switched=switched,
-            )
+            event("adaptive_embedding_backend_ok", backend=state.name, latency_ms=latency_ms, switched=switched)
             return vector
 
         raise RuntimeError("Все embedding backend недоступны: " + "; ".join(errors[-3:]))
