@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "GPL-2.0-only"}
 authors = [{name = "Leshy AI"}]
-dependencies = ["ddgs>=9,<10"]
+dependencies = [
+  "ddgs>=9,<10",
+  "tzdata>=2025.2",
+]
 
 [project.optional-dependencies]
 native = ["llama-cpp-python>=0.3.27,<0.4"]
