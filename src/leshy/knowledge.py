@@ -65,19 +65,7 @@ class KnowledgeBase:
         self.min_trusted_confidence = min_trusted_confidence
         self.vector_index = vector_index
 
-    def add_candidate(
-        self,
-        *,
-        topic: str,
-        claim: str,
-        source_url: str,
-        source_title: str | None = None,
-        source_type: str = "web",
-        metadata_json: str | dict = "{}",
-        data_class: str = "static",
-        checked_at: str | None = None,
-        ttl_seconds: int | None = None,
-    ) -> int:
+    def add_candidate(self, *, topic: str, claim: str, source_url: str, source_title: str | None = None, source_type: str = "web", metadata_json: str | dict = "{}", data_class: str = "static", checked_at: str | None = None, ttl_seconds: int | None = None) -> int:
         if data_class not in {"static", "dynamic"}:
             raise ValueError("data_class must be 'static' or 'dynamic'")
         if data_class == "dynamic":
@@ -91,16 +79,14 @@ class KnowledgeBase:
         if isinstance(metadata_json, dict):
             metadata_json = json.dumps(metadata_json, ensure_ascii=False, sort_keys=True)
         with self.storage.connection() as conn:
-            row = conn.execute(
-                "SELECT id FROM knowledge WHERE fingerprint=? AND source_url=? ORDER BY version DESC LIMIT 1",
-                (fp, source_url),
-            ).fetchone()
+            row = conn.execute("SELECT id,data_class FROM knowledge WHERE fingerprint=? AND source_url=? ORDER BY version DESC LIMIT 1", (fp, source_url)).fetchone()
             if row:
-                return int(row["id"])
-            cur = conn.execute(
-                "INSERT INTO knowledge(topic,claim,source_url,source_title,source_type,captured_at,confidence,status,fingerprint,metadata_json,data_class,checked_at,ttl_seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (topic, claim, source_url, source_title, source_type, utcnow(), source_weight(source_url), "candidate", fp, str(metadata_json), data_class, checked_at, ttl_seconds),
-            )
+                kid = int(row["id"])
+                if data_class == "dynamic":
+                    conn.execute("UPDATE knowledge SET data_class='dynamic',checked_at=?,ttl_seconds=?,captured_at=?,source_title=?,source_type=?,metadata_json=? WHERE id=?", (checked_at, ttl_seconds, utcnow(), source_title, source_type, str(metadata_json), kid))
+                    self.storage.audit("knowledge.dynamic_rechecked", {"id": kid, "topic": topic, "source_url": source_url, "checked_at": checked_at, "ttl_seconds": ttl_seconds})
+                return kid
+            cur = conn.execute("INSERT INTO knowledge(topic,claim,source_url,source_title,source_type,captured_at,confidence,status,fingerprint,metadata_json,data_class,checked_at,ttl_seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (topic, claim, source_url, source_title, source_type, utcnow(), source_weight(source_url), "candidate", fp, str(metadata_json), data_class, checked_at, ttl_seconds))
             kid = int(cur.lastrowid)
         self.storage.audit("knowledge.candidate_created", {"id": kid, "topic": topic, "source_url": source_url, "source_type": source_type, "data_class": data_class})
         if self.vector_index:
