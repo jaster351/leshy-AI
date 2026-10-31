@@ -76,6 +76,19 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if parsed.path.startswith("/generated/"):
+                target = app.image_generation.resolve_generated(parsed.path.rsplit("/", 1)[-1])
+                if not target:
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                data = target.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if not self._authorized():
                 self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
                 return
@@ -87,6 +100,17 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 return
             if parsed.path == "/v1/model/status":
                 self._json(HTTPStatus.OK, app.model_downloader.status())
+                return
+            if parsed.path == "/v1/image/status":
+                self._json(HTTPStatus.OK, app.image_generation.status())
+                return
+            if parsed.path == "/v1/image/job":
+                job_id = self._arg(args, "job_id")
+                job = app.image_generation.job(job_id)
+                if not job:
+                    self._json(HTTPStatus.NOT_FOUND, {"error": "Задача генерации изображения не найдена"})
+                else:
+                    self._json(HTTPStatus.OK, job)
                 return
             if parsed.path == "/v1/telegram/status":
                 self._json(HTTPStatus.OK, telegram.status())
@@ -141,6 +165,15 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                         session_id=str(body.get("session_id") or "") or None,
                     )
                     self._json(HTTPStatus.OK, result)
+                    return
+                if self.path == "/v1/image/generate":
+                    job = app.image_generation.enqueue(
+                        str(body.get("prompt") or ""),
+                        width=int(body.get("width") or 512),
+                        height=int(body.get("height") or 512),
+                        steps=int(body.get("steps") or 20),
+                    )
+                    self._json(HTTPStatus.ACCEPTED, job)
                     return
                 if self.path == "/v1/search":
                     self._json(HTTPStatus.OK, app.live_search(str(body.get("query") or ""), limit=int(body.get("limit") or 5)))
