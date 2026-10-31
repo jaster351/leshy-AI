@@ -27,14 +27,17 @@ $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 # Direct/manual build.ps1 runs publish immediately to dist\Leshy.
 if (-not $StageOnly) {
   try {
-    $self = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $PID) -ErrorAction Stop
-    if ($self.ParentProcessId) {
-      $parent = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$self.ParentProcessId) -ErrorAction Stop
-      $parentCommand = [string]$parent.CommandLine
-      if ($parentCommand -and $parentCommand.IndexOf('autobuilder-core.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        $StageOnly = $true
-        Write-Host 'AutoBuilder parent detected: staging package first; AutoBuilder will publish it safely to dist\Leshy.'
+    $coreRunning = $false
+    foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue)) {
+      $cmdline = [string]$proc.CommandLine
+      if ($cmdline -and $cmdline.IndexOf('autobuilder-core.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        $coreRunning = $true
+        break
       }
+    }
+    if ($coreRunning) {
+      $StageOnly = $true
+      Write-Host 'AutoBuilder core detected: staging package only; AutoBuilder will publish it safely to dist\Leshy.'
     }
   } catch { }
 }
@@ -73,26 +76,78 @@ function Normalize-PathText {
   try { return [System.IO.Path]::GetFullPath($Value).TrimEnd('\').ToLowerInvariant() } catch { return '' }
 }
 
-function Stop-LiveLeshy {
-  $target = Normalize-PathText $liveExe
-  if (-not $target) { return }
+function Get-LiveProcesses {
+  $root = Normalize-PathText $liveRoot
+  if (-not $root) { return @() }
+  $prefix = $root + '\'
+  $result = @()
   try {
-    foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='Leshy.exe'" -ErrorAction SilentlyContinue)) {
-      if ((Normalize-PathText ([string]$proc.ExecutablePath)) -eq $target) {
-        Write-Host "Stopping live Leshy before publishing: $($proc.ProcessId)"
-        Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction Stop
+    foreach ($proc in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
+      $path = Normalize-PathText ([string]$proc.ExecutablePath)
+      if ($path -and ($path -eq (Normalize-PathText $liveExe) -or $path.StartsWith($prefix,[System.StringComparison]::OrdinalIgnoreCase))) {
+        $result += $proc
       }
     }
-  } catch {
-    throw "Could not stop the current dist\Leshy\Leshy.exe before update: $($_.Exception.Message)"
+  } catch { }
+  return @($result)
+}
+
+function Stop-LiveLeshy {
+  $processes = @(Get-LiveProcesses)
+  foreach ($proc in $processes) {
+    try {
+      Write-Host "Stopping process from dist\Leshy: PID $($proc.ProcessId) $($proc.Name)"
+      Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction Stop
+    } catch {
+      Write-Warning "Could not stop PID $($proc.ProcessId): $($_.Exception.Message)"
+    }
   }
+
+  $deadline = (Get-Date).AddSeconds(15)
+  do {
+    $remaining = @(Get-LiveProcesses)
+    if ($remaining.Count -eq 0) { break }
+    Start-Sleep -Milliseconds 300
+  } while ((Get-Date) -lt $deadline)
+
+  $remaining = @(Get-LiveProcesses)
+  if ($remaining.Count -gt 0) {
+    $ids = ($remaining | ForEach-Object { [string]$_.ProcessId }) -join ', '
+    throw "Could not stop all processes using dist\Leshy. Remaining PID(s): $ids"
+  }
+
+  # Windows can keep DLL handles briefly after process termination.
+  Start-Sleep -Milliseconds 800
+}
+
+function Remove-WithRetry {
+  param(
+    [Parameter(Mandatory=$true)][string]$Path,
+    [int]$Attempts = 12,
+    [int]$DelayMs = 500
+  )
+  if (-not (Test-Path -LiteralPath $Path)) { return }
+  $lastError = $null
+  for ($i = 1; $i -le $Attempts; $i++) {
+    try {
+      Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+      return
+    } catch {
+      $lastError = $_.Exception.Message
+      if ($i -lt $Attempts) {
+        Write-Host "Waiting for file unlock ($i/$Attempts): $Path"
+        Start-Sleep -Milliseconds $DelayMs
+      }
+    }
+  }
+  throw "Could not remove locked runtime path after $Attempts attempts: $Path ; $lastError"
 }
 
 function Clear-LiveProgramFiles {
   New-Item -ItemType Directory -Force -Path $liveRoot | Out-Null
   foreach ($entry in @(Get-ChildItem -LiteralPath $liveRoot -Force -ErrorAction SilentlyContinue)) {
     if ($entry.Name -ieq 'LeshyBrain') { continue }
-    Remove-Item -LiteralPath $entry.FullName -Recurse -Force -ErrorAction Stop
+    Remove-WithRetry -Path $entry.FullName
   }
 }
 
