@@ -80,10 +80,16 @@ class KnowledgeBase:
         with self.storage.connection() as conn:
             rows = conn.execute("SELECT status, count(*) n FROM knowledge GROUP BY status").fetchall()
         by_status = {str(row["status"]): int(row["n"]) for row in rows}
+        total = sum(by_status.values())
+        candidate = by_status.get("candidate", 0)
+        trusted = by_status.get("trusted", 0)
+        # Stable explicit names are part of the public status contract. Keep the
+        # legacy `total` alias for older UI/builds while 1.10.x clients migrate.
         return {
-            "total": sum(by_status.values()),
-            "candidate": by_status.get("candidate", 0),
-            "trusted": by_status.get("trusted", 0),
+            "knowledge_total": total,
+            "candidate": candidate,
+            "trusted": trusted,
+            "total": total,
             "conflict": by_status.get("conflict", 0),
             "stale": by_status.get("stale", 0),
             "rejected": by_status.get("rejected", 0),
