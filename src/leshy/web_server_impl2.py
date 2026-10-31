@@ -16,12 +16,14 @@ from .runtime_compat import CompatibleRuntimeManager
 from .streaming_backends import install_streaming_backends
 from .telegram_rich import TelegramBridge
 from .voice_asr import LocalVoiceASR
+from .voice_tts import LocalVoiceTTS
 
 
 def make_handler(app, telegram, settings, model_catalog):
     Parent = base.make_handler(app, telegram, settings, model_catalog)
     dashboard = DashboardService(app)
     voice_asr = LocalVoiceASR(settings.brain_dir)
+    voice_tts = LocalVoiceTTS(settings.brain_dir)
 
     class Handler(Parent):
         def do_GET(self):
@@ -55,12 +57,8 @@ def make_handler(app, telegram, settings, model_catalog):
                 if not self._authorized():
                     self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
                     return
-                return self._json(HTTPStatus.OK, voice_asr.status())
+                return self._json(HTTPStatus.OK, {"asr": voice_asr.status(), "tts": voice_tts.status()})
 
-            # Новый список сессий хранит pin/archive/lock самостоятельно, но
-            # автоименование остаётся обязанностью DashboardService. Вызов ниже
-            # только планирует одно безопасное фоновое переименование и не меняет
-            # JSON-ответ расширенного endpoint.
             if parsed.path == "/v1/sessions":
                 try:
                     args = parse.parse_qs(parsed.query)
@@ -97,6 +95,32 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("voice_http_transcribe_failed", str(exc))
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Ошибка локального распознавания: {exc}"})
+
+            if parsed.path == "/v1/voice/speak":
+                if not self._authorized():
+                    self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                    return
+                try:
+                    body = self._body()
+                    audio, meta = voice_tts.synthesize(
+                        str(body.get("text") or ""),
+                        preferred_voice=str(body.get("voice") or ""),
+                    )
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "audio/wav")
+                    self.send_header("Content-Length", str(len(audio)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Leshy-TTS-Backend", str(meta.get("backend") or "local"))
+                    if meta.get("voice"):
+                        self.send_header("X-Leshy-TTS-Voice", str(meta["voice"]).encode("ascii", "ignore").decode("ascii"))
+                    self.end_headers()
+                    self.wfile.write(audio)
+                    return
+                except (ValueError, RuntimeError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc), "voice": voice_tts.status()})
+                except Exception as exc:
+                    problem("voice_http_speak_failed", str(exc))
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Ошибка локальной озвучки: {exc}"})
             return super().do_POST()
 
     return Handler
