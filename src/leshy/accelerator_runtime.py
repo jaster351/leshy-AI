@@ -49,6 +49,7 @@ class LlamaCppRuntimeManager:
         if os.name != "nt":
             return False
         if backend == "vulkan":
+            # Универсальный GPU runtime: AMD Radeon, NVIDIA и Intel с Vulkan-драйвером.
             return lowered.endswith(".zip") and "bin-win-vulkan-x64" in lowered
         if backend == "openvino":
             return lowered.endswith(".zip") and "bin-win-openvino" in lowered and "x64" in lowered
@@ -180,7 +181,7 @@ def _free_local_port() -> int:
 
 
 class LlamaServerLLM:
-    """Локальный LLM через llama-server с быстрым отказом и multi-GPU."""
+    """Постоянный локальный llama-server, удерживающий модель в RAM/VRAM между запросами."""
 
     def __init__(
         self,
@@ -213,6 +214,7 @@ class LlamaServerLLM:
         self._port: int | None = None
         self._lock = threading.RLock()
         self._chat_lock = threading.RLock()
+        self._ready_since: float | None = None
 
     def _stop_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
@@ -226,6 +228,7 @@ class LlamaServerLLM:
                     pass
         self._process = None
         self._port = None
+        self._ready_since = None
 
     def _is_healthy(self, base: str, timeout: float = 0.75) -> bool:
         try:
@@ -257,11 +260,11 @@ class LlamaServerLLM:
                 "-c", str(max(512, self.n_ctx)),
                 "-np", "1",
                 "-t", str(cpu_threads),
-                "--no-warmup",
             ]
             if self.backend == "vulkan":
-                # llama.cpp распределяет модель между доступными GPU в layer mode.
-                # --fit позволяет автоматически подстроить размещение под VRAM.
+                # Vulkan намеренно используется как универсальный Windows GPU backend:
+                # AMD Radeon, NVIDIA и Intel. Процесс остаётся запущенным, поэтому
+                # веса модели не выгружаются из VRAM между сообщениями.
                 args += ["-ngl", "all", "-sm", "layer", "--fit", "on"]
             if self.backend == "openvino":
                 env["GGML_OPENVINO_DEVICE"] = self.device or "NPU"
@@ -282,6 +285,12 @@ class LlamaServerLLM:
             except Exception:
                 log_handle.close()
                 raise
+            finally:
+                # Popen inherits the handle; the parent must not keep an extra lock on Windows.
+                try:
+                    log_handle.close()
+                except Exception:
+                    pass
             self._port = port
             base = f"http://127.0.0.1:{port}"
             event(
@@ -291,6 +300,7 @@ class LlamaServerLLM:
                 gpu_count=self.gpu_count if self.backend == "vulkan" else 0,
                 cpu_threads=cpu_threads,
                 startup_timeout_seconds=self.startup_timeout,
+                resident=True,
             )
             deadline = time.monotonic() + self.startup_timeout
             while time.monotonic() < deadline:
@@ -298,13 +308,30 @@ class LlamaServerLLM:
                     self._stop_process()
                     raise LLMUnavailable(f"Локальный {self.backend} backend завершился при запуске. См. {log_path}")
                 if self._is_healthy(base, timeout=0.75):
-                    event("accelerator_server_ready", backend=self.backend, port=port, device=self.device)
+                    self._ready_since = time.monotonic()
+                    event("accelerator_server_ready", backend=self.backend, port=port, device=self.device, resident=True)
                     return base
                 time.sleep(0.25)
             self._stop_process()
             raise LLMUnavailable(
                 f"Локальный {self.backend} backend не стал готов за {int(self.startup_timeout)} секунд"
             )
+
+    def warmup(self) -> bool:
+        """Загружает runtime и модель заранее и оставляет сервер resident."""
+        self._ensure_server()
+        event("accelerator_backend_warmed", backend=self.backend, device=self.device, resident=True)
+        return True
+
+    def resident_status(self) -> dict[str, Any]:
+        alive = self._process is not None and self._process.poll() is None and bool(self._port)
+        return {
+            "backend": self.backend,
+            "device": self.device,
+            "resident": bool(alive),
+            "port": self._port if alive else None,
+            "ready_seconds": round(time.monotonic() - self._ready_since, 1) if alive and self._ready_since else 0.0,
+        }
 
     def chat(self, messages: list[ChatMessage]) -> str:
         # Один llama-server slot не должен получать параллельные запросы от UI,
@@ -332,7 +359,10 @@ class LlamaServerLLM:
                     raise LLMUnavailable("Ускоренный backend вернул пустой ответ")
                 return text
             except error.HTTPError as exc:
-                self._stop_process()
+                # Серверные ошибки означают сломанный worker и требуют перезапуска.
+                # Клиентские 4xx не должны выгружать модель из VRAM.
+                if exc.code >= 500:
+                    self._stop_process()
                 exception("accelerator_chat_http_failed", exc, backend=self.backend, device=self.device, status=exc.code)
                 raise LLMUnavailable(
                     f"Ускоренный backend {self.backend} вернул HTTP {exc.code}"
