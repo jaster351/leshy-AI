@@ -10,7 +10,13 @@ Remove-Item Env:LESHY_BRAIN_DIR -ErrorAction SilentlyContinue
 Remove-Item Env:LESHY_INSTALL_ROOT -ErrorAction SilentlyContinue
 Remove-Item Env:LESHY_LEGACY_BRAIN_DIR -ErrorAction SilentlyContinue
 
-$runtimeLogStage = Join-Path (Get-Location).Path '.autobuild\leshy-runtime-logs\current'
+$repoRoot = (Get-Location).Path
+$autoRoot = Join-Path $repoRoot '.autobuild'
+$packageDist = Join-Path $autoRoot 'package-dist'
+$packageRoot = Join-Path $packageDist 'Leshy'
+$packageWork = Join-Path $autoRoot 'pyinstaller-work'
+$runtimeLogStage = Join-Path $autoRoot 'leshy-runtime-logs\current'
+
 Remove-Item -Recurse -Force $runtimeLogStage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $runtimeLogStage | Out-Null
 
@@ -28,10 +34,17 @@ foreach ($required in @('leshy.ui.mode','data-section="knowledge"','data-section
   if ($uiSource -notlike "*$required*") { throw "Full Web UI contract is missing: $required" }
 }
 
-Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+# IMPORTANT: never build into dist/Leshy. That directory may be the live copy
+# selected by the user and can contain a multi-gigabyte LeshyBrain. PyInstaller
+# --noconfirm removes its output folder, so all disposable build output lives
+# under .autobuild instead.
+Remove-Item -Recurse -Force $packageDist, $packageWork -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
 python -m PyInstaller --noconfirm --clean --onedir --console `
   --name Leshy `
   --paths src `
+  --distpath $packageDist `
+  --workpath $packageWork `
   --collect-all llama_cpp `
   --collect-all ddgs `
   --collect-all tzdata `
@@ -39,14 +52,16 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --add-data "VERSION;." `
   windows/launcher.py
 
-if (-not (Test-Path 'dist/Leshy/Leshy.exe')) { throw 'PyInstaller did not create dist/Leshy/Leshy.exe' }
+$packageExe = Join-Path $packageRoot 'Leshy.exe'
+if (-not (Test-Path $packageExe)) { throw "PyInstaller did not create $packageExe" }
 
+# Smoke tests use a disposable brain only inside the isolated package tree.
 $env:LESHY_LLM_BACKEND = 'echo'
-$smokeRoot = (Resolve-Path 'dist/Leshy').Path
+$smokeRoot = (Resolve-Path $packageRoot).Path
 $smokeBrain = Join-Path $smokeRoot 'LeshyBrain'
 $smokeLogs = Join-Path $smokeBrain 'logs'
 Remove-Item -Recurse -Force $smokeBrain -ErrorAction SilentlyContinue
-$proc = Start-Process -FilePath (Resolve-Path 'dist/Leshy/Leshy.exe') -ArgumentList '--no-browser','--host','127.0.0.1','--port','18765' -PassThru -WindowStyle Hidden
+$proc = Start-Process -FilePath $packageExe -ArgumentList '--no-browser','--host','127.0.0.1','--port','18765' -PassThru -WindowStyle Hidden
 try {
   $ok = $false
   foreach ($i in 1..30) {
@@ -88,7 +103,7 @@ try {
   $meta = [ordered]@{
     version = $version
     captured_at = (Get-Date).ToString('o')
-    source = 'dist/Leshy/LeshyBrain/logs'
+    source = '.autobuild/package-dist/Leshy/LeshyBrain/logs'
   }
   $meta | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runtimeLogStage 'build-metadata.json') -Encoding UTF8
 
@@ -121,8 +136,13 @@ if (-not $isccPath) {
   }
 }
 if (-not $isccPath) { throw 'Inno Setup 6 (ISCC.exe) was not found' }
-& $isccPath "/DMyAppVersion=$version" 'windows/installer.iss'
+
+# Package directly from the isolated tree. The live dist/Leshy/LeshyBrain is
+# never a source and is never removed by the build.
+& $isccPath "/DMyAppVersion=$version" ("/DMyAppSourceDir=" + $packageRoot) 'windows/installer.iss'
+if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
 $installer = "dist/LeshySetup-$version.exe"
 if (-not (Test-Path $installer)) { throw "Installer was not created: $installer" }
 Write-Host "READY: $installer"
+Write-Host "DATA SAFE: dist\Leshy\LeshyBrain was not touched."
