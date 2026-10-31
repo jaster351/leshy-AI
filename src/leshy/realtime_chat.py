@@ -1,0 +1,225 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import threading
+import time
+import uuid
+from typing import Any, Iterator
+
+from .diagnostics import event, problem
+from .llm import ChatMessage
+from .research_policy import research_reason
+from .storage import utcnow
+
+
+@dataclass(slots=True)
+class StreamEvent:
+    type: str
+    data: dict[str, Any]
+
+
+class RealtimeChatManager:
+    """Оркестрирует настоящую потоковую генерацию и её остановку пользователем."""
+
+    def __init__(self, app, session_admin=None):
+        self.app = app
+        self.session_admin = session_admin
+        self._lock = threading.RLock()
+        self._cancellations: dict[str, threading.Event] = {}
+
+    def _register(self, request_id: str | None) -> tuple[str, threading.Event]:
+        rid = (request_id or str(uuid.uuid4())).strip()[:120]
+        cancel = threading.Event()
+        with self._lock:
+            self._cancellations[rid] = cancel
+        return rid, cancel
+
+    def stop(self, request_id: str) -> bool:
+        rid = str(request_id or "").strip()
+        with self._lock:
+            cancel = self._cancellations.get(rid)
+        if cancel is None:
+            return False
+        cancel.set()
+        event("chat_stream_stop_requested", request_id=rid)
+        return True
+
+    def _unregister(self, request_id: str) -> None:
+        with self._lock:
+            self._cancellations.pop(request_id, None)
+
+    @staticmethod
+    def _chunk_fallback(text: str, size: int = 48) -> Iterator[str]:
+        value = str(text or "")
+        for offset in range(0, len(value), size):
+            yield value[offset:offset + size]
+
+    def _llm_stream(self, messages: list[ChatMessage], cancel: threading.Event) -> Iterator[str]:
+        streamer = getattr(self.app.llm, "stream_chat", None)
+        if callable(streamer):
+            yield from streamer(messages, cancel_event=cancel)
+            return
+        answer = self.app.llm.chat(messages)
+        yield from self._chunk_fallback(answer)
+
+    def _save_user_and_history(self, message: str, owner_id: str, session_id: str | None) -> tuple[str, list[Any]]:
+        sid = self.app._ensure_session(owner_id, session_id)
+        now = utcnow()
+        with self.app.storage.connection() as conn:
+            if self.session_admin is not None and session_id:
+                row = conn.execute("SELECT locked FROM sessions WHERE id=? AND owner_id=?", (sid, owner_id)).fetchone()
+                if row is not None and bool(row["locked"]):
+                    raise PermissionError("Этот чат заблокирован. Разблокируйте его в меню чата, чтобы продолжить переписку.")
+            conn.execute(
+                "INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)",
+                (sid, "user", message, now),
+            )
+            count = int(conn.execute("SELECT COUNT(*) AS c FROM messages WHERE session_id=?", (sid,)).fetchone()["c"])
+            if count == 1:
+                conn.execute(
+                    "UPDATE sessions SET title=?,title_source=?,updated_at=? WHERE id=?",
+                    (" ".join(message.split())[:80], "auto", now, sid),
+                )
+            rows = conn.execute(
+                "SELECT role,content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 24",
+                (sid,),
+            ).fetchall()
+        return sid, rows
+
+    def _build_context(self, message: str, owner_id: str, rows: list[Any]) -> tuple[list[ChatMessage], list[dict[str, str]], bool]:
+        context: list[ChatMessage] = [
+            ChatMessage(
+                "system",
+                "Интернет-поиск Лешему доступен через приложение. Никогда не утверждай, что доступа к интернету нет. "
+                "Отвечай только готовым пользовательским ответом, без внутреннего анализа. Форматируй код fenced-блоками "
+                "Markdown с языком, например ```python, чтобы Web и Telegram могли показать кнопку копирования.",
+            )
+        ]
+        memory_context = self.app._memory_context(owner_id)
+        if memory_context:
+            context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
+
+        trusted = self.app.knowledge.search(message, trusted_only=True, limit=5)
+        candidates = self.app.knowledge.search_candidates(message, limit=5)
+        if trusted:
+            facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
+            context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
+
+        sources: list[dict[str, str]] = []
+        search_attempted = False
+        reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
+        if reason or self.app._needs_live_search(message):
+            search_attempted = True
+            try:
+                search_result = self.app.live_search(message, limit=5, reason=reason or "требуются актуальные данные")
+                sources = [
+                    {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
+                    for item in search_result.get("results", [])
+                ]
+                if search_result.get("results"):
+                    snippets = "\n".join(
+                        f"- {item.get('title','')}: {item.get('snippet','')} [{item.get('url','')}]"
+                        for item in search_result["results"]
+                    )
+                    context.append(ChatMessage(
+                        "system",
+                        "Результаты текущего веб-поиска. Используй их для ответа, не выдавая непроверенное за факт:\n" + snippets,
+                    ))
+            except Exception as exc:
+                problem("chat_stream_search_failed", str(exc), query=message[:500])
+                context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + str(exc)))
+
+        history = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
+        return context + history, sources, search_attempted
+
+    def stream(
+        self,
+        message: str,
+        *,
+        owner_id: str = "web:local",
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ) -> Iterator[StreamEvent]:
+        message = str(message or "").strip()
+        owner_id = (owner_id or "web:local").strip()[:200]
+        if not message:
+            raise ValueError("Сообщение пустое")
+        if len(message) > 32000:
+            raise ValueError("Сообщение слишком длинное")
+
+        # Служебные команды и image-job пока используют канонический app.chat,
+        # но интерфейс остаётся совместимым с тем же SSE протоколом.
+        special = message.lower().startswith(("/remember ", "/memories")) or self.app._image_prompt(message) is not None
+        if special:
+            rid, cancel = self._register(request_id)
+            try:
+                result = self.app.chat(message, owner_id=owner_id, session_id=session_id)
+                yield StreamEvent("start", {"request_id": rid, "session_id": result["session_id"]})
+                answer = str(result.get("answer") or "")
+                if not cancel.is_set() and answer:
+                    yield StreamEvent("delta", {"text": answer})
+                yield StreamEvent("done", {
+                    "request_id": rid,
+                    "session_id": result["session_id"],
+                    "answer": answer,
+                    "sources": result.get("sources") or [],
+                    "image_job": result.get("image_job"),
+                    "stopped": bool(cancel.is_set()),
+                })
+            finally:
+                self._unregister(rid)
+            return
+
+        rid, cancel = self._register(request_id)
+        sid = ""
+        answer_parts: list[str] = []
+        started = time.monotonic()
+        try:
+            sid, rows = self._save_user_and_history(message, owner_id, session_id)
+            messages, sources, search_attempted = self._build_context(message, owner_id, rows)
+            yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": sources})
+            event("chat_stream_started", request_id=rid, session_id=sid, owner_id=owner_id)
+
+            for delta in self._llm_stream(messages, cancel):
+                if cancel.is_set():
+                    break
+                text = str(delta or "")
+                if not text:
+                    continue
+                answer_parts.append(text)
+                yield StreamEvent("delta", {"text": text})
+
+            answer = "".join(answer_parts).strip()
+            stopped = cancel.is_set()
+            if answer:
+                answered_at = self.app._save_assistant(sid, answer)
+            else:
+                answered_at = utcnow()
+            latency_ms = int((time.monotonic() - started) * 1000)
+            event(
+                "chat_stream_finished",
+                request_id=rid,
+                session_id=sid,
+                owner_id=owner_id,
+                answer_chars=len(answer),
+                stopped=stopped,
+                latency_ms=latency_ms,
+                web_search=search_attempted,
+            )
+            yield StreamEvent("done", {
+                "request_id": rid,
+                "session_id": sid,
+                "answer": answer,
+                "created_at": answered_at,
+                "sources": sources,
+                "stopped": stopped,
+                "latency_ms": latency_ms,
+            })
+        except Exception as exc:
+            problem("chat_stream_failed", str(exc), request_id=rid, session_id=sid, owner_id=owner_id)
+            yield StreamEvent("error", {"request_id": rid, "session_id": sid, "error": str(exc)})
+        finally:
+            self._unregister(rid)
+
+
+__all__ = ["RealtimeChatManager", "StreamEvent"]
