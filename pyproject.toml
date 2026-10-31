@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 native = ["llama-cpp-python>=0.3.27,<0.4"]
 build = ["pyinstaller>=6.11,<7"]
+test = ["pytest>=8,<9"]
 
 [project.scripts]
 leshy = "leshy.web_server:main"
