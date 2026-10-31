@@ -15,6 +15,7 @@ dependencies = [
   "tzdata>=2025.2",
   "yt-dlp>=2026.10.26,<2027",
   "faster-whisper>=1.2,<2",
+  "av>=11,<19",
   "pypdf>=6,<7",
   "playwright>=1.55,<2",
   "huggingface_hub>=0.36,<2",
