@@ -34,6 +34,22 @@ foreach ($required in @('leshy.ui.mode','data-section="knowledge"','data-section
   if ($uiSource -notlike "*$required*") { throw "Full Web UI contract is missing: $required" }
 }
 
+# External UI modules contain the real button recovery, pending-chat layout,
+# hardware panel and visible self-learning control. A build must fail before
+# packaging if any of those contracts disappear.
+$variantSource = Get-Content 'web/variant3.js' -Raw
+foreach ($required in @('learningQuickToggle','bindCoreControls','scienceProgressText','/v1/learning')) {
+  if ($variantSource -notlike "*$required*") { throw "Variant 3 UI contract is missing: $required" }
+}
+$enhancementSource = Get-Content 'web/ui-enhancements.js' -Raw
+foreach ($required in @('addPendingMessage','height:auto!important','pending.remove()','#messages .msg.user')) {
+  if ($enhancementSource -notlike "*$required*") { throw "Chat UI regression contract is missing: $required" }
+}
+$hardwareSource = Get-Content 'web/hardware-panel.js' -Raw
+foreach ($required in @('/v1/hardware','/v1/hardware/config','cpu_gpu_npu')) {
+  if ($hardwareSource -notlike "*$required*") { throw "Hardware UI contract is missing: $required" }
+}
+
 # IMPORTANT: never build into dist/Leshy. That directory may be the live copy
 # selected by the user and can contain a multi-gigabyte LeshyBrain. PyInstaller
 # --noconfirm removes its output folder, so all disposable build output lives
@@ -79,8 +95,30 @@ try {
     throw "Frozen app uses wrong data root. Expected: $expectedBrain ; Actual: $actualBrain"
   }
 
+  # Verify that the packaged HTTP server really serves the external UI modules
+  # used by the buttons. This catches PyInstaller/add-data regressions.
+  $variantAsset = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/variant3.js' -TimeoutSec 3
+  if ($variantAsset.StatusCode -ne 200 -or $variantAsset.Content -notlike '*learningQuickToggle*') {
+    throw 'Frozen Web UI did not serve variant3.js learning controls'
+  }
+  $enhancementAsset = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/ui-enhancements.js' -TimeoutSec 3
+  if ($enhancementAsset.StatusCode -ne 200 -or $enhancementAsset.Content -notlike '*addPendingMessage*') {
+    throw 'Frozen Web UI did not serve pending-chat enhancements'
+  }
+  $hardwareAsset = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/hardware-panel.js' -TimeoutSec 3
+  if ($hardwareAsset.StatusCode -ne 200 -or $hardwareAsset.Content -notlike '*cpu_gpu_npu*') {
+    throw 'Frozen Web UI did not serve hardware controls'
+  }
+
   $reply = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/chat' -ContentType 'application/json' -Body '{"message":"smoke","owner_id":"ci","session_id":"ci-smoke"}'
   if (-not $reply.answer) { throw 'Frozen smoke-test chat returned an empty answer' }
+
+  # The visible learning button depends on this endpoint. Toggle it on and back
+  # off immediately so the smoke test does not leave a background research run.
+  $learningOn = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/learning' -ContentType 'application/json' -Body '{"enabled":true}'
+  if (-not $learningOn.enabled) { throw 'Self-learning API did not enable learning' }
+  $learningOff = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/learning' -ContentType 'application/json' -Body '{"enabled":false}'
+  if ($learningOff.enabled) { throw 'Self-learning API did not disable learning' }
 
   $capabilities = Invoke-RestMethod -Uri 'http://127.0.0.1:18765/v1/capabilities' -TimeoutSec 3
   if (-not $capabilities.items -or $capabilities.items.Count -lt 5) { throw 'Full dashboard capabilities endpoint failed' }
