@@ -51,11 +51,17 @@ def main() -> None:
     os.environ["LESHY_HOST"] = args.host
     os.environ["LESHY_PORT"] = str(args.port)
 
+    from leshy.diagnostic_publisher import DiagnosticPublisher
     from leshy.web_server import serve
 
-    if not args.no_browser:
-        threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/")).start()
-    serve(args.host, args.port)
+    publisher = DiagnosticPublisher(brain_root)
+    publisher.start()
+    try:
+        if not args.no_browser:
+            threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/")).start()
+        serve(args.host, args.port)
+    finally:
+        publisher.stop()
 
 
 if __name__ == "__main__":
