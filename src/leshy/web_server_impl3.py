@@ -7,16 +7,37 @@ from http.server import ThreadingHTTPServer
 from urllib import parse
 
 from . import web_server_impl2 as previous
-from .diagnostics import problem
+from .diagnostics import event, problem
 from .hf_settings import HuggingFaceSettings
 from .marketplace import MarketplaceManager
 from .marketplace_chat import install_marketplace_chat_bridge
 from .marketplace_plugin_runtime import MarketplacePluginRuntime
+from .memory_policy import memory_status
 from .model_catalog import apply_saved_model_to_settings, configure_app_model_verifier
 from .os_control_approval import install_os_control
 from .runtime_compat import CompatibleRuntimeManager
 from .streaming_backends import install_streaming_backends
 from .telegram_fast import FastTelegramBridge
+
+
+def _apply_low_memory_guard(app, settings) -> None:
+    """Не держать две CPU-копии одной GGUF на системах с небольшим объёмом RAM."""
+    try:
+        status = memory_status(settings.brain_dir)
+        total = int((status.get("system") or {}).get("ram_total_bytes") or 0)
+        states = list(getattr(app.llm, "_states", []) or [])
+        if not total or total > 20 * 1024**3 or not states:
+            return
+        has_cpu_server = any(getattr(state, "name", "") == "cpu-llama-server" for state in states)
+        if not has_cpu_server:
+            return
+        kept = [state for state in states if getattr(state, "name", "") != "cpu-native"]
+        if len(kept) != len(states):
+            app.llm._states = kept
+            app.llm.model = "adaptive:" + ",".join(str(getattr(state, "name", "")) for state in kept)
+            event("low_memory_cpu_native_disabled", ram_total_bytes=total, remaining_backends=[state.name for state in kept])
+    except Exception as exc:
+        problem("low_memory_guard_failed", str(exc))
 
 
 def make_handler(app, telegram, settings, model_catalog):
@@ -30,6 +51,12 @@ def make_handler(app, telegram, settings, model_catalog):
     class Handler(Parent):
         def do_GET(self):
             parsed = parse.urlparse(self.path)
+            if parsed.path == "/chatgpt-shell.js":
+                try:
+                    return self._send_asset("chatgpt-shell-stable.js", "application/javascript; charset=utf-8")
+                except FileNotFoundError:
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "chatgpt-shell-stable.js не найден"})
+
             if parsed.path == "/marketplace-panel.js":
                 try:
                     return self._send_asset("marketplace-panel.js", "application/javascript; charset=utf-8")
@@ -97,6 +124,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
         model_name_provider=lambda: app.model_path.name,
     )
     app.llm = app._build_llm()
+    _apply_low_memory_guard(app, settings)
     configure_app_model_verifier(app, model_catalog)
     install_streaming_backends(app.llm)
     install_os_control(app)
