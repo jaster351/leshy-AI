@@ -52,7 +52,7 @@ class PersonProfile:
 
 
 class PeopleStore:
-    """Single local person/profile store shared by every Leshy interface."""
+    """Единое локальное хранилище профилей людей для всех интерфейсов Лешего."""
 
     def __init__(self, brain_dir: Path):
         self.path = Path(brain_dir) / "People" / "people.json"
@@ -153,10 +153,10 @@ class PeopleStore:
     ) -> PersonProfile:
         person = self.get(person_id)
         if person is None:
-            raise KeyError(f"Unknown person: {person_id}")
+            raise KeyError(f"Неизвестный пользователь: {person_id}")
         existing_owner = self.find_by_identity(interface, external_id)
         if existing_owner is not None and existing_owner.person_id != person_id:
-            raise ValueError("Identity is already linked to another person")
+            raise ValueError("Эта внешняя идентичность уже привязана к другому пользователю")
         identity = next((i for i in person.identities if i.interface == interface and i.external_id == str(external_id)), None)
         if identity is None:
             identity = InterfaceIdentity(interface=str(interface).lower(), external_id=str(external_id))
@@ -169,7 +169,7 @@ class PeopleStore:
     def update(self, person_id: str, **fields: Any) -> PersonProfile:
         person = self.get(person_id)
         if person is None:
-            raise KeyError(f"Unknown person: {person_id}")
+            raise KeyError(f"Неизвестный пользователь: {person_id}")
         allowed = {
             "first_name", "last_name", "patronymic", "preferred_name", "language_code",
             "birthday_day", "birthday_month", "birthday_year", "timezone", "notes",
