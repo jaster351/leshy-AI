@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import parse
@@ -20,6 +21,7 @@ from .model_catalog import (
     configure_app_model_verifier,
     switch_app_model,
 )
+from .startup_recovery import recover_unanswered
 from .telegram import TelegramBridge
 
 
@@ -103,6 +105,7 @@ def make_handler(
                 markers = (
                     '<script src="/ui-enhancements.js"></script>',
                     '<script src="/hardware-panel.js"></script>',
+                    '<script src="/model-panel.js"></script>',
                     '<script src="/variant3.js"></script>',
                 )
                 scripts = "".join(marker + "\n" for marker in markers if marker not in html)
@@ -121,6 +124,9 @@ def make_handler(
                 return
             if parsed.path == "/hardware-panel.js":
                 self._send_asset(_web_asset(settings, "hardware-panel.js"), "application/javascript; charset=utf-8")
+                return
+            if parsed.path == "/model-panel.js":
+                self._send_asset(_web_asset(settings, "model-panel.js"), "application/javascript; charset=utf-8")
                 return
             if parsed.path == "/variant3.js":
                 self._send_asset(_web_asset(settings, "variant3.js"), "application/javascript; charset=utf-8")
@@ -226,8 +232,6 @@ def make_handler(
                 self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
                 return
             try:
-                # GGUF-файлы могут занимать десятки гигабайт, поэтому этот endpoint
-                # читает тело потоково и не использует 2-МБ JSON parser.
                 if self.path == "/v1/models/upload":
                     self._upload_model()
                     return
@@ -311,6 +315,9 @@ def make_handler(
                         allow_all=bool(body.get("allow_all", False)),
                         owner_id=str(body.get("owner_id") or ""),
                     )
+                    # При ручном сохранении настроек пользователь ожидает запуск
+                    # Telegram сразу, стартовая 30-секундная пауза относится только
+                    # к запуску самого приложения.
                     telegram.start()
                     self._json(HTTPStatus.OK, telegram.status())
                     return
@@ -340,6 +347,20 @@ def _warm_local_llm(app: LeshyApp) -> None:
         problem("llm_background_warmup_failed", str(exc))
 
 
+def _delayed_recovery(app: LeshyApp, telegram: TelegramBridge, delay_seconds: float = 30.0) -> None:
+    """После старта дать системе 30 секунд, затем восстановить каналы/ответы."""
+    time.sleep(max(0.0, float(delay_seconds)))
+    try:
+        telegram.start()
+    except Exception as exc:
+        problem("telegram_delayed_start_failed", str(exc))
+    try:
+        result = recover_unanswered(app)
+        event("startup_recovery_cycle_finished", delay_seconds=delay_seconds, **result)
+    except Exception as exc:
+        problem("startup_recovery_cycle_failed", str(exc), delay_seconds=delay_seconds)
+
+
 def serve(host: str | None = None, port: int | None = None) -> None:
     settings = Settings.from_env()
     model_catalog = apply_saved_model_to_settings(settings)
@@ -349,7 +370,12 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     app.telegram = telegram
     app.start_background()
     threading.Thread(target=_warm_local_llm, args=(app,), name="leshy-llm-warmup", daemon=True).start()
-    telegram.start()
+    threading.Thread(
+        target=_delayed_recovery,
+        args=(app, telegram, 30.0),
+        name="leshy-startup-recovery",
+        daemon=True,
+    ).start()
     bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0")
     bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
     server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
