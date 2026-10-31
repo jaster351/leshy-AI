@@ -86,7 +86,26 @@ class RealtimeChatManager:
             ).fetchall()
         return sid, rows
 
-    def _build_context(self, message: str, owner_id: str, rows: list[Any]) -> tuple[list[ChatMessage], list[dict[str, str]], bool]:
+    def _search_plan(self, message: str) -> dict[str, Any]:
+        trusted = self.app.knowledge.search(message, trusted_only=True, limit=5)
+        candidates = self.app.knowledge.search_candidates(message, limit=5)
+        reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
+        needed = bool(reason or self.app._needs_live_search(message))
+        return {
+            "trusted": trusted,
+            "candidates": candidates,
+            "reason": reason or ("требуются актуальные данные" if needed else ""),
+            "needed": needed,
+        }
+
+    def _build_context(
+        self,
+        message: str,
+        owner_id: str,
+        rows: list[Any],
+        *,
+        search_plan: dict[str, Any] | None = None,
+    ) -> tuple[list[ChatMessage], list[dict[str, str]], bool]:
         context: list[ChatMessage] = [
             ChatMessage(
                 "system",
@@ -99,19 +118,17 @@ class RealtimeChatManager:
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
 
-        trusted = self.app.knowledge.search(message, trusted_only=True, limit=5)
-        candidates = self.app.knowledge.search_candidates(message, limit=5)
+        plan = search_plan or self._search_plan(message)
+        trusted = list(plan.get("trusted") or [])
         if trusted:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
 
         sources: list[dict[str, str]] = []
-        search_attempted = False
-        reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
-        if reason or self.app._needs_live_search(message):
-            search_attempted = True
+        search_attempted = bool(plan.get("needed"))
+        if search_attempted:
             try:
-                search_result = self.app.live_search(message, limit=5, reason=reason or "требуются актуальные данные")
+                search_result = self.app.live_search(message, limit=5, reason=str(plan.get("reason") or "требуются актуальные данные"))
                 sources = [
                     {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
                     for item in search_result.get("results", [])
@@ -230,7 +247,34 @@ class RealtimeChatManager:
         started = time.monotonic()
         try:
             sid, rows = self._save_user_and_history(message, owner_id, session_id)
-            messages, sources, search_attempted = self._build_context(message, owner_id, rows)
+            plan = self._search_plan(message)
+            if plan.get("needed"):
+                yield StreamEvent("activity", {
+                    "kind": "web_search",
+                    "phase": "searching",
+                    "text": "Ищу в интернете…",
+                    "reason": str(plan.get("reason") or ""),
+                })
+                event("chat_web_search_visible", request_id=rid, session_id=sid, reason=str(plan.get("reason") or ""))
+
+            messages, sources, search_attempted = self._build_context(message, owner_id, rows, search_plan=plan)
+            if search_attempted:
+                if sources:
+                    yield StreamEvent("activity", {
+                        "kind": "web_search",
+                        "phase": "reading",
+                        "text": f"Нашёл {len(sources)} источников · изучаю…",
+                        "source_count": len(sources),
+                        "sources": sources,
+                    })
+                else:
+                    yield StreamEvent("activity", {
+                        "kind": "web_search",
+                        "phase": "finished",
+                        "text": "Поиск завершён · подходящие источники не найдены",
+                        "source_count": 0,
+                    })
+
             yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": sources})
             event("chat_stream_started", request_id=rid, session_id=sid, owner_id=owner_id)
 
