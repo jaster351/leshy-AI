@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import parse
@@ -11,6 +12,7 @@ from urllib import parse
 from .app import LeshyApp, LLMUnavailable
 from .config import Settings
 from .dashboard import DashboardService
+from .diagnostics import event, problem
 from .telegram import TelegramBridge
 
 
@@ -83,9 +85,18 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
             args = parse.parse_qs(parsed.query)
             if parsed.path == "/":
                 html = _web_index(settings).read_text(encoding="utf-8")
-                marker = '<script src="/ui-enhancements.js"></script>'
-                if marker not in html:
-                    html = html.replace("</body>", marker + "\n</body>")
+                css_marker = '<link rel="stylesheet" href="/variant3.css">'
+                if css_marker not in html:
+                    html = html.replace("</head>", css_marker + "\n</head>")
+                enhancement_marker = '<script src="/ui-enhancements.js"></script>'
+                variant_marker = '<script src="/variant3.js"></script>'
+                scripts = ""
+                if enhancement_marker not in html:
+                    scripts += enhancement_marker + "\n"
+                if variant_marker not in html:
+                    scripts += variant_marker + "\n"
+                if scripts:
+                    html = html.replace("</body>", scripts + "</body>")
                 data = html.encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -96,6 +107,12 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 return
             if parsed.path == "/ui-enhancements.js":
                 self._send_asset(_web_asset(settings, "ui-enhancements.js"), "application/javascript; charset=utf-8")
+                return
+            if parsed.path == "/variant3.js":
+                self._send_asset(_web_asset(settings, "variant3.js"), "application/javascript; charset=utf-8")
+                return
+            if parsed.path == "/variant3.css":
+                self._send_asset(_web_asset(settings, "variant3.css"), "text/css; charset=utf-8")
                 return
             if parsed.path.startswith("/generated/"):
                 target = app.image_generation.resolve_generated(parsed.path.rsplit("/", 1)[-1])
@@ -237,7 +254,12 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                     users = body.get("allowed_users") or []
                     if isinstance(users, str):
                         users = [part.strip() for part in users.replace(",", "\n").splitlines() if part.strip()]
-                    telegram.configure(str(body.get("token") or ""), users)
+                    telegram.configure(
+                        str(body.get("token") or ""),
+                        users,
+                        allow_all=bool(body.get("allow_all", False)),
+                        owner_id=str(body.get("owner_id") or ""),
+                    )
                     telegram.start()
                     self._json(HTTPStatus.OK, telegram.status())
                     return
@@ -256,12 +278,26 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
     return Handler
 
 
+def _warm_local_llm(app: LeshyApp) -> None:
+    warmer = getattr(app.llm, "warmup", None)
+    if not callable(warmer):
+        return
+    try:
+        backend = warmer()
+        event("llm_background_warmup_finished", backend=backend or "none")
+    except Exception as exc:
+        # Warmup is an optimization; the normal adaptive request path still
+        # performs failover if every prewarm attempt fails.
+        problem("llm_background_warmup_failed", str(exc))
+
+
 def serve(host: str | None = None, port: int | None = None) -> None:
     settings = Settings.from_env()
     app = LeshyApp(settings)
     telegram = TelegramBridge(app, settings.brain_dir)
     app.telegram = telegram
     app.start_background()
+    threading.Thread(target=_warm_local_llm, args=(app,), name="leshy-llm-warmup", daemon=True).start()
     telegram.start()
     bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0")
     bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
