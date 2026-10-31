@@ -27,7 +27,11 @@ class OllamaLLM:
         self.timeout = timeout
 
     def chat(self, messages: list[ChatMessage]) -> str:
-        payload = json.dumps({"model": self.model, "messages": [{"role": m.role, "content": m.content} for m in messages], "stream": False, "options": {"temperature": 0.25}}).encode("utf-8")
+        # Local import avoids a module cycle: persona uses ChatMessage defined above.
+        from .persona import with_leshy_identity
+
+        prepared_messages = with_leshy_identity(messages)
+        payload = json.dumps({"model": self.model, "messages": [{"role": m.role, "content": m.content} for m in prepared_messages], "stream": False, "options": {"temperature": 0.25}}).encode("utf-8")
         req = request.Request(f"{self.base_url}/api/chat", data=payload, headers={"Content-Type": "application/json"}, method="POST")
         try:
             with request.urlopen(req, timeout=self.timeout) as response:
