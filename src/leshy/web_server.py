@@ -10,6 +10,7 @@ from urllib import parse
 
 from .app import LeshyApp, LLMUnavailable
 from .config import Settings
+from .dashboard import DashboardService
 from .telegram import TelegramBridge
 
 
@@ -27,8 +28,10 @@ def _web_index(settings: Settings) -> Path:
 
 
 def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
+    dashboard = DashboardService(app)
+
     class Handler(BaseHTTPRequestHandler):
-        server_version = "Leshy/1"
+        server_version = "Leshy/2"
 
         def log_message(self, fmt: str, *args):
             return
@@ -58,8 +61,13 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 raise ValueError("Ожидается JSON-объект")
             return value
 
+        @staticmethod
+        def _arg(args: dict[str, list[str]], name: str, default: str = "") -> str:
+            return str((args.get(name) or [default])[0]).strip()
+
         def do_GET(self):
             parsed = parse.urlparse(self.path)
+            args = parse.parse_qs(parsed.query)
             if parsed.path == "/":
                 data = _web_index(settings).read_bytes()
                 self.send_response(HTTPStatus.OK)
@@ -74,6 +82,9 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
             if parsed.path == "/v1/status":
                 self._json(HTTPStatus.OK, app.status())
                 return
+            if parsed.path == "/v1/overview":
+                self._json(HTTPStatus.OK, dashboard.overview(self._arg(args, "owner_id", "web:local")))
+                return
             if parsed.path == "/v1/model/status":
                 self._json(HTTPStatus.OK, app.model_downloader.status())
                 return
@@ -81,9 +92,8 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 self._json(HTTPStatus.OK, telegram.status())
                 return
             if parsed.path == "/v1/history":
-                args = parse.parse_qs(parsed.query)
-                session_id = str((args.get("session_id") or [""])[0]).strip()
-                owner_id = str((args.get("owner_id") or ["web:local"])[0]).strip()
+                session_id = self._arg(args, "session_id")
+                owner_id = self._arg(args, "owner_id", "web:local")
                 if not session_id:
                     self._json(HTTPStatus.BAD_REQUEST, {"error": "session_id обязателен"})
                     return
@@ -91,6 +101,30 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                     self._json(HTTPStatus.OK, {"items": app.history(owner_id, session_id)})
                 except Exception as exc:
                     self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            if parsed.path == "/v1/sessions":
+                self._json(HTTPStatus.OK, {"items": dashboard.sessions(self._arg(args, "owner_id", "web:local"), self._arg(args, "limit", "50"))})
+                return
+            if parsed.path == "/v1/memories":
+                self._json(HTTPStatus.OK, {"items": dashboard.memories(self._arg(args, "owner_id", "web:local"), self._arg(args, "limit", "100"))})
+                return
+            if parsed.path == "/v1/knowledge":
+                self._json(HTTPStatus.OK, {"items": dashboard.knowledge(self._arg(args, "status", "all"), self._arg(args, "limit", "100"))})
+                return
+            if parsed.path == "/v1/research/tasks":
+                self._json(HTTPStatus.OK, {"items": dashboard.research_tasks(self._arg(args, "limit", "100"))})
+                return
+            if parsed.path == "/v1/learning/history":
+                self._json(HTTPStatus.OK, {"items": dashboard.learning_history(self._arg(args, "limit", "100"))})
+                return
+            if parsed.path == "/v1/tasks":
+                self._json(HTTPStatus.OK, {"items": dashboard.tasks(self._arg(args, "owner_id", "web:local"), self._arg(args, "status", "all"), self._arg(args, "limit", "100"))})
+                return
+            if parsed.path == "/v1/capabilities":
+                self._json(HTTPStatus.OK, {"items": dashboard.capabilities()})
+                return
+            if parsed.path == "/v1/logs":
+                self._json(HTTPStatus.OK, dashboard.logs(self._arg(args, "limit", "120")))
                 return
             self._json(HTTPStatus.NOT_FOUND, {"error": "Не найдено"})
 
@@ -118,6 +152,29 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings):
                 if self.path == "/v1/learning":
                     enabled = app.set_learning(bool(body.get("enabled")))
                     self._json(HTTPStatus.OK, {"enabled": enabled})
+                    return
+                if self.path == "/v1/memory":
+                    owner_id = str(body.get("owner_id") or "web:local")
+                    memory_id = app.remember(owner_id, str(body.get("content") or ""), importance=float(body.get("importance") or .8))
+                    self._json(HTTPStatus.CREATED, {"id": memory_id})
+                    return
+                if self.path == "/v1/tasks":
+                    task = dashboard.create_task(
+                        owner_id=str(body.get("owner_id") or "web:local"),
+                        title=str(body.get("title") or ""),
+                        details=str(body.get("details") or ""),
+                        priority=int(body.get("priority") or 0),
+                        due_at=str(body.get("due_at") or "") or None,
+                    )
+                    self._json(HTTPStatus.CREATED, task)
+                    return
+                if self.path == "/v1/tasks/update":
+                    task_id = int(body.get("id") or 0)
+                    if task_id <= 0:
+                        raise ValueError("id задачи обязателен")
+                    changes = {key: body[key] for key in ("title", "details", "status", "priority", "due_at") if key in body}
+                    task = dashboard.update_task(owner_id=str(body.get("owner_id") or "web:local"), task_id=task_id, **changes)
+                    self._json(HTTPStatus.OK, task)
                     return
                 if self.path == "/v1/model/download":
                     self._json(HTTPStatus.ACCEPTED, app.model_downloader.start())
