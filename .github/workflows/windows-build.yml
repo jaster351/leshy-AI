@@ -27,6 +27,7 @@ jobs:
             '.\windows\autobuilder.ps1',
             '.\windows\autobuilder-core.ps1',
             '.\windows\autobuilder-ui.ps1',
+            '.\windows\autobuilder-ui-v3.ps1',
             '.\windows\publish-build-logs.ps1'
           )) {
             $path = (Resolve-Path $file).Path
