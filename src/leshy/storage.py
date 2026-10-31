@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL D
 CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL CHECK(role IN ('system','user','assistant','tool')),content TEXT NOT NULL,created_at TEXT NOT NULL,edited_at TEXT);
 CREATE INDEX IF NOT EXISTS ix_messages_session_id ON messages(session_id,id);
 CREATE TABLE IF NOT EXISTS memories(id INTEGER PRIMARY KEY AUTOINCREMENT,owner_id TEXT NOT NULL DEFAULT 'shared',kind TEXT NOT NULL,content TEXT NOT NULL,importance REAL NOT NULL DEFAULT 0.5,source TEXT,created_at TEXT NOT NULL,expires_at TEXT,fingerprint TEXT NOT NULL UNIQUE);
-CREATE TABLE IF NOT EXISTS knowledge(id INTEGER PRIMARY KEY AUTOINCREMENT,topic TEXT NOT NULL,claim TEXT NOT NULL,source_url TEXT NOT NULL,source_title TEXT,source_type TEXT NOT NULL DEFAULT 'web',captured_at TEXT NOT NULL,verified_at TEXT,confidence REAL NOT NULL DEFAULT 0,status TEXT NOT NULL CHECK(status IN ('candidate','trusted','conflict','rejected','stale')),version INTEGER NOT NULL DEFAULT 1,fingerprint TEXT NOT NULL,supersedes_id INTEGER REFERENCES knowledge(id),metadata_json TEXT NOT NULL DEFAULT '{}',UNIQUE(fingerprint,source_url,version));
+CREATE TABLE IF NOT EXISTS knowledge(id INTEGER PRIMARY KEY AUTOINCREMENT,topic TEXT NOT NULL,claim TEXT NOT NULL,source_url TEXT NOT NULL,source_title TEXT,source_type TEXT NOT NULL DEFAULT 'web',captured_at TEXT NOT NULL,verified_at TEXT,confidence REAL NOT NULL DEFAULT 0,status TEXT NOT NULL CHECK(status IN ('candidate','trusted','conflict','rejected','stale')),version INTEGER NOT NULL DEFAULT 1,fingerprint TEXT NOT NULL,supersedes_id INTEGER REFERENCES knowledge(id),metadata_json TEXT NOT NULL DEFAULT '{}',data_class TEXT NOT NULL DEFAULT 'static',checked_at TEXT,ttl_seconds INTEGER,UNIQUE(fingerprint,source_url,version));
 CREATE INDEX IF NOT EXISTS ix_knowledge_topic ON knowledge(topic,status,confidence DESC);
 CREATE INDEX IF NOT EXISTS ix_knowledge_fingerprint ON knowledge(fingerprint);
 CREATE TABLE IF NOT EXISTS research_tasks(id INTEGER PRIMARY KEY AUTOINCREMENT,query TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('queued','running','done','failed')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT);
@@ -72,6 +72,9 @@ class Storage:
             self._ensure_column(conn, "sessions", "title_source", "TEXT NOT NULL DEFAULT 'auto'")
             self._ensure_column(conn, "messages", "edited_at", "TEXT")
             self._ensure_column(conn, "memories", "owner_id", "TEXT NOT NULL DEFAULT 'shared'")
+            self._ensure_column(conn, "knowledge", "data_class", "TEXT NOT NULL DEFAULT 'static'")
+            self._ensure_column(conn, "knowledge", "checked_at", "TEXT")
+            self._ensure_column(conn, "knowledge", "ttl_seconds", "INTEGER")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_owner_updated ON sessions(owner_id,updated_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_memories_owner_importance ON memories(owner_id,importance DESC,id DESC)")
 
