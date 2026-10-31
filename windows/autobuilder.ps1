@@ -13,6 +13,7 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $UiScript = Join-Path $PSScriptRoot 'autobuilder-ui.ps1'
 $CoreScript = Join-Path $PSScriptRoot 'autobuilder-core.ps1'
+$SettingsPath = Join-Path (Join-Path $RepoRoot '.autobuild') 'ui-settings.json'
 $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $StartupRoot = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
 $StartupCmd = Join-Path $StartupRoot 'Leshy-AutoBuilder.cmd'
@@ -22,6 +23,26 @@ function Get-UiArguments {
     $args = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $UiScript + '"'
     if ($Minimized) { $args += ' -Minimized' }
     return $args
+}
+
+function Quote-Argument {
+    param([string]$Value)
+    return '"' + (($Value -replace '"','').Trim()) + '"'
+}
+
+function Get-CoreTargetArguments {
+    $path = $RepoRoot
+    $remote = 'origin'
+    $branch = 'main'
+    if (Test-Path -LiteralPath $SettingsPath) {
+        try {
+            $settings = Get-Content -LiteralPath $SettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($settings.repository_path) { $path = [string]$settings.repository_path }
+            if ($settings.remote) { $remote = [string]$settings.remote }
+            if ($settings.branch) { $branch = [string]$settings.branch }
+        } catch { }
+    }
+    return ' -RepositoryPath ' + (Quote-Argument $path) + ' -Remote ' + (Quote-Argument $remote) + ' -Branch ' + (Quote-Argument $branch)
 }
 
 function Find-UiProcess {
@@ -80,12 +101,14 @@ switch ($Mode) {
     }
     'status' {
         Write-Host ('Startup: ' + $(if (Test-Path -LiteralPath $StartupCmd) { 'installed' } else { 'not installed' }))
-        & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $CoreScript -Mode status
-        exit $LASTEXITCODE
+        $args = '-NoProfile -ExecutionPolicy Bypass -File ' + (Quote-Argument $CoreScript) + ' -Mode status' + (Get-CoreTargetArguments)
+        $proc = Start-Process -FilePath $PowerShellExe -ArgumentList $args -WorkingDirectory $RepoRoot -NoNewWindow -Wait -PassThru
+        exit $proc.ExitCode
     }
     'once' {
-        & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $CoreScript -Mode full-update
-        exit $LASTEXITCODE
+        $args = '-NoProfile -ExecutionPolicy Bypass -File ' + (Quote-Argument $CoreScript) + ' -Mode full-update' + (Get-CoreTargetArguments)
+        $proc = Start-Process -FilePath $PowerShellExe -ArgumentList $args -WorkingDirectory $RepoRoot -NoNewWindow -Wait -PassThru
+        exit $proc.ExitCode
     }
     'watch' {
         Start-Ui -Minimized $true
