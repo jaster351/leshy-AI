@@ -113,10 +113,60 @@
     }
   }
 
+  function installLearningProgressUi(){
+    const pane=$('pane-learning');
+    if(!pane || $('scienceLearningCard')) return;
+    const card=document.createElement('div');
+    card.id='scienceLearningCard';
+    card.className='card science-learning-card';
+    card.innerHTML=`
+      <h3>Автономная научная программа</h3>
+      <div class="row"><span>Научные материалы</span><b id="scienceProgressText">0 / 2000</b></div>
+      <div class="science-progress"><span id="scienceProgressFill"></span></div>
+      <div class="row"><span>Мониторинг новостей</span><b id="newsMonitorState">—</b></div>
+      <div class="row"><span>Фоновый worker</span><b id="learningWorkerState">—</b></div>
+      <div class="hint" id="scienceLearningHint" style="margin-top:8px">При включённом самообучении Леший изучает академические источники, проверяет утверждения и периодически просматривает свежие новости.</div>
+    `;
+    const firstGrid=pane.querySelector('.grid');
+    if(firstGrid) firstGrid.insertAdjacentElement('afterend',card); else pane.appendChild(card);
+  }
+
+  function renderLearningProgress(status){
+    if(!status) return;
+    installLearningProgressUi();
+    const worker=status.learning_worker||{};
+    const learned=Number(worker.scientific_materials||0);
+    const target=Number(worker.scientific_target||2000);
+    const pct=Math.max(0,Math.min(100,Number(worker.scientific_progress_percent||0)));
+    const text=$('scienceProgressText');
+    if(text) text.textContent=learned+' / '+target+' · '+pct.toFixed(1)+'%';
+    const fill=$('scienceProgressFill');
+    if(fill) fill.style.width=pct+'%';
+    const news=$('newsMonitorState');
+    if(news){
+      const minutes=Math.max(1,Math.round(Number(worker.news_interval_seconds||900)/60));
+      news.textContent=worker.news_monitoring?'включён · каждые '+minutes+' мин':'выключен';
+      news.className=worker.news_monitoring?'good':'warn';
+    }
+    const state=$('learningWorkerState');
+    if(state){
+      const labels={learning:'изучает',idle:'готов к следующему циклу',waiting_rate_limit:'пауза между запросами',backoff:'пауза после ошибки',disabled:'выключен',error:'ошибка',stopped:'остановлен'};
+      state.textContent=labels[worker.state]||worker.state||'—';
+      state.className=worker.state==='error'?'bad':(status.learning_enabled?'good':'warn');
+    }
+    const hint=$('scienceLearningHint');
+    if(hint){
+      if(!status.learning_enabled) hint.textContent='Самообучение выключено. Нажмите «Самообучение: ВЫКЛ», чтобы продолжить научную программу и мониторинг новостей.';
+      else if(worker.scientific_goal_reached) hint.textContent='Цель в 2000 академических материалов достигнута. Леший продолжает обновлять научные знания и следить за свежими публикациями и новостями.';
+      else hint.textContent='Цель: изучить не менее 2000 разных академических материалов. Знания сохраняются с источниками и проходят верификацию перед повышением до trusted.';
+    }
+  }
+
   async function refreshLearningState(){
     try{
       const status=await request('/v1/status');
       updateLearningControls(!!status.learning_enabled);
+      renderLearningProgress(status);
       return status;
     }catch(_error){
       const quick=$('learningQuickToggle');
@@ -137,6 +187,7 @@
         ? 'Самообучение включено. Леший самостоятельно исследует интернет и проверяет знания.'
         : 'Самообучение выключено пользователем.';
       setUiState(runtimeState.learning?'Самообучение включено':'Самообучение выключено','ok');
+      await refreshLearningState();
     }catch(error){
       alert('Не удалось изменить самообучение: '+error.message);
       setUiState('Ошибка самообучения','error');
@@ -324,6 +375,9 @@
       #learningQuickToggle{white-space:nowrap}
       #learningQuickToggle.learning-on{border-color:rgba(147,221,177,.55);background:rgba(80,180,120,.18);color:#cffff0}
       #learningQuickToggle.learning-off{border-color:rgba(241,207,141,.32);background:rgba(241,207,141,.07);color:#efdba8}
+      .science-learning-card{margin-top:12px}
+      .science-progress{height:8px;border-radius:999px;background:rgba(127,137,153,.16);overflow:hidden;margin:8px 0 10px}
+      .science-progress>span{display:block;height:100%;width:0;background:linear-gradient(90deg,#3e78b3,#67a3dc);transition:width .35s ease}
       @media(max-width:720px){#learningQuickToggle{font-size:11px;padding:7px 9px}}
     `;
     document.head.appendChild(style);
@@ -333,6 +387,7 @@
     safe('professional mode',forceProfessionalMode);
     safe('recovery styles',installRecoveryStyle);
     safe('learning button',installVisibleLearningButton);
+    safe('learning progress',installLearningProgressUi);
     safe('telegram controls',makeTelegramAccessUi);
     safe('core controls',bindCoreControls);
     refreshTelegramAccess();
