@@ -42,6 +42,32 @@ class GpuPriorityTests(unittest.TestCase):
         router=AdaptiveLLM([("npu-openvino",npu),("cpu-native",cpu),("gpu-vulkan",gpu)],cooldown_seconds=60)
         self.assertEqual(router.chat([ChatMessage("user","test")]),"cpu-answer"); self.assertEqual(log,["gpu-vulkan","npu-openvino","cpu-native"])
 
+    def test_background_llm_uses_npu_then_cpu_then_gpu(self):
+        log=[]
+        npu=FakeLLM("npu-openvino",log,error="temporary npu failure")
+        cpu=FakeLLM("cpu-native",log,error="temporary cpu failure")
+        gpu=FakeLLM("gpu-vulkan",log,answer="gpu-background")
+        router=AdaptiveLLM(
+            [("gpu-vulkan",gpu),("cpu-native",cpu),("npu-openvino",npu)],
+            cooldown_seconds=60,
+            priority=("npu","cpu","gpu","other"),
+        )
+        self.assertEqual(router.chat([ChatMessage("user","background")]),"gpu-background")
+        self.assertEqual(log,["npu-openvino","cpu-native","gpu-vulkan"])
+
+    def test_background_healthy_npu_does_not_touch_interactive_gpu(self):
+        log=[]
+        gpu=FakeLLM("gpu-vulkan",log,answer="gpu")
+        npu=FakeLLM("npu-openvino",log,answer="npu-background")
+        cpu=FakeLLM("cpu-native",log,answer="cpu")
+        router=AdaptiveLLM(
+            [("gpu-vulkan",gpu),("npu-openvino",npu),("cpu-native",cpu)],
+            priority=("npu","cpu","gpu","other"),
+        )
+        self.assertEqual(router.chat([ChatMessage("user","background")]),"npu-background")
+        self.assertEqual(log,["npu-openvino"])
+        self.assertEqual(gpu.calls,0)
+
     def test_gpu_is_retried_after_cooldown(self):
         log=[]; gpu=FakeLLM("gpu-vulkan",log,error="temporary 503"); npu=FakeLLM("npu-openvino",log,answer="npu-answer"); cpu=FakeLLM("cpu-native",log,answer="cpu-answer")
         router=AdaptiveLLM([("gpu-vulkan",gpu),("npu-openvino",npu),("cpu-native",cpu)],cooldown_seconds=60)
