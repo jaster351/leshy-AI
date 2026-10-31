@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from hashlib import sha256
 from pathlib import Path
+import re
 import uuid
 from typing import Any
 
@@ -11,6 +12,7 @@ from .adaptive_backend import AdaptiveLLM
 from .config import Settings
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
+from .image_generation import ImageGenerationManager
 from .knowledge import KnowledgeBase
 from .learning_control import LearningControl
 from .llm import ChatMessage, EchoLLM, LLMUnavailable, OllamaLLM
@@ -24,7 +26,7 @@ from .version import VERSION
 
 
 class LeshyApp:
-    """Рабочее ядро первой сборки: чат, память, знания, поиск и самообучение."""
+    """Рабочее ядро: чат, память, знания, поиск, обучение и локальные инструменты."""
 
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or Settings.from_env()
@@ -38,6 +40,7 @@ class LeshyApp:
             FallbackSearch(SearxngSearch(self.settings.searxng_url, timeout=3), DdgsSearch()),
         )
         self.hardware = self._detect_hardware()
+        self.image_generation = ImageGenerationManager(self.settings.brain_dir, self.hardware)
         self.model_path = self.settings.native_models_dir / self.settings.native_chat_file
         self.model_downloader = ModelDownloader(self.model_path)
         self.accelerator_runtime = LlamaCppRuntimeManager(self.settings.brain_dir)
@@ -91,7 +94,6 @@ class LeshyApp:
         candidates: list[tuple[str, Any]] = []
         caps = self.hardware
 
-        # Windows GPU: официальный Vulkan llama.cpp runtime загружается и проверяется менеджером.
         if caps is not None and bool(getattr(caps, "gpu", False)):
             candidates.append((
                 "gpu-vulkan",
@@ -108,7 +110,6 @@ class LeshyApp:
                 ),
             ))
 
-        # Intel/совместимый NPU используется после GPU, если устройство реально обнаружено.
         if caps is not None and bool(getattr(caps, "npu", False)):
             candidates.append((
                 "npu-openvino",
@@ -125,9 +126,8 @@ class LeshyApp:
                 ),
             ))
 
-        # Надёжный CPU fallback идёт через официальный свежий llama-server.
-        # Встроенный llama-cpp-python остаётся последним резервом, если внешний
-        # runtime по какой-либо причине не удалось загрузить или запустить.
+        # Fresh official llama-server is a robust CPU fallback when the bundled
+        # Python binding cannot open a newly released GGUF architecture/format.
         candidates.append(("cpu-llama-server", cpu_server))
         candidates.append(("cpu-native", cpu_llm))
         return AdaptiveLLM(
@@ -201,6 +201,37 @@ class LeshyApp:
     def _memory_context(self, owner_id: str) -> str:
         items = self.memories(owner_id, limit=8)
         return "\n".join(f"- {item['content']}" for item in items) if items else ""
+
+    @staticmethod
+    def _image_prompt(text: str) -> str | None:
+        value = " ".join(str(text or "").split()).strip()
+        lower = value.lower()
+        image_nouns = ("картинк", "изображен", "фото", "рисунок", "image", "picture")
+        generate_verbs = ("сгенерир", "нарисуй", "нарисовать", "создай", "создать", "generate", "draw", "create")
+        if not (any(noun in lower for noun in image_nouns) and any(verb in lower for verb in generate_verbs)):
+            return None
+        prompt = re.sub(
+            r"(?i)\b(сгенерируй|сгенерировать|создай|создать|нарисуй|нарисовать|generate|draw|create)\b",
+            " ",
+            value,
+        )
+        prompt = re.sub(r"(?i)\b(мне|пожалуйста)\b", " ", prompt)
+        prompt = re.sub(r"(?i)\b(картинку|картинка|изображение|изображения|фото|рисунок|image|picture)\b", " ", prompt)
+        prompt = " ".join(prompt.strip(" .,:;-—").split())
+        if not prompt:
+            prompt = "beautiful high quality image"
+        # SD 1.5 understands English much better. Preserve arbitrary user text,
+        # but improve the very common Russian New Year request without making
+        # image generation depend on the text LLM being healthy.
+        replacements = {
+            "новогодней елки": "beautiful decorated Christmas tree, New Year, festive lights, winter atmosphere",
+            "новогоднюю елку": "beautiful decorated Christmas tree, New Year, festive lights, winter atmosphere",
+            "новогодняя елка": "beautiful decorated Christmas tree, New Year, festive lights, winter atmosphere",
+            "новогодней ёлки": "beautiful decorated Christmas tree, New Year, festive lights, winter atmosphere",
+            "новогоднюю ёлку": "beautiful decorated Christmas tree, New Year, festive lights, winter atmosphere",
+            "новогодняя ёлка": "beautiful decorated Christmas tree, New Year, festive lights, winter atmosphere",
+        }
+        return replacements.get(prompt.lower(), prompt)
 
     @staticmethod
     def _needs_live_search(text: str) -> bool:
@@ -286,6 +317,21 @@ class LeshyApp:
             items = self.memories(owner_id)
             answer = "Сохранённая память пуста." if not items else "Сохранённая память:\n" + "\n".join(f"• {item['content']}" for item in items)
             return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
+
+        image_prompt = self._image_prompt(message)
+        if image_prompt is not None:
+            job = self.image_generation.enqueue(image_prompt)
+            answer = (
+                "Начал локальную генерацию изображения. При первом запуске Леший сам скачает и проверит модель "
+                "изображений; прогресс появится прямо в чате."
+            )
+            return {
+                "session_id": sid,
+                "answer": answer,
+                "created_at": self._save_assistant(sid, answer),
+                "sources": [],
+                "image_job": job,
+            }
 
         context: list[ChatMessage] = [
             ChatMessage(
@@ -399,6 +445,7 @@ class LeshyApp:
             "model": getattr(self.llm, "model", self.settings.ollama_model),
             "model_ready": bool(model_status.get("exists")) and model_status.get("state") not in {"invalid", "error", "downloading"} if self.settings.llm_backend == "native" else True,
             "model_download": model_status,
+            "image_generation": self.image_generation.status(),
             "brain_dir": str(self.settings.brain_dir),
             "logs_dir": str(self.settings.brain_dir / "logs"),
             "learning_enabled": self.learning.is_enabled(),
