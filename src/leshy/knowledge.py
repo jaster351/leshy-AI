@@ -78,18 +78,27 @@ class KnowledgeBase:
         fp = fingerprint_claim(claim)
         if isinstance(metadata_json, dict):
             metadata_json = json.dumps(metadata_json, ensure_ascii=False, sort_keys=True)
+        audit_event = "knowledge.candidate_created"
+        audit_payload: dict = {"topic": topic, "source_url": source_url, "source_type": source_type, "data_class": data_class}
         with self.storage.connection() as conn:
             row = conn.execute("SELECT id,data_class FROM knowledge WHERE fingerprint=? AND source_url=? ORDER BY version DESC LIMIT 1", (fp, source_url)).fetchone()
             if row:
                 kid = int(row["id"])
                 if data_class == "dynamic":
                     conn.execute("UPDATE knowledge SET data_class='dynamic',checked_at=?,ttl_seconds=?,captured_at=?,source_title=?,source_type=?,metadata_json=? WHERE id=?", (checked_at, ttl_seconds, utcnow(), source_title, source_type, str(metadata_json), kid))
-                    self.storage.audit("knowledge.dynamic_rechecked", {"id": kid, "topic": topic, "source_url": source_url, "checked_at": checked_at, "ttl_seconds": ttl_seconds})
-                return kid
-            cur = conn.execute("INSERT INTO knowledge(topic,claim,source_url,source_title,source_type,captured_at,confidence,status,fingerprint,metadata_json,data_class,checked_at,ttl_seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (topic, claim, source_url, source_title, source_type, utcnow(), source_weight(source_url), "candidate", fp, str(metadata_json), data_class, checked_at, ttl_seconds))
-            kid = int(cur.lastrowid)
-        self.storage.audit("knowledge.candidate_created", {"id": kid, "topic": topic, "source_url": source_url, "source_type": source_type, "data_class": data_class})
-        if self.vector_index:
+                    audit_event = "knowledge.dynamic_rechecked"
+                    audit_payload = {"id": kid, "topic": topic, "source_url": source_url, "checked_at": checked_at, "ttl_seconds": ttl_seconds}
+                else:
+                    return kid
+            else:
+                cur = conn.execute("INSERT INTO knowledge(topic,claim,source_url,source_title,source_type,captured_at,confidence,status,fingerprint,metadata_json,data_class,checked_at,ttl_seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (topic, claim, source_url, source_title, source_type, utcnow(), source_weight(source_url), "candidate", fp, str(metadata_json), data_class, checked_at, ttl_seconds))
+                kid = int(cur.lastrowid)
+                audit_payload["id"] = kid
+        # Audit only after the knowledge transaction has committed. Opening another
+        # writer while the first SQLite transaction is active can block for the full
+        # connection timeout even in WAL mode.
+        self.storage.audit(audit_event, audit_payload)
+        if self.vector_index and audit_event == "knowledge.candidate_created":
             self.vector_index.upsert("knowledge", kid, f"{topic}\n{claim}")
         return kid
 
