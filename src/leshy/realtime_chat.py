@@ -7,6 +7,7 @@ import uuid
 from typing import Any, Iterator
 
 from .diagnostics import event, problem
+from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .research_policy import research_reason
 from .storage import utcnow
@@ -54,13 +55,17 @@ class RealtimeChatManager:
         for offset in range(0, len(value), size):
             yield value[offset:offset + size]
 
-    def _llm_stream(self, messages: list[ChatMessage], cancel: threading.Event) -> Iterator[str]:
-        streamer = getattr(self.app.llm, "stream_chat", None)
-        if callable(streamer):
-            yield from streamer(messages, cancel_event=cancel)
-            return
-        answer = self.app.llm.chat(messages)
-        yield from self._chunk_fallback(answer)
+    def _llm_stream(self, messages: list[ChatMessage], cancel: threading.Event, owner_id: str) -> Iterator[str]:
+        scheduler = get_inference_scheduler(self.app)
+        priority = scheduler.priority_for(owner_id)
+        source = str(owner_id or "system")[:160]
+        with scheduler.slot(source=source, priority=priority, cancel_event=cancel):
+            streamer = getattr(self.app.llm, "stream_chat", None)
+            if callable(streamer):
+                yield from streamer(messages, cancel_event=cancel)
+                return
+            answer = self.app.llm.chat(messages)
+            yield from self._chunk_fallback(answer)
 
     def _save_user_and_history(self, message: str, owner_id: str, session_id: str | None) -> tuple[str, list[Any]]:
         sid = self.app._ensure_session(owner_id, session_id)
@@ -278,7 +283,7 @@ class RealtimeChatManager:
             yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": sources})
             event("chat_stream_started", request_id=rid, session_id=sid, owner_id=owner_id)
 
-            for delta in self._llm_stream(messages, cancel):
+            for delta in self._llm_stream(messages, cancel, owner_id):
                 if cancel.is_set():
                     break
                 text = str(delta or "")
