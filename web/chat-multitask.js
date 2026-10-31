@@ -75,8 +75,16 @@
     setSid(id);unread.delete(id);if(!unread.size)document.title='Леший';const messages=$('messages');if(messages)messages.textContent='';
     try{
       const r=await api('/v1/history?session_id='+encodeURIComponent(id)+'&owner_id='+encodeURIComponent(OWNER));
-      for(const m of r.items||[])window.addMessage(m.role,m.content);
-      const live=streams.get(id);if(live){const ui=makeStreamingBox(live.raw);if(ui){live.box=ui.box;live.body=ui.body}event('activity',{session_id:id,kind:live.activityKind||'',text:live.activity||'Леший думает…'})}
+      const items=r.items||[];
+      for(const m of items)window.addMessage(m.role,m.content);
+      const live=streams.get(id);
+      if(live){
+        const pending=String(live.userText||'');
+        const pendingAlreadySaved=!pending||items.some(m=>String(m.role||'')==='user'&&String(m.content||'')===pending);
+        if(pending&&!pendingAlreadySaved)window.addMessage('user',pending);
+        const ui=makeStreamingBox(live.raw);if(ui){live.box=ui.box;live.body=ui.body}
+        event('activity',{session_id:id,kind:live.activityKind||'',text:live.activity||'Леший думает…'});
+      }
     }catch(e){if(messages){messages.textContent='';window.addMessage('assistant','Не удалось загрузить историю: '+e.message)}}
     try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}stateForCurrent();decorateSidebar();
   }
@@ -87,7 +95,7 @@
 
   async function runStream(text,requestedSession){
     const requestId=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random());const controller=new AbortController();
-    const tempKey=requestedSession||('pending:'+requestId);const stream={requestId,controller,tempKey,sessionId:requestedSession||'',raw:'',activity:'Леший думает…',activityKind:'',renderPending:false,body:null,box:null,meta:null};
+    const tempKey=requestedSession||('pending:'+requestId);const stream={requestId,controller,tempKey,sessionId:requestedSession||'',userText:text,raw:'',activity:'Леший думает…',activityKind:'',renderPending:false,body:null,box:null,meta:null};
     streams.set(tempKey,stream);if(requestedSession)streams.set(requestedSession,stream);
     const ui=makeStreamingBox('');if(ui){stream.box=ui.box;stream.body=ui.body}stateForCurrent();decorateSidebar();event('activity',{session_id:requestedSession||'',text:'Леший думает…'});
     try{
@@ -120,7 +128,14 @@
     try{
       const archivedView=$('sessionArchiveToggle')?.textContent?.trim()==='Назад';
       const r=await api('/v1/sessions?owner_id='+encodeURIComponent(OWNER)+'&limit=100&archived='+(archivedView?'1':'0'));const rows=[...list.querySelectorAll('.leshy-session-item,.item')];
-      (r.items||[]).forEach((item,i)=>{const row=rows[i];if(!row)return;row.dataset.sessionId=item.id;const open=row.querySelector('.leshy-session-open')||row.querySelector('button');if(!open)return;open.querySelectorAll('.leshy-session-work,.leshy-session-unread').forEach(x=>x.remove());open.classList.remove('is-working','has-unread');if(streams.has(item.id)){const d=document.createElement('i');d.className='leshy-session-work';d.title='Леший отвечает';open.appendChild(d);open.classList.add('is-working')}else if(unread.has(item.id)){const d=document.createElement('i');d.className='leshy-session-unread';d.title='Новый ответ';open.appendChild(d);open.classList.add('has-unread')}});
+      (r.items||[]).forEach((item,i)=>{
+        const row=rows[i];if(!row)return;row.dataset.sessionId=item.id;
+        const open=row.querySelector('.leshy-session-open')||row.querySelector('button')||row;
+        open.onclick=ev=>{if(ev){ev.preventDefault();ev.stopPropagation()}loadHistory(item.id)};
+        open.querySelectorAll('.leshy-session-work,.leshy-session-unread').forEach(x=>x.remove());open.classList.remove('is-working','has-unread');
+        if(streams.has(item.id)){const d=document.createElement('i');d.className='leshy-session-work';d.title='Леший отвечает';open.appendChild(d);open.classList.add('is-working')}
+        else if(unread.has(item.id)){const d=document.createElement('i');d.className='leshy-session-unread';d.title='Новый ответ';open.appendChild(d);open.classList.add('has-unread')}
+      });
     }catch(_e){}
   }
 
