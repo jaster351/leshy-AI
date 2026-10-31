@@ -18,40 +18,53 @@ class _BackendState:
     last_latency_ms: int | None = None
 
 
-def _hardware_rank(name: str) -> int:
+def _hardware_kind(name: str) -> str:
     lowered = name.lower()
     if "gpu" in lowered or "vulkan" in lowered or "cuda" in lowered or "rocm" in lowered:
-        return 0
+        return "gpu"
     if "npu" in lowered or "openvino" in lowered:
-        return 1
+        return "npu"
     if "cpu" in lowered or "native" in lowered:
-        return 2
-    return 3
+        return "cpu"
+    return "other"
 
 
 class AdaptiveLLM:
-    """GPU-first failover для интерактивного LLM.
+    """Failover между локальными LLM backend с явным порядком устройств.
 
-    На каждом новом пользовательском запросе первым выбирается доступный GPU.
-    Если GPU находится в cooldown после реальной ошибки, используется NPU, затем
-    CPU. После окончания cooldown GPU снова автоматически получает приоритет.
+    Для интерактивного чата порядок по умолчанию строго GPU → NPU → CPU.
+    Для фоновых задач Runtime может передать другой порядок, чтобы не отнимать
+    GPU у пользовательского ответа. Backend в cooldown пропускается до
+    восстановления, после чего снова участвует согласно заданному приоритету.
     """
 
-    def __init__(self, candidates: list[tuple[str, Any]], *, cooldown_seconds: float = 180.0):
+    def __init__(
+        self,
+        candidates: list[tuple[str, Any]],
+        *,
+        cooldown_seconds: float = 180.0,
+        priority: tuple[str, ...] = ("gpu", "npu", "cpu", "other"),
+    ):
         if not candidates:
             raise ValueError("Нужен хотя бы один LLM backend")
         self._states = [_BackendState(name, provider) for name, provider in candidates]
         self.cooldown_seconds = max(5.0, float(cooldown_seconds))
+        self.priority = tuple(priority)
+        self._priority_rank = {kind: index for index, kind in enumerate(self.priority)}
         self._preferred = self._states[0].name
         self._lock = threading.RLock()
         self.model = "adaptive:" + ",".join(state.name for state in self._states)
+
+    def _rank(self, state: _BackendState) -> tuple[int, int, str]:
+        kind = _hardware_kind(state.name)
+        return (self._priority_rank.get(kind, len(self._priority_rank)), state.failures, state.name)
 
     def _ordered(self) -> list[_BackendState]:
         now = time.monotonic()
         with self._lock:
             healthy = [state for state in self._states if state.failed_until <= now]
             cooling = [state for state in self._states if state.failed_until > now]
-            healthy.sort(key=lambda state: (_hardware_rank(state.name), state.failures, state.name))
+            healthy.sort(key=self._rank)
             if healthy:
                 return healthy
             return sorted(cooling, key=lambda state: state.failed_until)[:1]
@@ -95,9 +108,11 @@ class AdaptiveLLM:
         with self._lock:
             return {
                 "preferred": self._preferred,
+                "priority": list(self.priority),
                 "backends": [
                     {
                         "name": state.name,
+                        "kind": _hardware_kind(state.name),
                         "cooldown_remaining_seconds": max(0.0, round(state.failed_until - now, 1)),
                         "failures": state.failures,
                         "last_latency_ms": state.last_latency_ms,
@@ -119,11 +134,19 @@ class AdaptiveLLM:
 class AdaptiveEmbeddings:
     """GPU-first failover embeddings: GPU → NPU → CPU."""
 
-    def __init__(self, candidates: list[tuple[str, Any]], *, cooldown_seconds: float = 180.0):
+    def __init__(
+        self,
+        candidates: list[tuple[str, Any]],
+        *,
+        cooldown_seconds: float = 180.0,
+        priority: tuple[str, ...] = ("gpu", "npu", "cpu", "other"),
+    ):
         if not candidates:
             raise ValueError("Нужен хотя бы один embedding backend")
         self._states = [_BackendState(name, provider) for name, provider in candidates]
         self.cooldown_seconds = max(5.0, float(cooldown_seconds))
+        self.priority = tuple(priority)
+        self._priority_rank = {kind: index for index, kind in enumerate(self.priority)}
         self._preferred = self._states[0].name
         self._lock = threading.RLock()
 
@@ -143,12 +166,16 @@ class AdaptiveEmbeddings:
                 continue
         return False
 
+    def _rank(self, state: _BackendState) -> tuple[int, int, str]:
+        kind = _hardware_kind(state.name)
+        return (self._priority_rank.get(kind, len(self._priority_rank)), state.failures, state.name)
+
     def _ordered(self) -> list[_BackendState]:
         now = time.monotonic()
         with self._lock:
             healthy = [state for state in self._states if state.failed_until <= now]
             cooling = [state for state in self._states if state.failed_until > now]
-            healthy.sort(key=lambda state: (_hardware_rank(state.name), state.failures, state.name))
+            healthy.sort(key=self._rank)
             if healthy:
                 return healthy
             return sorted(cooling, key=lambda state: state.failed_until)[:1]
@@ -192,11 +219,13 @@ class AdaptiveEmbeddings:
         with self._lock:
             return {
                 "preferred": self._preferred,
+                "priority": list(self.priority),
                 "model": self.model,
                 "compatible_models": list(self.compatible_models),
                 "backends": [
                     {
                         "name": state.name,
+                        "kind": _hardware_kind(state.name),
                         "cooldown_remaining_seconds": max(0.0, round(state.failed_until - now, 1)),
                         "failures": state.failures,
                         "last_latency_ms": state.last_latency_ms,
