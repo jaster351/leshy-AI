@@ -9,6 +9,15 @@ python -m pip install -e .
 python -m pip install "pyinstaller>=6.11,<7"
 python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 
+Write-Host 'Running unit tests...'
+python -m unittest discover -s tests -v
+if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed' }
+
+$uiSource = Get-Content 'web/index.html' -Raw
+foreach ($required in @('leshy.ui.mode','data-section="knowledge"','data-section="learning"','data-section="tasks"','data-section="tools"','data-section="system"','data-section="settings"','data-section="logs"')) {
+  if ($uiSource -notlike "*$required*") { throw "Full Web UI contract is missing: $required" }
+}
+
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 python -m PyInstaller --noconfirm --clean --onedir --console `
   --name Leshy `
@@ -45,6 +54,17 @@ try {
 
   $reply = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/chat' -ContentType 'application/json' -Body '{"message":"smoke","owner_id":"ci","session_id":"ci-smoke"}'
   if (-not $reply.answer) { throw 'Frozen smoke-test chat returned an empty answer' }
+
+  $capabilities = Invoke-RestMethod -Uri 'http://127.0.0.1:18765/v1/capabilities' -TimeoutSec 3
+  if (-not $capabilities.items -or $capabilities.items.Count -lt 5) { throw 'Full dashboard capabilities endpoint failed' }
+
+  $task = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/tasks' -ContentType 'application/json' -Body '{"owner_id":"ci","title":"smoke dashboard task","priority":1}'
+  if (-not $task.id) { throw 'Dashboard task creation failed' }
+  $tasks = Invoke-RestMethod -Uri 'http://127.0.0.1:18765/v1/tasks?owner_id=ci' -TimeoutSec 3
+  if (-not $tasks.items -or $tasks.items.Count -lt 1) { throw 'Dashboard tasks endpoint failed' }
+
+  $overview = Invoke-RestMethod -Uri 'http://127.0.0.1:18765/v1/overview?owner_id=ci' -TimeoutSec 3
+  if (-not $overview.status.version) { throw 'Dashboard overview endpoint failed' }
 } finally {
   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
   Start-Sleep -Milliseconds 300
