@@ -9,11 +9,11 @@ from .storage import Storage, utcnow
 
 
 class CuriosityEngine:
-    """Persistent autonomous learning loop.
+    """Постоянный цикл автономного обучения.
 
-    A goal is not a one-shot search. Leshy keeps the goal, researches one gap at
-    a time, evaluates the accumulated trusted knowledge and either marks the goal
-    mastered or schedules follow-up queries for the remaining gaps.
+    Учебная цель не является одноразовым поиском. Леший сохраняет цель,
+    последовательно исследует пробелы, оценивает накопленные проверенные знания
+    и либо помечает цель освоенной, либо формирует следующие поисковые запросы.
     """
 
     DEFAULT_CURRICULUM = (
@@ -120,11 +120,11 @@ class CuriosityEngine:
 
     def run_cycle(self, goal_id: int | None = None) -> dict[str, Any]:
         if not self.control.is_enabled():
-            return {"status": "disabled", "reason": "autonomous learning is switched off"}
+            return {"status": "disabled", "reason": "автономное обучение выключено"}
 
         goal = self._claim_goal(goal_id)
         if goal is None:
-            return {"status": "idle", "reason": "no active learning goals"}
+            return {"status": "idle", "reason": "нет активных учебных целей"}
 
         gaps = self._decode_gaps(goal["gaps_json"])
         if not gaps:
@@ -141,7 +141,7 @@ class CuriosityEngine:
         if not new_gaps:
             new_gaps = gaps
         else:
-            # Preserve unfinished curriculum after model-proposed gaps.
+            # Сохраняем незавершённые пункты программы после пробелов, предложенных моделью.
             new_gaps.extend(q for q in gaps if q not in new_gaps)
 
         target = float(goal["target_score"])
@@ -239,14 +239,14 @@ class CuriosityEngine:
                 "next_queries": queries,
             }
         except Exception as exc:
-            # Conservative fallback: knowledge count can advance progress but cannot
-            # declare mastery without a successful semantic self-assessment.
+            # Консервативный резервный режим: количество знаний может повысить прогресс,
+            # но не позволяет объявить тему освоенной без успешной смысловой самопроверки.
             self.storage.audit("learning.self_assessment_failed", {"topic": topic, "error": str(exc)[:500]})
             fallback = min(0.74, trusted_notes / 16.0)
             return {
                 "score": fallback,
                 "trusted_notes": trusted_notes,
-                "gaps": ["semantic self-assessment unavailable"],
+                "gaps": ["смысловая самопроверка недоступна"],
                 "next_queries": [],
             }
 
@@ -260,5 +260,5 @@ class CuriosityEngine:
         start = text.find("{")
         end = text.rfind("}")
         if start < 0 or end <= start:
-            raise ValueError("self-assessment did not return JSON")
+            raise ValueError("модуль самопроверки не вернул JSON")
         return text[start : end + 1]
