@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -14,20 +15,25 @@ from .model_catalog import apply_saved_model_to_settings, configure_app_model_ve
 from .runtime_compat import CompatibleRuntimeManager
 from .streaming_backends import install_streaming_backends
 from .telegram_rich import TelegramBridge
+from .voice_asr import LocalVoiceASR
 
 
 def make_handler(app, telegram, settings, model_catalog):
     Parent = base.make_handler(app, telegram, settings, model_catalog)
     dashboard = DashboardService(app)
+    voice_asr = LocalVoiceASR(settings.brain_dir)
 
     class Handler(Parent):
         def do_GET(self):
             parsed = parse.urlparse(self.path)
             if parsed.path == "/":
                 html = base._inject_runtime_ui(base._web_index(settings).read_text(encoding="utf-8"))
-                marker = '<script src="/chatgpt-shell.js"></script>'
-                if marker not in html:
-                    html = html.replace("</body>", marker + "\n</body>")
+                for marker in (
+                    '<script src="/chatgpt-shell.js"></script>',
+                    '<script src="/voice-live.js"></script>',
+                ):
+                    if marker not in html:
+                        html = html.replace("</body>", marker + "\n</body>")
                 data = html.encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -37,12 +43,19 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.wfile.write(data)
                 return
 
-            if parsed.path == "/chatgpt-shell.js":
+            if parsed.path in {"/chatgpt-shell.js", "/voice-live.js"}:
+                name = parsed.path.rsplit("/", 1)[-1]
                 try:
-                    return self._send_asset("chatgpt-shell.js", "application/javascript; charset=utf-8")
+                    return self._send_asset(name, "application/javascript; charset=utf-8")
                 except FileNotFoundError:
-                    self._json(HTTPStatus.NOT_FOUND, {"error": "chatgpt-shell.js не найден"})
+                    self._json(HTTPStatus.NOT_FOUND, {"error": f"{name} не найден"})
                     return
+
+            if parsed.path == "/v1/voice/status":
+                if not self._authorized():
+                    self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                    return
+                return self._json(HTTPStatus.OK, voice_asr.status())
 
             # Новый список сессий хранит pin/archive/lock самостоятельно, но
             # автоименование остаётся обязанностью DashboardService. Вызов ниже
@@ -57,6 +70,34 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception:
                     pass
             return super().do_GET()
+
+        def do_POST(self):
+            parsed = parse.urlparse(self.path)
+            if parsed.path == "/v1/voice/transcribe":
+                if not self._authorized():
+                    self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                    if length <= 0:
+                        raise ValueError("Пустая аудиозапись")
+                    if length > 24 * 1024 * 1024:
+                        raise ValueError("Голосовая запись слишком большая (максимум 24 МБ)")
+                    audio = self.rfile.read(length)
+                    args = parse.parse_qs(parsed.query)
+                    language = str((args.get("language") or [""])[0]).strip() or None
+                    result = voice_asr.transcribe(
+                        audio,
+                        content_type=self.headers.get("Content-Type", "audio/webm"),
+                        language=language,
+                    )
+                    return self._json(HTTPStatus.OK, result.as_dict())
+                except (ValueError, RuntimeError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc), "voice": voice_asr.status()})
+                except Exception as exc:
+                    problem("voice_http_transcribe_failed", str(exc))
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Ошибка локального распознавания: {exc}"})
+            return super().do_POST()
 
     return Handler
 
