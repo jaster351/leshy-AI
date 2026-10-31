@@ -52,6 +52,28 @@ class LiveResearchTests(unittest.TestCase):
         )
         self.assertTrue(LeshyApp._answer_needs_research(answer))
 
+    def test_knowledge_counts_expose_explicit_status_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = Storage(Path(tmp) / "brain.db")
+            knowledge = KnowledgeBase(storage)
+            empty = knowledge.counts()
+            self.assertEqual(empty["knowledge_total"], 0)
+            self.assertEqual(empty["candidate"], 0)
+            self.assertEqual(empty["trusted"], 0)
+            self.assertEqual(empty["total"], empty["knowledge_total"])
+
+            knowledge.add_candidate(
+                topic="WebGPU",
+                claim="WebGPU exposes modern GPU capabilities to web applications through a portable API.",
+                source_url="https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API",
+                source_title="WebGPU API",
+            )
+            counts = knowledge.counts()
+            self.assertEqual(counts["knowledge_total"], 1)
+            self.assertEqual(counts["candidate"], 1)
+            self.assertEqual(counts["trusted"], 0)
+            self.assertEqual(counts["total"], counts["knowledge_total"])
+
     def test_live_search_immediately_increases_knowledge_base(self):
         with tempfile.TemporaryDirectory() as tmp:
             storage = Storage(Path(tmp) / "brain.db")
@@ -77,7 +99,7 @@ class LiveResearchTests(unittest.TestCase):
             self.assertEqual(search.calls, 1)
             self.assertEqual(result["status"], "queued_verification")
             self.assertGreater(result["accepted_claims"], 0)
-            self.assertGreater(after["total"], before["total"])
+            self.assertGreater(after["knowledge_total"], before["knowledge_total"])
             self.assertGreater(after["candidate"], before["candidate"])
             with storage.connection() as conn:
                 task = conn.execute("SELECT status FROM research_tasks WHERE id=?", (result["task_id"],)).fetchone()
