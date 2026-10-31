@@ -8,6 +8,24 @@ from urllib.parse import urlparse
 from .storage import Storage, utcnow
 
 PRIMARY_TRUSTED_HOSTS = {"docs.python.org", "learn.microsoft.com", "developer.mozilla.org", "docs.github.com"}
+ACADEMIC_TRUSTED_HOSTS = {
+    "arxiv.org",
+    "pubmed.ncbi.nlm.nih.gov",
+    "pmc.ncbi.nlm.nih.gov",
+    "nature.com",
+    "science.org",
+    "plos.org",
+    "biorxiv.org",
+    "medrxiv.org",
+    "jmlr.org",
+    "openreview.net",
+    "ieeexplore.ieee.org",
+    "dl.acm.org",
+    "journals.aps.org",
+    "frontiersin.org",
+    "royalsocietypublishing.org",
+    "copernicus.org",
+}
 
 
 def normalize_claim(text: str) -> str:
@@ -22,8 +40,15 @@ def source_weight(url: str) -> float:
     host = (urlparse(url).hostname or "").lower().rstrip(".")
     if not host:
         return .20
+    if host.startswith("www."):
+        host = host[4:]
     if host.endswith(".gov") or host.endswith(".edu"):
         return .92
+    if host in ACADEMIC_TRUSTED_HOSTS or any(host.endswith("." + domain) for domain in ACADEMIC_TRUSTED_HOSTS):
+        # Академический домен повышает исходное доверие, но не делает утверждение
+        # trusted автоматически: обычный verify_topic по-прежнему требует либо
+        # высокий вес первичного источника, либо независимое подтверждение.
+        return .90
     if host in PRIMARY_TRUSTED_HOSTS:
         return .90
     if host.startswith("docs.") or host.startswith("developer."):
