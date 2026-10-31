@@ -5,6 +5,7 @@
   const MAX_RECORDING_MS=90*1000;
   const MAX_BUFFER_BYTES=8*1024*1024;
   const SNAPSHOT_INTERVAL_MS=2500;
+  const STOP_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>';
   const state={
     enabled:false,recording:false,speaking:false,stream:null,recorder:null,chunks:[],chunkBytes:0,mime:'',baseText:'',latestText:'',
     inFlight:false,startedAt:0,speechSeen:false,lastVoiceAt:0,analyser:null,audioContext:null,raf:0,
@@ -23,12 +24,24 @@
     return '';
   }
 
-  function setButton(){
-    const b=$('chatMicButton');if(!b)return;
+  function publishState(reason='state'){
+    const detail={enabled:!!state.enabled,recording:!!state.recording,speaking:!!state.speaking,stopped:!state.enabled,reason};
+    window.leshyVoiceState=detail;
+    try{window.dispatchEvent(new CustomEvent('leshy:voice-state',{detail}))}catch(_e){}
+  }
+
+  function setButton(reason='state'){
+    const b=$('chatMicButton');if(!b){publishState(reason);return}
+    if(!b.dataset.voiceIdleHtml)b.dataset.voiceIdleHtml=b.innerHTML;
     b.classList.toggle('voice-live-active',state.enabled);
     b.classList.toggle('voice-live-speaking',state.speaking);
+    b.innerHTML=state.enabled?STOP_ICON:b.dataset.voiceIdleHtml;
+    b.dataset.voiceState=!state.enabled?'off':state.speaking?'speaking':state.recording?'recording':'waiting';
+    b.setAttribute('aria-pressed',state.enabled?'true':'false');
+    b.setAttribute('aria-label',state.enabled?'Остановить голосовой режим':'Включить голосовой режим');
     b.style.background=state.recording?'#474747':(state.speaking?'#3f3f3f':(state.enabled?'#363636':''));
-    b.title=!state.enabled?'Включить локальный голосовой режим':state.speaking?'Леший говорит · нажмите, чтобы перебить':state.recording?'Голосовой режим: слушаю':'Голосовой режим: ожидаю следующую реплику';
+    b.title=state.enabled?'Остановить голосовой режим':'Включить локальный голосовой режим';
+    publishState(reason);
   }
 
   function clearSnapshotTimer(){if(state.snapshotTimer)clearInterval(state.snapshotTimer);state.snapshotTimer=0}
@@ -41,7 +54,7 @@
     state.asrFailed=true;state.enabled=false;state.recording=false;state.generation+=1;
     clearTimeout(state.restartTimer);closeAudioGraph();
     try{if(state.recorder&&state.recorder.state!=='inactive')state.recorder.stop()}catch(_e){}
-    state.recorder=null;stopTracks();clearRecordedAudio();setButton();
+    state.recorder=null;stopTracks();clearRecordedAudio();setButton('error');
     notice('Голосовой режим остановлен: '+(error?.message||String(error))+'. Повторные запросы не отправляются.',6500);
   }
 
@@ -76,7 +89,7 @@
   }
 
   function stopPlayback(){
-    const audio=state.playback;state.playback=null;state.speaking=false;setButton();
+    const audio=state.playback;state.playback=null;state.speaking=false;setButton('playback-stopped');
     if(audio){try{audio.pause();audio.src=''}catch(_e){}}
     if(state.playbackUrl){try{URL.revokeObjectURL(state.playbackUrl)}catch(_e){}state.playbackUrl=''}
   }
@@ -89,7 +102,7 @@
       const response=await fetch('/v1/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
       if(!response.ok){const data=await response.json().catch(()=>({error:'Озвучка недоступна'}));throw new Error(data.error||('HTTP '+response.status))}
       const blob=await response.blob();if(!state.enabled)return;
-      const url=URL.createObjectURL(blob),audio=new Audio(url);state.playbackUrl=url;state.playback=audio;state.speaking=true;setButton();
+      const url=URL.createObjectURL(blob),audio=new Audio(url);state.playbackUrl=url;state.playback=audio;state.speaking=true;setButton('speaking');
       await new Promise(resolve=>{audio.onended=resolve;audio.onerror=resolve;const p=audio.play();if(p&&typeof p.catch==='function')p.catch(resolve)});
       stopPlayback();
     }catch(error){state.ttsUnavailable=true;notice('Локальная озвучка недоступна: '+error.message,4000);stopPlayback()}
@@ -97,7 +110,7 @@
 
   async function finishTurn({send=true,keepSession=true}={}){
     if(!state.recording)return;
-    state.recording=false;setButton();closeAudioGraph();const generation=state.generation,recorder=state.recorder;
+    state.recording=false;setButton('processing');closeAudioGraph();const generation=state.generation,recorder=state.recorder;
     await new Promise(resolve=>{if(!recorder||recorder.state==='inactive'){resolve();return}const old=recorder.onstop;recorder.onstop=e=>{try{old&&old.call(recorder,e)}catch(_e){}resolve()};try{recorder.requestData()}catch(_e){}try{recorder.stop()}catch(_e){resolve()}setTimeout(resolve,700)});
     stopTracks();await new Promise(r=>setTimeout(r,80));
     // Если промежуточный ASR ещё занят, не создаём второй параллельный запрос.
@@ -122,34 +135,34 @@
 
   async function startRecording(){
     if(!state.enabled||state.recording||state.speaking||state.asrFailed)return;
-    if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){notice('Браузер не умеет передавать аудио с микрофона',3200);state.enabled=false;setButton();return}
+    if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){notice('Браузер не умеет передавать аудио с микрофона',3200);state.enabled=false;setButton('unsupported');return}
     try{
       const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});if(!state.enabled){stream.getTracks().forEach(t=>t.stop());return}
       state.generation+=1;const generation=state.generation;state.stream=stream;state.chunks=[];state.chunkBytes=0;state.latestText='';state.baseText=$('chatInput')?.value.trim()||'';state.speechSeen=false;state.lastVoiceAt=performance.now();state.startedAt=performance.now();state.mime=chooseMime();
       state.recorder=state.mime?new MediaRecorder(stream,{mimeType:state.mime,audioBitsPerSecond:64000}):new MediaRecorder(stream);state.mime=state.recorder.mimeType||state.mime||'audio/webm';
       state.recorder.ondataavailable=e=>{if(generation!==state.generation||!e.data||e.data.size<=0)return;state.chunks.push(e.data);state.chunkBytes+=e.data.size;if(state.chunkBytes>MAX_BUFFER_BYTES)abortVoiceAfterAsrError(new Error('аудиобуфер превысил безопасный лимит 8 МБ'))};
       state.recorder.onerror=e=>abortVoiceAfterAsrError(e.error||new Error('ошибка записи микрофона'));
-      state.recorder.start(700);state.recording=true;setButton();notice('Слушаю локально…',1500);
+      state.recorder.start(700);state.recording=true;setButton('recording');notice('Слушаю локально…',1500);
       const AC=window.AudioContext||window.webkitAudioContext;if(AC){state.audioContext=new AC();const source=state.audioContext.createMediaStreamSource(stream);state.analyser=state.audioContext.createAnalyser();state.analyser.fftSize=1024;state.analyser.smoothingTimeConstant=.25;source.connect(state.analyser);state.raf=requestAnimationFrame(()=>vadLoop(generation))}
       state.snapshotTimer=setInterval(()=>{if(state.recording&&!state.inFlight&&state.chunks.length&&!state.asrFailed)transcribeSnapshot(false,generation)},SNAPSHOT_INTERVAL_MS);
-    }catch(error){state.enabled=false;setButton();const msg=error&&error.name==='NotAllowedError'?'Нет разрешения на микрофон':(error.message||String(error));notice('Микрофон: '+msg,3500)}
+    }catch(error){state.enabled=false;setButton('permission-error');const msg=error&&error.name==='NotAllowedError'?'Нет разрешения на микрофон':(error.message||String(error));notice('Микрофон: '+msg,3500)}
   }
 
   function scheduleRestartAfterAnswer(){
     clearTimeout(state.restartTimer);const wait=()=>{if(!state.enabled||state.asrFailed)return;if(state.speaking){state.restartTimer=setTimeout(wait,200);return}const send=$('chatSend');if(send?.classList.contains('streaming')){state.restartTimer=setTimeout(wait,250);return}state.restartTimer=setTimeout(()=>{if(state.enabled&&!state.recording&&!state.speaking&&!state.asrFailed)startRecording()},220)};wait();
   }
 
-  async function disableVoice(){state.enabled=false;clearTimeout(state.restartTimer);stopPlayback();setButton();if(state.recording)await finishTurn({send:false,keepSession:false});closeAudioGraph();stopTracks();clearRecordedAudio();notice('Голосовой режим выключен',1000)}
+  async function disableVoice(){state.enabled=false;clearTimeout(state.restartTimer);stopPlayback();setButton('disabled');if(state.recording)await finishTurn({send:false,keepSession:false});closeAudioGraph();stopTracks();clearRecordedAudio();notice('Голосовой режим выключен',1000)}
 
   async function toggleVoice(){
-    if(state.speaking){stopPlayback();if(!state.enabled)state.enabled=true;state.asrFailed=false;setButton();await startRecording();return}
     if(state.enabled){await disableVoice();return}
     const send=$('chatSend');if(send?.classList.contains('streaming')){try{send.click()}catch(_e){}await new Promise(r=>setTimeout(r,120))}
-    state.enabled=true;state.asrFailed=false;state.ttsUnavailable=false;setButton();await startRecording();
+    state.enabled=true;state.asrFailed=false;state.ttsUnavailable=false;setButton('enabled');await startRecording();
   }
 
   function install(){
-    const b=$('chatMicButton');if(!b||b.dataset.localVoiceBound==='1')return false;b.dataset.localVoiceBound='1';b.onclick=e=>{e.preventDefault();e.stopPropagation();toggleVoice()};setButton();
+    const b=$('chatMicButton');if(!b||b.dataset.localVoiceBound==='1')return false;
+    b.dataset.localVoiceBound='1';b.dataset.voiceIdleHtml=b.innerHTML;b.onclick=e=>{e.preventDefault();e.stopPropagation();toggleVoice()};setButton('installed');
     if(!$('leshyLocalVoiceStyle')){const style=document.createElement('style');style.id='leshyLocalVoiceStyle';style.textContent='#chatMicButton.voice-live-active{box-shadow:0 0 0 1px #737373 inset,0 0 0 4px rgba(255,255,255,.035)}#chatMicButton.voice-live-speaking{animation:leshyVoicePulse 1s ease-in-out infinite}@keyframes leshyVoicePulse{50%{box-shadow:0 0 0 6px rgba(255,255,255,.08)}}';document.head.appendChild(style)}
     return true;
   }
