@@ -48,9 +48,10 @@ class RuntimePolicyStore:
 class CompatibleRuntimeManager(LlamaCppRuntimeManager):
     """Llama.cpp runtime с автообновлением для новых GGUF и сохранением legacy.
 
-    auto   — новые архитектуры получают свежий runtime, старые используют текущий;
+    auto   — новые архитектуры получают свежий runtime; старые модели автоматически
+             используют сохранённый legacy, если он существует;
     modern — всегда проверяется и ставится свежий официальный llama.cpp;
-    legacy — используется сохранённый предыдущий runtime, если он есть.
+    legacy — принудительно используется сохранённый предыдущий runtime, если он есть.
     """
 
     MODERN_MODEL_MARKERS = (
@@ -152,21 +153,36 @@ class CompatibleRuntimeManager(LlamaCppRuntimeManager):
     def ensure(self, backend: str, progress=None) -> Path:
         policy = self.policy_store.load()
         model_name = str(self.model_name_provider() or "")
+        is_modern_model = self.requires_modern_runtime(model_name)
+
         if policy.mode == "legacy":
             legacy = self.legacy_server_path(backend)
             if legacy:
+                event("accelerator_runtime_selected", backend=backend, mode="legacy", model=model_name)
                 return legacy
             return super().ensure(backend, progress)
 
-        needs_modern = policy.mode == "modern" or (policy.mode == "auto" and self.requires_modern_runtime(model_name))
+        if policy.mode == "auto" and not is_modern_model:
+            legacy = self.legacy_server_path(backend)
+            if legacy:
+                event("accelerator_runtime_selected", backend=backend, mode="auto-legacy", model=model_name)
+                return legacy
+            return super().ensure(backend, progress)
+
+        needs_modern = policy.mode == "modern" or (policy.mode == "auto" and is_modern_model)
         if needs_modern:
             try:
-                return self.ensure_latest(backend, progress)
+                result = self.ensure_latest(backend, progress)
+                event("accelerator_runtime_selected", backend=backend, mode="modern", model=model_name)
+                return result
             except Exception as exc:
                 problem("accelerator_runtime_modern_update_failed", str(exc), backend=backend, model=model_name)
                 current = self.server_path(backend)
                 if current:
                     return current
+                legacy = self.legacy_server_path(backend)
+                if legacy:
+                    return legacy
                 raise
         return super().ensure(backend, progress)
 
@@ -183,15 +199,18 @@ class CompatibleRuntimeManager(LlamaCppRuntimeManager):
                 "legacy_tag": str(self._manifest(legacy_dir).get("tag") or ""),
             }
         model_name = str(self.model_name_provider() or "")
+        modern = self.requires_modern_runtime(model_name)
+        automatic_choice = "modern" if modern else ("legacy" if any(value["legacy"] for value in backends.values()) else "current")
         return {
             "mode": policy.mode,
             "model": model_name,
-            "model_requires_modern": self.requires_modern_runtime(model_name),
+            "model_requires_modern": modern,
+            "automatic_choice": automatic_choice,
             "backends": backends,
             "modes": {
-                "auto": "Авто: свежий runtime для новых архитектур, совместимый режим для старых моделей.",
+                "auto": "Авто: новые модели запускаются на свежем llama.cpp, старые автоматически используют сохранённый legacy runtime, если он доступен.",
                 "modern": "Современный: всегда использовать/обновлять актуальный официальный llama.cpp.",
-                "legacy": "Legacy: предпочитать сохранённую предыдущую версию llama.cpp для старых GGUF.",
+                "legacy": "Legacy: принудительно предпочитать сохранённую предыдущую версию llama.cpp для старых GGUF.",
             },
         }
 
