@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "1.10.3"
+  #define MyAppVersion "1.10.5"
 #endif
 
 [Setup]
@@ -7,14 +7,17 @@ AppId={{B4F54CC2-AC3C-4A3E-9E38-9A9E53A71D03}
 AppName=Леший
 AppVersion={#MyAppVersion}
 AppPublisher=Leshy AI
-DefaultDirName={autopf}\Leshy AI
+; Пользователь выбирает корневую папку Лешего. Все данные будут храниться
+; относительно Leshy.exe внутри {app}\LeshyBrain.
+DefaultDirName={userdocs}\Leshy AI
+UsePreviousAppDir=no
 DefaultGroupName=Леший
 OutputDir=..\dist
 OutputBaseFilename=LeshySetup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\Leshy.exe
@@ -26,6 +29,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "..\dist\Leshy\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Dirs]
+Name: "{app}\LeshyBrain"
+Name: "{app}\LeshyBrain\data"
+Name: "{app}\LeshyBrain\models"
+Name: "{app}\LeshyBrain\workspace"
+Name: "{app}\LeshyBrain\secrets"
 
 [Icons]
 Name: "{group}\Леший"; Filename: "{app}\Leshy.exe"
