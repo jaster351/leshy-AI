@@ -14,7 +14,18 @@ _FRESHNESS_MARKERS = (
 
 _EXPLICIT_WEB_MARKERS = (
     "найди в интернете", "поищи в интернете", "проверь в интернете", "посмотри в интернете",
+    "найди информацию в интернете", "найди эту информацию в интернете",
+    "поищи информацию в интернете", "проверь информацию в интернете", "посмотри информацию в интернете",
     "найди в сети", "поищи в сети", "веб-поиск", "web search", "search the web",
+)
+
+# Пользователь естественно вставляет объект между глаголом и «в интернете»:
+# «найди информацию про X в интернете», «проверь это в сети». Такие фразы
+# должны детерминированно включать live-search и не зависеть от решения LLM.
+_EXPLICIT_WEB_PATTERNS = (
+    re.compile(r"\b(?:найди|поищи|проверь|посмотри)\b.{0,180}\b(?:в\s+интернете|в\s+сети|онлайн)\b", re.IGNORECASE),
+    re.compile(r"\b(?:в\s+интернете|в\s+сети|онлайн)\b.{0,180}\b(?:найди|поищи|проверь|посмотри)\b", re.IGNORECASE),
+    re.compile(r"\b(?:find|search|check|look\s+up)\b.{0,180}\b(?:online|on\s+the\s+web|on\s+the\s+internet)\b", re.IGNORECASE),
 )
 
 _SMALL_TALK = (
@@ -45,7 +56,7 @@ def research_reason(
     q = normalize_query(query)
     if not q:
         return None
-    if any(marker in q for marker in _EXPLICIT_WEB_MARKERS):
+    if any(marker in q for marker in _EXPLICIT_WEB_MARKERS) or any(pattern.search(q) for pattern in _EXPLICIT_WEB_PATTERNS):
         return "явный запрос интернет-поиска"
     if any(marker in q for marker in _FRESHNESS_MARKERS):
         return "требуются актуальные данные"
