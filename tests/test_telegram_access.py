@@ -30,8 +30,8 @@ class TelegramAccessTests(unittest.TestCase):
         bridge = TelegramBridge(app, root / "LeshyBrain")
         sent = []
         answers = []
-        bridge._send = lambda chat_id, text: sent.append((chat_id, text))
-        bridge._send_answer = lambda chat_id, text: answers.append((chat_id, text))
+        bridge._send = lambda chat_id, text, **kwargs: sent.append((chat_id, text))
+        bridge._send_answer = lambda chat_id, text, **kwargs: answers.append((chat_id, text))
         bridge._send_typing = lambda chat_id: None
         return app, bridge, sent, answers
 
