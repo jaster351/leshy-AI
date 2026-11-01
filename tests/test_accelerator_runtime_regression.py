@@ -46,9 +46,10 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
                 return {"backend": self.backend, "model": self.model}
 
         fallback = _Fallback()
+        fallback.warmup = lambda: True
         router = AdaptiveLLM([("gpu-vulkan", _Broken()), ("cpu-native", fallback)])
-        self.assertTrue(router.warmup())
-        self.assertEqual(router.status()["active_backend"], "cpu-native")
+        self.assertEqual(router.warmup(), "cpu-native")
+        self.assertEqual(router.status()["preferred"], "cpu-native")
 
     def test_adaptive_warmup_uses_gpu_first_and_exposes_resident_state(self):
         class _Ready:
@@ -57,8 +58,8 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
             def warmup(self): return True
             def status(self): return {"backend": self.backend, "model": self.model, "resident": True}
         router = AdaptiveLLM([("gpu-vulkan", _Ready()), ("cpu-native", _Fallback())])
-        self.assertTrue(router.warmup())
-        self.assertEqual(router.status()["active_backend"], "gpu-vulkan")
+        self.assertEqual(router.warmup(), "gpu-vulkan")
+        self.assertEqual(router.status()["preferred"], "gpu-vulkan")
 
     def test_http_503_stops_backend_and_raises_llm_unavailable(self):
         provider = self._provider("openvino")
