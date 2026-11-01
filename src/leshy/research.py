@@ -87,13 +87,18 @@ class FallbackSearch:
     def search(self, query: str, limit: int = 5) -> list[SearchResult]:
         errors: list[str] = []
         for provider in self.providers:
+            provider_name = type(provider).__name__
             try:
                 results = provider.search(query, limit=limit)
                 if results:
                     return results
+                # Пустой ответ тоже важен для диагностики fallback-цепочки.
+                # Раньше он терялся, поэтому из runtime-лога было невозможно
+                # понять, запускался ли последний резервный провайдер вообще.
+                errors.append(f"{provider_name}: 0 результатов")
             except Exception as exc:
-                errors.append(str(exc))
-        raise RuntimeError("Все поисковые провайдеры недоступны: " + "; ".join(errors))
+                errors.append(f"{provider_name}: {exc}")
+        raise RuntimeError("Все поисковые провайдеры недоступны или не дали результатов: " + "; ".join(errors))
 
 
 class SafeWebFetcher:
