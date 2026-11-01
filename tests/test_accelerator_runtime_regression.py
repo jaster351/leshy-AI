@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from leshy.accelerator_runtime import LlamaServerLLM, LlamaServerManager
+from leshy.accelerator_runtime import LlamaCppRuntimeManager, LlamaServerLLM
 from leshy.adaptive_backend import AdaptiveLLM
 from leshy.llm import ChatMessage, LLMUnavailable
 
@@ -33,7 +33,7 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
         root = Path(temp.name)
         model = root / "model.gguf"
         model.write_bytes(b"x")
-        manager = LlamaServerManager(root / "runtime")
+        manager = LlamaCppRuntimeManager(root)
         return LlamaServerLLM(manager, backend, model, ensure_model=lambda: model)
 
     def test_adaptive_warmup_falls_back_when_gpu_fails(self):
