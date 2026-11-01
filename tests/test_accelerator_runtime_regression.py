@@ -46,9 +46,9 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
                 return {"backend": self.backend, "model": self.model}
 
         fallback = _Fallback()
-        router = AdaptiveLLM([_Broken(), fallback])
+        router = AdaptiveLLM([("gpu-vulkan", _Broken()), ("cpu-native", fallback)])
         self.assertTrue(router.warmup())
-        self.assertEqual(router.status()["active_backend"], "cpu")
+        self.assertEqual(router.status()["active_backend"], "cpu-native")
 
     def test_adaptive_warmup_uses_gpu_first_and_exposes_resident_state(self):
         class _Ready:
@@ -56,9 +56,9 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
             backend = "vulkan"
             def warmup(self): return True
             def status(self): return {"backend": self.backend, "model": self.model, "resident": True}
-        router = AdaptiveLLM([_Ready(), _Fallback()])
+        router = AdaptiveLLM([("gpu-vulkan", _Ready()), ("cpu-native", _Fallback())])
         self.assertTrue(router.warmup())
-        self.assertEqual(router.status()["active_backend"], "vulkan")
+        self.assertEqual(router.status()["active_backend"], "gpu-vulkan")
 
     def test_http_503_stops_backend_and_raises_llm_unavailable(self):
         provider = self._provider("openvino")
@@ -76,7 +76,7 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
         provider._process = unittest.mock.Mock()
         provider._process.poll.return_value = None
         cpu = _Fallback()
-        router = AdaptiveLLM([provider, cpu], cooldown_seconds=60)
+        router = AdaptiveLLM([("npu-openvino", provider), ("cpu-native", cpu)], cooldown_seconds=60)
         exc = HTTPError("http://127.0.0.1:12345/v1/chat/completions", 503, "busy", hdrs=None, fp=None)
         with patch("leshy.accelerator_runtime.request.urlopen", side_effect=exc) as urlopen:
             self.assertEqual(router.chat([ChatMessage("user", "first")]), "fallback-ok")
