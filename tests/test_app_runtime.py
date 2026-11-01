@@ -43,11 +43,16 @@ class AppRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             settings = self.make_settings(Path(temp))
             app = LeshyApp(settings)
-            self.assertFalse(app.learning.is_enabled())
-            app.set_learning(True)
-            restarted = LeshyApp(settings)
-            self.assertTrue(restarted.learning.is_enabled())
-            app.stop_background()
+            restarted = None
+            try:
+                self.assertFalse(app.learning.is_enabled())
+                app.set_learning(True)
+                restarted = LeshyApp(settings)
+                self.assertTrue(restarted.learning.is_enabled())
+            finally:
+                app.stop_background()
+                if restarted is not None:
+                    restarted.stop_background()
 
     def test_explicit_memory_is_persistent_and_isolated(self):
         with tempfile.TemporaryDirectory() as temp:
