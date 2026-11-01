@@ -6,7 +6,8 @@ from __future__ import annotations
 поэтому отсутствие поддержки конкретного формата не ломает основной runtime.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import hashlib
 from pathlib import Path
 from typing import Callable
 
@@ -23,6 +24,8 @@ class ExtractedDocument:
     text: str
     adapter: str
     pages_or_slides: int = 0
+    source_sha256: str = ""
+    source_bytes: int = 0
 
 
 def _clean(parts: list[str]) -> str:
@@ -85,6 +88,16 @@ def supported_document_suffixes() -> tuple[str, ...]:
     return tuple(sorted(_ADAPTERS))
 
 
+def _fingerprint(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            size += len(chunk)
+            digest.update(chunk)
+    return digest.hexdigest(), size
+
+
 def extract_document(path: str | Path) -> ExtractedDocument:
     source = Path(path).expanduser()
     if not source.is_file():
@@ -96,7 +109,8 @@ def extract_document(path: str | Path) -> ExtractedDocument:
     result = adapter(source)
     if not result.text.strip():
         raise ValueError("В документе не найден извлекаемый текст; возможно, нужен OCR")
-    return result
+    source_sha256, source_bytes = _fingerprint(source)
+    return replace(result, source_sha256=source_sha256, source_bytes=source_bytes)
 
 
 __all__ = ["DocumentAdapterUnavailable", "ExtractedDocument", "extract_document", "supported_document_suffixes"]
