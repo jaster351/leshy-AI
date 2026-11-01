@@ -3,6 +3,7 @@ from __future__ import annotations
 from . import web_server_impl5 as previous
 from .app import LeshyApp
 from .learning_command_runtime import install_explicit_learning_routing
+from .reliable_web_runtime import install_reliable_web_runtime
 from .voice_tts_ru import RussianLocalVoiceTTS
 
 
@@ -25,14 +26,16 @@ def _install_russian_voice_tts() -> None:
 
 def make_handler(app, telegram, settings, model_catalog):
     install_explicit_learning_routing(LeshyApp)
+    install_reliable_web_runtime(LeshyApp)
     _install_russian_voice_tts()
     return previous.make_handler(app, telegram, settings, model_catalog)
 
 
 def serve(host: str | None = None, port: int | None = None) -> None:
-    # Маршрутизация ставится один раз до создания Web/Telegram
-    # RealtimeChatManager. Саму цепочку фабрик HTTP-handler не подменяем.
+    # Общие runtime-политики ставятся до создания LeshyApp/Telegram, поэтому
+    # Web, голос, Telegram и startup recovery используют один и тот же контур.
     install_explicit_learning_routing(LeshyApp)
+    install_reliable_web_runtime(LeshyApp)
     _install_russian_voice_tts()
     previous.serve(host=host, port=port)
 
