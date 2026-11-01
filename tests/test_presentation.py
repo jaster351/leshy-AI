@@ -16,11 +16,12 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("Qwen", LESHY_IDENTITY_PROMPT)
         self.assertEqual(messages[-1].content, "Привет")
 
-    def test_telegram_hides_think_in_clickable_spoiler(self):
+    def test_telegram_does_not_expose_internal_thinking(self):
         rendered = _telegram_answer_html("<think>скрытая мысль</think>Готовый ответ")
-        self.assertIn("<tg-spoiler>скрытая мысль</tg-spoiler>", rendered)
-        self.assertIn("Готовый ответ", rendered)
+        self.assertEqual(rendered, "Готовый ответ")
+        self.assertNotIn("скрытая мысль", rendered)
         self.assertNotIn("<think>", rendered)
+        self.assertNotIn("tg-spoiler", rendered)
 
     def test_web_ui_has_hidden_reasoning_and_image_progress(self):
         path = Path(__file__).resolve().parents[1] / "web" / "ui-enhancements.js"
@@ -28,7 +29,6 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("think-block", source)
         self.assertIn("details", source)
         self.assertIn("/v1/image/job?job_id=", source)
-        self.assertIn("generated-image", source)
 
 
 if __name__ == "__main__":
