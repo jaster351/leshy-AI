@@ -18,6 +18,8 @@
   let speakingAudio=null;
   let speakingUrl='';
   let speakingButton=null;
+  const activityStates=new Map();
+  let activityTimer=0;
 
   function toast(text){
     let n=$('shellToast');
@@ -37,7 +39,7 @@
   function cleanText(node){
     if(!node)return '';
     const clone=node.cloneNode(true);
-    clone.querySelectorAll('.who,.sources,.leshy-message-actions,.leshy-message-more,.leshy-stream-caret,button').forEach(x=>x.remove());
+    clone.querySelectorAll('.who,.sources,.leshy-message-actions,.leshy-message-more,.leshy-stream-caret,.leshy-live-activity,button').forEach(x=>x.remove());
     const body=clone.querySelector('.chat-rich-body,.leshy-stream-plain')||clone;
     return String(body.innerText||body.textContent||'').replace(/\u00a0/g,' ').trim();
   }
@@ -170,6 +172,69 @@
 
   function decorateAll(){stableMessages().forEach(decorate)}
 
+  function activityKey(detail){return String(detail&&detail.session_id||currentSession()||'pending')}
+  function activeStreamingBox(){
+    const root=$('messages');if(!root)return null;
+    const boxes=[...root.querySelectorAll(':scope > .msg.assistant.leshy-background-stream')];
+    return boxes.length?boxes[boxes.length-1]:null;
+  }
+  function ensureActivityPanel(box){
+    if(!box)return null;
+    let panel=box.querySelector(':scope > .leshy-live-activity');
+    if(panel)return panel;
+    panel=document.createElement('div');panel.className='leshy-live-activity';
+    panel.innerHTML='<div class="leshy-live-activity-head"><span class="leshy-live-spinner" aria-hidden="true"></span><span class="leshy-live-stage"></span><span class="leshy-live-time"></span></div><div class="leshy-live-reason"></div><div class="leshy-live-sources"></div><div class="leshy-live-warning"></div>';
+    const body=box.querySelector(':scope > .leshy-stream-plain');
+    if(body)box.insertBefore(panel,body);else box.appendChild(panel);
+    return panel;
+  }
+  function sourceTitle(item){
+    const title=String(item&&item.title||'').trim();if(title)return title;
+    try{return new URL(String(item&&item.url||'')).hostname||'Источник'}catch(_e){return 'Источник'}
+  }
+  function renderActivityState(state){
+    const panel=state&&state.panel;if(!panel||!panel.isConnected)return;
+    const now=Date.now(),elapsed=Math.max(0,Math.floor((now-state.startedAt)/1000)),stale=Math.max(0,Math.floor((now-state.updatedAt)/1000));
+    const stage=panel.querySelector('.leshy-live-stage'),time=panel.querySelector('.leshy-live-time'),reason=panel.querySelector('.leshy-live-reason'),sources=panel.querySelector('.leshy-live-sources'),warning=panel.querySelector('.leshy-live-warning');
+    if(stage)stage.textContent=state.text||'Леший работает…';
+    if(time)time.textContent=elapsed+' с';
+    if(reason){reason.textContent=state.reason?String(state.reason):'';reason.style.display=state.reason?'block':'none'}
+    if(sources){
+      sources.textContent='';
+      const items=Array.isArray(state.sources)?state.sources.slice(0,5):[];
+      if(items.length){
+        const label=document.createElement('div');label.className='leshy-live-sources-label';label.textContent='Найденные источники:';sources.appendChild(label);
+        items.forEach((item,index)=>{
+          const row=document.createElement('a');row.className='leshy-live-source';row.textContent=(index+1)+'. '+sourceTitle(item);const url=String(item&&item.url||'').trim();
+          if(url){row.href=url;row.target='_blank';row.rel='noopener noreferrer'}else row.removeAttribute('href');sources.appendChild(row);
+        });
+      }
+    }
+    if(warning){
+      if(stale>=30){warning.textContent='Нет нового этапа '+stale+' с. Возможно, внешний источник или обработка отвечают медленно; запрос всё ещё открыт.';warning.classList.add('visible','strong')}
+      else if(stale>=12){warning.textContent='Этап занимает дольше обычного · нового статуса '+stale+' с.';warning.classList.add('visible');warning.classList.remove('strong')}
+      else{warning.textContent='';warning.classList.remove('visible','strong')}
+    }
+  }
+  function onActivity(detail){
+    detail=detail||{};const key=activityKey(detail),box=activeStreamingBox();if(!box)return;
+    let state=activityStates.get(key);
+    if(!state){state={startedAt:Date.now(),updatedAt:Date.now(),text:'Леший работает…',reason:'',sources:[],panel:null};activityStates.set(key,state)}
+    state.updatedAt=Date.now();state.text=String(detail.text||state.text||'Леший работает…');state.reason=String(detail.reason||'');
+    if(Array.isArray(detail.sources))state.sources=detail.sources;
+    state.panel=ensureActivityPanel(box);state.panel.style.display='block';renderActivityState(state);
+  }
+  function hideActivity(detail){
+    const key=activityKey(detail||{}),state=activityStates.get(key);
+    if(state&&state.panel)state.panel.style.display='none';
+  }
+  function finishActivity(detail){
+    const key=activityKey(detail||{}),state=activityStates.get(key);
+    if(state&&state.panel)state.panel.style.display='none';activityStates.delete(key);
+    if(key!=='pending'&&activityStates.has('pending')){const pending=activityStates.get('pending');if(pending&&pending.panel)pending.panel.style.display='none';activityStates.delete('pending')}
+  }
+  function refreshActivities(){activityStates.forEach(state=>renderActivityState(state))}
+
   function css(){
     if($('leshyMessageActionsStyle'))return;
     const s=document.createElement('style');s.id='leshyMessageActionsStyle';s.textContent=`
@@ -186,7 +251,13 @@
       .leshy-message-more.open{display:block}
       .leshy-message-more button{width:100%;height:38px;display:flex;align-items:center;gap:10px;border:0;border-radius:8px;background:transparent;color:#eee;padding:0 9px;cursor:pointer;text-align:left}
       .leshy-message-more button:hover{background:#3c3c3c}.leshy-message-more button svg{flex:0 0 17px}
-      @media(max-width:720px){.leshy-message-actions.user{opacity:1}.leshy-message-action{width:32px;height:32px}}
+      .leshy-live-activity{max-width:700px;margin:7px 0 9px;padding:9px 11px;border:1px solid rgba(142,184,220,.18);border-radius:11px;background:rgba(142,184,220,.055);color:#cbd8e3;font-size:12.5px;line-height:1.38}
+      .leshy-live-activity-head{display:flex;align-items:center;gap:8px;min-height:20px}.leshy-live-stage{font-weight:600;color:#dce8f1}.leshy-live-time{margin-left:auto;color:#758b9d;font-variant-numeric:tabular-nums}
+      .leshy-live-spinner{width:12px;height:12px;border:1.5px solid rgba(158,194,224,.28);border-top-color:#8eb8dc;border-radius:50%;animation:leshyActivitySpin .85s linear infinite;flex:0 0 12px}@keyframes leshyActivitySpin{to{transform:rotate(360deg)}}
+      .leshy-live-reason{display:none;margin:3px 0 0 20px;color:#8196a8}.leshy-live-sources{margin:7px 0 0 20px;display:grid;gap:3px}.leshy-live-sources:empty{display:none}.leshy-live-sources-label{color:#8fa4b5;margin-bottom:1px}
+      .leshy-live-source{display:block;max-width:640px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a8c9e5;text-decoration:none}.leshy-live-source:hover{text-decoration:underline;color:#c8e2f7}
+      .leshy-live-warning{display:none;margin:7px 0 0 20px;color:#c7aa72}.leshy-live-warning.visible{display:block}.leshy-live-warning.strong{color:#e4ad76}
+      @media(max-width:720px){.leshy-message-actions.user{opacity:1}.leshy-message-action{width:32px;height:32px}.leshy-live-activity{max-width:100%;margin-right:4px}.leshy-live-source{max-width:78vw}}
     `;document.head.appendChild(s);
   }
 
@@ -195,7 +266,11 @@
     const root=$('messages');if(root){const observer=new MutationObserver(()=>decorateAll());observer.observe(root,{childList:true,subtree:false})}
     document.addEventListener('click',e=>{if(!e.target.closest('.leshy-more-wrap'))closeMenus()});
     window.addEventListener('leshy:session-changed',()=>setTimeout(decorateAll,0));
-    window.addEventListener('beforeunload',stopSpeaking);
+    window.addEventListener('leshy:activity',e=>onActivity(e.detail||{}));
+    window.addEventListener('leshy:delta',e=>hideActivity(e.detail||{}));
+    window.addEventListener('leshy:done',e=>finishActivity(e.detail||{}));
+    activityTimer=window.setInterval(refreshActivities,1000);
+    window.addEventListener('beforeunload',()=>{stopSpeaking();if(activityTimer)clearInterval(activityTimer)});
   }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
