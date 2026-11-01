@@ -1,0 +1,64 @@
+name: Leshy Release
+
+on:
+  workflow_run:
+    workflows: ["Leshy Windows Build"]
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      WINDOWS_RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+      - name: Проверить версию релиза
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          test "$version" = "1.10.3"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Дождаться успешного Linux CI для того же коммита
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            result="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=20" --jq '[.workflow_runs[] | select(.name == "Leshy AI CI")][0] | if . == null then "missing" else (.status + ":" + (.conclusion // "")) end')"
+            echo "Linux CI: $result"
+            if [ "$result" = "completed:success" ]; then exit 0; fi
+            if [[ "$result" == completed:* ]]; then exit 1; fi
+            sleep 10
+          done
+          echo "Linux CI did not complete successfully in time" >&2
+          exit 1
+      - name: Скачать проверенный Windows installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifact
+          gh run download "$WINDOWS_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "LeshySetup-${{ steps.version.outputs.version }}" --dir release-artifact
+          test -s "release-artifact/LeshySetup-${{ steps.version.outputs.version }}.exe"
+          sha256sum "release-artifact/LeshySetup-${{ steps.version.outputs.version }}.exe"
+      - name: Опубликовать GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.version.outputs.version }}"
+          asset="release-artifact/LeshySetup-${{ steps.version.outputs.version }}.exe"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" "$asset" --repo "$GITHUB_REPOSITORY" --target "$HEAD_SHA" --title "Леший ${{ steps.version.outputs.version }}" --notes "Проверенный релиз Лешего ${{ steps.version.outputs.version }}. Перед публикацией успешно пройдены Linux CI, Windows frozen smoke-test и проверка установщика."
+          fi
