@@ -31,7 +31,7 @@ class TelegramAccessTests(unittest.TestCase):
         sent = []
         answers = []
         bridge._send = lambda chat_id, text: sent.append((chat_id, text))
-        bridge._send_answer = lambda chat_id, text: answers.append((chat_id, text))
+        bridge._send_answer = lambda chat_id, text, **kwargs: answers.append((chat_id, text, kwargs.get("reply_to_message_id")))
         bridge._send_typing = lambda chat_id: None
         return app, bridge, sent, answers
 
@@ -45,10 +45,10 @@ class TelegramAccessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             app, bridge, sent, answers = self.make_bridge(Path(temp))
             bridge.configure("", [], allow_all=True, owner_id="100")
-            bridge._handle_message({"chat": {"id": 1}, "from": {"id": 200}, "text": "привет"})
+            bridge._handle_message({"chat": {"id": 1}, "from": {"id": 200}, "message_id": 55, "text": "привет"})
             self.assertEqual(len(app.chat_calls), 1)
             self.assertEqual(app.chat_calls[0][1], "telegram:200")
-            self.assertEqual(answers, [(1, "ok")])
+            self.assertEqual(answers, [(1, "ok", 55)])
 
             bridge._handle_message({"chat": {"id": 1}, "from": {"id": 200}, "text": "/learning_on"})
             self.assertEqual(app.learning_calls, [])
