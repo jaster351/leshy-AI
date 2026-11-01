@@ -11,15 +11,10 @@ def make_handler(app, telegram, settings, model_catalog):
 
 
 def serve(host: str | None = None, port: int | None = None) -> None:
-    # Маршрутизация ставится до создания Web/Telegram RealtimeChatManager,
-    # поэтому все каналы получают одинаковое поведение «изучи/научись».
+    # Маршрутизация ставится один раз до создания Web/Telegram
+    # RealtimeChatManager. Саму цепочку фабрик HTTP-handler не подменяем.
     install_explicit_learning_routing(LeshyApp)
-    original = previous.make_handler
-    previous.make_handler = make_handler
-    try:
-        previous.serve(host=host, port=port)
-    finally:
-        previous.make_handler = original
+    previous.serve(host=host, port=port)
 
 
 def main() -> None:
