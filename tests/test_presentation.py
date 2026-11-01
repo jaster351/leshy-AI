@@ -16,10 +16,10 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("Qwen", LESHY_IDENTITY_PROMPT)
         self.assertEqual(messages[-1].content, "Привет")
 
-    def test_telegram_hides_think_in_clickable_spoiler(self):
+    def test_telegram_does_not_expose_private_think_reasoning(self):
         rendered = _telegram_answer_html("<think>скрытая мысль</think>Готовый ответ")
-        self.assertIn("<tg-spoiler>скрытая мысль</tg-spoiler>", rendered)
-        self.assertIn("Готовый ответ", rendered)
+        self.assertEqual(rendered, "Готовый ответ")
+        self.assertNotIn("скрытая мысль", rendered)
         self.assertNotIn("<think>", rendered)
 
     def test_web_ui_has_hidden_reasoning_and_image_progress(self):
