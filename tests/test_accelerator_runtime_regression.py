@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from leshy.accelerator_runtime import AcceleratorLLM, LlamaServerLLM, LlamaServerManager
+from leshy.accelerator_runtime import LlamaServerLLM, LlamaServerManager
 from leshy.adaptive_backend import AdaptiveLLM
 from leshy.llm import ChatMessage, LLMUnavailable
 
