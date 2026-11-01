@@ -48,17 +48,13 @@ class RedactingFormatter(logging.Formatter):
 
 
 class ReleasingRotatingFileHandler(RotatingFileHandler):
-    """Rotating handler that never keeps a Windows log file locked between records.
-
-    Leshy can be recreated many times by tests, updater health checks and embedded
-    runtimes. A normal RotatingFileHandler keeps the file descriptor open until
-    explicit shutdown, which prevents TemporaryDirectory and update staging
-    directories from being removed on Windows. We open lazily for each emit and
-    close immediately afterwards while preserving the standard rotation logic.
-    """
+    """Rotating handler без постоянной блокировки файла и с самовосстановлением каталога."""
 
     def emit(self, record: logging.LogRecord) -> None:
+        # Временный install/update root может быть удалён между событиями. Логирование
+        # не должно ломать runtime: при следующей записи каталог создаётся заново.
         try:
+            Path(self.baseFilename).parent.mkdir(parents=True, exist_ok=True)
             super().emit(record)
         finally:
             self.acquire()
@@ -112,33 +108,15 @@ def configure_diagnostics(base_dir: Path, version: str) -> logging.Logger:
     _LOG_DIR = log_dir
     _ANALYSIS_LOG_DIR = analysis_dir
     formatter = RedactingFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-    all_handler = ReleasingRotatingFileHandler(
-        log_dir / "leshy.log",
-        maxBytes=10 * 1024 * 1024,
-        backupCount=10,
-        encoding="utf-8",
-        delay=True,
-    )
+    all_handler = ReleasingRotatingFileHandler(log_dir / "leshy.log", maxBytes=10 * 1024 * 1024, backupCount=10, encoding="utf-8", delay=True)
     all_handler.setLevel(logging.INFO)
     all_handler.setFormatter(formatter)
-    problem_handler = ReleasingRotatingFileHandler(
-        log_dir / "problems.log",
-        maxBytes=10 * 1024 * 1024,
-        backupCount=10,
-        encoding="utf-8",
-        delay=True,
-    )
+    problem_handler = ReleasingRotatingFileHandler(log_dir / "problems.log", maxBytes=10 * 1024 * 1024, backupCount=10, encoding="utf-8", delay=True)
     problem_handler.setLevel(logging.WARNING)
     problem_handler.setFormatter(formatter)
     handlers: list[logging.Handler] = [all_handler, problem_handler]
     if analysis_dir is not None:
-        analysis_handler = ReleasingRotatingFileHandler(
-            analysis_dir / "leshy-auto.log",
-            maxBytes=5 * 1024 * 1024,
-            backupCount=4,
-            encoding="utf-8",
-            delay=True,
-        )
+        analysis_handler = ReleasingRotatingFileHandler(analysis_dir / "leshy-auto.log", maxBytes=5 * 1024 * 1024, backupCount=4, encoding="utf-8", delay=True)
         analysis_handler.setLevel(logging.INFO)
         analysis_handler.setFormatter(formatter)
         handlers.append(analysis_handler)
@@ -154,14 +132,7 @@ def configure_diagnostics(base_dir: Path, version: str) -> logging.Logger:
     _HANDLERS = handlers
     _CONFIGURED = True
     _install_exception_hooks(logger)
-    event(
-        "process_start",
-        version=version,
-        pid=os.getpid(),
-        session=_SESSION_ID,
-        runtime_log_root="LeshyBrain/logs",
-        analysis_mirror=analysis_dir is not None,
-    )
+    event("process_start", version=version, pid=os.getpid(), session=_SESSION_ID, runtime_log_root="LeshyBrain/logs", analysis_mirror=analysis_dir is not None)
     return logger
 
 
@@ -209,20 +180,12 @@ def problem(name: str, message: str, **fields: Any) -> None:
 
 
 def exception(name: str, exc: BaseException, **fields: Any) -> None:
-    payload = {
-        "event": name,
-        "session": _SESSION_ID,
-        "pid": os.getpid(),
-        "thread": threading.current_thread().name,
-        "error_type": type(exc).__name__,
-        "error": _sanitize_text(str(exc)),
-        "traceback": _sanitize_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__))),
-        **_redact_dict(fields),
-    }
+    payload = {"event": name, "session": _SESSION_ID, "pid": os.getpid(), "thread": threading.current_thread().name, "error_type": type(exc).__name__, "error": _sanitize_text(str(exc)), "traceback": _sanitize_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__))), **_redact_dict(fields)}
     logging.getLogger(_LOGGER_NAME).error(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     os.replace(tmp, path)
@@ -259,15 +222,7 @@ def _install_exception_hooks(logger: logging.Logger) -> None:
 
     def sys_hook(exc_type, exc, tb):
         try:
-            payload = {
-                "event": "unhandled_exception",
-                "session": _SESSION_ID,
-                "pid": os.getpid(),
-                "thread": threading.current_thread().name,
-                "error_type": getattr(exc_type, "__name__", str(exc_type)),
-                "error": _sanitize_text(str(exc)),
-                "traceback": _sanitize_text("".join(traceback.format_exception(exc_type, exc, tb))),
-            }
+            payload = {"event": "unhandled_exception", "session": _SESSION_ID, "pid": os.getpid(), "thread": threading.current_thread().name, "error_type": getattr(exc_type, "__name__", str(exc_type)), "error": _sanitize_text(str(exc)), "traceback": _sanitize_text("".join(traceback.format_exception(exc_type, exc, tb)))}
             logger.critical(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         finally:
             previous(exc_type, exc, tb)
