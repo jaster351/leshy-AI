@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+from leshy.document_learning import DocumentAdapterUnavailable
 from leshy.document_pipeline import DocumentIngestResult
 from leshy.material_document_worker import process_material_document
 
@@ -30,7 +29,7 @@ class MaterialDocumentWorkerTests(unittest.TestCase):
         self.assertEqual(outcome.metadata["candidate_claims"], 4)
         self.assertFalse(outcome.metadata["vision_pending"])
 
-    def test_empty_or_scanned_document_fails_closed(self):
+    def test_empty_or_scanned_pipeline_result_fails_closed(self):
         result = DocumentIngestResult(
             title="scan.pdf",
             source_uri="file:///scan.pdf",
@@ -47,7 +46,27 @@ class MaterialDocumentWorkerTests(unittest.TestCase):
         self.assertEqual(outcome.status, "blocked")
         self.assertTrue(outcome.metadata["ocr_or_vision_pending"])
         self.assertTrue(outcome.metadata["adapter_pending"])
+
+    def test_real_extraction_ocr_signal_is_blocked_not_failed(self):
+        with patch("leshy.material_document_worker.ingest_document", side_effect=ValueError("В документе не найден извлекаемый текст; возможно, нужен OCR")):
+            outcome = process_material_document("scan.pdf", object(), title="Скан")
+        self.assertEqual(outcome.status, "blocked")
+        self.assertEqual(outcome.title, "Скан")
+        self.assertTrue(outcome.metadata["ocr_or_vision_pending"])
         self.assertIn("OCR/vision", outcome.summary)
+
+    def test_missing_optional_adapter_is_blocked_not_failed(self):
+        with patch("leshy.material_document_worker.ingest_document", side_effect=DocumentAdapterUnavailable("Для PDF установите pypdf")):
+            outcome = process_material_document("manual.pdf", object())
+        self.assertEqual(outcome.status, "blocked")
+        self.assertTrue(outcome.metadata["adapter_pending"])
+        self.assertFalse(outcome.metadata["ocr_or_vision_pending"])
+        self.assertIn("pypdf", outcome.summary)
+
+    def test_unexpected_value_error_is_not_hidden(self):
+        with patch("leshy.material_document_worker.ingest_document", side_effect=ValueError("corrupt internal state")):
+            with self.assertRaisesRegex(ValueError, "corrupt internal state"):
+                process_material_document("manual.pdf", object())
 
 
 if __name__ == "__main__":
