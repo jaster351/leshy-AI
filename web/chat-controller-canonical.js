@@ -39,15 +39,24 @@
     box.append(who,body);root.appendChild(box);root.scrollTop=root.scrollHeight;
     return {box,body};
   }
+  function ensureBox(req){
+    if(!req.ui||!req.ui.box||!req.ui.box.isConnected)req.ui=makeBox();
+    return req.ui;
+  }
   function render(req){
-    if(!req.ui||!req.ui.body||!req.ui.body.isConnected)return;
-    req.ui.body.textContent=req.raw;
+    const ui=ensureBox(req);
+    if(!ui||!ui.body)return;
+    ui.body.textContent=req.raw;
     const root=$('messages');if(root&&root.scrollHeight-root.scrollTop-root.clientHeight<180)root.scrollTop=root.scrollHeight;
   }
   function finalRender(req,answer,sources){
     if(req.ui&&req.ui.box&&req.ui.box.isConnected)req.ui.box.remove();
+    req.ui=null;
     if(typeof window.addMessage==='function')window.addMessage('assistant',answer||'',sources||[]);
-    else if(req.ui&&req.ui.body)req.ui.body.textContent=answer||'';
+    else{
+      const ui=ensureBox(req);
+      if(ui&&ui.body)ui.body.textContent=answer||'';
+    }
   }
 
   function parse(buffer,onEvent){
@@ -82,7 +91,11 @@
     try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}
     if(typeof window.addMessage==='function')window.addMessage('user',text);
 
-    const req={requestId:rid(),sessionId:sid(),controller:new AbortController(),raw:'',terminal:false,ui:makeBox(),done:null};
+    // Пока модель ещё не выдала первый токен, не создаём пустую assistant-card.
+    // Иначе слой оформления считает её готовым ответом и заранее рисует действия
+    // «Перезапустить / Скопировать / Поделиться». До delta пользователь должен
+    // видеть только честный статус «Леший думает…» (или activity поиска).
+    const req={requestId:rid(),sessionId:sid(),controller:new AbortController(),raw:'',terminal:false,ui:null,done:null};
     active=req;state('Леший думает…');armStall(req);
     emit('activity',{session_id:req.sessionId,request_id:req.requestId,text:'Леший думает…'});
 

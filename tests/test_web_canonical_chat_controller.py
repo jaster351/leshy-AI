@@ -32,3 +32,17 @@ def test_each_send_gets_new_request_id_and_current_session():
     assert "sessionId:sid()" in js
     assert "session_id:req.sessionId" in js
     assert "request_id:req.requestId" in js
+
+
+def test_thinking_state_does_not_create_fake_answer_card_before_first_delta():
+    js = (ROOT / "web" / "chat-controller-canonical.js").read_text(encoding="utf-8")
+    request = js.index("const req={requestId:rid()")
+    first_delta = js.index("}else if(type==='delta'){")
+    assert "ui:null" in js[request:first_delta]
+    assert "ui:makeBox()" not in js[request:first_delta]
+    assert "state('Леший думает…')" in js[request:first_delta]
+    assert "function ensureBox(req)" in js
+    assert "if(!req.ui||!req.ui.box||!req.ui.box.isConnected)req.ui=makeBox();" in js
+    # Потоковая карточка создаётся лениво из render(), то есть только после delta.
+    render = js.index("function render(req)")
+    assert "const ui=ensureBox(req);" in js[render:first_delta]
