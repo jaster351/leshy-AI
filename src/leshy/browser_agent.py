@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -49,8 +49,9 @@ class BrowserAgent:
     """Единая точка browser-действий Лешего.
 
     READ выполняется автоматически. Изменяющие, подтверждающие и финансовые
-    действия обязаны пройти Human Approval Gate. Это правило действует для всех
-    адаптеров: Playwright, Browser Use и будущих MCP/Skills.
+    действия обязаны пройти Human Approval Gate. После проверки подтверждения
+    адаптер получает внутренний `_approval_verified`, чтобы прямой вызов адаптера
+    не мог случайно выглядеть как одобренное действие.
     """
 
     def __init__(self, adapters: list[BrowserAdapter], *, allowed_hosts: tuple[str, ...] = ()):
@@ -68,15 +69,24 @@ class BrowserAgent:
             event("browser_agent_blocked_host", url=action.url, action=action.name)
             return BrowserActionResult("blocked", "Домен не разрешён политикой Browser Agent.")
 
-        if action.risk is not BrowserRisk.READ and not approved:
-            event("browser_agent_approval_required", action=action.name, risk=action.risk.value, url=action.url)
-            raise ApprovalRequired(action)
+        if action.risk is not BrowserRisk.READ:
+            if not approved:
+                event("browser_agent_approval_required", action=action.name, risk=action.risk.value, url=action.url)
+                raise ApprovalRequired(action)
+            arguments = dict(action.arguments)
+            arguments["_approval_verified"] = True
+            action = replace(action, arguments=arguments)
+            event("browser_agent_approval_verified", action=action.name, risk=action.risk.value, url=action.url)
 
         for adapter in self.adapters:
-            if not adapter.available():
+            try:
+                if not adapter.available():
+                    continue
+                event("browser_agent_adapter_selected", adapter=adapter.adapter_id, action=action.name, risk=action.risk.value)
+                result = adapter.execute(action)
+            except Exception as exc:
+                event("browser_agent_adapter_failed", adapter=getattr(adapter, "adapter_id", "unknown"), action=action.name, error=str(exc))
                 continue
-            event("browser_agent_adapter_selected", adapter=adapter.adapter_id, action=action.name, risk=action.risk.value)
-            result = adapter.execute(action)
             if result.status not in {"unavailable", "unsupported"}:
                 return result
 
