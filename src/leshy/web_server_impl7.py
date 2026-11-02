@@ -8,6 +8,7 @@ from . import web_server_impl5 as shell
 from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
 from .diagnostics import problem
+from .freshness_memory_runtime import install_freshness_memory_runtime
 from .identity_runtime import install_creator_identity_routing
 from .learning_command_runtime import install_explicit_learning_routing
 from .reliable_web_runtime import install_reliable_web_runtime
@@ -22,6 +23,9 @@ def _install_runtime_contracts(app=None) -> None:
     """Ставить idempotency последним, поверх всех специальных chat routing."""
     install_explicit_learning_routing(LeshyApp)
     install_reliable_web_runtime(LeshyApp)
+    # Freshness-layer должен быть внутри latency-layer, чтобы stale fallback
+    # попал в общую компактизацию prompt и не переполнил 4096-token backend.
+    install_freshness_memory_runtime(app)
     install_runtime_latency_fixes(app)
     install_creator_identity_routing(LeshyApp)
     install_telegram_exact_once_finalization()
