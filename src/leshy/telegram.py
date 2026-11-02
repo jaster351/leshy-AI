@@ -39,6 +39,85 @@ def _telegram_answer_html(text: str) -> str:
     return "".join(parts).strip()
 
 
+def _telegram_message_text(message: dict) -> str:
+    """Возвращает полезное содержимое Telegram-сообщения для reply-контекста."""
+    text = str(message.get("text") or message.get("caption") or "").strip()
+    if text:
+        return text
+    media: list[str] = []
+    if message.get("photo"):
+        media.append("фото/изображение")
+    if message.get("document"):
+        document = message.get("document") or {}
+        name = str(document.get("file_name") or "").strip()
+        media.append(f"документ {name}" if name else "документ")
+    if message.get("video"):
+        media.append("видео")
+    if message.get("animation"):
+        media.append("анимация")
+    if message.get("audio"):
+        media.append("аудио")
+    if message.get("voice"):
+        media.append("голосовое сообщение")
+    if message.get("sticker"):
+        media.append("стикер")
+    if message.get("location"):
+        media.append("геопозиция")
+    return "[" + ", ".join(media) + "]" if media else "[сообщение без текста]"
+
+
+def _telegram_sender_label(message: dict) -> str:
+    sender = message.get("from") or {}
+    first = str(sender.get("first_name") or "").strip()
+    last = str(sender.get("last_name") or "").strip()
+    username = str(sender.get("username") or "").strip()
+    name = " ".join(part for part in (first, last) if part).strip()
+    if username:
+        return f"{name} (@{username})" if name else f"@{username}"
+    if name:
+        return name
+    sender_id = str(sender.get("id") or "").strip()
+    return f"Telegram user {sender_id}" if sender_id else "неизвестный автор"
+
+
+def _telegram_reply_prompt(message: dict, text: str) -> tuple[str, int | None]:
+    """Добавляет выбранное через Telegram Reply сообщение как приоритетный контекст.
+
+    В истории после исходной реплики могут уже находиться новые сообщения. Поэтому
+    сам факт reply должен иметь больший семантический приоритет, чем принцип
+    «последнее сообщение в чате». Служебный контекст не меняет Telegram UI, но
+    делает цель ответа однозначной для модели.
+    """
+    replied = message.get("reply_to_message")
+    if not isinstance(replied, dict):
+        return text, None
+    target_id_raw = replied.get("message_id")
+    try:
+        target_id = int(target_id_raw) if target_id_raw is not None else None
+    except (TypeError, ValueError):
+        target_id = None
+    target = _telegram_message_text(replied)[:6000]
+    author = _telegram_sender_label(replied)[:300]
+    quote = message.get("quote")
+    quote_text = ""
+    if isinstance(quote, dict):
+        quote_text = str(quote.get("text") or "").strip()[:3000]
+
+    parts = [
+        "[Контекст Telegram Reply — приоритетный]",
+        "Пользователь нажал «Ответить» на конкретное сообщение ниже. Текущий запрос относится прежде всего к нему. "
+        "Даже если после этого сообщения в истории чата уже появились другие реплики, не подменяй цель ответа последним сообщением.",
+        f"ID выбранного сообщения: {target_id if target_id is not None else 'неизвестен'}",
+        f"Автор выбранного сообщения: {author}",
+        "Содержимое выбранного сообщения:",
+        target,
+    ]
+    if quote_text:
+        parts.extend(("Выделенная пользователем цитата:", quote_text))
+    parts.extend(("[Текущий текст пользователя]", text))
+    return "\n".join(parts), target_id
+
+
 class TelegramBridge:
     def __init__(self, app, brain_dir: Path):
         self.app = app
@@ -160,6 +239,7 @@ class TelegramBridge:
             "natural_name_addressing": True,
             "message_reactions": True,
             "reply_to_each_message": True,
+            "reply_target_priority": True,
             "backlog_before_ack": True,
             "privacy_mode_note": "Для чтения обычных сообщений группы без @упоминания Privacy Mode бота должен быть отключён в Telegram.",
         }
@@ -315,6 +395,16 @@ class TelegramBridge:
             self._send(chat_id, "Самообучение выключено.")
             return
 
+        chat_text, reply_target_id = _telegram_reply_prompt(message, text)
+        if reply_target_id is not None:
+            event(
+                "telegram_reply_context_applied",
+                chat_id=str(chat_id),
+                telegram_user_id=user_id,
+                message_id=int(message_id) if message_id else None,
+                target_message_id=reply_target_id,
+            )
+
         self._send_typing(chat_id)
         typing_stop = threading.Event()
 
@@ -326,7 +416,7 @@ class TelegramBridge:
         typing_thread.start()
         try:
             result = self.app.chat(
-                text,
+                chat_text,
                 owner_id=f"telegram:{user_id}",
                 session_id=f"telegram:{chat_id}:{user_id}",
             )
@@ -347,6 +437,7 @@ class TelegramBridge:
                 address_reason=address_reason,
                 reaction=reaction or "",
                 reply_to_message_id=int(message_id) if message_id else None,
+                reply_target_message_id=reply_target_id,
             )
         except Exception as exc:
             problem("telegram_chat_failed", str(exc), telegram_user_id=user_id)
