@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .diagnostics import event, problem
 
@@ -22,10 +22,19 @@ class DocumentIntelligence:
     Сетевые URL намеренно не принимаются. Файл читается только локально с правами
     процесса Лешего. Основной движок — Microsoft MarkItDown; PDF имеет встроенный
     резерв через pypdf, чтобы базовый разбор не зависел от одного конвертера.
+
+    `converter_factory` существует для детерминированных regression-тестов и не
+    меняет production-путь: по умолчанию используется установленный MarkItDown.
     """
 
-    def __init__(self, *, max_bytes: int = 128 * 1024 * 1024):
+    def __init__(
+        self,
+        *,
+        max_bytes: int = 128 * 1024 * 1024,
+        converter_factory: Callable[[], Any] | None = None,
+    ):
         self.max_bytes = max(1 * 1024 * 1024, min(int(max_bytes), 1024 * 1024 * 1024))
+        self._converter_factory = converter_factory
 
     @staticmethod
     def _validate(path: str | Path) -> Path:
@@ -54,6 +63,23 @@ class DocumentIntelligence:
             raise RuntimeError("Для этого формата требуется MarkItDown")
         return path.read_text(encoding="utf-8", errors="replace")
 
+    def _new_markitdown(self):
+        if self._converter_factory is not None:
+            return self._converter_factory()
+        from markitdown import MarkItDown
+
+        return MarkItDown(enable_plugins=False)
+
+    @staticmethod
+    def _result_text(result: Any) -> str:
+        # Актуальный MarkItDown использует text_content. `markdown` оставлен для
+        # совместимости с предыдущими/альтернативными результатами конвертера.
+        for attribute in ("text_content", "markdown"):
+            value = getattr(result, attribute, None)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return ""
+
     def convert(self, path: str | Path) -> DocumentResult:
         file_path = self._validate(path)
         size = file_path.stat().st_size
@@ -62,16 +88,10 @@ class DocumentIntelligence:
 
         event("document_intelligence_started", path=str(file_path), size_bytes=size)
         try:
-            from markitdown import MarkItDown
-
-            converter = MarkItDown(enable_plugins=False)
+            converter = self._new_markitdown()
             convert_local = getattr(converter, "convert_local", None)
             result = convert_local(str(file_path)) if callable(convert_local) else converter.convert(str(file_path))
-            markdown = str(
-                getattr(result, "markdown", None)
-                or getattr(result, "text_content", None)
-                or ""
-            ).strip()
+            markdown = self._result_text(result)
             if not markdown:
                 raise RuntimeError("MarkItDown вернул пустой результат")
             engine = "markitdown"
