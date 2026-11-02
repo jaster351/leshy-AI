@@ -7,7 +7,7 @@ from . import web_server_impl6 as previous
 from . import web_server_impl5 as shell
 from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
-from .diagnostics import problem
+from .diagnostics import event, problem
 from .freshness_cache_runtime import install_freshness_cache_runtime
 from .freshness_memory_runtime import install_freshness_memory_runtime
 from .identity_runtime import install_creator_identity_routing
@@ -36,10 +36,15 @@ def _install_runtime_contracts(app=None) -> None:
 
 def _runtime_html(settings) -> bytes:
     html = shell._runtime_html(settings).decode("utf-8")
+    # Старый followup-finalizer больше не нужен: canonical controller сам
+    # завершает запрос прямо на SSE done/error/duplicate и сразу освобождает
+    # активный stream. Это исключает несколько конкурирующих владельцев
+    # жизненного цикла одного Web-запроса.
+    html = html.replace('<script src="/chat-followup-finalizer.js"></script>\n', "")
     for marker in (
         '<script src="/chat-idempotency.js"></script>',
         '<script src="/chat-stall-watchdog.js"></script>',
-        '<script src="/chat-followup-finalizer.js"></script>',
+        '<script src="/chat-controller-canonical.js"></script>',
     ):
         if marker not in html:
             html = html.replace("</body>", marker + "\n</body>")
@@ -51,6 +56,26 @@ def make_handler(app, telegram, settings, model_catalog):
     Parent = _ORIGINAL_SHELL_MAKE_HANDLER(app, telegram, settings, model_catalog)
 
     class Handler(Parent):
+        def _stream_chat(self, body: dict) -> None:
+            request_id = str(body.get("request_id") or "").strip()
+            owner = str(body.get("owner_id") or "web:local").strip()[:200]
+            sid = str(body.get("session_id") or "").strip()[:200]
+            event(
+                "web_chat_stream_received",
+                request_id=request_id,
+                owner_id=owner,
+                session_id=sid,
+            )
+            try:
+                return super()._stream_chat(body)
+            finally:
+                event(
+                    "web_chat_stream_http_finished",
+                    request_id=request_id,
+                    owner_id=owner,
+                    session_id=sid,
+                )
+
         def do_GET(self):
             parsed = parse.urlparse(self.path)
             if parsed.path == "/":
@@ -62,7 +87,12 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            if parsed.path in {"/chat-idempotency.js", "/chat-stall-watchdog.js", "/chat-followup-finalizer.js"}:
+            if parsed.path in {
+                "/chat-idempotency.js",
+                "/chat-stall-watchdog.js",
+                "/chat-controller-canonical.js",
+                "/chat-followup-finalizer.js",
+            }:
                 name = parsed.path.rsplit("/", 1)[-1]
                 try:
                     return self._send_asset(name, "application/javascript; charset=utf-8")
