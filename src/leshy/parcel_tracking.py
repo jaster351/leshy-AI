@@ -113,7 +113,7 @@ def _relevant_excerpt(text: str, track: str) -> list[str]:
         return lines[start:start + 70]
     keywords = (
         "достав", "вруч", "получ", "сортиров", "прибыл", "покинул", "принят",
-        "тамож", "курьер", "в пути", "отправлен", "статус", "событ", "служба доставки",
+        "тамож", "курьер", "в пути", "отправлено", "отправлен из", "статус", "событ", "служба доставки",
         "не найден", "нет информации",
     )
     selected = [line for line in lines if any(word in line.lower() for word in keywords)]
@@ -128,7 +128,7 @@ def _category(text: str) -> str:
         return "out_for_delivery"
     if any(marker in value for marker in ("возврат", "неудачная попытка", "утерян", "задержан", "проблем", "исключение", "не вручено")):
         return "exception"
-    if any(marker in value for marker in ("в пути", "сортиров", "прибыл", "покинул", "принят", "экспорт", "импорт", "отправлен", "тамож")):
+    if any(marker in value for marker in ("в пути", "сортиров", "прибыл", "покинул", "принят", "экспорт", "импорт", "отправлено", "отправлен из", "тамож")):
         return "in_transit"
     return "unknown"
 
@@ -138,14 +138,23 @@ def _status_line(lines: list[str], category: str, track: str) -> str:
         "delivered": ("достав", "вруч", "получ"),
         "out_for_delivery": ("курьер", "готов к выдаче", "место вручения", "отделени"),
         "exception": ("возврат", "неудач", "утерян", "задерж", "проблем"),
-        "in_transit": ("в пути", "сортиров", "прибыл", "покинул", "принят", "экспорт", "импорт", "отправлен", "тамож"),
+        "in_transit": ("сортиров", "прибыл", "покинул", "принят", "экспорт", "импорт", "тамож", "в пути", "отправлено", "отправлен из"),
     }
+    generic_ui = (
+        "отслеживание почтов", "почтового отправления", "почтовое отправление",
+        "номер отслеживания", "трек-код", "отследить посылку", "история отслеживания",
+    )
     words = category_words.get(category, ())
     for line in lines:
         lower = line.lower().replace("ё", "е")
+        if any(marker in lower for marker in generic_ui):
+            continue
         if any(word in lower for word in words):
             return line[:500]
     for line in lines:
+        lower = line.lower().replace("ё", "е")
+        if any(marker in lower for marker in generic_ui):
+            continue
         if track.upper() not in line.upper() and len(line) >= 5:
             return line[:500]
     return "Статус на странице найден, но не удалось выделить краткую формулировку."
