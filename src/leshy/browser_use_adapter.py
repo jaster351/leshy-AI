@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import os
+import re
 import threading
 from typing import Any, Awaitable
 from urllib.parse import urlparse
@@ -27,6 +28,7 @@ _READ_ONLY_EXCLUDED_ACTIONS: tuple[str, ...] = (
     "send_keys",
     "select_dropdown",
 )
+_PROFILE_PART_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 
 
 class BrowserUseAdapter:
@@ -36,6 +38,11 @@ class BrowserUseAdapter:
     без click/input/send_keys/form selection, произвольного JavaScript и файловых
     операций. Любое изменение допускается только после `_approval_verified`, который
     может поставить исключительно BrowserAgent.
+
+    По умолчанию используется общий профиль Browser Agent. Специализированные
+    модули могут передать безопасные `profile_namespace` и `profile_key`; тогда
+    создаётся отдельный постоянный профиль внутри LeshyBrain/browser/profiles.
+    Это используется, например, для изоляции личных кабинетов разных пользователей.
     """
 
     adapter_id = "browser-use"
@@ -47,8 +54,8 @@ class BrowserUseAdapter:
             raw = os.getenv("LESHY_BROWSER_HEADLESS", "1").strip().lower()
             headless = raw not in {"0", "false", "no", "off"}
         self.headless = bool(headless)
-        root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
-        self.profile_dir = root / "browser" / "browser-use-profile"
+        self.root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
+        self.profile_dir = self.root / "browser" / "browser-use-profile"
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         try:
             self.profile_dir.chmod(0o700)
@@ -100,6 +107,23 @@ class BrowserUseAdapter:
         from browser_use import Tools
 
         return Tools(exclude_actions=list(cls._excluded_actions(action)))
+
+    def _profile_for_action(self, action: BrowserAction) -> Path:
+        namespace = str(action.arguments.get("profile_namespace") or "").strip()
+        key = str(action.arguments.get("profile_key") or "").strip()
+        if not namespace and not key:
+            return self.profile_dir
+        if not namespace or not key:
+            raise ValueError("Изолированный browser-профиль требует profile_namespace и profile_key")
+        if not _PROFILE_PART_RE.fullmatch(namespace) or not _PROFILE_PART_RE.fullmatch(key):
+            raise ValueError("Некорректный ключ изолированного browser-профиля")
+        target = self.root / "browser" / "profiles" / namespace / key
+        target.mkdir(parents=True, exist_ok=True)
+        try:
+            target.chmod(0o700)
+        except Exception:
+            pass
+        return target
 
     @staticmethod
     def _run_sync(awaitable: Awaitable[Any]) -> Any:
@@ -168,9 +192,10 @@ class BrowserUseAdapter:
             return BrowserActionResult("blocked", "Стартовый URL не входит в разрешённые домены")
 
         browser_info = ensure_system_browser(auto_install=True)
+        profile_dir = self._profile_for_action(action)
         browser = Browser(
             executable_path=browser_info.executable,
-            user_data_dir=str(self.profile_dir),
+            user_data_dir=str(profile_dir),
             headless=self.headless,
             allowed_domains=self._domain_patterns(hosts),
             keep_alive=False,
@@ -187,6 +212,7 @@ class BrowserUseAdapter:
             action=action.name,
             risk=action.risk.value,
             excluded=list(excluded),
+            isolated_profile=profile_dir != self.profile_dir,
         )
         agent = Agent(
             task=user_task + self._guard(action, hosts),
@@ -205,6 +231,7 @@ class BrowserUseAdapter:
                 hosts=list(hosts),
                 risk=action.risk.value,
                 action=action.name,
+                isolated_profile=profile_dir != self.profile_dir,
             )
             return BrowserActionResult(
                 "ok",
