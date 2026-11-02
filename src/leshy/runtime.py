@@ -3,6 +3,7 @@ from __future__ import annotations
 from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
 from .config import Settings
+from .freshness_cache_runtime import install_freshness_cache_runtime
 from .freshness_memory_runtime import install_freshness_memory_runtime
 from .identity_runtime import install_creator_identity_routing
 from .runtime_latency_fix import install_runtime_latency_fixes
@@ -17,9 +18,10 @@ class Runtime(LeshyApp):
     """
 
     def __init__(self, settings: Settings | None = None):
-        # Freshness ставится до latency-layer, чтобы финальная компактизация
-        # контекста учитывала stale fallback и не выбрасывала его за token budget.
+        # Freshness/cache ставятся до latency-layer, чтобы финальная компактизация
+        # учитывала stale fallback и свежие локальные dynamic-знания.
         install_freshness_memory_runtime()
+        install_freshness_cache_runtime()
         install_runtime_latency_fixes()
         install_creator_identity_routing(LeshyApp)
         # Idempotency ставится последним поверх специальных chat routing, чтобы
