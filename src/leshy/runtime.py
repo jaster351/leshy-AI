@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .app import LeshyApp
 from .config import Settings
+from .identity_runtime import install_creator_identity_routing
 
 
 class Runtime(LeshyApp):
@@ -13,6 +14,7 @@ class Runtime(LeshyApp):
     """
 
     def __init__(self, settings: Settings | None = None):
+        install_creator_identity_routing(LeshyApp)
         super().__init__(settings or Settings.from_env())
         self.learning_control = self.learning
         # Совместимость с кодом, который ожидал `.agent.chat(...)`.
