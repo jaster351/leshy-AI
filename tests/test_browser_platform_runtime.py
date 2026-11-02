@@ -151,6 +151,35 @@ class BrowserAgentApprovalTests(unittest.TestCase):
         self.assertEqual(PlaywrightBrowserAdapter._allowed_hosts(action), ("trusted.example",))
         self.assertFalse(BrowserUseAdapter._host_allowed(action.url, BrowserUseAdapter._hosts(action)))
 
+    def test_read_only_browser_use_removes_mutating_tools(self) -> None:
+        action = BrowserAction(
+            "research",
+            "https://example.com",
+            BrowserRisk.READ,
+            {"allowed_hosts": ("example.com",)},
+        )
+        excluded = set(BrowserUseAdapter._excluded_actions(action))
+        self.assertTrue(
+            {"click", "input", "send_keys", "select_dropdown", "evaluate", "upload_file", "write_file", "replace_file", "read_file"}
+            <= excluded
+        )
+        tools = BrowserUseAdapter._tools_for_action(action)
+        registered = set(tools.registry.registry.actions)
+        self.assertTrue({"navigate", "search", "extract"} <= registered)
+        self.assertTrue(excluded.isdisjoint(registered))
+
+    def test_approved_commit_keeps_interaction_tools_but_not_js_or_file_io(self) -> None:
+        action = BrowserAction(
+            "agent_commit",
+            "https://example.com",
+            BrowserRisk.COMMIT,
+            {"allowed_hosts": ("example.com",), "_approval_verified": True},
+        )
+        excluded = set(BrowserUseAdapter._excluded_actions(action))
+        self.assertNotIn("click", excluded)
+        self.assertNotIn("input", excluded)
+        self.assertTrue({"evaluate", "upload_file", "write_file", "replace_file", "read_file"} <= excluded)
+
 
 class BrowserResearchRecoveryTests(unittest.TestCase):
     def test_selected_results_survive_platform_recreation(self) -> None:
