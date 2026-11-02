@@ -86,7 +86,9 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
         self.assertEqual(cpu.calls, 2)
         status = router.status()
         npu = next(item for item in status["backends"] if item["name"] == "npu-openvino")
-        self.assertGreater(npu["cooldown_remaining_seconds"], 0)
+        self.assertTrue(npu["quarantined"])
+        self.assertIsNone(npu["cooldown_remaining_seconds"])
+        self.assertIn("503", npu["quarantine_reason"])
 
     def test_vulkan_uses_layer_split_and_fit_without_forcing_all_layers(self):
         # --fit должен сам подобрать число GPU-слоёв по свободной VRAM.
