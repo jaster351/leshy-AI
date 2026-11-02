@@ -3,6 +3,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Regression воспроизводит пользовательский сценарий: первый ответ завершён,
+# следующий вопрос в той же Web-сессии обязан начать новый request немедленно.
+
 
 def test_canonical_controller_is_loaded_last_and_old_finalizer_is_not_injected():
     server = (ROOT / "src" / "leshy" / "web_server_impl7.py").read_text(encoding="utf-8")
