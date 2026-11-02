@@ -81,12 +81,12 @@ def _execute_intent(app, intent: ParcelIntent, owner_id: str, session_id: str, *
             activity=activity,
         )
         return format_parcel_result(result, following=not result.needs_user_action), [
-            {"title": "ГдеПосылка", "url": result.source_url}
+            {"title": "ParcelRadar", "url": result.source_url}
         ] if result.source_url else []
 
     result = service.track_once(intent.tracking_number, activity=activity)
     return format_parcel_result(result), [
-        {"title": "ГдеПосылка", "url": result.source_url}
+        {"title": "ParcelRadar", "url": result.source_url}
     ] if result.source_url else []
 
 
