@@ -26,17 +26,11 @@ _AMOUNT_RE = re.compile(
     re.IGNORECASE,
 )
 _ORDINALS = {
-    "перв": 0,
-    "1 вариант": 0,
-    "вариант 1": 0,
-    "втор": 1,
-    "2 вариант": 1,
-    "вариант 2": 1,
-    "трет": 2,
-    "3 вариант": 2,
-    "вариант 3": 2,
+    "перв": 0, "1 вариант": 0, "вариант 1": 0,
+    "втор": 1, "2 вариант": 1, "вариант 2": 1,
+    "трет": 2, "3 вариант": 2, "вариант 3": 2,
 }
-_RESEARCH_VERBS = ("найд", "поищ", "подбер", "сравн", "посмотр", "проверь", "выбери", "куп", "закаж", "заброниру", "брон")
+_RESEARCH_VERBS = ("найд", "поищ", "подбер", "сравн", "посмотр", "проверь", "выбери")
 _COMMERCE_NOUNS = (
     "товар", "магазин", "цена", "билет", "авиабилет", "самолет", "самолёт", "поезд",
     "отель", "гостиниц", "номер", "рейс", "заказ", "брон", "достав", "маркетплейс",
@@ -74,15 +68,16 @@ def parse_browser_conversation_intent(text: str) -> BrowserConversationIntent | 
     if any(marker in low for marker in _FINANCIAL_VERBS):
         return BrowserConversationIntent("financial", value, urls[0] if urls else "", selected, amount_summary)
 
-    if any(marker in low for marker in _COMMIT_VERBS) and (urls or selected is not None or "этот" in low or "его" in low):
+    commit_requested = any(marker in low for marker in _COMMIT_VERBS)
+    if commit_requested and (urls or selected is not None or "этот" in low or "его" in low):
         return BrowserConversationIntent("commit", value, urls[0] if urls else "", selected)
 
     if urls and any(marker in low for marker in ("открой", "изучи", "проверь", "посмотри", "сравни")):
         return BrowserConversationIntent("research_url", value, urls[0])
 
+    if commit_requested:
+        return BrowserConversationIntent("research", value)
     if any(verb in low for verb in _RESEARCH_VERBS) and any(noun in low for noun in _COMMERCE_NOUNS):
-        # Даже «купи/забронируй» на первом сообщении сначала является исследованием:
-        # Леший обязан показать варианты до внешнего обязательства.
         return BrowserConversationIntent("research", value)
     return None
 
@@ -90,8 +85,7 @@ def parse_browser_conversation_intent(text: str) -> BrowserConversationIntent | 
 class BrowserPlatform:
     def __init__(self, app):
         self.app = app
-        local_browser_llm = LeshyBrowserUseLLM(app.llm)
-        self.browser_use = BrowserUseAdapter(local_browser_llm)
+        self.browser_use = BrowserUseAdapter(LeshyBrowserUseLLM(app.llm))
         self.playwright = PlaywrightBrowserAdapter()
         self.agent = BrowserAgent([self.browser_use, self.playwright])
         self.approvals = ApprovalBroker(ttl_seconds=600)
@@ -151,15 +145,14 @@ class BrowserPlatform:
             return self._fallback_summary([]), []
 
         hosts = tuple(dict.fromkeys(self._host(row["url"]) for row in safe_rows if self._host(row["url"])))
-        start_url = safe_rows[0]["url"]
         action = BrowserAction(
             "research",
-            start_url,
+            safe_rows[0]["url"],
             BrowserRisk.READ,
             {
                 "task": (
                     "Исследуй и сравни варианты по запросу пользователя. Используй только разрешённые сайты. "
-                    "Верни короткое сравнение с ценой/условиями/датами, если они видны, и URL лучших вариантов. "
+                    "Верни короткое сравнение с ценой, условиями и датами, если они видны, и URL лучших вариантов. "
                     f"Запрос: {query}"
                 ),
                 "allowed_hosts": hosts,
@@ -172,8 +165,10 @@ class BrowserPlatform:
         if browser_result.status == "ok" and str(browser_result.data.get("result") or "").strip():
             answer = str(browser_result.data["result"]).strip()
             answer += "\n\nПеред оформлением выбранного варианта Леший запросит отдельное подтверждение."
-            return answer, [{"title": row["title"], "url": row["url"]} for row in safe_rows]
-        return self._fallback_summary(safe_rows), [{"title": row["title"], "url": row["url"]} for row in safe_rows]
+        else:
+            answer = self._fallback_summary(safe_rows)
+        sources = [{"title": row["title"], "url": row["url"]} for row in safe_rows]
+        return answer, sources
 
     def research_url(self, intent: BrowserConversationIntent, *, session_id: str) -> tuple[str, list[dict[str, str]]]:
         host = self._host(intent.url)
@@ -229,15 +224,13 @@ class BrowserPlatform:
             risk = BrowserRisk.COMMIT
             action_name = "agent_commit"
             summary = f"Внешнее действие на {host}: {intent.text}"
-            arguments = {
-                "task": intent.text,
-                "allowed_hosts": (host,),
-                "use_vision": False,
-                "max_steps": 35,
-            }
+            arguments = {"task": intent.text, "allowed_hosts": (host,), "use_vision": False, "max_steps": 35}
 
-        action = BrowserAction(action_name, url, risk, arguments, description=intent.text)
-        pending = self.approvals.request(owner_id, action, summary=summary)
+        pending = self.approvals.request(
+            owner_id,
+            BrowserAction(action_name, url, risk, arguments, description=intent.text),
+            summary=summary,
+        )
         return pending.public()
 
     def resolve_approval(self, owner_id: str, approval_id: str, *, approved: bool) -> BrowserActionResult:
@@ -288,19 +281,25 @@ def install_browser_platform_routing(app_class, app=None) -> None:
     _ORIGINAL_CHAT = app_class.chat
     _ORIGINAL_STREAM = RealtimeChatManager.stream
 
-    def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None, **kwargs):
+    def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None, **_kwargs):
         intent = parse_browser_conversation_intent(message)
         platform = getattr(self, "browser_platform", None)
         if intent is None or not isinstance(platform, BrowserPlatform) or not platform.enabled():
-            return _ORIGINAL_CHAT(self, message, owner_id=owner_id, session_id=session_id, **kwargs)
+            return _ORIGINAL_CHAT(self, message, owner_id=owner_id, session_id=session_id)
 
         sid = self._ensure_session(owner_id, session_id)
         now = utcnow()
         with self.storage.connection() as conn:
-            conn.execute("INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)", (sid, "user", str(message), now))
+            conn.execute(
+                "INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)",
+                (sid, "user", str(message), now),
+            )
             count = int(conn.execute("SELECT COUNT(*) AS c FROM messages WHERE session_id=?", (sid,)).fetchone()["c"])
             if count == 1:
-                conn.execute("UPDATE sessions SET title=?,updated_at=? WHERE id=?", (" ".join(str(message).split())[:80], now, sid))
+                conn.execute(
+                    "UPDATE sessions SET title=?,updated_at=? WHERE id=?",
+                    (" ".join(str(message).split())[:80], now, sid),
+                )
         try:
             answer, sources, pending = platform.handle(str(message), owner_id=owner_id, session_id=sid)
         except Exception as exc:
@@ -315,40 +314,72 @@ def install_browser_platform_routing(app_class, app=None) -> None:
             "approval": pending,
         }
 
-    def stream(self: RealtimeChatManager, message: str, *, owner_id: str = "web:local", session_id: str | None = None, request_id: str | None = None) -> Iterator[StreamEvent]:
+    def stream(
+        self: RealtimeChatManager,
+        message: str,
+        *,
+        owner_id: str = "web:local",
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ) -> Iterator[StreamEvent]:
         intent = parse_browser_conversation_intent(message)
         platform = getattr(self.app, "browser_platform", None)
         if intent is None or not isinstance(platform, BrowserPlatform) or not platform.enabled():
-            yield from _ORIGINAL_STREAM(self, message, owner_id=owner_id, session_id=session_id, request_id=request_id)
+            yield from _ORIGINAL_STREAM(
+                self,
+                message,
+                owner_id=owner_id,
+                session_id=session_id,
+                request_id=request_id,
+            )
             return
 
         rid, cancel = self._register(request_id)
-        sid, _rows = self._save_user_and_history(str(message), owner_id, session_id)
-        yield StreamEvent("start", {"request_id": rid, "session_id": sid, "browser_agent": True})
-        yield StreamEvent("activity", {"kind": "browser_agent", "phase": "working", "text": "Работаю в браузере…"})
+        sid = ""
         try:
-            answer, sources, pending = platform.handle(str(message), owner_id=owner_id, session_id=sid)
-        except Exception as exc:
-            problem("browser_platform_stream_failed", str(exc), session_id=sid)
-            answer, sources, pending = str(exc), [], None
-        if cancel.is_set():
-            yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "sources": [], "stopped": True, "browser_agent": True})
-            return
-        for chunk in self._chunk_fallback(answer, 180):
+            sid, _rows = self._save_user_and_history(str(message), owner_id, session_id)
+            yield StreamEvent("start", {"request_id": rid, "session_id": sid, "browser_agent": True})
+            yield StreamEvent("activity", {"kind": "browser_agent", "phase": "working", "text": "Работаю в браузере…"})
+            try:
+                answer, sources, pending = platform.handle(str(message), owner_id=owner_id, session_id=sid)
+            except Exception as exc:
+                problem("browser_platform_stream_failed", str(exc), session_id=sid)
+                answer, sources, pending = str(exc), [], None
+
             if cancel.is_set():
-                break
-            yield StreamEvent("delta", {"text": chunk})
-        answered_at = self.app._save_assistant(sid, answer)
-        yield StreamEvent("done", {
-            "request_id": rid,
-            "session_id": sid,
-            "answer": answer,
-            "created_at": answered_at,
-            "sources": sources,
-            "stopped": cancel.is_set(),
-            "browser_agent": True,
-            "approval": pending,
-        })
+                yield StreamEvent(
+                    "done",
+                    {"request_id": rid, "session_id": sid, "answer": "", "sources": [], "stopped": True, "browser_agent": True},
+                )
+                return
+
+            for chunk in self._chunk_fallback(answer, 180):
+                if cancel.is_set():
+                    break
+                yield StreamEvent("delta", {"text": chunk})
+            if cancel.is_set():
+                yield StreamEvent(
+                    "done",
+                    {"request_id": rid, "session_id": sid, "answer": "", "sources": [], "stopped": True, "browser_agent": True},
+                )
+                return
+
+            answered_at = self.app._save_assistant(sid, answer)
+            yield StreamEvent(
+                "done",
+                {
+                    "request_id": rid,
+                    "session_id": sid,
+                    "answer": answer,
+                    "created_at": answered_at,
+                    "sources": sources,
+                    "stopped": False,
+                    "browser_agent": True,
+                    "approval": pending,
+                },
+            )
+        finally:
+            self._unregister(rid)
 
     app_class.chat = chat
     RealtimeChatManager.stream = stream
