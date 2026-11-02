@@ -91,4 +91,26 @@ def process_material_document(path: str | Path, knowledge: Any, *, title: str = 
     )
 
 
-__all__ = ["MaterialDocumentOutcome", "process_material_document"]
+def finish_material_document(coordinator: Any, row: dict[str, Any], knowledge: Any) -> MaterialDocumentOutcome:
+    """Обработать document-file и атомарно записать итог в learning_materials.
+
+    Это узкая граница между ``MaterialLearningWorker`` и document pipeline:
+    worker передаёт строку очереди, а здесь единообразно сохраняются status,
+    title, summary и provenance metadata. Неожиданные исключения не скрываются —
+    их по-прежнему переводит в ``failed`` общий диагностический контур worker.
+    """
+    material_id = int(row["id"])
+    source = str(row["source"])
+    title = str(row.get("title") or "")[:500]
+    outcome = process_material_document(source, knowledge, title=title)
+    coordinator.finish_material(
+        material_id,
+        status=outcome.status,
+        title=outcome.title,
+        summary=outcome.summary,
+        metadata=outcome.metadata,
+    )
+    return outcome
+
+
+__all__ = ["MaterialDocumentOutcome", "finish_material_document", "process_material_document"]
