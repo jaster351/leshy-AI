@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from http import HTTPStatus
 from urllib import parse
 
@@ -14,6 +15,7 @@ from .identity_runtime import install_creator_identity_routing
 from .learning_command_runtime import install_explicit_learning_routing
 from .reliable_web_runtime import install_reliable_web_runtime
 from .runtime_latency_fix import install_runtime_latency_fixes
+from .session_admin import SessionAdminService
 from .telegram_exact_once import install_telegram_exact_once_finalization
 from .telegram_fast import FastTelegramBridge
 
@@ -52,19 +54,45 @@ def _install_runtime_contracts(app=None) -> None:
 
 
 def _runtime_html(settings) -> bytes:
-    """Использовать эталонный Web Chat transport 1.10.35.
+    """Эталонный chat transport + изолированное меню истории.
 
-    Все новые backend-контракты остаются активны, но страница не получает
-    дополнительные конкурирующие владельцы chat lifecycle: canonical,
-    client-idempotency, stall-watchdog и followup-finalizer. Работает проверенный
-    chat-multitask из эталонной версии, который уже входит в shell._runtime_html.
+    `chat-multitask.js` остаётся единственным владельцем send/stream lifecycle.
+    `sidebar-session-actions.js` работает только с DOM истории и metadata API:
+    он не меняет sendFrom, SSE, request_id или session transport.
     """
-    return shell._runtime_html(settings)
+    html_text = shell._runtime_html(settings).decode("utf-8")
+    marker = '<script src="/sidebar-session-actions.js"></script>'
+    if marker not in html_text:
+        html_text = html_text.replace("</body>", marker + "\n</body>")
+    return html_text.encode("utf-8")
+
+
+def _shared_chat_html(payload: dict) -> bytes:
+    session = payload.get("session") or {}
+    title = html.escape(str(session.get("title") or "Диалог с Лешим"))
+    blocks: list[str] = []
+    for message in payload.get("messages") or []:
+        role = str(message.get("role") or "assistant")
+        who = "Вы" if role == "user" else "Леший"
+        body = html.escape(str(message.get("content") or "")).replace("\n", "<br>")
+        css = "user" if role == "user" else "assistant"
+        blocks.append(
+            f'<article class="msg {css}"><div class="who">{who}</div><div>{body}</div></article>'
+        )
+    page = f"""<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title><style>
+html,body{{margin:0;background:#212121;color:#ececec;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+main{{max-width:820px;margin:0 auto;padding:34px 18px 70px}}h1{{font-size:20px;margin:0 0 26px}}.muted{{color:#999;font-size:12px;margin-bottom:24px}}
+.msg{{margin:0 0 18px;line-height:1.55;word-break:break-word}}.msg.user{{width:fit-content;max-width:78%;margin-left:auto;background:#303030;padding:10px 15px;border-radius:20px}}.msg.assistant{{padding:4px 0 16px}}.who{{font-size:11px;color:#9b9b9b;margin-bottom:6px}}
+</style></head><body><main><h1>{title}</h1><div class="muted">Общая ссылка · только чтение</div>{''.join(blocks)}</main></body></html>"""
+    return page.encode("utf-8")
 
 
 def make_handler(app, telegram, settings, model_catalog):
     _install_runtime_contracts(app)
     Parent = _ORIGINAL_SHELL_MAKE_HANDLER(app, telegram, settings, model_catalog)
+    session_organizer = SessionAdminService(app.storage)
 
     class Handler(Parent):
         def _stream_chat(self, body: dict) -> None:
@@ -98,21 +126,69 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if parsed.path.startswith("/share/"):
+                token = parse.unquote(parsed.path[len("/share/"):]).strip()
+                try:
+                    data = _shared_chat_html(session_organizer.resolve_share(token))
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(data)
+                except ValueError:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Общая ссылка недействительна или отозвана")
+                return
             if parsed.path in {
                 "/chat-idempotency.js",
                 "/chat-stall-watchdog.js",
                 "/chat-controller-canonical.js",
                 "/chat-followup-finalizer.js",
+                "/sidebar-session-actions.js",
             }:
                 name = parsed.path.rsplit("/", 1)[-1]
                 try:
                     return self._send_asset(name, "application/javascript; charset=utf-8")
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": f"{name} не найден"})
+            if parsed.path == "/v1/chat-projects":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                args = parse.parse_qs(parsed.query)
+                owner = self._arg(args, "owner_id", "web:local")
+                return self._json(HTTPStatus.OK, {"items": session_organizer.projects(owner)})
             return super().do_GET()
 
         def do_POST(self):
             parsed = parse.urlparse(self.path)
+            if parsed.path in {
+                "/v1/chat-projects/create",
+                "/v1/sessions/project",
+                "/v1/sessions/share",
+                "/v1/sessions/share/revoke",
+            }:
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                try:
+                    body = self._body()
+                    owner = str(body.get("owner_id") or "web:local").strip()[:200]
+                    if parsed.path == "/v1/chat-projects/create":
+                        return self._json(HTTPStatus.OK, session_organizer.create_project(owner, str(body.get("name") or "")))
+                    sid = str(body.get("id") or "").strip()[:200]
+                    if parsed.path == "/v1/sessions/project":
+                        project_id = str(body.get("project_id") or "").strip() or None
+                        return self._json(HTTPStatus.OK, session_organizer.move_to_project(owner, sid, project_id))
+                    if parsed.path == "/v1/sessions/share":
+                        result = session_organizer.create_share(owner, sid)
+                        result["path"] = "/share/" + str(result["token"])
+                        return self._json(HTTPStatus.OK, result)
+                    return self._json(HTTPStatus.OK, session_organizer.revoke_share(owner, sid))
+                except (ValueError, PermissionError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                except Exception as exc:
+                    problem("session_sidebar_operation_failed", str(exc), path=parsed.path)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+
             if parsed.path != "/v1/chat":
                 return super().do_POST()
             if not self._authorized():
