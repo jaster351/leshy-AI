@@ -5,8 +5,11 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import subprocess
 import time
 from typing import Any
+
+from .system_browser import ensure_system_browser
 
 
 def _owner_key(owner_id: str) -> str:
@@ -44,6 +47,10 @@ class LentaBrowserSession:
     def profile_dir(self) -> Path:
         return self.root
 
+    @property
+    def owner_key(self) -> str:
+        return _owner_key(self.owner_id)
+
     def load(self) -> dict[str, Any]:
         try:
             value = json.loads(self.state_path.read_text(encoding="utf-8"))
@@ -54,9 +61,9 @@ class LentaBrowserSession:
     def mark_login_required(self, reason: str = "") -> dict[str, Any]:
         state = self.load()
         state.update({
-            "schema": 2,
+            "schema": 3,
             "site": "lenta.com",
-            "owner_key": _owner_key(self.owner_id),
+            "owner_key": self.owner_key,
             "login_required": True,
             "authenticated": False,
             "last_login_check": time.time(),
@@ -68,9 +75,9 @@ class LentaBrowserSession:
     def mark_authenticated(self, *, account_hint: str = "") -> dict[str, Any]:
         state = self.load()
         state.update({
-            "schema": 2,
+            "schema": 3,
             "site": "lenta.com",
-            "owner_key": _owner_key(self.owner_id),
+            "owner_key": self.owner_key,
             "login_required": False,
             "authenticated": True,
             "last_login_check": time.time(),
@@ -79,11 +86,59 @@ class LentaBrowserSession:
         self._save(state)
         return state
 
+    def remember_store(self, store_id: str | int, *, channel: str = "lo") -> dict[str, Any]:
+        """Запомнить магазин/канал только внутри профиля конкретного пользователя."""
+        value = str(store_id or "").strip()
+        if not value:
+            raise ValueError("store_id не может быть пустым")
+        state = self.load()
+        state.update({
+            "schema": 3,
+            "site": "lenta.com",
+            "owner_key": self.owner_key,
+            "store_id": value[:120],
+            "channel": str(channel or "lo").strip()[:20] or "lo",
+            "last_store_update": time.time(),
+        })
+        self._save(state)
+        return state
+
+    def open_login_window(self, url: str = "https://lenta.com/") -> dict[str, Any]:
+        """Открыть видимое окно системного браузера с персональным профилем.
+
+        Окно остаётся открытым после возврата функции, поэтому пользователь может
+        самостоятельно ввести телефон, SMS/2FA и закрыть браузер после входа.
+        Секреты не проходят через чат и не записываются Лешим отдельно.
+        """
+        browser = ensure_system_browser(auto_install=True)
+        args = [
+            browser.executable,
+            f"--user-data-dir={self.profile_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            str(url or "https://lenta.com/"),
+        ]
+        creationflags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        subprocess.Popen(  # noqa: S603
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+        self.mark_login_required("Открыто окно авторизации; ожидается вход пользователя")
+        return {
+            "browser": browser.name,
+            "profile_dir": str(self.profile_dir),
+            "owner_key": self.owner_key,
+            "url": str(url or "https://lenta.com/"),
+        }
+
     def clear(self) -> dict[str, Any]:
         state = {
-            "schema": 2,
+            "schema": 3,
             "site": "lenta.com",
-            "owner_key": _owner_key(self.owner_id),
+            "owner_key": self.owner_key,
             "login_required": True,
             "authenticated": False,
             "last_login_check": time.time(),
@@ -95,7 +150,7 @@ class LentaBrowserSession:
         state = self.load()
         return {
             "site": "lenta.com",
-            "owner_key": _owner_key(self.owner_id),
+            "owner_key": self.owner_key,
             "profile_dir": str(self.profile_dir),
             "persistent_profile": True,
             "isolated_per_user": True,
@@ -105,6 +160,8 @@ class LentaBrowserSession:
             "login_required": bool(state.get("login_required", True)),
             "last_login_check": state.get("last_login_check"),
             "account_hint": str(state.get("account_hint") or ""),
+            "store_id": str(state.get("store_id") or ""),
+            "channel": str(state.get("channel") or "lo"),
         }
 
     def _save(self, state: dict[str, Any]) -> None:
