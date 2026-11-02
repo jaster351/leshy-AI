@@ -20,6 +20,7 @@ $autoRoot = Join-Path $repoRoot '.autobuild'
 $packageDist = Join-Path $autoRoot 'package-dist'
 $packageRoot = Join-Path $packageDist 'Leshy'
 $packageWork = Join-Path $autoRoot 'pyinstaller-work'
+$smokePackageRoot = Join-Path $autoRoot 'frozen-smoke-package'
 $liveRoot = Join-Path $repoRoot 'dist\Leshy'
 $liveExe = Join-Path $liveRoot 'Leshy.exe'
 $brainRoot = Join-Path $liveRoot 'LeshyBrain'
@@ -55,7 +56,7 @@ python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://
 # .autobuild is disposable compiler workspace only. Finished output is published
 # to dist\Leshy either here (manual build) or by AutoBuilder after it creates its
 # rollback backup (StageOnly/AutoBuilder mode).
-Remove-Item -Recurse -Force $packageDist, $packageWork -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $packageDist, $packageWork, $smokePackageRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
 
 python -m PyInstaller --noconfirm --clean --onedir --console `
@@ -73,6 +74,12 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --collect-all huggingface_hub `
   --collect-all hf_xet `
   --collect-all playwright `
+  --collect-all browser_use `
+  --collect-all markitdown `
+  --collect-all mcp `
+  --collect-all mss `
+  --collect-all pyautogui `
+  --collect-all pypdf `
   --add-data "web;web" `
   --add-data "VERSION;." `
   windows/launcher.py
@@ -87,6 +94,100 @@ function Normalize-PathText {
   if (-not $Value) { return '' }
   try { return [System.IO.Path]::GetFullPath($Value).TrimEnd('\').ToLowerInvariant() } catch { return '' }
 }
+
+function Get-FreeTcpPort {
+  $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+  try {
+    $listener.Start()
+    return ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+  } finally {
+    $listener.Stop()
+  }
+}
+
+function Invoke-FrozenSmokeTest {
+  param(
+    [Parameter(Mandatory=$true)][string]$SourcePackageRoot,
+    [Parameter(Mandatory=$true)][string]$SmokePackageRoot
+  )
+
+  if (Test-Path -LiteralPath $SmokePackageRoot) {
+    Remove-Item -LiteralPath $SmokePackageRoot -Recurse -Force
+  }
+  New-Item -ItemType Directory -Force -Path $SmokePackageRoot | Out-Null
+  Copy-Item -Path (Join-Path $SourcePackageRoot '*') -Destination $SmokePackageRoot -Recurse -Force
+
+  $executable = Join-Path $SmokePackageRoot 'Leshy.exe'
+  if (-not (Test-Path -LiteralPath $executable)) {
+    throw "Frozen smoke package does not contain Leshy.exe: $executable"
+  }
+
+  # Launcher intentionally keeps LeshyBrain next to Leshy.exe. Running smoke from
+  # a disposable full package copy verifies that exact production behaviour while
+  # preventing test data from contaminating the package used by the installer.
+  $port = Get-FreeTcpPort
+  $baseUrl = "http://127.0.0.1:$port"
+  $oldBackend = $env:LESHY_LLM_BACKEND
+  $oldEmbeddings = $env:LESHY_EMBEDDINGS_ENABLED
+  $oldHeadless = $env:LESHY_BROWSER_HEADLESS
+  $oldToken = $env:LESHY_API_TOKEN
+  $process = $null
+
+  try {
+    $env:LESHY_LLM_BACKEND = 'echo'
+    $env:LESHY_EMBEDDINGS_ENABLED = '0'
+    $env:LESHY_BROWSER_HEADLESS = '1'
+    $env:LESHY_API_TOKEN = ''
+
+    Write-Host "FROZEN SMOKE: starting $executable on $baseUrl"
+    $process = Start-Process -FilePath $executable -ArgumentList @(
+      '--host', '127.0.0.1',
+      '--port', [string]$port,
+      '--no-browser'
+    ) -PassThru -WindowStyle Hidden
+
+    $deadline = (Get-Date).AddSeconds(60)
+    $status = $null
+    do {
+      if ($process.HasExited) {
+        throw "Frozen Leshy exited before /v1/status became ready (exit code $($process.ExitCode))"
+      }
+      try {
+        $status = Invoke-RestMethod -Uri "$baseUrl/v1/status" -Method Get -TimeoutSec 5
+        if ($status) { break }
+      } catch {
+        Start-Sleep -Milliseconds 500
+      }
+    } while ((Get-Date) -lt $deadline)
+
+    if (-not $status) { throw 'Frozen /v1/status did not become ready within 60 seconds' }
+    if ([string]$status.version -ne $version) {
+      throw "Frozen /v1/status version mismatch: expected $version, got $($status.version)"
+    }
+
+    $chatBody = @{ message = 'frozen smoke'; owner_id = 'windows-build-smoke' } | ConvertTo-Json -Compress
+    $chat = Invoke-RestMethod -Uri "$baseUrl/v1/chat" -Method Post -ContentType 'application/json; charset=utf-8' -Body $chatBody -TimeoutSec 30
+    if (-not $chat) { throw 'Frozen /v1/chat returned an empty response' }
+    if (-not ([string]$chat.session_id).Trim()) { throw 'Frozen /v1/chat did not return session_id' }
+    if (-not ([string]$chat.answer).Trim()) { throw 'Frozen /v1/chat did not return answer' }
+
+    Write-Host "FROZEN SMOKE OK: version=$($status.version); session=$($chat.session_id)"
+  } finally {
+    if ($process -and -not $process.HasExited) {
+      try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch { }
+      try { $process.WaitForExit(10000) | Out-Null } catch { }
+    }
+    if ($null -eq $oldBackend) { Remove-Item Env:LESHY_LLM_BACKEND -ErrorAction SilentlyContinue } else { $env:LESHY_LLM_BACKEND = $oldBackend }
+    if ($null -eq $oldEmbeddings) { Remove-Item Env:LESHY_EMBEDDINGS_ENABLED -ErrorAction SilentlyContinue } else { $env:LESHY_EMBEDDINGS_ENABLED = $oldEmbeddings }
+    if ($null -eq $oldHeadless) { Remove-Item Env:LESHY_BROWSER_HEADLESS -ErrorAction SilentlyContinue } else { $env:LESHY_BROWSER_HEADLESS = $oldHeadless }
+    if ($null -eq $oldToken) { Remove-Item Env:LESHY_API_TOKEN -ErrorAction SilentlyContinue } else { $env:LESHY_API_TOKEN = $oldToken }
+    Remove-Item -LiteralPath $SmokePackageRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
+# Quality gate is run against a disposable copy of the actual PyInstaller package.
+# Existence of Leshy.exe alone is not considered a successful build.
+Invoke-FrozenSmokeTest -SourcePackageRoot $packageRoot -SmokePackageRoot $smokePackageRoot
 
 function Get-LiveProcesses {
   $root = Normalize-PathText $liveRoot
@@ -212,4 +313,4 @@ if (-not $StageOnly) {
 Write-Host "READY SETUP:   $installer"
 Write-Host "BROWSER:       system Edge/Chrome/Chromium; no browser bundled"
 Write-Host "DATA SAFE:     $brainRoot is preserved during live publication."
-Write-Host 'AUTO TESTS:    disabled; manual verification by user.'
+Write-Host 'AUTO TESTS:    frozen /v1/status + /v1/chat passed before installer creation.'

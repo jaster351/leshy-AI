@@ -23,6 +23,27 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         description="Системный Edge/Chrome/Chromium с отдельным профилем Лешего, cookies и представлением страницы как для человека; если браузера нет, Windows-версия попробует установить его автоматически.",
     ),
     ModuleSettingDefinition(
+        name="browser-agent",
+        title="Browser Agent",
+        description="Интеллектуальное исследование сайтов через Browser Use и детерминированные действия через Playwright. Покупки, бронирования, отправка форм и финансовые операции проходят Human Approval Gate.",
+        dependencies=("human-browser",),
+    ),
+    ModuleSettingDefinition(
+        name="document-intelligence",
+        title="Document Intelligence",
+        description="Локальный разбор PDF, DOCX, XLSX, PPTX и текстовых документов в Markdown для анализа, памяти и RAG через MarkItDown с резервным PDF-парсером.",
+    ),
+    ModuleSettingDefinition(
+        name="computer-use",
+        title="Computer Use",
+        description="Локальное управление desktop UI по циклу увидеть → выполнить → повторно увидеть → проверить. Опасные действия требуют подтверждения пользователя.",
+    ),
+    ModuleSettingDefinition(
+        name="tools-marketplace",
+        title="Skills / MCP Marketplace",
+        description="Безопасный реестр MCP/Skills, просмотр разрешений, изолированная установка расширений, health-check, отключение и удаление.",
+    ),
+    ModuleSettingDefinition(
         name="parcel-tracking",
         title="Отслеживание посылок",
         description="Проверка трек-номеров через бесплатный веб-сервис без регистрации и фоновое уведомление об изменениях.",

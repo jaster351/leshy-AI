@@ -18,6 +18,11 @@ dependencies = [
   "av>=11,<19",
   "pypdf>=6,<7",
   "playwright>=1.55,<2",
+  "browser-use>=0.13.14,<0.14",
+  "markitdown[docx,xlsx,pptx,pdf]>=0.1.9,<0.2",
+  "mcp>=2,<3",
+  "mss>=10,<11",
+  "pyautogui>=0.9.54,<1",
   "huggingface_hub>=0.36,<2",
   "hf_xet>=1.1,<2",
 ]

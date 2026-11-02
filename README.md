@@ -6,7 +6,24 @@
 
 ## Версия
 
-Каноническая версия хранится только в корневом файле `VERSION`. Текущая версия — **1.10.3**. Runtime, UI и Windows-сборка обязаны получать номер версии из этого файла.
+Каноническая версия хранится только в корневом файле `VERSION`. Текущая версия ветки Browser Platform — **1.10.12**. Runtime, UI и Windows-сборка обязаны получать номер версии из этого файла.
+
+## Browser Platform 1.10.12
+
+Browser Platform объединяет Browser Use и Playwright под единым `BrowserAgent` и общей политикой безопасности.
+
+- Browser Use выполняет интеллектуальное исследование и работу с динамическими сайтами через родную локальную LLM Лешего;
+- Playwright выполняет детерминированные browser-workflow и существующие browser-skills;
+- запрос «купи…» или «забронируй…» сначала ищет и сравнивает варианты, а не создаёт заказ немедленно;
+- `mutate`, `commit` и `financial` проходят Human Approval Gate; оплата требует отдельного подтверждения суммы и валюты;
+- найденные варианты сохраняются в SQLite и восстанавливаются после перезапуска;
+- browser state/cookies сохраняются в отдельном профиле; CAPTCHA/challenge/2FA не обходятся;
+- MCP v2 Tools Gateway подключает стандартные инструменты;
+- Extension Marketplace ставит MCP/Skills в отдельные venv с проверкой разрешений, лицензии, версии и health-check;
+- Document Intelligence использует MarkItDown для PDF/DOCX/XLSX/PPTX и других поддерживаемых форматов;
+- существующий Computer Use остаётся отдельным desktop-модулем.
+
+Подробности: `docs/BROWSER_AGENT.md`.
 
 ## Первый рабочий контур 1.10.3
 
@@ -81,7 +98,7 @@ python -m leshy.web_server
 2. собирает `Leshy.exe` через PyInstaller;
 3. запускает frozen smoke-test `/v1/status` и `/v1/chat` на тестовом backend;
 4. собирает установщик Inno Setup;
-5. проверяет наличие `dist/LeshySetup-1.10.3.exe`.
+5. проверяет наличие `dist/LeshySetup-<version>.exe`.
 
 Для последнего шага требуется Inno Setup 6 (`ISCC.exe`).
 
@@ -173,7 +190,7 @@ Telegram использует исходящее соединение/long polli
 - UI 4→3 checks;
 - frozen Windows `/v1/status` smoke-test;
 - frozen Windows `/v1/chat` smoke-test;
-- успешной сборки `LeshySetup-1.10.3.exe`.
+- успешной сборки `LeshySetup-<version>.exe`.
 
 Сбой CI до назначения runner (`runner_id=0`, без выполненных steps) является инфраструктурным сбоем GitHub Actions и не считается результатом тестирования кода.
 
@@ -181,6 +198,7 @@ Telegram использует исходящее соединение/long polli
 
 Ключевые документы находятся в `docs/`, включая:
 
+- `BROWSER_AGENT.md`;
 - `PRIORITY_WORKING_RELEASE_1.10.3.md`;
 - `UI_CONTRACT_1.10.3.md`;
 - `WINDOWS_TRAY_AUTOSTART_DATA_ROOT.md`;

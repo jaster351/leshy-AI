@@ -108,7 +108,8 @@ class ParcelTrackingTests(unittest.TestCase):
         parsed = parse_parcel_page(TRACK, self.runner.text, "https://parcelradar.app/track/test", browser_name="Firefox")
         self.assertEqual(parsed.tracking_number, TRACK)
         self.assertEqual(parsed.status_category, "in_transit")
-        self.assertIn("in transit", parsed.status.lower())
+        self.assertIn("посылка в пути", parsed.status.lower())
+        self.assertIn("in transit", parsed.last_event_text.lower())
         self.assertTrue(parsed.fingerprint)
         self.assertEqual(parsed.browser_name, "Firefox")
 
@@ -157,10 +158,13 @@ class ParcelTrackingTests(unittest.TestCase):
         self.service.deliver_pending()
         self.assertEqual(len(self.app.telegram.messages), 1)
         self.assertEqual(self.app.telegram.messages[0][0], 555)
-        self.assertIn("обновилась", self.app.telegram.messages[0][1])
+        self.assertIn("доставлена", self.app.telegram.messages[0][1].lower())
+        self.assertIn("удаляю", self.app.telegram.messages[0][1].lower())
         with self.app.storage.connection() as conn:
-            state = conn.execute("SELECT state FROM parcel_subscriptions WHERE owner_id='telegram:123'").fetchone()["state"]
-        self.assertEqual(state, "delivered")
+            row_after_delivery = conn.execute(
+                "SELECT * FROM parcel_subscriptions WHERE owner_id='telegram:123'"
+            ).fetchone()
+        self.assertIsNone(row_after_delivery)
         self.service.deliver_pending()
         self.assertEqual(len(self.app.telegram.messages), 1)
 
@@ -182,7 +186,8 @@ class ParcelTrackingTests(unittest.TestCase):
                 "SELECT content FROM messages WHERE session_id='web-session' AND role='assistant' ORDER BY id"
             ).fetchall()
         self.assertEqual(len(messages), 1)
-        self.assertIn("обновилась", str(messages[0]["content"]))
+        self.assertIn("доставлена", str(messages[0]["content"]).lower())
+        self.assertIn("удаляю", str(messages[0]["content"]).lower())
 
 
 if __name__ == "__main__":
