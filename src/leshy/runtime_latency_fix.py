@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from .diagnostics import event
+from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .realtime_chat import RealtimeChatManager
 from .research import DdgsSearch
 from .research_policy import research_reason
+from .temporal_grounding import ground_search_query
 
 # Подтверждено runtime-логом ddgs 2026-11-02. Несуществующие для текущего
 # пакета backend'ы (bing/google/yandex) нельзя передавать: ddgs молча уходит в
@@ -26,9 +28,15 @@ SUPPORTED_DDGS_BACKENDS = (
 # держим компактным и оставляем запас под identity prompt и ответ модели.
 REALTIME_CONTEXT_CHAR_BUDGET = 2600
 
+# Интерактивный запрос не должен бесконечно висеть за уже занятой LLM.
+# 90 секунд заметно больше подтверждённого runtime-логом ожидания Web (39 с),
+# но исключает многоминутное зависание при потерянном/зависшем активном слоте.
+INTERACTIVE_QUEUE_TIMEOUT_SECONDS = 90.0
+
 _INSTALLED = False
 _ORIGINAL_SEARCH_PLAN = None
 _ORIGINAL_BUILD_CONTEXT = None
+_ORIGINAL_LIVE_SEARCH = None
 
 
 def _clip(text: str, limit: int, *, preserve_ends: bool = False) -> str:
@@ -125,7 +133,7 @@ def _patch_provider(provider: Any) -> None:
 
 def install_runtime_latency_fixes(app=None) -> None:
     """Установить подтверждённые runtime-логами исправления Web/Telegram."""
-    global _INSTALLED, _ORIGINAL_SEARCH_PLAN, _ORIGINAL_BUILD_CONTEXT
+    global _INSTALLED, _ORIGINAL_SEARCH_PLAN, _ORIGINAL_BUILD_CONTEXT, _ORIGINAL_LIVE_SEARCH
 
     # Для новых экземпляров и уже созданного app.
     DdgsSearch.DEFAULT_BACKENDS = SUPPORTED_DDGS_BACKENDS
@@ -137,8 +145,13 @@ def install_runtime_latency_fixes(app=None) -> None:
     if _INSTALLED:
         return
     _INSTALLED = True
+
+    # Импорт внутри функции избегает циклического импорта во время загрузки app.py.
+    from .app import LeshyApp
+
     _ORIGINAL_SEARCH_PLAN = RealtimeChatManager._search_plan
     _ORIGINAL_BUILD_CONTEXT = RealtimeChatManager._build_context
+    _ORIGINAL_LIVE_SEARCH = LeshyApp.live_search
 
     def search_plan(self, message: str) -> dict[str, Any]:
         plan = dict(_ORIGINAL_SEARCH_PLAN(self, message))
@@ -166,16 +179,57 @@ def install_runtime_latency_fixes(app=None) -> None:
         compacted = compact_realtime_messages(messages)
         return compacted, sources, attempted
 
+    def live_search(self, query: str, *, limit: int = 5, reason: str = "прямой запрос пользователя") -> dict:
+        original = " ".join(str(query or "").split()).strip()
+        grounded = ground_search_query(original)
+        if grounded != original:
+            event(
+                "temporal_search_grounded",
+                original_query=original[:500],
+                grounded_query=grounded[:500],
+            )
+        return _ORIGINAL_LIVE_SEARCH(self, grounded, limit=limit, reason=reason)
+
+    def llm_stream(self, messages: list[ChatMessage], cancel, owner_id: str):
+        scheduler = get_inference_scheduler(self.app)
+        priority = scheduler.priority_for(owner_id)
+        source = str(owner_id or "system")[:160]
+        try:
+            with scheduler.slot(
+                source=source,
+                priority=priority,
+                cancel_event=cancel,
+                timeout=INTERACTIVE_QUEUE_TIMEOUT_SECONDS,
+            ):
+                streamer = getattr(self.app.llm, "stream_chat", None)
+                if callable(streamer):
+                    yield from streamer(messages, cancel_event=cancel)
+                    return
+                answer = self.app.llm.chat(messages)
+                yield from self._chunk_fallback(answer)
+        except TimeoutError:
+            event(
+                "interactive_inference_queue_timeout",
+                source=source,
+                priority=priority,
+                timeout_seconds=INTERACTIVE_QUEUE_TIMEOUT_SECONDS,
+            )
+            raise
+
     RealtimeChatManager._search_plan = search_plan
     RealtimeChatManager._build_context = build_context
+    RealtimeChatManager._llm_stream = llm_stream
+    LeshyApp.live_search = live_search
     event(
         "runtime_latency_fixes_installed",
         ddgs_backends=list(SUPPORTED_DDGS_BACKENDS),
         context_char_budget=REALTIME_CONTEXT_CHAR_BUDGET,
+        interactive_queue_timeout_seconds=INTERACTIVE_QUEUE_TIMEOUT_SECONDS,
     )
 
 
 __all__ = [
+    "INTERACTIVE_QUEUE_TIMEOUT_SECONDS",
     "REALTIME_CONTEXT_CHAR_BUDGET",
     "SUPPORTED_DDGS_BACKENDS",
     "compact_realtime_messages",

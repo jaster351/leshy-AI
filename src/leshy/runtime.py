@@ -4,6 +4,7 @@ from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
 from .config import Settings
 from .identity_runtime import install_creator_identity_routing
+from .runtime_latency_fix import install_runtime_latency_fixes
 
 
 class Runtime(LeshyApp):
@@ -15,6 +16,7 @@ class Runtime(LeshyApp):
     """
 
     def __init__(self, settings: Settings | None = None):
+        install_runtime_latency_fixes()
         install_creator_identity_routing(LeshyApp)
         # Idempotency ставится последним поверх специальных chat routing, чтобы
         # повтор одного request_id не создавал второй ответ ни в одном интерфейсе.

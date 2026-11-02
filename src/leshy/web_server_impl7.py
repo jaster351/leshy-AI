@@ -30,9 +30,12 @@ def _install_runtime_contracts(app=None) -> None:
 
 def _runtime_html(settings) -> bytes:
     html = shell._runtime_html(settings).decode("utf-8")
-    marker = '<script src="/chat-idempotency.js"></script>'
-    if marker not in html:
-        html = html.replace("</body>", marker + "\n</body>")
+    for marker in (
+        '<script src="/chat-idempotency.js"></script>',
+        '<script src="/chat-stall-watchdog.js"></script>',
+    ):
+        if marker not in html:
+            html = html.replace("</body>", marker + "\n</body>")
     return html.encode("utf-8")
 
 
@@ -52,11 +55,12 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            if parsed.path == "/chat-idempotency.js":
+            if parsed.path in {"/chat-idempotency.js", "/chat-stall-watchdog.js"}:
+                name = parsed.path.rsplit("/", 1)[-1]
                 try:
-                    return self._send_asset("chat-idempotency.js", "application/javascript; charset=utf-8")
+                    return self._send_asset(name, "application/javascript; charset=utf-8")
                 except FileNotFoundError:
-                    return self._json(HTTPStatus.NOT_FOUND, {"error": "chat-idempotency.js не найден"})
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": f"{name} не найден"})
             return super().do_GET()
 
         def do_POST(self):

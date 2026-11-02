@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .llm import ChatMessage
+from .temporal_grounding import temporal_system_instruction
 
 
 LESHY_IDENTITY_PROMPT = """/no_think
@@ -24,8 +25,12 @@ BitTorrent, torrent-файлы и magnet-ссылки являются нейт�
 
 
 def with_leshy_identity(messages: list[ChatMessage]) -> list[ChatMessage]:
-    """Возвращает новый список сообщений с неизменяемой личностью Лешего первым system-сообщением."""
-    return [ChatMessage("system", LESHY_IDENTITY_PROMPT), *list(messages)]
+    """Возвращает новый список сообщений с личностью и актуальным временным контекстом."""
+    items = list(messages)
+    latest_user = next((str(item.content) for item in reversed(items) if item.role == "user"), "")
+    temporal = temporal_system_instruction(latest_user)
+    identity = LESHY_IDENTITY_PROMPT if not temporal else LESHY_IDENTITY_PROMPT + "\n\n" + temporal
+    return [ChatMessage("system", identity), *items]
 
 
 __all__ = ["LESHY_IDENTITY_PROMPT", "with_leshy_identity"]
