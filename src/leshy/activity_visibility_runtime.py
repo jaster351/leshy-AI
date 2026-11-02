@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterator
 
-from .diagnostics import event, problem
+from .diagnostics import event
 from .realtime_chat import RealtimeChatManager, StreamEvent
 
 
@@ -10,26 +10,14 @@ _INSTALLED = False
 _ORIGINAL_STREAM = None
 
 
-def _telegram_chat_id(session_id: str | None) -> int | None:
-    value = str(session_id or "")
-    if not value.startswith("telegram:"):
-        return None
-    parts = value.split(":", 2)
-    if len(parts) < 2:
-        return None
-    try:
-        return int(parts[1])
-    except Exception:
-        return None
-
-
 def install_activity_visibility(app=None) -> None:
-    """Делать activity-события видимыми в Telegram без изменения Web transport.
+    """Показывать текущую работу Лешего без дополнительного Telegram API roundtrip.
 
-    Web уже получает activity через SSE. Для Telegram раньше эти события
-    игнорировались, поэтому пользователь видел только typing. Этот слой создаёт
-    одно временное статус-сообщение, обновляет его по этапам и удаляет перед
-    первым реальным токеном/финальным ответом.
+    Web уже получает `activity` через SSE. Telegram FastBridge умеет показывать
+    обычные `delta`, поэтому для новых типов activity превращаем служебный этап
+    во временный preview текущего ответа. Freshness-события не трогаем: старый
+    `_TelegramFreshnessProxy` уже обрабатывает их и гарантирует чистый финальный
+    ответ без служебного текста.
     """
     global _INSTALLED, _ORIGINAL_STREAM
     if _INSTALLED:
@@ -37,54 +25,59 @@ def install_activity_visibility(app=None) -> None:
     _INSTALLED = True
     _ORIGINAL_STREAM = RealtimeChatManager.stream
 
-    def stream(self: RealtimeChatManager, message: str, *, owner_id: str = "web:local", session_id: str | None = None, request_id: str | None = None) -> Iterator[StreamEvent]:
+    def stream(
+        self: RealtimeChatManager,
+        message: str,
+        *,
+        owner_id: str = "web:local",
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ) -> Iterator[StreamEvent]:
         telegram_mode = str(owner_id or "").startswith("telegram:")
-        bridge = getattr(self.app, "telegram", None) if telegram_mode else None
-        chat_id = _telegram_chat_id(session_id) if telegram_mode else None
-        status_message_id = 0
-
-        def clear_status() -> None:
-            nonlocal status_message_id
-            if not status_message_id or bridge is None or chat_id is None:
-                return
-            try:
-                bridge._api("deleteMessage", {"chat_id": chat_id, "message_id": int(status_message_id)}, timeout=5)
-            except Exception:
-                pass
-            status_message_id = 0
-
-        try:
-            for item in _ORIGINAL_STREAM(
-                self,
-                message,
-                owner_id=owner_id,
-                session_id=session_id,
-                request_id=request_id,
-            ):
-                if telegram_mode and item.type == "activity" and bridge is not None and chat_id is not None:
-                    text = str(item.data.get("text") or "Леший работает…").strip()
-                    if text:
-                        try:
-                            if status_message_id:
-                                bridge._api(
-                                    "editMessageText",
-                                    {"chat_id": chat_id, "message_id": int(status_message_id), "text": text},
-                                    timeout=5,
-                                )
-                            else:
-                                result = bridge._api("sendMessage", {"chat_id": chat_id, "text": text}, timeout=5) or {}
-                                status_message_id = int(result.get("message_id") or 0) if isinstance(result, dict) else 0
-                            event("telegram_activity_visible", chat_id=str(chat_id), text=text[:200])
-                        except Exception as exc:
-                            problem("telegram_activity_visible_failed", str(exc), chat_id=str(chat_id))
-                elif telegram_mode and item.type in {"delta", "done", "error"}:
-                    clear_status()
+        freshness_active = False
+        for item in _ORIGINAL_STREAM(
+            self,
+            message,
+            owner_id=owner_id,
+            session_id=session_id,
+            request_id=request_id,
+        ):
+            if not telegram_mode or item.type != "activity":
                 yield item
-        finally:
-            clear_status()
+                continue
+
+            kind = str(item.data.get("kind") or "")
+            phase = str(item.data.get("phase") or "")
+            text = str(item.data.get("text") or "Леший работает…").strip()
+
+            # Этот контракт уже реализован freshness proxy. Оставляем событие
+            # нетронутым, чтобы не получить два preview и не смешать служебный
+            # текст с итоговым ответом.
+            if kind == "freshness":
+                freshness_active = True
+                yield item
+                continue
+            if freshness_active and kind == "web_search":
+                yield item
+                continue
+
+            # Остальные этапы (в первую очередь Browser Skills) показываются
+            # через существующий streaming preview Telegram. Никаких отдельных
+            # HTTP-запросов к Telegram API здесь нет.
+            if text:
+                event(
+                    "telegram_activity_preview",
+                    owner_id=str(owner_id)[:160],
+                    kind=kind,
+                    phase=phase,
+                    text=text[:200],
+                )
+                yield StreamEvent("delta", {"text": text + "\n\n", "activity_preview": True})
+            else:
+                yield item
 
     RealtimeChatManager.stream = stream
-    event("activity_visibility_runtime_installed", telegram_status_messages=True)
+    event("activity_visibility_runtime_installed", telegram_via_existing_stream=True)
 
 
 __all__ = ["install_activity_visibility"]
