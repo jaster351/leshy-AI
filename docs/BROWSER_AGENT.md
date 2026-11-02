@@ -29,6 +29,10 @@ Approval одноразовый, привязан к владельцу и де�
 
 Browser Use получает внутренний `_approval_verified` только после прохождения Human Approval Gate. Финансовый адаптер дополнительно требует `approval_summary`; изменение суммы, валюты, получателя, количества или дополнительных услуг после подтверждения запрещено.
 
+### Технический read-only
+
+Для `read` ограничение реализовано не только инструкцией LLM. Browser Use запускается с отдельным `Tools(exclude_actions=...)`: отключены `click`, `input`, `send_keys`, `select_dropdown`, `evaluate`, upload и локальные операции чтения/записи файлов. Остаются безопасные действия навигации, поиска, прокрутки и извлечения. После подтверждённого `commit/financial` взаимодействие с формами разрешается, но произвольный JavaScript и файловый I/O остаются отключены.
+
 ## Доменная изоляция и CAPTCHA
 
 Browser Use и Playwright получают allowlist доменов. Явный allowlist нельзя автоматически расширить стартовым URL. Переход/редирект за его пределы блокируется.
@@ -87,6 +91,7 @@ Regression-набор покрывает:
 - отсутствие секретных arguments в публичном approval;
 - запрет non-read Browser Use без approval;
 - запрет финансового действия без approval summary;
+- физическое отсутствие mutating tools в read-only Browser Use registry;
 - запрет расширения явного доменного allowlist стартовым URL;
 - локальный Document Intelligence и запрет URL;
 - сохранение/выключение MCP manifest;
