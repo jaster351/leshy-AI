@@ -24,6 +24,11 @@ def _brain_root() -> Path:
     return (_install_root() / "LeshyBrain").resolve()
 
 
+def _bundled_browser_root() -> Path:
+    """Единственный browser runtime Лешего — Firefox, поставляемый вместе с программой."""
+    return (_install_root() / "playwright-browsers").resolve()
+
+
 def _legacy_brain() -> Path:
     """Старое хранилище 1.10.4 и ниже — только для одноразовой миграции."""
     base = Path(os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
@@ -116,10 +121,14 @@ def main() -> None:
 
     install_root = _install_root()
     brain_root = _brain_root()
+    browser_root = _bundled_browser_root()
     legacy_brain = _legacy_brain()
 
     os.environ["LESHY_INSTALL_ROOT"] = str(install_root)
     os.environ["LESHY_BRAIN_DIR"] = str(brain_root)
+    # Не искать системные Chrome/Edge/Firefox. Playwright Лешего всегда использует
+    # только собственный Firefox, который поставляется рядом с Leshy.exe.
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_root)
 
     if legacy_brain.exists() and not brain_root.exists():
         os.environ["LESHY_LEGACY_BRAIN_DIR"] = str(legacy_brain)
