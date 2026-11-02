@@ -39,7 +39,17 @@ def _best_event(result: Any) -> str:
     return ""
 
 
-def format_parcel_result_short(result: Any, *, following: bool = False) -> str:
+def format_parcel_result_short(
+    result: Any,
+    *,
+    following: bool = False,
+    offer_follow: bool = False,
+) -> str:
+    """Короткий пользовательский ответ с тем же контрактом, что и основной presenter.
+
+    ``parcel_tracking_runtime`` передаёт ``offer_follow`` после разовой проверки,
+    поэтому этот параметр обязан поддерживаться и коротким presenter'ом.
+    """
     track = str(getattr(result, "tracking_number", "") or "").strip()
     if bool(getattr(result, "needs_user_action", False)):
         return f"{track}: сайт запросил CAPTCHA/подтверждение пользователя. После прохождения проверки повторю отслеживание."
@@ -62,6 +72,8 @@ def format_parcel_result_short(result: Any, *, following: bool = False) -> str:
 
     if following:
         text += "\nБуду следить дальше и сообщу при изменении статуса."
+    elif offer_follow and category != "delivered":
+        text += "\nХотите, чтобы я следил за этой посылкой и сообщил, когда статус изменится?"
     return text
 
 
