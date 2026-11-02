@@ -1,0 +1,485 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+import os
+import re
+import threading
+import time
+import uuid
+from typing import Any
+
+from .diagnostics import event, problem
+from .llm import ChatMessage
+from .storage import utcnow
+
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS superagent_tickets(
+    id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    session_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    request_text TEXT NOT NULL,
+    mandate_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('queued','working','waiting','ready','blocked','failed','stopped')),
+    latest_report TEXT NOT NULL DEFAULT '',
+    attention TEXT NOT NULL DEFAULT '',
+    sources_json TEXT NOT NULL DEFAULT '[]',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    next_run_epoch REAL NOT NULL DEFAULT 0,
+    delivered INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_superagent_due ON superagent_tickets(state,next_run_epoch,created_at);
+CREATE INDEX IF NOT EXISTS ix_superagent_owner ON superagent_tickets(owner_id,updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS superagent_inputs(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id TEXT NOT NULL REFERENCES superagent_tickets(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL DEFAULT 'message',
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_superagent_inputs_ticket ON superagent_inputs(ticket_id,id);
+
+CREATE TABLE IF NOT EXISTS superagent_assignments(
+    id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL REFERENCES superagent_tickets(id) ON DELETE CASCADE,
+    attempt INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('running','ended')),
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    outcome TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS ix_superagent_assignments_ticket ON superagent_assignments(ticket_id,attempt DESC);
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class SuperAgentIntent:
+    action: str
+    argument: str = ""
+    ticket_id: str = ""
+
+
+def _short_id() -> str:
+    stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
+    millis = int((time.time() % 1) * 1000)
+    return f"SA-{stamp}{millis:03d}-{uuid.uuid4().hex[:6]}"
+
+
+def parse_superagent_intent(text: str) -> SuperAgentIntent | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    low = raw.lower().replace("ё", "е")
+
+    prefixes = ("/agent ", "/superagent ", "суперагент: ", "суперагент ")
+    body = ""
+    for prefix in prefixes:
+        if low.startswith(prefix):
+            body = raw[len(prefix):].strip()
+            break
+    if low in {"/agent", "/superagent", "суперагент"}:
+        return SuperAgentIntent("list")
+    if not body:
+        return None
+
+    lower_body = body.lower().replace("ё", "е")
+    if lower_body in {"list", "список", "задачи", "status", "статус"}:
+        return SuperAgentIntent("list")
+
+    match = re.match(r"^(?:status|статус)\s+([A-Za-z0-9-]+)\s*$", body, re.IGNORECASE)
+    if match:
+        return SuperAgentIntent("status", ticket_id=match.group(1))
+    match = re.match(r"^(?:stop|стоп|останови)\s+([A-Za-z0-9-]+)\s*$", body, re.IGNORECASE)
+    if match:
+        return SuperAgentIntent("stop", ticket_id=match.group(1))
+    match = re.match(r"^(?:retry|повтори|продолжи)\s+([A-Za-z0-9-]+)\s*$", body, re.IGNORECASE)
+    if match:
+        return SuperAgentIntent("retry", ticket_id=match.group(1))
+    match = re.match(r"^(?:answer|ответ)\s+([A-Za-z0-9-]+)\s+(.+)$", body, re.IGNORECASE | re.DOTALL)
+    if match:
+        return SuperAgentIntent("answer", argument=match.group(2).strip(), ticket_id=match.group(1))
+    return SuperAgentIntent("create", argument=body)
+
+
+class SuperAgentService:
+    """Устойчивый автономный контур по принципам Trigger→Mandate→Ticket→Assignment→Report.
+
+    Он сознательно отделён от обычного чата: новая работа появляется только по
+    явной команде пользователя. Состояние хранится в SQLite и переживает перезапуск.
+    """
+
+    def __init__(self, app):
+        self.app = app
+        self.storage = app.storage
+        self._stop = threading.Event()
+        self._wake = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._llm_lock = threading.RLock()
+        self.poll_seconds = max(0.5, min(float(os.getenv("LESHY_SUPERAGENT_POLL_SECONDS", "2")), 30.0))
+        self.max_attempts = max(1, min(int(os.getenv("LESHY_SUPERAGENT_MAX_ATTEMPTS", "3")), 8))
+        self._ensure_schema()
+        self._recover_interrupted()
+
+    def _ensure_schema(self) -> None:
+        with self.storage.connection() as conn:
+            conn.executescript(_SCHEMA)
+
+    def _recover_interrupted(self) -> None:
+        now = utcnow()
+        with self.storage.connection() as conn:
+            rows = conn.execute("SELECT id FROM superagent_tickets WHERE state='working'").fetchall()
+            for row in rows:
+                ticket_id = str(row["id"])
+                conn.execute(
+                    "UPDATE superagent_tickets SET state='queued',latest_report=?,next_run_epoch=0,updated_at=? WHERE id=?",
+                    ("Предыдущий запуск был прерван. Продолжаю после восстановления состояния.", now, ticket_id),
+                )
+                conn.execute(
+                    "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome='interrupted',error='host restarted' "
+                    "WHERE ticket_id=? AND state='running'",
+                    (now, ticket_id),
+                )
+        if rows:
+            event("superagent_recovered", tickets=len(rows))
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._wake.clear()
+        self._thread = threading.Thread(target=self._run, name="leshy-superagent", daemon=True)
+        self._thread.start()
+        event("superagent_started")
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._wake.set()
+        thread = self._thread
+        if thread and thread.is_alive():
+            thread.join(timeout=5.0)
+        event("superagent_stopped")
+
+    def create(self, owner_id: str, session_id: str, request_text: str) -> dict[str, Any]:
+        request = " ".join(str(request_text or "").split()).strip()
+        if not request:
+            raise ValueError("Задача пуста")
+        if len(request) > 12000:
+            raise ValueError("Задача слишком длинная")
+        ticket_id = _short_id()
+        title = request[:120]
+        now = utcnow()
+        mandate = {
+            "strength": "explicit",
+            "scope": request,
+            "source": "chat",
+            "owner_id": str(owner_id or "web:local")[:200],
+            "created_at": now,
+            "policy_version": 1,
+        }
+        with self.storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO superagent_tickets(id,owner_id,session_id,title,request_text,mandate_json,state,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?, 'queued',?,?)",
+                (ticket_id, str(owner_id or "web:local")[:200], str(session_id or "")[:200], title, request,
+                 json.dumps(mandate, ensure_ascii=False), now, now),
+            )
+            conn.execute(
+                "INSERT INTO superagent_inputs(ticket_id,kind,content,created_at) VALUES(?,?,?,?)",
+                (ticket_id, "request", request, now),
+            )
+        self.storage.audit("superagent.ticket.created", {"ticket_id": ticket_id, "owner_id": owner_id})
+        event("superagent_ticket_created", ticket_id=ticket_id, owner_id=owner_id)
+        self._wake.set()
+        return self.get(ticket_id, owner_id=owner_id)
+
+    def get(self, ticket_id: str, *, owner_id: str | None = None) -> dict[str, Any]:
+        with self.storage.connection() as conn:
+            row = conn.execute("SELECT * FROM superagent_tickets WHERE id=?", (str(ticket_id),)).fetchone()
+        if row is None:
+            raise KeyError("Задание не найдено")
+        item = dict(row)
+        if owner_id is not None and str(item["owner_id"]) != str(owner_id):
+            raise PermissionError("Задание принадлежит другому пользователю")
+        try:
+            item["mandate"] = json.loads(str(item.pop("mandate_json") or "{}"))
+        except Exception:
+            item["mandate"] = {}
+        try:
+            item["sources"] = json.loads(str(item.pop("sources_json") or "[]"))
+        except Exception:
+            item["sources"] = []
+        return item
+
+    def list(self, owner_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        with self.storage.connection() as conn:
+            rows = conn.execute(
+                "SELECT id,title,state,latest_report,attention,attempt,created_at,updated_at FROM superagent_tickets "
+                "WHERE owner_id=? ORDER BY updated_at DESC LIMIT ?",
+                (str(owner_id or "web:local")[:200], max(1, min(int(limit), 50))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def stop_ticket(self, ticket_id: str, owner_id: str) -> dict[str, Any]:
+        ticket = self.get(ticket_id, owner_id=owner_id)
+        if ticket["state"] in {"ready", "stopped"}:
+            return ticket
+        now = utcnow()
+        with self.storage.connection() as conn:
+            conn.execute("UPDATE superagent_tickets SET state='stopped',attention='',updated_at=? WHERE id=?", (now, ticket_id))
+            conn.execute(
+                "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome='stopped' WHERE ticket_id=? AND state='running'",
+                (now, ticket_id),
+            )
+        event("superagent_ticket_stopped", ticket_id=ticket_id)
+        return self.get(ticket_id, owner_id=owner_id)
+
+    def retry(self, ticket_id: str, owner_id: str) -> dict[str, Any]:
+        ticket = self.get(ticket_id, owner_id=owner_id)
+        if ticket["state"] not in {"failed", "blocked", "waiting"}:
+            raise ValueError("Повтор доступен только для ожидающего, заблокированного или неудачного задания")
+        with self.storage.connection() as conn:
+            conn.execute(
+                "UPDATE superagent_tickets SET state='queued',attention='',next_run_epoch=0,delivered=0,updated_at=? WHERE id=?",
+                (utcnow(), ticket_id),
+            )
+        self._wake.set()
+        return self.get(ticket_id, owner_id=owner_id)
+
+    def answer(self, ticket_id: str, owner_id: str, text: str) -> dict[str, Any]:
+        ticket = self.get(ticket_id, owner_id=owner_id)
+        value = str(text or "").strip()
+        if not value:
+            raise ValueError("Ответ пуст")
+        now = utcnow()
+        with self.storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO superagent_inputs(ticket_id,kind,content,created_at) VALUES(?,?,?,?)",
+                (ticket_id, "human", value[:12000], now),
+            )
+            conn.execute(
+                "UPDATE superagent_tickets SET state='queued',attention='',next_run_epoch=0,delivered=0,updated_at=? WHERE id=?",
+                (now, ticket_id),
+            )
+        self._wake.set()
+        return self.get(ticket_id, owner_id=owner_id)
+
+    def _next_due(self) -> dict[str, Any] | None:
+        with self.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM superagent_tickets WHERE state='queued' AND next_run_epoch<=? ORDER BY created_at LIMIT 1",
+                (time.time(),),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def _inputs(self, ticket_id: str) -> list[dict[str, str]]:
+        with self.storage.connection() as conn:
+            rows = conn.execute(
+                "SELECT kind,content,created_at FROM superagent_inputs WHERE ticket_id=? ORDER BY id",
+                (ticket_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _parse_report(text: str) -> tuple[str, str, str]:
+        raw = str(text or "").strip()
+        candidate = raw
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.IGNORECASE | re.DOTALL)
+        if fenced:
+            candidate = fenced.group(1)
+        else:
+            brace = re.search(r"\{.*\}", raw, re.DOTALL)
+            if brace:
+                candidate = brace.group(0)
+        try:
+            payload = json.loads(candidate)
+            state = str(payload.get("status") or "ready").lower()
+            if state not in {"ready", "waiting", "blocked", "failed"}:
+                state = "ready"
+            result = str(payload.get("result") or payload.get("summary") or "").strip()
+            question = str(payload.get("question") or "").strip()
+            if not result and state == "ready":
+                result = raw
+            return state, result[:12000], question[:1200]
+        except Exception:
+            return "ready", raw[:12000], ""
+
+    def _execute(self, ticket: dict[str, Any]) -> tuple[str, str, str, list[dict[str, str]]]:
+        ticket_id = str(ticket["id"])
+        request = str(ticket["request_text"])
+        inputs = self._inputs(ticket_id)
+        sources: list[dict[str, str]] = []
+        research_text = ""
+        try:
+            needs_live = bool(getattr(self.app, "_needs_live_search", lambda _x: False)(request))
+            if needs_live:
+                found = self.app.live_search(request, limit=5, reason="автономное задание SuperAgent")
+                for item in found.get("results", []) or []:
+                    title = str(item.get("title") or item.get("url") or "Источник")
+                    url = str(item.get("url") or "")
+                    snippet = str(item.get("snippet") or item.get("body") or "")
+                    if url:
+                        sources.append({"title": title[:200], "url": url[:1000]})
+                    research_text += f"\n- {title}: {snippet[:1000]} ({url})"
+        except Exception as exc:
+            problem("superagent_research_failed", str(exc), ticket_id=ticket_id)
+
+        followups = "\n".join(
+            f"- {item['kind']}: {item['content']}" for item in inputs[1:]
+        )
+        system = (
+            "Ты исполнитель автономного модуля Лешего. Работай только в пределах явно выданной задачи. "
+            "Не придумывай выполненные внешние действия: если у тебя нет инструмента для действия, честно укажи это. "
+            "Минимизируй внимание человека: задай ровно один конкретный вопрос только если без ответа нельзя продолжить. "
+            "Верни строго JSON: {\"status\":\"ready|waiting|blocked|failed\",\"result\":\"краткий полезный итог\",\"question\":\"один вопрос или пусто\"}. "
+            "ready — результат уже можно использовать; waiting — нужен один ответ пользователя; blocked — есть внешнее препятствие; failed — задача не выполнена."
+        )
+        user = (
+            f"Задание {ticket_id}:\n{request}\n"
+            + (f"\nДополнительные входные данные:\n{followups}\n" if followups else "")
+            + (f"\nАктуальные веб-данные:\n{research_text}\n" if research_text else "")
+        )
+        with self._llm_lock:
+            response = self.app.llm.chat([ChatMessage("system", system), ChatMessage("user", user)])
+        state, result, question = self._parse_report(response)
+        if state == "waiting" and not question:
+            state = "blocked"
+            result = result or "Исполнитель остановился без конкретного вопроса."
+        return state, result, question, sources
+
+    @staticmethod
+    def _transient(exc: BaseException) -> bool:
+        text = str(exc).lower()
+        return any(marker in text for marker in (
+            "timeout", "timed out", "429", "408", "500", "502", "503", "504",
+            "connection reset", "connection refused", "temporarily unavailable", "временно недоступ",
+        ))
+
+    def _run_ticket(self, ticket: dict[str, Any]) -> None:
+        ticket_id = str(ticket["id"])
+        attempt = int(ticket.get("attempt") or 0) + 1
+        assignment_id = f"{ticket_id}-A{attempt}"
+        now = utcnow()
+        with self.storage.connection() as conn:
+            changed = conn.execute(
+                "UPDATE superagent_tickets SET state='working',attempt=?,updated_at=? WHERE id=? AND state='queued'",
+                (attempt, now, ticket_id),
+            )
+            if int(changed.rowcount or 0) != 1:
+                return
+            conn.execute(
+                "INSERT INTO superagent_assignments(id,ticket_id,attempt,state,started_at) VALUES(?,?,?,?,?)",
+                (assignment_id, ticket_id, attempt, "running", now),
+            )
+        event("superagent_assignment_started", ticket_id=ticket_id, assignment_id=assignment_id, attempt=attempt)
+
+        try:
+            state, report, attention, sources = self._execute(ticket)
+            ended = utcnow()
+            with self.storage.connection() as conn:
+                current = conn.execute("SELECT state FROM superagent_tickets WHERE id=?", (ticket_id,)).fetchone()
+                if current is None or str(current["state"]) == "stopped":
+                    conn.execute(
+                        "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome='stopped' WHERE id=?",
+                        (ended, assignment_id),
+                    )
+                    return
+                conn.execute(
+                    "UPDATE superagent_tickets SET state=?,latest_report=?,attention=?,sources_json=?,next_run_epoch=0,delivered=0,updated_at=? WHERE id=?",
+                    (state, report, attention, json.dumps(sources, ensure_ascii=False), ended, ticket_id),
+                )
+                conn.execute(
+                    "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome=? WHERE id=?",
+                    (ended, state, assignment_id),
+                )
+            event("superagent_report", ticket_id=ticket_id, state=state, attempt=attempt)
+            self._deliver(ticket_id)
+        except Exception as exc:
+            transient = self._transient(exc)
+            retry = transient and attempt < self.max_attempts
+            ended = utcnow()
+            with self.storage.connection() as conn:
+                conn.execute(
+                    "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome=?,error=? WHERE id=?",
+                    (ended, "retry" if retry else "failed", str(exc)[:1000], assignment_id),
+                )
+                if retry:
+                    delay = min(60.0, float(2 ** attempt))
+                    conn.execute(
+                        "UPDATE superagent_tickets SET state='queued',latest_report=?,next_run_epoch=?,updated_at=? WHERE id=?",
+                        (f"Временная ошибка, повтор через {int(delay)} сек.: {str(exc)[:500]}", time.time() + delay, ended, ticket_id),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE superagent_tickets SET state='failed',latest_report=?,attention='',delivered=0,updated_at=? WHERE id=?",
+                        (str(exc)[:12000], ended, ticket_id),
+                    )
+            problem("superagent_assignment_failed", str(exc), ticket_id=ticket_id, attempt=attempt, retry=retry)
+            if not retry:
+                self._deliver(ticket_id)
+
+    def _deliver(self, ticket_id: str) -> None:
+        ticket = self.get(ticket_id)
+        if int(ticket.get("delivered") or 0):
+            return
+        state = str(ticket.get("state") or "")
+        if state not in {"ready", "waiting", "blocked", "failed"}:
+            return
+        report = str(ticket.get("latest_report") or "").strip()
+        attention = str(ticket.get("attention") or "").strip()
+        if state == "ready":
+            text = f"SuperAgent {ticket_id}: {report or 'Задание завершено.'}"
+        elif state == "waiting":
+            text = f"SuperAgent {ticket_id} ждёт Вашего ответа: {attention or report}"
+        elif state == "blocked":
+            text = f"SuperAgent {ticket_id} заблокирован: {report or attention}"
+        else:
+            text = f"SuperAgent {ticket_id}: не удалось выполнить задачу. {report}"
+        session_id = str(ticket.get("session_id") or "")
+        try:
+            if session_id:
+                self.app._save_assistant(session_id, text[:16000])
+            with self.storage.connection() as conn:
+                conn.execute("UPDATE superagent_tickets SET delivered=1,updated_at=? WHERE id=?", (utcnow(), ticket_id))
+            event("superagent_result_delivered", ticket_id=ticket_id, state=state, session_id=session_id)
+        except Exception as exc:
+            problem("superagent_delivery_failed", str(exc), ticket_id=ticket_id)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            ticket = None
+            try:
+                ticket = self._next_due()
+                if ticket is not None:
+                    self._run_ticket(ticket)
+                    continue
+            except Exception as exc:
+                problem("superagent_loop_failed", str(exc), ticket_id=str((ticket or {}).get("id") or ""))
+            self._wake.wait(self.poll_seconds)
+            self._wake.clear()
+
+
+def format_ticket(ticket: dict[str, Any]) -> str:
+    state_labels = {
+        "queued": "в очереди", "working": "работает", "waiting": "ждёт ответа",
+        "ready": "готово", "blocked": "заблокировано", "failed": "ошибка", "stopped": "остановлено",
+    }
+    state = str(ticket.get("state") or "")
+    ticket_id = str(ticket.get("id") or "")
+    title = str(ticket.get("title") or "")
+    report = str(ticket.get("latest_report") or "").strip()
+    attention = str(ticket.get("attention") or "").strip()
+    text = f"{ticket_id}: {state_labels.get(state, state)} — {title}"
+    if state == "waiting" and attention:
+        text += f"\nНужен ответ: {attention}"
+    elif report and state in {"ready", "blocked", "failed"}:
+        text += f"\n{report}"
+    return text
+
+
+__all__ = ["SuperAgentIntent", "SuperAgentService", "format_ticket", "parse_superagent_intent"]
