@@ -23,6 +23,9 @@ class LeshyBrowserUseLLM:
     def __init__(self, llm: Any, *, name: str = "leshy-local"):
         self.llm = llm
         self._name = str(name or "leshy-local")
+        # BaseChatModel Browser Use — runtime-checkable Protocol с обязательным
+        # атрибутом model. Он нужен также для выбора таймаутов внутри Agent.
+        self.model = self._name
 
     @property
     def provider(self) -> str:
@@ -31,6 +34,10 @@ class LeshyBrowserUseLLM:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def model_name(self) -> str:
+        return self.model
 
     @staticmethod
     def _role(message: Any) -> str:
