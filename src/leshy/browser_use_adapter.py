@@ -15,11 +15,8 @@ from .system_browser import ensure_system_browser
 class BrowserUseAdapter:
     """Интеллектуальный Browser Agent поверх Browser Use.
 
-    По умолчанию работает только на чтение. Изменяющие/commit/financial задачи
-    принимаются исключительно с `_approval_verified`, который ставит BrowserAgent
-    после Human Approval Gate. Это позволяет использовать Browser Use на сайтах с
-    динамическим DOM, сохраняя Playwright как детерминированный исполнитель для
-    известных и проверенных workflow.
+    READ выполняется автоматически. Любое изменение допускается только после
+    `_approval_verified`, который может поставить исключительно BrowserAgent.
     """
 
     adapter_id = "browser-use"
@@ -34,6 +31,10 @@ class BrowserUseAdapter:
         root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
         self.profile_dir = root / "browser" / "browser-use-profile"
         self.profile_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.profile_dir.chmod(0o700)
+        except Exception:
+            pass
 
     def available(self) -> bool:
         if self.llm is None:
@@ -49,11 +50,16 @@ class BrowserUseAdapter:
         raw = action.arguments.get("allowed_hosts") or ()
         if isinstance(raw, str):
             raw = [raw]
-        hosts = [str(x).lower().strip().strip(".") for x in raw if str(x).strip()]
+        explicit = tuple(dict.fromkeys(str(x).lower().strip().strip(".") for x in raw if str(x).strip()))
+        if explicit:
+            return explicit
         primary = (urlparse(action.url).hostname or "").lower().strip(".")
-        if primary and primary not in hosts:
-            hosts.append(primary)
-        return tuple(dict.fromkeys(hosts))
+        return (primary,) if primary else ()
+
+    @staticmethod
+    def _host_allowed(url: str, hosts: tuple[str, ...]) -> bool:
+        host = (urlparse(str(url or "")).hostname or "").lower().strip(".")
+        return bool(host) and any(host == item or host.endswith("." + item) for item in hosts)
 
     @staticmethod
     def _domain_patterns(hosts: tuple[str, ...]) -> list[str]:
@@ -65,7 +71,6 @@ class BrowserUseAdapter:
 
     @staticmethod
     def _run_sync(awaitable: Awaitable[Any]) -> Any:
-        """Запустить async Browser Use из sync tool API, включая активный event loop."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -77,7 +82,7 @@ class BrowserUseAdapter:
         def worker() -> None:
             try:
                 result["value"] = asyncio.run(awaitable)
-            except BaseException as exc:  # pragma: no cover - передаётся вызывающему потоку
+            except BaseException as exc:  # pragma: no cover
                 error["value"] = exc
 
         thread = threading.Thread(target=worker, name="leshy-browser-use", daemon=True)
@@ -126,6 +131,8 @@ class BrowserUseAdapter:
         hosts = self._hosts(action)
         if not hosts:
             return BrowserActionResult("blocked", "Browser Use требует ограниченный список доменов")
+        if not self._host_allowed(action.url, hosts):
+            return BrowserActionResult("blocked", "Стартовый URL не входит в разрешённые домены")
 
         browser_info = ensure_system_browser(auto_install=True)
         browser = Browser(
@@ -135,7 +142,6 @@ class BrowserUseAdapter:
             allowed_domains=self._domain_patterns(hosts),
             keep_alive=False,
         )
-
         user_task = str(action.arguments.get("task") or action.description or "").strip()
         if not user_task:
             user_task = f"Изучи страницу {action.url} и верни полезную информацию."
@@ -149,7 +155,9 @@ class BrowserUseAdapter:
             use_vision=bool(action.arguments.get("use_vision", default_vision)),
         )
         try:
-            history = await agent.run(max_steps=min(self.max_steps, int(action.arguments.get("max_steps", self.max_steps))))
+            history = await agent.run(
+                max_steps=min(self.max_steps, int(action.arguments.get("max_steps", self.max_steps)))
+            )
             final = history.final_result() if hasattr(history, "final_result") else str(history)
             event(
                 "browser_agent_browser_use_completed",
@@ -180,6 +188,9 @@ class BrowserUseAdapter:
             return BrowserActionResult("blocked", "Изменяющее browser-действие не прошло Human Approval Gate")
         if action.risk is BrowserRisk.FINANCIAL and not str(action.arguments.get("approval_summary") or "").strip():
             return BrowserActionResult("blocked", "Финансовое действие требует подтверждённого резюме суммы и условий")
+        hosts = self._hosts(action)
+        if not hosts or not self._host_allowed(action.url, hosts):
+            return BrowserActionResult("blocked", "Стартовый URL не входит в разрешённые домены")
         if not self.available():
             return BrowserActionResult("unavailable", "Browser Use или совместимая LLM недоступны")
         try:
