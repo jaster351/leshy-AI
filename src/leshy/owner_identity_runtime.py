@@ -32,11 +32,11 @@ def canonical_owner(app, owner_id: str) -> str:
             except Exception as exc:
                 problem("owner_identity_telegram_resolve_failed", str(exc), telegram_user_id=telegram_user_id)
                 return value
-    try:
-        mapped = service._alias_owner(value)  # внутренний alias-слой того же runtime
-        return mapped or value
-    except Exception:
-        return value
+    # Web идентифицируется серверной HttpOnly-сессией, а подтверждённый UUID
+    # после bootstrap передаётся совместимым старому UI owner_id. Нельзя глобально
+    # превращать web:local в первый профиль: другой браузер до привязки должен
+    # оставаться отдельным пользователем.
+    return value
 
 
 def _link_code(text: str) -> str:
