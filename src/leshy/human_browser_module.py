@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 import os
-import re
 import time
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from .diagnostics import event, problem
 from .modules import ModuleManifest, ModuleRequest, ModuleResponse
+from .system_browser import ensure_system_browser
 
 
 _INTERACTIVE_SELECTOR = (
@@ -71,15 +71,16 @@ class BrowserAction:
     wait_ms: int = 0
 
 
-class HumanFirefoxBrowser:
-    """Firefox с постоянным профилем и представлением страницы для Лешего.
+class HumanSystemBrowser:
+    """Системный браузер с отдельным постоянным профилем Лешего.
 
-    Важные свойства:
-    - настоящий движок Firefox через Playwright, а не подмена User-Agent;
-    - постоянный user-data-dir: cookies/localStorage/session state сохраняются;
-    - страница рендерится обычным браузером, затем Леший получает видимый текст,
-      скриншот viewport и нумерованную карту реально видимых интерактивных элементов;
-    - CAPTCHA/challenge не обходятся: модуль возвращает needs_user_action.
+    Используется уже установленный Microsoft Edge, Google Chrome или Chromium.
+    Сам браузер не входит в дистрибутив Лешего. Если на Windows поддерживаемого
+    браузера нет, Леший пытается установить Edge через winget, затем Chrome.
+
+    Страница рендерится реальным системным браузером, а Леший получает видимый
+    текст, screenshot viewport и нумерованную карту видимых интерактивных элементов.
+    CAPTCHA/challenge не обходятся: модуль возвращает needs_user_action.
     """
 
     def __init__(
@@ -91,7 +92,7 @@ class HumanFirefoxBrowser:
         timeout_ms: int = 30_000,
     ) -> None:
         brain_root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
-        self.profile_dir = Path(profile_dir or brain_root / "browser" / "firefox-profile")
+        self.profile_dir = Path(profile_dir or brain_root / "browser" / "system-profile")
         self.screenshots_dir = Path(screenshots_dir or brain_root / "browser" / "screenshots")
         if headless is None:
             raw = os.getenv("LESHY_HUMAN_BROWSER_HEADLESS", "0").strip().lower()
@@ -214,12 +215,18 @@ class HumanFirefoxBrowser:
 }
 """
         rows = page.locator(_INTERACTIVE_SELECTOR).evaluate_all(script)
-        return tuple(
-            BrowserElement(element_id=f"e{index + 1}", **row)
-            for index, row in enumerate(rows)
-        )
+        return tuple(BrowserElement(element_id=f"e{index + 1}", **row) for index, row in enumerate(rows))
 
-    def _snapshot(self, page, context, *, started: float, status: str = "success", message: str = "") -> BrowserSnapshot:
+    def _snapshot(
+        self,
+        page,
+        context,
+        *,
+        browser_name: str,
+        started: float,
+        status: str = "success",
+        message: str = "",
+    ) -> BrowserSnapshot:
         visible_text = self._visible_text(page)
         if status == "success" and self._needs_user_action(visible_text):
             status = "needs_user_action"
@@ -249,7 +256,7 @@ class HumanFirefoxBrowser:
             status=status,
             url=str(page.url or ""),
             title=str(page.title() or ""),
-            browser_name="Mozilla Firefox",
+            browser_name=browser_name,
             user_agent=user_agent,
             visible_text=visible_text,
             elements=elements,
@@ -266,7 +273,6 @@ class HumanFirefoxBrowser:
         target = self.validate_url(url)
         plan = self.normalize_actions(actions)
         started = time.monotonic()
-        event("human_browser_started", url=target, browser="firefox", headless=self.headless)
         try:
             from playwright.sync_api import sync_playwright
         except Exception as exc:
@@ -275,11 +281,15 @@ class HumanFirefoxBrowser:
         with sync_playwright() as pw:
             context = None
             try:
-                context = pw.firefox.launch_persistent_context(
+                browser = ensure_system_browser(auto_install=True)
+                event("human_browser_started", url=target, browser=browser.name, headless=self.headless)
+                context = pw.chromium.launch_persistent_context(
                     user_data_dir=str(self.profile_dir),
+                    executable_path=browser.executable,
                     headless=self.headless,
                     locale="ru-RU",
                     viewport={"width": 1366, "height": 768},
+                    args=["--no-first-run", "--no-default-browser-check"],
                 )
                 page = context.pages[0] if context.pages else context.new_page()
                 page.set_default_timeout(self.timeout_ms)
@@ -290,6 +300,7 @@ class HumanFirefoxBrowser:
                     return self._snapshot(
                         page,
                         context,
+                        browser_name=browser.name,
                         started=started,
                         status="needs_user_action",
                         message="Сайт требует действия пользователя (CAPTCHA/challenge).",
@@ -313,15 +324,17 @@ class HumanFirefoxBrowser:
                         return self._snapshot(
                             page,
                             context,
+                            browser_name=browser.name,
                             started=started,
                             status="needs_user_action",
                             message="Сайт потребовал действие пользователя после выполнения шага.",
                         )
 
-                result = self._snapshot(page, context, started=started)
+                result = self._snapshot(page, context, browser_name=browser.name, started=started)
                 event(
                     "human_browser_finished",
                     url=result.url,
+                    browser=browser.name,
                     status=result.status,
                     elements=len(result.elements),
                     cookies=result.cookies_count,
@@ -339,16 +352,21 @@ class HumanFirefoxBrowser:
                         pass
 
 
+# Совместимость с ранним именем класса 1.10.4/1.10.5. Это только Python alias;
+# Firefox больше не используется и не поставляется в дистрибутиве.
+HumanFirefoxBrowser = HumanSystemBrowser
+
+
 @dataclass(slots=True)
 class HumanBrowserModule:
     """Отдельный модуль браузера, пригодный для вызова другими навыками Лешего."""
 
-    browser: HumanFirefoxBrowser = field(default_factory=HumanFirefoxBrowser)
+    browser: HumanSystemBrowser = field(default_factory=HumanSystemBrowser)
     manifest: ModuleManifest = field(
         default_factory=lambda: ModuleManifest(
             name="human-browser",
-            version="0.1.0",
-            description="Настоящий Firefox с постоянным профилем и структурированной картой видимой страницы",
+            version="0.2.0",
+            description="Системный Edge/Chrome/Chromium с отдельным постоянным профилем и картой видимой страницы",
             priority=700,
         )
     )
@@ -388,6 +406,7 @@ __all__ = [
     "BrowserElement",
     "BrowserSnapshot",
     "HumanFirefoxBrowser",
+    "HumanSystemBrowser",
     "HumanBrowserModule",
     "create_human_browser_module",
 ]
