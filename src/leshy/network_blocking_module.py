@@ -16,6 +16,7 @@ from .modules import ModuleManifest, ModuleRequest, ModuleResponse
 
 DEFAULT_PORTS = (22, 3389)
 CHEBURCHECK_ENDPOINT = "https://cheburcheck.ru/api/v1/check"
+CHEBURCHECK_PROBE_ENDPOINT = "https://cheburcheck.ru/api/v1/probe/{query_id}"
 CHECK_HOST_NODES_ENDPOINT = "https://check-host.net/nodes/hosts"
 CHECK_HOST_START_ENDPOINT = "https://check-host.net/check-tcp"
 CHECK_HOST_RESULT_ENDPOINT = "https://check-host.net/check-result/{request_id}"
@@ -44,11 +45,32 @@ class CheburcheckEvidence:
     blocked: bool | None = None
     target: str = ""
     target_type: str = ""
+    query_id: str = ""
     rkn_domain: str = ""
     blocked_subnets: tuple[str, ...] = ()
     cdn_providers: tuple[str, ...] = ()
     whitelisted: bool = False
     source_url: str = ""
+    error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CheburProbeObservation:
+    probe_id: str
+    region: str = ""
+    provider: str = ""
+    asn: str = ""
+    verdicts: tuple[str, ...] = ()
+    target_hop: int | None = None
+    dpi_hop: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CheburProbeSummary:
+    ok: bool
+    online_probes: int = 0
+    responded_probes: int = 0
+    observations: tuple[CheburProbeObservation, ...] = ()
     error: str = ""
 
 
@@ -63,22 +85,25 @@ class BlockingAssessment:
     local: tuple[TcpObservation, ...]
     remote: tuple[TcpObservation, ...]
     cheburcheck: CheburcheckEvidence
+    chebur_probe: CheburProbeSummary
     reasons: tuple[str, ...]
     checked_at_epoch: float
 
 
 class NetworkBlockingChecker:
-    """Диагностика блокировок без изменения удалённого сервера.
+    """Отдельная диагностика IP/доменов и вероятной фильтрации ТСПУ.
 
-    Методика объединяет три независимых класса признаков:
-    1. TCP connect из сети самого Лешего одновременно на SSH/22 и RDP/3389.
-    2. Cheburcheck `/api/v1/check`: реестры РКН, заблокированные подсети и CDN.
-    3. Check-Host TCP из российских и зарубежных точек.
+    Последовательность соответствует согласованной схеме:
+    1. сначала TCP connect (эквивалент Telnet-проверки доступности) из сети Лешего
+       одновременно на SSH/22 и RDP/3389;
+    2. затем публичный Cheburcheck `/api/v1/check` для реестров РКН/CDN;
+    3. по подписанному query id запускается официальный `/api/v1/probe/<id>` SSE,
+       который использует сайт: распределённые probe-узлы и TCP traceroute после DPI;
+    4. параллельно выполняется независимая TCP-проверка Check-Host из российских
+       и зарубежных точек.
 
-    Географический timeout не объявляется математическим доказательством ТСПУ.
-    Значение 100% означает «100 по согласованной диагностической эвристике Лешего»:
-    рабочий порт отвечает хотя бы из одной зарубежной точки, а российская точка
-    получает connection timeout/сетевую ошибку при той же проверке.
+    PROBE_ID/PROBE_TOKEN не нужны: без token Cheburcheck использует публичные
+    видимые probe-узлы. Токен нужен только для адресного собственного probe.
     """
 
     def __init__(
@@ -87,10 +112,12 @@ class NetworkBlockingChecker:
         local_timeout_seconds: float = 5.0,
         http_timeout_seconds: float = 12.0,
         check_host_wait_seconds: float = 12.0,
+        chebur_probe_wait_seconds: float = 125.0,
     ) -> None:
         self.local_timeout_seconds = max(0.5, min(float(local_timeout_seconds), 30.0))
         self.http_timeout_seconds = max(3.0, min(float(http_timeout_seconds), 30.0))
         self.check_host_wait_seconds = max(3.0, min(float(check_host_wait_seconds), 30.0))
+        self.chebur_probe_wait_seconds = max(10.0, min(float(chebur_probe_wait_seconds), 135.0))
         self._nodes_cache: tuple[float, dict[str, dict[str, Any]]] = (0.0, {})
 
     @staticmethod
@@ -150,16 +177,20 @@ class NetworkBlockingChecker:
         return any(marker in lower for marker in markers)
 
     @staticmethod
-    def _http_json(url: str, *, timeout: float) -> Any:
+    def _request(url: str, *, accept: str, timeout: float):
         req = request.Request(
             url,
             headers={
-                "Accept": "application/json",
+                "Accept": accept,
                 "User-Agent": "Leshy-NetworkDiagnostics/1.0 (+https://github.com/jaster351/leshy-AI)",
             },
             method="GET",
         )
-        with request.urlopen(req, timeout=timeout) as response:
+        return request.urlopen(req, timeout=timeout)
+
+    @classmethod
+    def _http_json(cls, url: str, *, timeout: float) -> Any:
+        with cls._request(url, accept="application/json", timeout=timeout) as response:
             payload = response.read(2_000_000)
         return json.loads(payload.decode("utf-8", errors="replace"))
 
@@ -179,9 +210,7 @@ class NetworkBlockingChecker:
                 latency_ms=max(0, int((time.monotonic() - started) * 1000)),
                 address=address,
             )
-        except socket.timeout as exc:
-            return TcpObservation(source="local", port=int(port), status="timeout", error=str(exc) or "timeout")
-        except TimeoutError as exc:
+        except (socket.timeout, TimeoutError) as exc:
             return TcpObservation(source="local", port=int(port), status="timeout", error=str(exc) or "timeout")
         except ConnectionRefusedError as exc:
             return TcpObservation(source="local", port=int(port), status="refused", error=str(exc))
@@ -207,6 +236,7 @@ class NetworkBlockingChecker:
                 blocked=bool(payload.get("blocked")),
                 target=str(payload.get("target") or target),
                 target_type=str(payload.get("target_type") or ""),
+                query_id=str(payload.get("id") or ""),
                 rkn_domain=str(payload.get("rkn_domain") or ""),
                 blocked_subnets=tuple(str(x) for x in (payload.get("blocked_subnets") or [])[:100]),
                 cdn_providers=tuple(sorted(str(x) for x in providers.keys())),
@@ -216,6 +246,87 @@ class NetworkBlockingChecker:
         except Exception as exc:
             problem("network_blocking_cheburcheck_failed", str(exc), target=target)
             return CheburcheckEvidence(ok=False, target=target, source_url=url, error=str(exc))
+
+    @staticmethod
+    def _dispatch_sse_event(event_name: str, data_lines: list[str], state: dict[str, Any]) -> bool:
+        if not data_lines:
+            return False
+        try:
+            payload = json.loads("\n".join(data_lines))
+        except Exception:
+            return False
+        if event_name == "started" and isinstance(payload, dict):
+            state["online_probes"] = int(payload.get("online_probes") or 0)
+        elif event_name == "result" and isinstance(payload, dict):
+            verdicts = tuple(str(value) for value in (payload.get("verdicts") or []) if value)
+            state.setdefault("observations", []).append(
+                CheburProbeObservation(
+                    probe_id=str(payload.get("probe_id") or ""),
+                    region=str(payload.get("region") or ""),
+                    provider=str(payload.get("provider") or ""),
+                    asn=str(payload.get("asn") or ""),
+                    verdicts=verdicts,
+                    target_hop=int(payload["target_hop"]) if payload.get("target_hop") is not None else None,
+                    dpi_hop=int(payload["dpi_hop"]) if payload.get("dpi_hop") is not None else None,
+                )
+            )
+        elif event_name == "done" and isinstance(payload, dict):
+            state["responded_probes"] = int(payload.get("responded_probes") or payload.get("responses") or len(state.get("observations", [])))
+            if payload.get("online_probes") is not None:
+                state["online_probes"] = int(payload.get("online_probes") or 0)
+            return True
+        return False
+
+    def _chebur_probe(self, query_id: str) -> CheburProbeSummary:
+        if not query_id:
+            return CheburProbeSummary(ok=False, error="Cheburcheck не выдал id для динамической проверки")
+        url = CHEBURCHECK_PROBE_ENDPOINT.format(query_id=parse.quote(query_id, safe=""))
+        state: dict[str, Any] = {"online_probes": 0, "responded_probes": 0, "observations": []}
+        deadline = time.monotonic() + self.chebur_probe_wait_seconds
+        event_name = "message"
+        data_lines: list[str] = []
+        try:
+            with self._request(
+                url,
+                accept="text/event-stream",
+                timeout=self.chebur_probe_wait_seconds + 10.0,
+            ) as response:
+                for raw_line in response:
+                    if time.monotonic() > deadline:
+                        break
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if not line:
+                        done = self._dispatch_sse_event(event_name, data_lines, state)
+                        event_name = "message"
+                        data_lines = []
+                        if done:
+                            break
+                        continue
+                    if line.startswith(":"):
+                        continue
+                    if line.startswith("event:"):
+                        event_name = line[6:].strip() or "message"
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                if data_lines:
+                    self._dispatch_sse_event(event_name, data_lines, state)
+            observations = tuple(state.get("observations") or ())
+            responded = int(state.get("responded_probes") or len(observations))
+            return CheburProbeSummary(
+                ok=True,
+                online_probes=int(state.get("online_probes") or 0),
+                responded_probes=responded,
+                observations=observations,
+            )
+        except Exception as exc:
+            problem("network_blocking_chebur_probe_failed", str(exc))
+            return CheburProbeSummary(
+                ok=False,
+                online_probes=int(state.get("online_probes") or 0),
+                responded_probes=len(state.get("observations") or ()),
+                observations=tuple(state.get("observations") or ()),
+                error=str(exc),
+            )
 
     def _nodes(self) -> dict[str, dict[str, Any]]:
         stamp, cached = self._nodes_cache
@@ -251,6 +362,7 @@ class NetworkBlockingChecker:
                 ru.append((name, meta))
             elif code:
                 foreign.append((name, meta))
+        ru.sort(key=lambda item: item[0])
         foreign.sort(key=lambda item: (preferred.get(self._node_location(item[1])[0], 99), item[0]))
         selected = ru[:2] + foreign[:4]
         if not selected:
@@ -262,9 +374,7 @@ class NetworkBlockingChecker:
         code, country, city = NetworkBlockingChecker._node_location(meta)
         if value is None:
             return None
-        row = value
-        if isinstance(value, list) and value:
-            row = value[0]
+        row = value[0] if isinstance(value, list) and value else value
         if isinstance(row, list) and row:
             row = row[0]
         if isinstance(row, dict):
@@ -321,8 +431,18 @@ class NetworkBlockingChecker:
             )
         return None
 
+    @staticmethod
+    def _host_port(target: str, port: int) -> str:
+        try:
+            address = ipaddress.ip_address(target)
+            if address.version == 6:
+                return f"[{target}]:{port}"
+        except ValueError:
+            pass
+        return f"{target}:{port}"
+
     def _check_host_port(self, target: str, port: int, nodes: dict[str, dict[str, Any]]) -> tuple[TcpObservation, ...]:
-        query: list[tuple[str, str]] = [("host", f"{target}:{port}")]
+        query: list[tuple[str, str]] = [("host", self._host_port(target, port))]
         query.extend(("node", node) for node in nodes)
         start_url = CHECK_HOST_START_ENDPOINT + "?" + parse.urlencode(query)
         try:
@@ -396,10 +516,18 @@ class NetworkBlockingChecker:
         local: tuple[TcpObservation, ...],
         remote: tuple[TcpObservation, ...],
         chebur: CheburcheckEvidence,
+        probe: CheburProbeSummary | None = None,
     ) -> BlockingAssessment:
+        probe = probe or CheburProbeSummary(ok=False, error="Динамический probe не выполнялся")
         profile, service_ports = NetworkBlockingChecker._service_profile(local, remote)
         reasons: list[str] = []
         score = 0
+
+        official_tspu = any("tspu_block" in item.verdicts for item in probe.observations)
+        official_ok = bool(probe.observations) and all(
+            item.verdicts and all(verdict in {"ok", "uncertain"} for verdict in item.verdicts)
+            for item in probe.observations
+        ) and any("ok" in item.verdicts for item in probe.observations)
 
         ports_to_assess = service_ports or DEFAULT_PORTS
         successful_observations = 0
@@ -417,7 +545,7 @@ class NetworkBlockingChecker:
             if ru_fail and foreign_success:
                 geographic_tspu = True
                 reasons.append(
-                    f"TCP/{port}: российская точка даёт timeout/сетевую ошибку, а зарубежная точка подключается."
+                    f"TCP/{port}: российская точка Check-Host даёт timeout/сетевую ошибку, а зарубежная точка подключается."
                 )
 
             if port_remote:
@@ -438,9 +566,12 @@ class NetworkBlockingChecker:
                 if item.status == "connected":
                     successful_observations += 1
 
-        if geographic_tspu:
+        if official_tspu:
             score = 100
-            reasons.append("По согласованной эвристике Лешего это максимальный признак фильтрации по российской сети/ТСПУ.")
+            reasons.append("Распределённый Cheburcheck Probe вернул официальный verdict tspu_block (таймаут трассы после обнаруженного DPI-узла).")
+        elif geographic_tspu:
+            score = 100
+            reasons.append("По согласованной эвристике Лешего это максимальный географический признак фильтрации по российской сети/ТСПУ.")
         elif any_remote_data and all_relevant_remote_success:
             score = 0
             reasons.append("Рабочие порты доступны из всех завершивших проверку точек Check-Host.")
@@ -459,13 +590,16 @@ class NetworkBlockingChecker:
             item.status == "connected" and item.country_code == "ru" and item.port in ports_to_assess
             for item in remote
         )
-        if not geographic_tspu and foreign_success_any and ru_success_any:
+        if not official_tspu and not geographic_tspu and official_ok:
+            score = min(score, 20)
+            reasons.append("Cheburcheck Probe получил доступность без tspu_block; фактическая динамическая проверка сильнее одного попадания в статический список.")
+        if not official_tspu and not geographic_tspu and foreign_success_any and ru_success_any:
             score = min(score, 20)
             reasons.append("Рабочий порт отвечает и из России, и из зарубежных точек — географического признака ТСПУ нет.")
-        if not geographic_tspu and not local_success and foreign_success_any and ru_success_any:
+        if not official_tspu and not geographic_tspu and not local_success and foreign_success_any and ru_success_any:
             score = max(score, 25)
             reasons.append("Локально соединение не удалось, но внешние российские и зарубежные точки отвечают: вероятнее локальная сеть/маршрут/фаервол.")
-        if not geographic_tspu and not foreign_success_any and not ru_success_any and remote:
+        if not official_tspu and not geographic_tspu and not foreign_success_any and not ru_success_any and remote:
             score = min(score if score else 15, 70)
             reasons.append("Порт не отвечает одновременно из России и из других стран; это не характерный признак выборочной ТСПУ-фильтрации.")
 
@@ -485,6 +619,8 @@ class NetworkBlockingChecker:
 
         if not service_ports:
             reasons.append("Ни TCP/22, ни TCP/3389 не подтвердили работающий сервис; ОС не угадывается по закрытым портам.")
+        if probe.ok and probe.online_probes and not probe.observations:
+            reasons.append("Cheburcheck сообщил о доступных probe-узлах, но ни один результат не успел вернуться.")
 
         return BlockingAssessment(
             target=target,
@@ -496,6 +632,7 @@ class NetworkBlockingChecker:
             local=local,
             remote=remote,
             cheburcheck=chebur,
+            chebur_probe=probe,
             reasons=tuple(dict.fromkeys(reasons)),
             checked_at_epoch=time.time(),
         )
@@ -503,14 +640,19 @@ class NetworkBlockingChecker:
     def check(self, target: str) -> BlockingAssessment:
         normalized = self.normalize_target(target)
         event("network_blocking_check_started", target=normalized, ports=list(DEFAULT_PORTS))
-        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="leshy-blocking") as pool:
-            local_future = pool.submit(self._check_local_ports, normalized)
-            chebur_future = pool.submit(self._cheburcheck, normalized)
+
+        # 1. Сначала фактический TCP из собственной сети.
+        local = self._check_local_ports(normalized)
+        # 2. Затем статический Cheburcheck и получение подписанного query id.
+        chebur = self._cheburcheck(normalized)
+        # 3. После этого официальный dynamic probe + независимый Check-Host.
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="leshy-blocking-remote") as pool:
             remote_future = pool.submit(self._check_host, normalized)
-            local = local_future.result()
-            chebur = chebur_future.result()
+            probe_future = pool.submit(self._chebur_probe, chebur.query_id)
             remote = remote_future.result()
-        result = self._assessment(normalized, local, remote, chebur)
+            probe = probe_future.result()
+
+        result = self._assessment(normalized, local, remote, chebur, probe)
         event(
             "network_blocking_check_finished",
             target=normalized,
@@ -518,16 +660,15 @@ class NetworkBlockingChecker:
             tspu_probability=result.tspu_probability,
             availability_percent=result.availability_percent,
             chebur_blocked=result.cheburcheck.blocked,
+            chebur_probe_results=result.chebur_probe.responded_probes,
+            chebur_probe_tspu=any("tspu_block" in item.verdicts for item in result.chebur_probe.observations),
         )
         return result
 
     @staticmethod
     def format(result: BlockingAssessment) -> str:
         local_by_port = {item.port: item for item in result.local}
-        lines = [
-            f"Проверка {result.target}",
-            f"Профиль сервера: {result.profile}",
-        ]
+        lines = [f"Проверка {result.target}", f"Профиль сервера: {result.profile}"]
         for port, label in ((22, "SSH/Linux"), (3389, "RDP/Windows")):
             item = local_by_port.get(port)
             if item is None:
@@ -554,6 +695,23 @@ class NetworkBlockingChecker:
         else:
             lines.append("Cheburcheck: проверить не удалось" + (f" ({chebur.error})" if chebur.error else ""))
 
+        probe = result.chebur_probe
+        if probe.ok:
+            if probe.observations:
+                parts: list[str] = []
+                for item in probe.observations:
+                    location = item.region or item.provider or ("probe " + item.probe_id)
+                    verdicts = ",".join(item.verdicts) or "uncertain"
+                    parts.append(f"{location}: {verdicts}")
+                lines.append(
+                    f"Cheburcheck Probe ({probe.responded_probes}/{probe.online_probes or probe.responded_probes}): "
+                    + "; ".join(parts)
+                )
+            else:
+                lines.append(f"Cheburcheck Probe: результатов нет ({probe.responded_probes}/{probe.online_probes})")
+        elif probe.error:
+            lines.append("Cheburcheck Probe: " + probe.error)
+
         for port in DEFAULT_PORTS:
             observations = [item for item in result.remote if item.port == port]
             if not observations:
@@ -579,8 +737,8 @@ class NetworkBlockingModule:
     manifest: ModuleManifest = field(
         default_factory=lambda: ModuleManifest(
             name="network-blocking",
-            version="0.1.0",
-            description="Проверяет TCP/22 и TCP/3389, Cheburcheck и географическую доступность Check-Host для оценки блокировок ТСПУ",
+            version="0.2.0",
+            description="TCP/22+3389, Cheburcheck static+distributed Probe и Check-Host для диагностики блокировок ТСПУ",
             priority=850,
         )
     )
@@ -608,6 +766,7 @@ class NetworkBlockingModule:
                 "local": [asdict(item) for item in result.local],
                 "remote": [asdict(item) for item in result.remote],
                 "cheburcheck": asdict(result.cheburcheck),
+                "chebur_probe": asdict(result.chebur_probe),
                 "reasons": list(result.reasons),
             },
         )
@@ -619,6 +778,8 @@ def create_network_blocking_module() -> NetworkBlockingModule:
 
 __all__ = [
     "BlockingAssessment",
+    "CheburProbeObservation",
+    "CheburProbeSummary",
     "CheburcheckEvidence",
     "NetworkBlockingChecker",
     "NetworkBlockingModule",
