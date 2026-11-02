@@ -15,9 +15,25 @@ from .learning_command_runtime import install_explicit_learning_routing
 from .reliable_web_runtime import install_reliable_web_runtime
 from .runtime_latency_fix import install_runtime_latency_fixes
 from .telegram_exact_once import install_telegram_exact_once_finalization
+from .telegram_fast import FastTelegramBridge
 
 
 _ORIGINAL_SHELL_MAKE_HANDLER = shell.make_handler
+
+
+def _restore_reference_chat_timing() -> None:
+    """Вернуть Telegram-поведение эталона 1.10.35 без потери новых функций.
+
+    В эталонной версии не было отдельного pre-wait перед запуском realtime
+    stream, а видимые правки шли раз в 0.55 секунды. Сохраняем новые Reply,
+    exact-once и flood-control, но убираем дополнительную задержку старта.
+    """
+    FastTelegramBridge.edit_interval_seconds = 0.55
+
+    def no_foreground_pre_wait(self) -> None:
+        return None
+
+    FastTelegramBridge._wait_for_foreground_slot = no_foreground_pre_wait
 
 
 def _install_runtime_contracts(app=None) -> None:
@@ -30,25 +46,20 @@ def _install_runtime_contracts(app=None) -> None:
     install_freshness_cache_runtime()
     install_runtime_latency_fixes(app)
     install_creator_identity_routing(LeshyApp)
+    _restore_reference_chat_timing()
     install_telegram_exact_once_finalization()
     install_global_chat_idempotency()
 
 
 def _runtime_html(settings) -> bytes:
-    html = shell._runtime_html(settings).decode("utf-8")
-    # Старый followup-finalizer больше не нужен: canonical controller сам
-    # завершает запрос прямо на SSE done/error/duplicate и сразу освобождает
-    # активный stream. Это исключает несколько конкурирующих владельцев
-    # жизненного цикла одного Web-запроса.
-    html = html.replace('<script src="/chat-followup-finalizer.js"></script>\n', "")
-    for marker in (
-        '<script src="/chat-idempotency.js"></script>',
-        '<script src="/chat-stall-watchdog.js"></script>',
-        '<script src="/chat-controller-canonical.js"></script>',
-    ):
-        if marker not in html:
-            html = html.replace("</body>", marker + "\n</body>")
-    return html.encode("utf-8")
+    """Использовать эталонный Web Chat transport 1.10.35.
+
+    Все новые backend-контракты остаются активны, но страница не получает
+    дополнительные конкурирующие владельцы chat lifecycle: canonical,
+    client-idempotency, stall-watchdog и followup-finalizer. Работает проверенный
+    chat-multitask из эталонной версии, который уже входит в shell._runtime_html.
+    """
+    return shell._runtime_html(settings)
 
 
 def make_handler(app, telegram, settings, model_catalog):
