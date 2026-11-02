@@ -12,6 +12,7 @@ from .chat_idempotency import install_global_chat_idempotency
 from .diagnostics import event, problem
 from .freshness_cache_runtime import install_freshness_cache_runtime
 from .freshness_memory_runtime import install_freshness_memory_runtime
+from .honest_uncertainty_runtime import install_honest_uncertainty
 from .identity_runtime import install_creator_identity_routing
 from .interactive_search_budget import install_interactive_search_budget
 from .learning_command_runtime import install_explicit_learning_routing
@@ -59,6 +60,9 @@ def _install_runtime_contracts(app=None) -> None:
     # чтобы продолжения «да/нет/измени» не перехватывались общим Browser Agent.
     install_lenta_routing(LeshyApp, app)
     install_activity_visibility(app)
+    # Последний смысловой предохранитель до idempotency: пустой ответ никогда не
+    # должен превращаться в бесконечное ожидание или молчание пользователя.
+    install_honest_uncertainty(LeshyApp)
     _restore_reference_chat_timing()
     install_telegram_exact_once_finalization()
     install_global_chat_idempotency()
