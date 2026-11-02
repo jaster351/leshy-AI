@@ -42,24 +42,25 @@
   function installCss(){
     if($('leshySidebarSessionActionsStyle'))return;
     const style=document.createElement('style');style.id='leshySidebarSessionActionsStyle';style.textContent=`
-      #sidebarHistoryTitle{display:flex;align-items:center;justify-content:space-between;gap:8px}
-      #leshyArchiveToggle{border:0;background:transparent;color:#9a9a9a;border-radius:7px;height:28px;padding:0 7px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px}
+      #sidebarHistoryTitle{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;max-width:100%;box-sizing:border-box}
+      #leshyArchiveToggle{border:0;background:transparent;color:#9a9a9a;border-radius:7px;height:28px;padding:0 7px;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;flex:0 0 auto}
       #leshyArchiveToggle:hover{background:#2a2a2a;color:#eee}#leshyArchiveToggle svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+      #sessionList{min-width:0!important;max-width:100%!important;overflow-x:hidden!important}
       #sessionList .leshy-session-section{padding:13px 8px 5px;color:#8f8f8f;font-size:11px;font-weight:600;letter-spacing:.01em}
       #sessionList .leshy-project-name{padding:7px 8px 3px;color:#ababab;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      #sessionList .leshy-session-item{display:flex!important;align-items:center!important;gap:3px!important;position:relative!important;padding:2px 4px!important;min-height:38px!important}
-      .leshy-session-open{min-width:0;flex:1;height:34px;display:flex;align-items:center;gap:7px;border:0;background:transparent;color:#e8e8e8;border-radius:7px;padding:0 7px;cursor:pointer;text-align:left}
+      #sessionList .leshy-session-item{display:flex!important;align-items:center!important;gap:3px!important;position:relative!important;padding:2px 4px!important;min-height:38px!important;width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;overflow:hidden!important}
+      .leshy-session-open{min-width:0!important;width:0!important;max-width:100%!important;flex:1 1 0!important;height:34px;display:flex;align-items:center;gap:7px;border:0;background:transparent;color:#e8e8e8;border-radius:7px;padding:0 7px;cursor:pointer;text-align:left;overflow:hidden!important}
       .leshy-session-open:hover,.leshy-session-item.menu-open{background:#2a2a2a!important}.leshy-session-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
       .leshy-session-mark{display:inline-flex;align-items:center;color:#969696;flex:0 0 auto}.leshy-session-mark svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-      .leshy-session-more{width:30px;height:30px;display:grid;place-items:center;flex:0 0 30px;border:0;background:transparent;color:#a8a8a8;border-radius:7px;cursor:pointer;opacity:0}
-      .leshy-session-item:hover .leshy-session-more,.leshy-session-more:focus,.leshy-session-item.menu-open .leshy-session-more{opacity:1}.leshy-session-more:hover{background:#3a3a3a;color:#fff}.leshy-session-more svg{width:17px;height:17px;fill:currentColor;stroke:none}
+      .leshy-session-more{width:30px;height:30px;display:grid;place-items:center;flex:0 0 30px!important;margin-left:auto!important;position:relative;right:0;border:0;background:transparent;color:#a8a8a8;border-radius:7px;cursor:pointer;opacity:1!important}
+      .leshy-session-more:hover,.leshy-session-more:focus,.leshy-session-item.menu-open .leshy-session-more{background:#3a3a3a;color:#fff;opacity:1!important}.leshy-session-more svg{width:17px;height:17px;fill:currentColor;stroke:none}
       #leshySessionMenu{position:fixed;display:none;z-index:2400;width:236px;max-width:calc(100vw - 18px);padding:6px;background:#2b2b2b;border:1px solid #444;border-radius:13px;box-shadow:0 18px 55px rgba(0,0,0,.55)}#leshySessionMenu.open{display:block}
       #leshySessionMenu button{width:100%;height:39px;border:0;background:transparent;color:#eee;border-radius:8px;padding:0 9px;display:flex;align-items:center;gap:10px;cursor:pointer;text-align:left;font-size:14px}#leshySessionMenu button:hover,#leshySessionMenu button:focus{background:#3a3a3a;outline:none}#leshySessionMenu button.danger{color:#ff8f8f}#leshySessionMenu svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:0 0 17px}.leshy-menu-sep{height:1px;background:#444;margin:5px 4px}
       .leshy-session-rename{width:100%;height:28px;background:#202020;border:1px solid #666;border-radius:6px;color:#fff;padding:0 6px;outline:none;font:inherit}
       #leshyProjectOverlay{position:fixed;inset:0;display:none;z-index:2500;background:rgba(0,0,0,.48);align-items:center;justify-content:center;padding:18px}#leshyProjectOverlay.open{display:flex}
       #leshyProjectDialog{width:min(430px,96vw);max-height:min(560px,88vh);overflow:auto;background:#2b2b2b;border:1px solid #484848;border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.55);padding:14px}#leshyProjectDialog h3{margin:4px 6px 14px;font-size:16px}
       .leshy-project-choice{width:100%;height:42px;border:0;background:transparent;color:#eee;border-radius:9px;padding:0 10px;text-align:left;cursor:pointer;display:flex;align-items:center;gap:9px}.leshy-project-choice:hover{background:#3a3a3a}.leshy-project-choice svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7}.leshy-project-footer{display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid #444}.leshy-project-footer button{border:0;border-radius:9px;background:#3a3a3a;color:#eee;padding:9px 12px;cursor:pointer}.leshy-project-footer button:first-child{flex:1;text-align:left}
-      @media(max-width:820px){.leshy-session-more{opacity:1}#leshySessionMenu{width:min(250px,calc(100vw - 18px))}}
+      @media(max-width:820px){#leshySessionMenu{width:min(250px,calc(100vw - 18px))}}
     `;document.head.appendChild(style);
   }
 
@@ -98,7 +99,7 @@
       const result=await api('/v1/sessions?owner_id='+encodeURIComponent(OWNER)+'&limit=100&archived='+(archivedView?'1':'0'));
       const items=Array.isArray(result.items)?result.items:[];list.textContent='';
       if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=archivedView?'Архив пуст':'Диалогов пока нет';list.appendChild(empty);return}
-      if(archivedView){section(list,'Архив');items.forEach(item=>list.appendChild(rowFor(item)));return}
+      if(archivedView){items.forEach(item=>list.appendChild(rowFor(item)));return}
       let category='',lastProject='';
       for(const item of items){
         const next=item.pinned?'pinned':(item.project_id?'projects':'recent');
