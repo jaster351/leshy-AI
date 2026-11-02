@@ -155,17 +155,23 @@ def install_runtime_latency_fixes(app=None) -> None:
 
     def search_plan(self, message: str) -> dict[str, Any]:
         plan = dict(_ORIGINAL_SEARCH_PLAN(self, message))
-        # Защитный контракт для dynamic-data: даже если локальное trusted-знание
-        # есть или другой runtime-layer ошибся, погода/сегодня/цены/курсы и т.п.
-        # не могут уйти в генерацию без live-search.
+        # Dynamic-data обычно требует live-search. Исключение: freshness-layer
+        # уже нашёл в LeshyBrain релевантные сведения, проверенные в пределах TTL.
+        # Тогда повторный интернет-поиск не нужен, если пользователь явно не
+        # попросил перепроверить интернет прямо сейчас.
         forced_reason = research_reason(
             message,
             trusted_count=len(plan.get("trusted") or []),
             candidate_count=len(plan.get("candidates") or []),
         )
-        if forced_reason:
+        freshness_satisfied = bool(plan.get("freshness_satisfied"))
+        explicit_recheck = forced_reason == "явный запрос интернет-поиска"
+        if forced_reason and (not freshness_satisfied or explicit_recheck):
             plan["needed"] = True
             plan["reason"] = forced_reason
+        elif freshness_satisfied:
+            plan["needed"] = False
+            plan["reason"] = ""
         return plan
 
     def build_context(self, message, owner_id, rows, *, search_plan=None):
