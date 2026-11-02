@@ -28,6 +28,7 @@ class ModuleSettingsTests(unittest.TestCase):
                 "network-blocking",
                 "support-consultant",
                 "superagent",
+                "lenta",
             },
         )
         self.assertTrue(all(item["enabled"] for item in states.values()))
