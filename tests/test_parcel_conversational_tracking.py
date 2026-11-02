@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 
+from leshy.parcel_presenter import format_parcel_result_short
 from leshy.parcel_tracking import (
     ParcelResult,
     ParcelTrackingService,
@@ -58,6 +59,21 @@ class ParcelConversationalTrackingTests(unittest.TestCase):
         self.assertIn("Хотите, чтобы я следил", answer)
         self.assertNotIn("Источник:", answer)
         self.assertNotIn("Проверено", answer)
+
+    def test_short_presenter_accepts_follow_offer_contract(self):
+        result = ParcelResult(
+            tracking_number="11751925511565",
+            status="Посылка в пути. Последнее событие: Moscow",
+            status_category="in_transit",
+            last_event_text="Moscow",
+            source_url="https://parcelradar.app/track/?track=11751925511565",
+            checked_at="2026-11-02T18:10:00+00:00",
+            fingerprint="initial",
+            excerpt="",
+        )
+        answer = format_parcel_result_short(result, offer_follow=True)
+        self.assertIn("11751925511565", answer)
+        self.assertIn("Хотите, чтобы я следил", answer)
 
     def test_confirmation_activates_monitoring_and_delivery_removes_subscription(self):
         with tempfile.TemporaryDirectory() as tmp:
