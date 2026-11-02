@@ -6,10 +6,11 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import socket
-from typing import Protocol
+from typing import Any, Protocol
 
 from .llm import ChatMessage, LLM
 from .logging_paths import central_log_path
+from .module_settings import module_enabled
 from .modules import ModuleManifest, ModuleRequest, ModuleResponse
 from .work_schedule import WorkAssistancePolicy, parse_event_time, truthy
 
@@ -160,17 +161,26 @@ class SupportConsultantModule:
     llm: LLM
     brain_dir: Path | None = None
     work_policy: WorkAssistancePolicy = field(default_factory=WorkAssistancePolicy)
+    settings_storage: Any | None = None
     manifest: ModuleManifest = field(
         default_factory=lambda: ModuleManifest(
             name="support-consultant",
-            version="0.2.0",
+            version="0.3.0",
             description="Собирает контекст заявки, выполняет проверки и готовит варианты ответа",
             priority=500,
         )
     )
 
+    def _enabled(self) -> bool:
+        if self.settings_storage is None:
+            return True
+        try:
+            return module_enabled(self.settings_storage, "support-consultant")
+        except Exception:
+            return True
+
     def can_handle(self, request: ModuleRequest) -> bool:
-        return str(request.metadata.get("event") or "") == "support_ticket_notice"
+        return self._enabled() and str(request.metadata.get("event") or "") == "support_ticket_notice"
 
     @staticmethod
     def _notice(request: ModuleRequest) -> TicketNotice:
@@ -222,6 +232,8 @@ class SupportConsultantModule:
         return "\n".join(f"- {item.name}: {item.status}. {item.details}" for item in results) or "Проверки не выполнялись."
 
     def handle(self, request: ModuleRequest) -> ModuleResponse:
+        if not self._enabled():
+            return ModuleResponse(handled=False, metadata={"status": "module_disabled"})
         if not self._work_assistance_allowed(request):
             return ModuleResponse(
                 handled=True,
