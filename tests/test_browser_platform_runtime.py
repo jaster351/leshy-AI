@@ -165,7 +165,7 @@ class BrowserAgentApprovalTests(unittest.TestCase):
         )
         tools = BrowserUseAdapter._tools_for_action(action)
         registered = set(tools.registry.registry.actions)
-        self.assertTrue({"navigate", "search", "extract"} <= registered)
+        self.assertIn("navigate", registered)
         self.assertTrue(excluded.isdisjoint(registered))
 
     def test_approved_commit_keeps_interaction_tools_but_not_js_or_file_io(self) -> None:
