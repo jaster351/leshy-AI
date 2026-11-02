@@ -12,11 +12,30 @@ from .diagnostics import event, problem
 from .system_browser import ensure_system_browser
 
 
+# Browser Use даёт агенту мощные действия по умолчанию. Эти ограничения должны
+# быть техническими, а не только текстовой инструкцией модели.
+_ALWAYS_EXCLUDED_ACTIONS: tuple[str, ...] = (
+    "evaluate",
+    "upload_file",
+    "write_file",
+    "replace_file",
+    "read_file",
+)
+_READ_ONLY_EXCLUDED_ACTIONS: tuple[str, ...] = (
+    "click",
+    "input",
+    "send_keys",
+    "select_dropdown",
+)
+
+
 class BrowserUseAdapter:
     """Интеллектуальный Browser Agent поверх Browser Use.
 
-    READ выполняется автоматически. Любое изменение допускается только после
-    `_approval_verified`, который может поставить исключительно BrowserAgent.
+    READ выполняется автоматически, но получает урезанный набор Browser Use tools:
+    без click/input/send_keys/form selection, произвольного JavaScript и файловых
+    операций. Любое изменение допускается только после `_approval_verified`, который
+    может поставить исключительно BrowserAgent.
     """
 
     adapter_id = "browser-use"
@@ -70,6 +89,19 @@ class BrowserUseAdapter:
         return patterns
 
     @staticmethod
+    def _excluded_actions(action: BrowserAction) -> tuple[str, ...]:
+        blocked = list(_ALWAYS_EXCLUDED_ACTIONS)
+        if action.risk is BrowserRisk.READ:
+            blocked.extend(_READ_ONLY_EXCLUDED_ACTIONS)
+        return tuple(dict.fromkeys(blocked))
+
+    @classmethod
+    def _tools_for_action(cls, action: BrowserAction):
+        from browser_use import Tools
+
+        return Tools(exclude_actions=list(cls._excluded_actions(action)))
+
+    @staticmethod
     def _run_sync(awaitable: Awaitable[Any]) -> Any:
         try:
             asyncio.get_running_loop()
@@ -103,7 +135,8 @@ class BrowserUseAdapter:
         )
         if action.risk is BrowserRisk.READ:
             return common + (
-                "РЕЖИМ ТОЛЬКО ЧТЕНИЯ: можно искать, открывать страницы, сравнивать и извлекать данные. "
+                "РЕЖИМ ТОЛЬКО ЧТЕНИЯ: можно искать, открывать URL, прокручивать, сравнивать и извлекать данные. "
+                "Инструменты click/input/send_keys/select_dropdown/JS/file I/O технически отключены. "
                 "Нельзя входить в аккаунт, менять данные, добавлять товар в корзину, отправлять формы, "
                 "бронировать, публиковать, оформлять заказ или выполнять финансовое действие."
             )
@@ -148,10 +181,18 @@ class BrowserUseAdapter:
 
         provider = str(getattr(self.llm, "provider", "") or "").lower()
         default_vision = provider != "leshy"
+        excluded = self._excluded_actions(action)
+        event(
+            "browser_agent_browser_use_tools",
+            action=action.name,
+            risk=action.risk.value,
+            excluded=list(excluded),
+        )
         agent = Agent(
             task=user_task + self._guard(action, hosts),
             llm=self.llm,
             browser=browser,
+            tools=self._tools_for_action(action),
             use_vision=bool(action.arguments.get("use_vision", default_vision)),
         )
         try:
