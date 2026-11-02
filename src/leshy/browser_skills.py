@@ -8,6 +8,7 @@ import time
 from typing import Callable, Iterable
 
 from .diagnostics import event, problem
+from .system_browser import ensure_system_browser
 
 
 ActivityCallback = Callable[[str, dict], None]
@@ -50,11 +51,12 @@ class BrowserSkillUnavailable(RuntimeError):
 
 
 class HumanBrowserSkillRunner:
-    """Декларативные browser-skills через собственный Firefox Лешего.
+    """Декларативные browser-skills через системный Chromium-браузер.
 
-    Системные Edge/Chrome/Firefox никогда не используются. Playwright запускает
-    только свой Firefox из PLAYWRIGHT_BROWSERS_PATH, который поставляется рядом
-    с Leshy.exe. Cookies/localStorage сохраняются в LeshyBrain между запусками.
+    Леший использует уже установленный Microsoft Edge, Google Chrome или Chromium
+    и хранит собственное состояние cookies/localStorage в LeshyBrain. Браузер не
+    поставляется внутри дистрибутива. Если на Windows поддерживаемого браузера нет,
+    Леший один раз пытается установить Edge через winget, затем Chrome как резерв.
 
     Никаких обходов CAPTCHA/challenge или stealth-подмены нет: если сайт требует
     участия человека, возвращается needs_user_action.
@@ -82,12 +84,16 @@ class HumanBrowserSkillRunner:
 
     def _launch(self, playwright):
         try:
-            return playwright.firefox.launch(headless=self.headless), "Mozilla Firefox"
+            browser = ensure_system_browser(auto_install=True)
+            instance = playwright.chromium.launch(
+                executable_path=browser.executable,
+                headless=self.headless,
+                args=["--no-first-run", "--no-default-browser-check"],
+            )
+            event("browser_skill_system_browser_selected", browser=browser.name, executable=browser.executable)
+            return instance, browser.name
         except Exception as exc:
-            raise BrowserSkillUnavailable(
-                "Не удалось запустить встроенный Firefox Лешего. "
-                "Проверьте наличие каталога playwright-browsers в дистрибутиве. " + str(exc)
-            ) from exc
+            raise BrowserSkillUnavailable("Не удалось запустить системный браузер Лешего: " + str(exc)) from exc
 
     def _new_context(self, browser):
         kwargs = {
