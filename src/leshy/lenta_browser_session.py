@@ -12,6 +12,11 @@ from typing import Any
 from .system_browser import ensure_system_browser
 
 
+_ALLOWED_DELIVERY = {"account", "delivery", "pickup"}
+_ALLOWED_PAYMENT = {"account", "self", "cash", "card_on_delivery", "card_online"}
+_ALLOWED_SUBSTITUTIONS = {"automatic", "ask", "none"}
+
+
 def _owner_key(owner_id: str) -> str:
     """Стабильный безопасный ключ каталога для конкретного пользователя."""
     owner = str(owner_id or "").strip()[:200]
@@ -60,10 +65,49 @@ class LentaBrowserSession:
         except Exception:
             return {}
 
+    def preferences(self) -> dict[str, Any]:
+        state = self.load()
+        delivery = str(state.get("delivery_mode") or "account")
+        payment = str(state.get("payment_mode") or "account")
+        substitutions = str(state.get("substitution_policy") or "automatic")
+        return {
+            "delivery_mode": delivery if delivery in _ALLOWED_DELIVERY else "account",
+            "payment_mode": payment if payment in _ALLOWED_PAYMENT else "account",
+            "substitution_policy": substitutions if substitutions in _ALLOWED_SUBSTITUTIONS else "automatic",
+            "always_confirm_order": True,
+        }
+
+    def update_preferences(
+        self,
+        *,
+        delivery_mode: str | None = None,
+        payment_mode: str | None = None,
+        substitution_policy: str | None = None,
+    ) -> dict[str, Any]:
+        state = self.load()
+        if delivery_mode is not None:
+            value = str(delivery_mode).strip()
+            if value not in _ALLOWED_DELIVERY:
+                raise ValueError("Некорректный способ получения")
+            state["delivery_mode"] = value
+        if payment_mode is not None:
+            value = str(payment_mode).strip()
+            if value not in _ALLOWED_PAYMENT:
+                raise ValueError("Некорректный способ оплаты")
+            state["payment_mode"] = value
+        if substitution_policy is not None:
+            value = str(substitution_policy).strip()
+            if value not in _ALLOWED_SUBSTITUTIONS:
+                raise ValueError("Некорректная политика замены товаров")
+            state["substitution_policy"] = value
+        state.update({"schema": 4, "site": "lenta.com", "owner_key": self.owner_key})
+        self._save(state)
+        return self.preferences()
+
     def mark_login_required(self, reason: str = "") -> dict[str, Any]:
         state = self.load()
         state.update({
-            "schema": 3,
+            "schema": 4,
             "site": "lenta.com",
             "owner_key": self.owner_key,
             "login_required": True,
@@ -77,7 +121,7 @@ class LentaBrowserSession:
     def mark_authenticated(self, *, account_hint: str = "") -> dict[str, Any]:
         state = self.load()
         state.update({
-            "schema": 3,
+            "schema": 4,
             "site": "lenta.com",
             "owner_key": self.owner_key,
             "login_required": False,
@@ -95,7 +139,7 @@ class LentaBrowserSession:
             raise ValueError("store_id не может быть пустым")
         state = self.load()
         state.update({
-            "schema": 3,
+            "schema": 4,
             "site": "lenta.com",
             "owner_key": self.owner_key,
             "store_id": value[:120],
@@ -137,13 +181,17 @@ class LentaBrowserSession:
         }
 
     def clear(self) -> dict[str, Any]:
+        previous = self.load()
         state = {
-            "schema": 3,
+            "schema": 4,
             "site": "lenta.com",
             "owner_key": self.owner_key,
             "login_required": True,
             "authenticated": False,
             "last_login_check": time.time(),
+            "delivery_mode": previous.get("delivery_mode", "account"),
+            "payment_mode": previous.get("payment_mode", "account"),
+            "substitution_policy": previous.get("substitution_policy", "automatic"),
         }
         self._save(state)
         return state
@@ -164,6 +212,7 @@ class LentaBrowserSession:
             "account_hint": str(state.get("account_hint") or ""),
             "store_id": str(state.get("store_id") or ""),
             "channel": str(state.get("channel") or "lo"),
+            "preferences": self.preferences(),
         }
 
     def _save(self, state: dict[str, Any]) -> None:
