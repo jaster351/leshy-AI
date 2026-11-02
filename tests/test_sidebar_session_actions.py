@@ -89,6 +89,15 @@ class SidebarSessionActionsTests(unittest.TestCase):
         ):
             self.assertIn(label, source)
 
+    def test_sidebar_actions_stay_inside_visible_width_and_archive_is_not_duplicated(self) -> None:
+        source = (ROOT / "web" / "sidebar-session-actions.js").read_text(encoding="utf-8")
+        self.assertIn("width:100%!important;max-width:100%!important", source)
+        self.assertIn("overflow-x:hidden!important", source)
+        self.assertIn("opacity:1!important", source)
+        self.assertIn("width:0!important;max-width:100%!important;flex:1 1 0!important", source)
+        self.assertIn("if(archivedView){items.forEach(item=>list.appendChild(rowFor(item)));return}", source)
+        self.assertNotIn("if(archivedView){section(list,'Архив')", source)
+
     def test_runtime_adds_only_sidebar_module_to_reference_shell(self) -> None:
         original = web_server_impl7.shell._runtime_html
         try:
