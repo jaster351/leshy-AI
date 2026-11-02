@@ -22,12 +22,7 @@ _CAPTCHA_MARKERS = (
 
 
 class PlaywrightBrowserAdapter:
-    """Детерминированный Browser Agent поверх системного Chromium-браузера.
-
-    Адаптер намеренно поддерживает только ограниченный набор действий. Произвольный
-    JavaScript не выполняется. Любое изменяющее действие должно быть заранее
-    пропущено через BrowserAgent/Human Approval Gate.
-    """
+    """Детерминированный Browser Agent поверх системного Chromium-браузера."""
 
     adapter_id = "playwright"
 
@@ -40,6 +35,10 @@ class PlaywrightBrowserAdapter:
         root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
         self.state_dir = root / "browser"
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.state_dir.chmod(0o700)
+        except Exception:
+            pass
         self.storage_state_path = self.state_dir / "browser-agent-storage-state.json"
 
     @staticmethod
@@ -67,11 +66,11 @@ class PlaywrightBrowserAdapter:
         explicit = action.arguments.get("allowed_hosts") or ()
         if isinstance(explicit, str):
             explicit = [explicit]
-        hosts = [str(x).strip() for x in explicit if str(x).strip()]
+        hosts = tuple(dict.fromkeys(str(x).lower().strip().strip(".") for x in explicit if str(x).strip()))
+        if hosts:
+            return hosts
         primary = cls._host(action.url)
-        if primary and primary not in hosts:
-            hosts.append(primary)
-        return tuple(hosts)
+        return (primary,) if primary else ()
 
     def _launch(self, pw):
         system_browser = ensure_system_browser(auto_install=True)
@@ -80,18 +79,11 @@ class PlaywrightBrowserAdapter:
             headless=self.headless,
             args=["--no-first-run", "--no-default-browser-check"],
         )
-        event(
-            "browser_agent_playwright_started",
-            browser=system_browser.name,
-            executable=system_browser.executable,
-        )
+        event("browser_agent_playwright_started", browser=system_browser.name, executable=system_browser.executable)
         return browser, system_browser.name
 
     def _new_context(self, browser):
-        kwargs: dict[str, Any] = {
-            "locale": "ru-RU",
-            "viewport": {"width": 1366, "height": 768},
-        }
+        kwargs: dict[str, Any] = {"locale": "ru-RU", "viewport": {"width": 1366, "height": 768}}
         if self.storage_state_path.is_file():
             kwargs["storage_state"] = str(self.storage_state_path)
         return browser.new_context(**kwargs)
@@ -169,8 +161,7 @@ class PlaywrightBrowserAdapter:
             self._locator(page, step).press(key)
             return
         if kind == "wait":
-            milliseconds = max(0, min(int(step.get("milliseconds", 500)), 10_000))
-            page.wait_for_timeout(milliseconds)
+            page.wait_for_timeout(max(0, min(int(step.get("milliseconds", 500)), 10_000)))
             return
         if kind == "wait_for":
             self._locator(page, step).wait_for(state=str(step.get("state") or "visible"), timeout=self.timeout_ms)
@@ -178,10 +169,8 @@ class PlaywrightBrowserAdapter:
         raise ValueError(f"Неподдерживаемый browser-шаг: {kind}")
 
     def execute(self, action: BrowserAction) -> BrowserActionResult:
-        supported = {"open", "read", "extract", "workflow"}
-        if action.name not in supported:
+        if action.name not in {"open", "read", "extract", "workflow"}:
             return BrowserActionResult("unsupported", f"Playwright не поддерживает действие {action.name}")
-
         try:
             from playwright.sync_api import sync_playwright
         except Exception:
@@ -201,7 +190,6 @@ class PlaywrightBrowserAdapter:
                 page = context.pages[0] if context.pages else context.new_page()
                 page.set_default_timeout(self.timeout_ms)
                 self._goto(page, action.url, allowed_hosts)
-
                 initial_text = self._visible_text(page)
                 if self._needs_user(initial_text):
                     return BrowserActionResult(
@@ -221,9 +209,7 @@ class PlaywrightBrowserAdapter:
                             raise ValueError(f"Шаг {index + 1} должен быть объектом")
                         self._run_step(page, dict(raw_step), allowed_hosts)
                         if not self._host_allowed(page.url, allowed_hosts):
-                            raise PermissionError(
-                                f"После шага {index + 1} открыт неподтверждённый домен: {page.url}"
-                            )
+                            raise PermissionError(f"После шага {index + 1} открыт неподтверждённый домен: {page.url}")
                         visible = self._visible_text(page)
                         if self._needs_user(visible):
                             return BrowserActionResult(
@@ -238,22 +224,11 @@ class PlaywrightBrowserAdapter:
                     pass
                 visible = self._visible_text(page, limit=int(action.arguments.get("text_limit", 20_000)))
                 elapsed_ms = int((time.monotonic() - started) * 1000)
-                event(
-                    "browser_agent_playwright_completed",
-                    action=action.name,
-                    url=page.url,
-                    elapsed_ms=elapsed_ms,
-                )
+                event("browser_agent_playwright_completed", action=action.name, url=page.url, elapsed_ms=elapsed_ms)
                 return BrowserActionResult(
                     "ok",
                     "Браузерное действие выполнено и состояние страницы прочитано.",
-                    {
-                        "url": page.url,
-                        "title": page.title(),
-                        "visible_text": visible,
-                        "browser": browser_name,
-                        "elapsed_ms": elapsed_ms,
-                    },
+                    {"url": page.url, "title": page.title(), "visible_text": visible, "browser": browser_name, "elapsed_ms": elapsed_ms},
                 )
             except PermissionError as exc:
                 event("browser_agent_playwright_blocked", action=action.name, error=str(exc))
