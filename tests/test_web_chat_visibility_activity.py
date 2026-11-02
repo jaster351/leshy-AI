@@ -30,7 +30,7 @@ def test_visibility_fix_uses_real_composer_height_and_forces_done_scroll():
     assert "/v1/chat/stream" not in js
 
 
-def test_activity_runtime_reports_busy_model(monkeypatch):
+def test_activity_runtime_reports_busy_model():
     class Scheduler:
         def status(self):
             return {"active": {"source": "telegram:42"}, "waiting": [], "queue_depth": 0}
@@ -41,24 +41,24 @@ def test_activity_runtime_reports_busy_model(monkeypatch):
     manager = object.__new__(chat_activity_runtime.RealtimeChatManager)
     manager.app = DummyApp()
 
-    original = chat_activity_runtime._ORIGINAL_STREAM
+    original_method = chat_activity_runtime.RealtimeChatManager.stream
+    original_saved = chat_activity_runtime._ORIGINAL_STREAM
     installed = chat_activity_runtime._INSTALLED
+
+    def fake_original(self, message, *, owner_id="web:local", session_id=None, request_id=None):
+        yield StreamEvent("done", {"answer": "ok"})
+
     try:
+        chat_activity_runtime.RealtimeChatManager.stream = fake_original
+        chat_activity_runtime._ORIGINAL_STREAM = None
         chat_activity_runtime._INSTALLED = False
-
-        def fake_original(self, message, *, owner_id="web:local", session_id=None, request_id=None):
-            yield StreamEvent("done", {"answer": "ok"})
-
-        chat_activity_runtime._ORIGINAL_STREAM = fake_original
-        # Проверяем непосредственно контракт обёртки через временную установку.
         chat_activity_runtime.install_chat_activity_runtime()
         items = list(chat_activity_runtime.RealtimeChatManager.stream(manager, "test", owner_id="web:local"))
         assert items[0].type == "activity"
         assert "Жду освобождения модели" in items[0].data["text"]
         assert "Telegram" in items[0].data["text"]
+        assert items[-1].type == "done"
     finally:
-        # Тестовый процесс не должен оставлять monkey-patch в неожиданном состоянии.
+        chat_activity_runtime.RealtimeChatManager.stream = original_method
+        chat_activity_runtime._ORIGINAL_STREAM = original_saved
         chat_activity_runtime._INSTALLED = installed
-        if original is not None:
-            chat_activity_runtime.RealtimeChatManager.stream = original
-            chat_activity_runtime._ORIGINAL_STREAM = original
