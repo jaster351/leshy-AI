@@ -6,13 +6,16 @@ from urllib import parse
 
 from . import web_server_impl6 as previous
 from . import web_server_impl5 as shell
+from .activity_visibility_runtime import install_activity_visibility
 from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
 from .diagnostics import event, problem
 from .freshness_cache_runtime import install_freshness_cache_runtime
 from .freshness_memory_runtime import install_freshness_memory_runtime
 from .identity_runtime import install_creator_identity_routing
+from .interactive_search_budget import install_interactive_search_budget
 from .learning_command_runtime import install_explicit_learning_routing
+from .parcel_tracking_runtime import install_parcel_tracking_routing
 from .reliable_web_runtime import install_reliable_web_runtime
 from .runtime_latency_fix import install_runtime_latency_fixes
 from .session_admin import SessionAdminService
@@ -47,23 +50,34 @@ def _install_runtime_contracts(app=None) -> None:
     install_freshness_memory_runtime(app)
     install_freshness_cache_runtime()
     install_runtime_latency_fixes(app)
+    # Поиск идёт до inference scheduler, поэтому ему нужен отдельный общий
+    # wall-clock budget: иначе failover нескольких backend'ов задерживает ответ.
+    install_interactive_search_budget(LeshyApp)
     install_creator_identity_routing(LeshyApp)
+    # Browser Skills — отдельный fast-path. Он не меняет Web transport/SSE:
+    # только перехватывает естественные команды отслеживания до общего LLM.
+    install_parcel_tracking_routing(LeshyApp, app)
+    # Web activity уже идёт через SSE; Telegram получает временное статус-сообщение.
+    install_activity_visibility(app)
     _restore_reference_chat_timing()
     install_telegram_exact_once_finalization()
     install_global_chat_idempotency()
 
 
 def _runtime_html(settings) -> bytes:
-    """Эталонный chat transport + изолированное меню истории.
+    """Эталонный chat transport + изолированные UI-модули вокруг него.
 
     `chat-multitask.js` остаётся единственным владельцем send/stream lifecycle.
-    `sidebar-session-actions.js` работает только с DOM истории и metadata API:
-    он не меняет sendFrom, SSE, request_id или session transport.
+    Sidebar и layout/status модули работают только с DOM/событиями и не меняют
+    sendFrom, SSE, request_id или session transport.
     """
     html_text = shell._runtime_html(settings).decode("utf-8")
-    marker = '<script src="/sidebar-session-actions.js"></script>'
-    if marker not in html_text:
-        html_text = html_text.replace("</body>", marker + "\n</body>")
+    for marker in (
+        '<script src="/sidebar-session-actions.js"></script>',
+        '<script src="/chat-layout-status.js"></script>',
+    ):
+        if marker not in html_text:
+            html_text = html_text.replace("</body>", marker + "\n</body>")
     return html_text.encode("utf-8")
 
 
@@ -145,6 +159,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 "/chat-controller-canonical.js",
                 "/chat-followup-finalizer.js",
                 "/sidebar-session-actions.js",
+                "/chat-layout-status.js",
             }:
                 name = parsed.path.rsplit("/", 1)[-1]
                 try:

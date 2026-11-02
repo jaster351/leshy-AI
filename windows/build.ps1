@@ -67,6 +67,7 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --collect-all tokenizers `
   --collect-all huggingface_hub `
   --collect-all hf_xet `
+  --collect-all playwright `
   --add-data "web;web" `
   --add-data "VERSION;." `
   windows/launcher.py
