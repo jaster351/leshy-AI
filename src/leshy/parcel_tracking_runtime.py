@@ -6,6 +6,7 @@ import time
 from typing import Any, Iterator
 
 from .diagnostics import event, problem
+from .module_settings import module_enabled
 from .parcel_tracking import (
     BrowserSkillUnavailable,
     ParcelIntent,
@@ -24,14 +25,35 @@ _ORIGINAL_CHAT = None
 _ORIGINAL_STOP_BACKGROUND = None
 
 
+def _parcel_enabled(app) -> bool:
+    try:
+        return module_enabled(app.storage, "parcel-tracking")
+    except Exception as exc:
+        problem("parcel_module_setting_failed", str(exc))
+        return True
+
+
 def _service(app) -> ParcelTrackingService:
     service = getattr(app, "parcel_tracking", None)
-    if isinstance(service, ParcelTrackingService):
-        return service
-    service = ParcelTrackingService(app)
-    app.parcel_tracking = service
-    service.start()
+    if not isinstance(service, ParcelTrackingService):
+        service = ParcelTrackingService(app)
+        app.parcel_tracking = service
+    if _parcel_enabled(app):
+        service.start()
     return service
+
+
+def sync_parcel_runtime_state(app) -> None:
+    """Синхронизировать фоновый монитор с пользовательским переключателем модуля."""
+    service = getattr(app, "parcel_tracking", None)
+    if not isinstance(service, ParcelTrackingService):
+        if _parcel_enabled(app):
+            _service(app)
+        return
+    if _parcel_enabled(app):
+        service.start()
+    else:
+        service.stop()
 
 
 def _notification_route(owner_id: str, session_id: str | None) -> tuple[str, str]:
@@ -61,6 +83,8 @@ def _save_direct_user(app, message: str, owner_id: str, session_id: str | None) 
 
 
 def _execute_intent(app, intent: ParcelIntent, owner_id: str, session_id: str, *, activity=None) -> tuple[str, list[dict[str, str]]]:
+    if not _parcel_enabled(app):
+        raise BrowserSkillUnavailable("Модуль отслеживания посылок или Human Browser выключен в настройках")
     service = _service(app)
     if intent.action == "list":
         return format_parcel_list(service.list(owner_id)), []
@@ -99,12 +123,7 @@ def _run_intent_with_visible_activity(
     request_id: str,
     cancel: threading.Event,
 ) -> Iterator[StreamEvent]:
-    """Выполнить browser-skill в worker-потоке и сразу отдавать человеку шаги.
-
-    Без worker-потока callback browser-runner был бы виден только после полного
-    завершения Playwright. Queue превращает реальные шаги браузера в SSE/Telegram
-    activity-события в момент их выполнения.
-    """
+    """Выполнить browser-skill в worker-потоке и сразу отдавать человеку шаги."""
     updates: queue.Queue[tuple[str, Any]] = queue.Queue()
     result_box: dict[str, Any] = {}
 
@@ -122,7 +141,7 @@ def _run_intent_with_visible_activity(
     def worker() -> None:
         try:
             result_box["value"] = _execute_intent(app, intent, owner_id, session_id, activity=activity)
-        except BaseException as exc:  # передаём исключение обратно generator-потоку
+        except BaseException as exc:
             result_box["error"] = exc
         finally:
             updates.put(("finished", None))
@@ -149,9 +168,6 @@ def _run_intent_with_visible_activity(
             finished = True
 
     if not finished:
-        # Playwright не всегда можно жёстко прервать из другого потока без
-        # повреждения browser context. Поток daemon; результат после cancel
-        # игнорируется, а UI получает stopped.
         return
     if "error" in result_box:
         raise result_box["error"]
@@ -160,11 +176,12 @@ def _run_intent_with_visible_activity(
 
 
 def install_parcel_tracking_routing(app_class, app=None) -> None:
-    """Подключить browser-tracking как fast-path без LLM и без изменения Web transport."""
+    """Подключить browser-tracking как управляемый fast-path без LLM."""
     global _INSTALLED, _ORIGINAL_STREAM, _ORIGINAL_CHAT, _ORIGINAL_STOP_BACKGROUND
 
     if app is not None:
         _service(app)
+        sync_parcel_runtime_state(app)
     if _INSTALLED:
         return
     _INSTALLED = True
@@ -183,7 +200,7 @@ def install_parcel_tracking_routing(app_class, app=None) -> None:
     ) -> Iterator[StreamEvent]:
         value = str(message or "").strip()
         intent = parse_parcel_intent(value)
-        if intent is None:
+        if intent is None or not _parcel_enabled(self.app):
             yield from _ORIGINAL_STREAM(
                 self,
                 value,
@@ -283,7 +300,7 @@ def install_parcel_tracking_routing(app_class, app=None) -> None:
     def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None) -> dict[str, Any]:
         value = str(message or "").strip()
         intent = parse_parcel_intent(value)
-        if intent is None:
+        if intent is None or not _parcel_enabled(self):
             return _ORIGINAL_CHAT(self, value, owner_id=owner_id, session_id=session_id)
         owner = (owner_id or "web:local").strip()[:200]
         sid = _save_direct_user(self, value, owner, session_id)
@@ -317,4 +334,4 @@ def install_parcel_tracking_routing(app_class, app=None) -> None:
     app_class.stop_background = stop_background
 
 
-__all__ = ["install_parcel_tracking_routing"]
+__all__ = ["install_parcel_tracking_routing", "sync_parcel_runtime_state"]
