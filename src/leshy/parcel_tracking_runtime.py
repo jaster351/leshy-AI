@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import re
 import threading
 import time
 from typing import Any, Iterator
@@ -23,6 +24,14 @@ _INSTALLED = False
 _ORIGINAL_STREAM = None
 _ORIGINAL_CHAT = None
 _ORIGINAL_STOP_BACKGROUND = None
+
+_YES_REPLIES = {
+    "да", "давай", "конечно", "хочу", "согласен", "согласна", "следи", "отслеживай",
+    "да следи", "да отслеживай", "да хочу", "хорошо следи", "ок следи", "окей следи",
+}
+_NO_REPLIES = {
+    "нет", "не надо", "не нужно", "не следи", "не отслеживай", "нет спасибо", "пока не надо",
+}
 
 
 def _parcel_enabled(app) -> bool:
@@ -65,6 +74,30 @@ def _notification_route(owner_id: str, session_id: str | None) -> tuple[str, str
     return "web", str(owner_id or "web:local")
 
 
+def _normalize_reply(text: str) -> str:
+    value = str(text or "").lower().replace("ё", "е")
+    value = re.sub(r"[^a-zа-я0-9\s]+", " ", value, flags=re.IGNORECASE)
+    return " ".join(value.split()).strip()
+
+
+def _resolve_intent(app, text: str, owner_id: str, session_id: str | None) -> ParcelIntent | None:
+    intent = parse_parcel_intent(text)
+    if intent is not None:
+        return intent
+    reply = _normalize_reply(text)
+    if reply not in _YES_REPLIES and reply not in _NO_REPLIES:
+        return None
+    pending = _service(app).pending_follow(owner_id, session_id)
+    if not pending:
+        return None
+    track = str(pending.get("tracking_number") or "")
+    if not track:
+        return None
+    if reply in _YES_REPLIES:
+        return ParcelIntent("confirm_follow", track)
+    return ParcelIntent("decline_follow", track)
+
+
 def _save_direct_user(app, message: str, owner_id: str, session_id: str | None) -> str:
     sid = app._ensure_session(owner_id, session_id)
     now = utcnow()
@@ -86,13 +119,29 @@ def _execute_intent(app, intent: ParcelIntent, owner_id: str, session_id: str, *
     if not _parcel_enabled(app):
         raise BrowserSkillUnavailable("Модуль отслеживания посылок или Human Browser выключен в настройках")
     service = _service(app)
+
     if intent.action == "list":
         return format_parcel_list(service.list(owner_id)), []
+
     if intent.action == "stop":
         changed = service.stop_following(owner_id, intent.tracking_number)
         if changed:
             return f"Перестал следить за посылкой {intent.tracking_number}.", []
         return f"Посылка {intent.tracking_number} не была в активном отслеживании.", []
+
+    if intent.action == "confirm_follow":
+        row = service.confirm_pending(owner_id, intent.tracking_number)
+        if row is None:
+            return "Не нашёл ожидающую подтверждения посылку. Пришлите трек-номер ещё раз.", []
+        return (
+            f"Хорошо, слежу за посылкой {intent.tracking_number}. "
+            "Сообщу, когда статус изменится, а после подтверждённой доставки автоматически удалю её из отслеживания.",
+            [],
+        )
+
+    if intent.action == "decline_follow":
+        service.decline_pending(owner_id, intent.tracking_number)
+        return f"Хорошо, за посылкой {intent.tracking_number} следить не буду.", []
 
     if intent.action == "follow":
         channel, target = _notification_route(owner_id, session_id)
@@ -109,7 +158,15 @@ def _execute_intent(app, intent: ParcelIntent, owner_id: str, session_id: str, *
         ] if result.source_url else []
 
     result = service.track_once(intent.tracking_number, activity=activity)
-    return format_parcel_result(result), [
+    channel, target = _notification_route(owner_id, session_id)
+    offer_follow = service.offer_follow(
+        owner_id,
+        result,
+        notify_channel=channel,
+        notify_target=target,
+        session_id=session_id,
+    )
+    return format_parcel_result(result, offer_follow=offer_follow), [
         {"title": "ParcelRadar", "url": result.source_url}
     ] if result.source_url else []
 
@@ -199,18 +256,28 @@ def install_parcel_tracking_routing(app_class, app=None) -> None:
         request_id: str | None = None,
     ) -> Iterator[StreamEvent]:
         value = str(message or "").strip()
-        intent = parse_parcel_intent(value)
-        if intent is None or not _parcel_enabled(self.app):
+        owner = (owner_id or "web:local").strip()[:200]
+        if not _parcel_enabled(self.app):
             yield from _ORIGINAL_STREAM(
                 self,
                 value,
-                owner_id=owner_id,
+                owner_id=owner,
                 session_id=session_id,
                 request_id=request_id,
             )
             return
 
-        owner = (owner_id or "web:local").strip()[:200]
+        intent = _resolve_intent(self.app, value, owner, session_id)
+        if intent is None:
+            yield from _ORIGINAL_STREAM(
+                self,
+                value,
+                owner_id=owner,
+                session_id=session_id,
+                request_id=request_id,
+            )
+            return
+
         rid, cancel = self._register(request_id)
         sid = ""
         started = time.monotonic()
@@ -299,10 +366,12 @@ def install_parcel_tracking_routing(app_class, app=None) -> None:
 
     def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None) -> dict[str, Any]:
         value = str(message or "").strip()
-        intent = parse_parcel_intent(value)
-        if intent is None or not _parcel_enabled(self):
-            return _ORIGINAL_CHAT(self, value, owner_id=owner_id, session_id=session_id)
         owner = (owner_id or "web:local").strip()[:200]
+        if not _parcel_enabled(self):
+            return _ORIGINAL_CHAT(self, value, owner_id=owner, session_id=session_id)
+        intent = _resolve_intent(self, value, owner, session_id)
+        if intent is None:
+            return _ORIGINAL_CHAT(self, value, owner_id=owner, session_id=session_id)
         sid = _save_direct_user(self, value, owner, session_id)
         try:
             answer, sources = _execute_intent(self, intent, owner, sid)
