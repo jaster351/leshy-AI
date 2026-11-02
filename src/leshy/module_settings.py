@@ -60,6 +60,12 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         description="Диагностика серверов и подготовка ответов по заявкам; профиль сервера определяется по фактической доступности SSH/RDP.",
     ),
     ModuleSettingDefinition(
+        name="lenta",
+        title="Лента",
+        description="Поиск товаров и актуальных цен, планирование корзины и оформление заказа через личный кабинет. Авторизация и cookies изолированы по пользователям; перед заказом и оплатой требуется подтверждение владельца.",
+        dependencies=("human-browser", "browser-agent"),
+    ),
+    ModuleSettingDefinition(
         name="superagent",
         title="SuperAgent",
         description="Автономные фоновые задания по схеме Trigger → Mandate → Ticket → Assignment → Report: состояние переживает перезапуск, временные ошибки повторяются, а к человеку возвращаются только результат или один блокирующий вопрос.",
