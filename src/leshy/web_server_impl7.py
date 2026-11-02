@@ -17,6 +17,7 @@ from .honest_uncertainty_runtime import install_honest_uncertainty
 from .identity_runtime import install_creator_identity_routing
 from .interactive_search_budget import install_interactive_search_budget
 from .learning_command_runtime import install_explicit_learning_routing
+from .lenta_preferences_runtime import install_lenta_preferences_runtime
 from .lenta_runtime import install_lenta_routing
 from .module_settings import list_module_states, set_module_enabled
 from .network_blocking_runtime import install_network_blocking_routing
@@ -60,6 +61,7 @@ def _install_runtime_contracts(app=None) -> None:
     # Browser Platform уже ставится внешним impl8. «Лента» должна оборачивать его,
     # чтобы продолжения «да/нет/измени» не перехватывались общим Browser Agent.
     install_lenta_routing(LeshyApp, app)
+    install_lenta_preferences_runtime()
     # Интеллектуальная память, GraphRAG, команда подагентов и распределённый кластер
     # подключаются как единый вычислительный слой, но каждый модуль выключается отдельно.
     install_advanced_modules(LeshyApp, app)
