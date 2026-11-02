@@ -7,6 +7,7 @@ from urllib import parse
 from . import web_server_impl6 as previous
 from . import web_server_impl5 as shell
 from .app import LeshyApp
+from .chat_activity_runtime import install_chat_activity_runtime
 from .chat_idempotency import install_global_chat_idempotency
 from .diagnostics import event, problem
 from .freshness_cache_runtime import install_freshness_cache_runtime
@@ -48,22 +49,27 @@ def _install_runtime_contracts(app=None) -> None:
     install_freshness_cache_runtime()
     install_runtime_latency_fixes(app)
     install_creator_identity_routing(LeshyApp)
+    install_chat_activity_runtime()
     _restore_reference_chat_timing()
     install_telegram_exact_once_finalization()
     install_global_chat_idempotency()
 
 
 def _runtime_html(settings) -> bytes:
-    """Эталонный chat transport + изолированное меню истории.
+    """Эталонный chat transport + изолированные UI-дополнения.
 
     `chat-multitask.js` остаётся единственным владельцем send/stream lifecycle.
-    `sidebar-session-actions.js` работает только с DOM истории и metadata API:
-    он не меняет sendFrom, SSE, request_id или session transport.
+    Дополнительные модули работают только с DOM/sidebar и не меняют sendFrom,
+    SSE, request_id или session transport.
     """
     html_text = shell._runtime_html(settings).decode("utf-8")
-    marker = '<script src="/sidebar-session-actions.js"></script>'
-    if marker not in html_text:
-        html_text = html_text.replace("</body>", marker + "\n</body>")
+    markers = (
+        '<script src="/sidebar-session-actions.js"></script>',
+        '<script src="/chat-visibility-fix.js"></script>',
+    )
+    for marker in markers:
+        if marker not in html_text:
+            html_text = html_text.replace("</body>", marker + "\n</body>")
     return html_text.encode("utf-8")
 
 
@@ -145,6 +151,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 "/chat-controller-canonical.js",
                 "/chat-followup-finalizer.js",
                 "/sidebar-session-actions.js",
+                "/chat-visibility-fix.js",
             }:
                 name = parsed.path.rsplit("/", 1)[-1]
                 try:
