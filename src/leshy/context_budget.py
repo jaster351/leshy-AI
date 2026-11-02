@@ -23,6 +23,20 @@ def estimate_tokens(messages: list[ChatMessage]) -> int:
     return total
 
 
+def _normalize_system_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Свести системный контекст в один первый блок для строгих chat-template.
+
+    Некоторые GGUF (в частности Qwen3.5) допускают system только первым сообщением.
+    Леший собирает системный контекст из нескольких независимых слоёв, поэтому перед
+    любым backend объединяем их, сохраняя исходный порядок содержимого.
+    """
+    system_parts = [str(message.content).strip() for message in messages if message.role == "system" and str(message.content).strip()]
+    dialogue = [message for message in messages if message.role != "system"]
+    if not system_parts:
+        return dialogue
+    return [ChatMessage("system", "\n\n".join(system_parts))] + dialogue
+
+
 def _truncate_content(content: str, target_tokens: int) -> str:
     max_chars = max(64, int(target_tokens) * 2)
     value = str(content)
@@ -37,7 +51,7 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
     context_size = max(512, int(context_size))
     reserve = max(128, min(int(reserve_tokens), max(128, context_size // 2)))
     budget = max(256, context_size - reserve)
-    source = list(messages)
+    source = _normalize_system_messages(list(messages))
     before = estimator(source)
     if before <= budget:
         return ContextBudgetResult(source, before, before, budget, 0, 0)
