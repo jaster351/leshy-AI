@@ -7,6 +7,7 @@ from urllib import parse
 from . import web_server_impl6 as previous
 from . import web_server_impl5 as shell
 from .activity_visibility_runtime import install_activity_visibility
+from .advanced_modules_runtime import install_advanced_modules, sync_advanced_module_state
 from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
 from .diagnostics import event, problem
@@ -59,6 +60,9 @@ def _install_runtime_contracts(app=None) -> None:
     # Browser Platform уже ставится внешним impl8. «Лента» должна оборачивать его,
     # чтобы продолжения «да/нет/измени» не перехватывались общим Browser Agent.
     install_lenta_routing(LeshyApp, app)
+    # Интеллектуальная память, GraphRAG, команда подагентов и распределённый кластер
+    # подключаются как единый вычислительный слой, но каждый модуль выключается отдельно.
+    install_advanced_modules(LeshyApp, app)
     install_activity_visibility(app)
     # Последний смысловой предохранитель до idempotency: пустой ответ никогда не
     # должен превращаться в бесконечное ожидание или молчание пользователя.
@@ -109,6 +113,7 @@ def _sync_runtime_after_module_change(app, module_name: str) -> None:
         sync_parcel_runtime_state(app)
     if module_name == "superagent":
         sync_superagent_runtime_state(app)
+    sync_advanced_module_state(app, module_name)
 
 
 def make_handler(app, telegram, settings, model_catalog):
