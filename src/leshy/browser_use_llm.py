@@ -13,18 +13,13 @@ _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
 
 class LeshyBrowserUseLLM:
-    """Мост между локальным `LLM.chat()` Лешего и BaseChatModel Browser Use.
+    """Мост между локальным `LLM.chat()` Лешего и BaseChatModel Browser Use."""
 
-    Он не обращается к облачному API. Structured output запрашивается через JSON
-    schema и валидируется исходной Pydantic-моделью Browser Use. Визуальный input
-    не отправляется в текстовую LLM: Browser Use работает по DOM/текстовому состоянию.
-    """
+    _verified_api_keys: bool = False
 
     def __init__(self, llm: Any, *, name: str = "leshy-local"):
         self.llm = llm
         self._name = str(name or "leshy-local")
-        # BaseChatModel Browser Use — runtime-checkable Protocol с обязательным
-        # атрибутом model. Он нужен также для выбора таймаутов внутри Agent.
         self.model = self._name
 
     @property
@@ -114,11 +109,7 @@ class LeshyBrowserUseLLM:
             )
             prepared.append(ChatMessage("system", instruction))
 
-        event(
-            "browser_use_local_llm_started",
-            messages=len(prepared),
-            structured=output_format is not None,
-        )
+        event("browser_use_local_llm_started", messages=len(prepared), structured=output_format is not None)
         try:
             answer = await asyncio.to_thread(self.llm.chat, prepared)
             if output_format is None:
