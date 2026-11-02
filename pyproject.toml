@@ -9,7 +9,7 @@ description = "Леший — локальный автономный AI-асс�
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "GPL-2.0-only"}
-authors = [{name = "Leshy AI"}]
+authors = [{name = "Тихонов Михаил Викторович"}]
 dependencies = [
   "ddgs>=9,<10",
   "tzdata>=2025.2",
