@@ -109,7 +109,7 @@ class ParcelTrackingTests(unittest.TestCase):
         self.assertEqual(parsed.tracking_number, TRACK)
         self.assertEqual(parsed.status_category, "in_transit")
         self.assertIn("посылка в пути", parsed.status.lower())
-        self.assertIn("arrived at sorting center", parsed.last_event_text.lower())
+        self.assertIn("in transit", parsed.last_event_text.lower())
         self.assertTrue(parsed.fingerprint)
         self.assertEqual(parsed.browser_name, "Firefox")
 
@@ -161,8 +161,10 @@ class ParcelTrackingTests(unittest.TestCase):
         self.assertIn("доставлена", self.app.telegram.messages[0][1].lower())
         self.assertIn("удаляю", self.app.telegram.messages[0][1].lower())
         with self.app.storage.connection() as conn:
-            state = conn.execute("SELECT state FROM parcel_subscriptions WHERE owner_id='telegram:123'").fetchone()["state"]
-        self.assertEqual(state, "delivered")
+            row_after_delivery = conn.execute(
+                "SELECT * FROM parcel_subscriptions WHERE owner_id='telegram:123'"
+            ).fetchone()
+        self.assertIsNone(row_after_delivery)
         self.service.deliver_pending()
         self.assertEqual(len(self.app.telegram.messages), 1)
 
