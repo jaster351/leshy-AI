@@ -25,12 +25,32 @@ BitTorrent, torrent-файлы и magnet-ссылки являются нейт�
 
 
 def with_leshy_identity(messages: list[ChatMessage]) -> list[ChatMessage]:
-    """Возвращает новый список сообщений с личностью и актуальным временным контекстом."""
+    """Возвращает сообщения с одним начальным system-блоком.
+
+    Некоторые современные GGUF-шаблоны (в частности Qwen3.5) разрешают system
+    только в самом начале и отклоняют несколько последовательных system-сообщений.
+    Поэтому личность, память, локальные знания и результаты поиска объединяются в
+    один начальный блок, не меняя порядок пользовательской истории.
+    """
     items = list(messages)
     latest_user = next((str(item.content) for item in reversed(items) if item.role == "user"), "")
     temporal = temporal_system_instruction(latest_user)
     identity = LESHY_IDENTITY_PROMPT if not temporal else LESHY_IDENTITY_PROMPT + "\n\n" + temporal
-    return [ChatMessage("system", identity), *items]
+
+    system_parts = [identity]
+    first_non_system = 0
+    for index, item in enumerate(items):
+        if item.role != "system":
+            first_non_system = index
+            break
+        content = str(item.content or "").strip()
+        if content:
+            system_parts.append(content)
+    else:
+        first_non_system = len(items)
+
+    merged_system = ChatMessage("system", "\n\n".join(system_parts))
+    return [merged_system, *items[first_non_system:]]
 
 
 __all__ = ["LESHY_IDENTITY_PROMPT", "with_leshy_identity"]
