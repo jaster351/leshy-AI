@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from hashlib import sha256
 import json
@@ -11,6 +12,9 @@ from .llm import ChatMessage, LLM
 from .logging_paths import central_log_path
 from .modules import ModuleManifest, ModuleRequest, ModuleResponse
 from .work_schedule import WorkAssistancePolicy, parse_event_time, truthy
+
+
+DEFAULT_SERVICE_PORTS = (22, 3389)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,41 +74,80 @@ class DiagnosticProvider(Protocol):
 
 
 class TcpAvailabilityDiagnostics:
-    """Быстрая TCP-проверка сервера без shell-команд и изменения удалённой системы."""
+    """Быстрая TCP-проверка сервера без shell-команд и изменения удалённой системы.
+
+    Для определения сервисного профиля Леший всегда проверяет SSH/22 и RDP/3389
+    параллельно и только после этого делает вывод. Поле operating_system не
+    используется для выбора порта: ОС/профиль выводятся из фактической доступности.
+    """
 
     def __init__(self, timeout_seconds: float = 5.0):
         self.timeout_seconds = max(0.2, float(timeout_seconds))
 
     def _ports(self, context: ClientTicketContext) -> tuple[int, ...]:
-        if context.ports:
-            return tuple(dict.fromkeys(int(port) for port in context.ports if 1 <= int(port) <= 65535))
-        hint = f"{context.service_name} {context.operating_system}".lower()
-        if any(marker in hint for marker in ("windows", "rdp", "remote desktop")):
-            return (3389,)
-        if any(marker in hint for marker in ("linux", "ssh", "ubuntu", "debian", "centos", "alma", "rocky")):
-            return (22,)
-        return (22, 3389)
+        extra: list[int] = []
+        for port in context.ports:
+            try:
+                value = int(port)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= value <= 65535:
+                extra.append(value)
+        return tuple(dict.fromkeys((*DEFAULT_SERVICE_PORTS, *extra)))
+
+    def _check_port(self, target: str, port: int) -> DiagnosticResult:
+        try:
+            with socket.create_connection((target, port), timeout=self.timeout_seconds):
+                return DiagnosticResult(f"TCP/{port}", "доступен", "Соединение установлено")
+        except TimeoutError:
+            return DiagnosticResult(
+                f"TCP/{port}",
+                "тайм-аут",
+                f"Соединение не установлено за {self.timeout_seconds:g} с",
+            )
+        except OSError as exc:
+            return DiagnosticResult(f"TCP/{port}", "недоступен", str(exc))
+
+    @staticmethod
+    def _service_profile(results: list[DiagnosticResult]) -> DiagnosticResult:
+        statuses = {item.name: item.status for item in results}
+        ssh_open = statuses.get("TCP/22") == "доступен"
+        rdp_open = statuses.get("TCP/3389") == "доступен"
+
+        if ssh_open and not rdp_open:
+            return DiagnosticResult(
+                "Профиль сервера",
+                "Linux/SSH",
+                "TCP/22 отвечает, TCP/3389 не отвечает; профиль определён по фактической доступности сервиса.",
+            )
+        if rdp_open and not ssh_open:
+            return DiagnosticResult(
+                "Профиль сервера",
+                "Windows/RDP",
+                "TCP/3389 отвечает, TCP/22 не отвечает; профиль определён по фактической доступности сервиса.",
+            )
+        if ssh_open and rdp_open:
+            return DiagnosticResult(
+                "Профиль сервера",
+                "неоднозначный",
+                "Одновременно отвечают TCP/22 и TCP/3389; доступны оба сервиса, поэтому ОС по портам однозначно не определяется.",
+            )
+        return DiagnosticResult(
+            "Профиль сервера",
+            "не определён",
+            "Ни TCP/22, ни TCP/3389 не подтвердили доступность; ОС по недоступным портам не угадывается.",
+        )
 
     def run(self, context: ClientTicketContext) -> list[DiagnosticResult]:
         target = (context.server_ip or context.server_host).strip()
         if not target:
             return [DiagnosticResult("TCP", "нет данных", "В заявке не найден адрес сервера")]
 
-        results: list[DiagnosticResult] = []
-        for port in self._ports(context):
-            try:
-                with socket.create_connection((target, port), timeout=self.timeout_seconds):
-                    results.append(DiagnosticResult(f"TCP/{port}", "доступен", "Соединение установлено"))
-            except TimeoutError:
-                results.append(
-                    DiagnosticResult(
-                        f"TCP/{port}",
-                        "тайм-аут",
-                        f"Соединение не установлено за {self.timeout_seconds:g} с",
-                    )
-                )
-            except OSError as exc:
-                results.append(DiagnosticResult(f"TCP/{port}", "недоступен", str(exc)))
+        ports = self._ports(context)
+        workers = max(1, min(len(ports), 8))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="leshy-tcp-check") as pool:
+            results = list(pool.map(lambda port: self._check_port(target, port), ports))
+        results.append(self._service_profile(results))
         return results
 
 
@@ -211,6 +254,7 @@ class SupportConsultantModule:
             "Ты работаешь как внутренний консультант технической поддержки. "
             "Ничего не отправляй клиенту и не предлагай совершать изменения в BILLmanager. "
             "Сначала опирайся на историю переписки и результаты фактической диагностики. "
+            "Не спрашивай операционную систему, если профиль уже можно определить по ответу TCP/22 и TCP/3389. "
             "Подготовь три коротких варианта ответа специалисту: основной, более краткий и осторожный при недостатке данных. "
             "Не выдумывай выполненные проверки и факты. Пиши естественно, без канцелярита.\n\n"
             f"Тема: {context.subject or 'не указана'}\n"
