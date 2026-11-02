@@ -11,6 +11,7 @@
       :root{--leshy-composer-inset:170px}
       body.full #pane-chat{overflow:hidden!important}
       body.full #messages{padding-bottom:calc(var(--leshy-composer-inset) + 28px)!important;scroll-padding-bottom:calc(var(--leshy-composer-inset) + 28px)!important}
+      #sessionArchiveToggle{display:none!important}
       #leshyWorkStatus{position:absolute;left:50%;bottom:calc(var(--leshy-composer-inset) - 8px);transform:translateX(-50%);z-index:34;display:none;align-items:center;gap:8px;max-width:min(760px,calc(100% - 40px));padding:6px 10px;border:1px solid #3d3d3d;background:rgba(33,33,33,.94);backdrop-filter:blur(10px);border-radius:10px;color:#bdbdbd;font-size:12px;line-height:1.35;box-shadow:0 8px 24px rgba(0,0,0,.2);pointer-events:none}
       #leshyWorkStatus.show{display:flex}
       #leshyWorkStatus .dot{width:7px;height:7px;border-radius:50%;background:#a8c8ff;box-shadow:0 0 0 3px rgba(168,200,255,.08);animation:leshyWorkStatusPulse 1.15s ease-in-out infinite;flex:0 0 7px}
