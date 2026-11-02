@@ -131,6 +131,27 @@ def _patch_provider(provider: Any) -> None:
         _patch_provider(child)
 
 
+def _base_search_plan(manager, message: str) -> dict[str, Any]:
+    """Минимальный совместимый план для knowledge backend без freshness API."""
+    knowledge = manager.app.knowledge
+    trusted_search = getattr(knowledge, "search", None)
+    candidate_search = getattr(knowledge, "search_candidates", None)
+    trusted = list(trusted_search(message, trusted_only=True, limit=5) or []) if callable(trusted_search) else []
+    candidates = list(candidate_search(message, limit=5) or []) if callable(candidate_search) else []
+    reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
+    marker_router = getattr(manager.app, "_needs_live_search", None)
+    needed = bool(reason or (callable(marker_router) and marker_router(message)))
+    return {
+        "trusted": trusted,
+        "candidates": candidates,
+        "reason": reason or ("требуются актуальные данные" if needed else ""),
+        "needed": needed,
+        "freshness_satisfied": False,
+        "stale": [],
+        "fresh_dynamic": [],
+    }
+
+
 def install_runtime_latency_fixes(app=None) -> None:
     """Установить подтверждённые runtime-логами исправления Web/Telegram."""
     global _INSTALLED, _ORIGINAL_SEARCH_PLAN, _ORIGINAL_BUILD_CONTEXT, _ORIGINAL_LIVE_SEARCH
@@ -154,7 +175,18 @@ def install_runtime_latency_fixes(app=None) -> None:
     _ORIGINAL_LIVE_SEARCH = LeshyApp.live_search
 
     def search_plan(self, message: str) -> dict[str, Any]:
-        plan = dict(_ORIGINAL_SEARCH_PLAN(self, message))
+        try:
+            plan = dict(_ORIGINAL_SEARCH_PLAN(self, message))
+        except AttributeError as exc:
+            # Freshness расширяет штатный KnowledgeBase, но тестовые/плагинные
+            # knowledge backend могут реализовывать только старый search API.
+            # В таком случае деградируем к базовой политике, а не ломаем чат.
+            text = str(exc)
+            if "search_stale_dynamic" not in text and "search_fresh_dynamic" not in text:
+                raise
+            plan = _base_search_plan(self, message)
+            event("freshness_backend_compat_fallback", error=text[:300])
+
         # Dynamic-data обычно требует live-search. Исключение: freshness-layer
         # уже нашёл в LeshyBrain релевантные сведения, проверенные в пределах TTL.
         # Тогда повторный интернет-поиск не нужен, если пользователь явно не
