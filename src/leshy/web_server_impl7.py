@@ -39,6 +39,7 @@ def _runtime_html(settings) -> bytes:
     for marker in (
         '<script src="/chat-idempotency.js"></script>',
         '<script src="/chat-stall-watchdog.js"></script>',
+        '<script src="/chat-followup-finalizer.js"></script>',
     ):
         if marker not in html:
             html = html.replace("</body>", marker + "\n</body>")
@@ -61,7 +62,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            if parsed.path in {"/chat-idempotency.js", "/chat-stall-watchdog.js"}:
+            if parsed.path in {"/chat-idempotency.js", "/chat-stall-watchdog.js", "/chat-followup-finalizer.js"}:
                 name = parsed.path.rsplit("/", 1)[-1]
                 try:
                     return self._send_asset(name, "application/javascript; charset=utf-8")
