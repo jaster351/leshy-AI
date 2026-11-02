@@ -19,6 +19,7 @@ $autoRoot = Join-Path $repoRoot '.autobuild'
 $packageDist = Join-Path $autoRoot 'package-dist'
 $packageRoot = Join-Path $packageDist 'Leshy'
 $packageWork = Join-Path $autoRoot 'pyinstaller-work'
+$browserBundle = Join-Path $autoRoot 'playwright-browsers'
 $liveRoot = Join-Path $repoRoot 'dist\Leshy'
 $liveExe = Join-Path $liveRoot 'Leshy.exe'
 $brainRoot = Join-Path $liveRoot 'LeshyBrain'
@@ -46,6 +47,18 @@ python -m pip install --upgrade pip
 python -m pip install -e "."
 python -m pip install "pyinstaller>=6.11,<7"
 python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+
+# Leshy owns its browser runtime. Do not depend on Firefox/Chrome/Edge installed
+# in Windows. Download the Playwright Firefox build into a private build cache,
+# then copy that exact browser into the packaged Leshy directory.
+Remove-Item -Recurse -Force $browserBundle -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $browserBundle | Out-Null
+$env:PLAYWRIGHT_BROWSERS_PATH = $browserBundle
+python -m playwright install firefox
+if ($LASTEXITCODE -ne 0) { throw "Playwright Firefox install failed with exit code $LASTEXITCODE" }
+$bundledFirefox = Get-ChildItem -LiteralPath $browserBundle -Recurse -Filter firefox.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $bundledFirefox) { throw "Playwright did not install Firefox into $browserBundle" }
+Write-Host "BUNDLED FIREFOX: $($bundledFirefox.FullName)"
 
 # .autobuild is disposable compiler workspace only. Finished output is published
 # to dist\Leshy either here (manual build) or by AutoBuilder after it creates its
@@ -76,6 +89,12 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCOD
 
 $packageExe = Join-Path $packageRoot 'Leshy.exe'
 if (-not (Test-Path -LiteralPath $packageExe)) { throw "PyInstaller did not create $packageExe" }
+
+$packagedBrowserRoot = Join-Path $packageRoot 'playwright-browsers'
+Remove-Item -Recurse -Force $packagedBrowserRoot -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath $browserBundle -Destination $packagedBrowserRoot -Recurse -Force
+$packagedFirefox = Get-ChildItem -LiteralPath $packagedBrowserRoot -Recurse -Filter firefox.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $packagedFirefox) { throw "Packaged Leshy does not contain its Firefox runtime: $packagedBrowserRoot" }
 
 function Normalize-PathText {
   param([string]$Value)
@@ -205,5 +224,6 @@ if (-not $StageOnly) {
   Write-Host "READY EXE:     $liveExe"
 }
 Write-Host "READY SETUP:   $installer"
+Write-Host "BROWSER:       bundled Firefox from $packagedBrowserRoot"
 Write-Host "DATA SAFE:     $brainRoot is preserved during live publication."
 Write-Host 'AUTO TESTS:    disabled; manual verification by user.'
