@@ -20,7 +20,7 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
     ModuleSettingDefinition(
         name="human-browser",
         title="Human Browser",
-        description="Собственный Firefox Лешего с постоянным профилем, cookies и представлением страницы как для человека.",
+        description="Системный Edge/Chrome/Chromium с отдельным профилем Лешего, cookies и представлением страницы как для человека; если браузера нет, Windows-версия попробует установить его автоматически.",
     ),
     ModuleSettingDefinition(
         name="parcel-tracking",
