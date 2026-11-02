@@ -68,7 +68,6 @@
     try{fetch('/v1/chat/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:stream.requestId}),keepalive:true})}catch(_e){}
     try{stream.controller.abort()}catch(_e){}
     streams.delete(stream.sessionId||stream.tempKey);stateForCurrent();decorateSidebar();event('done',{session_id:stream.sessionId,stopped:true});
-    return {session_id:stream.sessionId||'',answer:stream.raw||'',stopped:true};
   }
   window.stopCurrentLeshyStream=()=>stop(streams.get(sid()));
 
@@ -76,16 +75,8 @@
     setSid(id);unread.delete(id);if(!unread.size)document.title='Леший';const messages=$('messages');if(messages)messages.textContent='';
     try{
       const r=await api('/v1/history?session_id='+encodeURIComponent(id)+'&owner_id='+encodeURIComponent(OWNER));
-      const items=r.items||[];
-      for(const m of items)window.addMessage(m.role,m.content);
-      const live=streams.get(id);
-      if(live){
-        const pending=String(live.userText||'');
-        const pendingAlreadySaved=!pending||items.some(m=>String(m.role||'')==='user'&&String(m.content||'')===pending);
-        if(pending&&!pendingAlreadySaved)window.addMessage('user',pending);
-        const ui=makeStreamingBox(live.raw);if(ui){live.box=ui.box;live.body=ui.body}
-        event('activity',{session_id:id,kind:live.activityKind||'',text:live.activity||'Леший думает…'});
-      }
+      for(const m of r.items||[])window.addMessage(m.role,m.content);
+      const live=streams.get(id);if(live){const ui=makeStreamingBox(live.raw);if(ui){live.box=ui.box;live.body=ui.body}event('activity',{session_id:id,kind:live.activityKind||'',text:live.activity||'Леший думает…'})}
     }catch(e){if(messages){messages.textContent='';window.addMessage('assistant','Не удалось загрузить историю: '+e.message)}}
     try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}stateForCurrent();decorateSidebar();
   }
@@ -96,7 +87,7 @@
 
   async function runStream(text,requestedSession){
     const requestId=(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random());const controller=new AbortController();
-    const tempKey=requestedSession||('pending:'+requestId);const stream={requestId,controller,tempKey,sessionId:requestedSession||'',userText:text,raw:'',activity:'Леший думает…',activityKind:'',renderPending:false,body:null,box:null,meta:null};
+    const tempKey=requestedSession||('pending:'+requestId);const stream={requestId,controller,tempKey,sessionId:requestedSession||'',raw:'',activity:'Леший думает…',activityKind:'',renderPending:false,body:null,box:null,meta:null};
     streams.set(tempKey,stream);if(requestedSession)streams.set(requestedSession,stream);
     const ui=makeStreamingBox('');if(ui){stream.box=ui.box;stream.body=ui.body}stateForCurrent();decorateSidebar();event('activity',{session_id:requestedSession||'',text:'Леший думает…'});
     try{
@@ -114,16 +105,14 @@
         }else if(type==='done')done=data;else if(type==='error')throw new Error(data.error||'Ошибка генерации');
       })}
       const answer=done&&typeof done.answer==='string'?done.answer:stream.raw;stream.raw=answer;streams.delete(stream.sessionId||stream.tempKey);event('done',{session_id:stream.sessionId,answer});notifyDone(stream,answer);await refreshActiveView(stream);stateForCurrent();await Promise.allSettled([window.loadSessions?window.loadSessions():Promise.resolve(),typeof window.refreshStatus==='function'?window.refreshStatus():Promise.resolve()]);
-      return {session_id:stream.sessionId||'',answer,stopped:!!(done&&done.stopped),request_id:requestId};
     }catch(e){
       streams.delete(stream.sessionId||stream.tempKey);if(e.name!=='AbortError'){if(sid()===stream.sessionId||(!stream.sessionId&&sid()===''))window.addMessage('assistant','Ошибка: '+e.message);toast('Ошибка ответа Лешего: '+e.message)}stateForCurrent();decorateSidebar();event('done',{session_id:stream.sessionId,error:e.message||''});
-      return {session_id:stream.sessionId||'',answer:'',error:e.message||'',stopped:e.name==='AbortError',request_id:requestId};
     }
   }
 
   window.sendFrom=async function(input){
-    const current=streams.get(sid());if(current)return await stop(current);
-    const text=String(input&&input.value||'').trim();if(!text)return null;ensureNotifyPermission();const requested=sid();input.value='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}window.addMessage('user',text);return await runStream(text,requested);
+    const current=streams.get(sid());if(current){await stop(current);return}
+    const text=String(input&&input.value||'').trim();if(!text)return;ensureNotifyPermission();const requested=sid();input.value='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}window.addMessage('user',text);runStream(text,requested);
   };
 
   async function decorateSidebar(){
@@ -131,14 +120,7 @@
     try{
       const archivedView=$('sessionArchiveToggle')?.textContent?.trim()==='Назад';
       const r=await api('/v1/sessions?owner_id='+encodeURIComponent(OWNER)+'&limit=100&archived='+(archivedView?'1':'0'));const rows=[...list.querySelectorAll('.leshy-session-item,.item')];
-      (r.items||[]).forEach((item,i)=>{
-        const row=rows[i];if(!row)return;row.dataset.sessionId=item.id;
-        const open=row.querySelector('.leshy-session-open')||row.querySelector('button')||row;
-        open.onclick=ev=>{if(ev){ev.preventDefault();ev.stopPropagation()}loadHistory(item.id)};
-        open.querySelectorAll('.leshy-session-work,.leshy-session-unread').forEach(x=>x.remove());open.classList.remove('is-working','has-unread');
-        if(streams.has(item.id)){const d=document.createElement('i');d.className='leshy-session-work';d.title='Леший отвечает';open.appendChild(d);open.classList.add('is-working')}
-        else if(unread.has(item.id)){const d=document.createElement('i');d.className='leshy-session-unread';d.title='Новый ответ';open.appendChild(d);open.classList.add('has-unread')}
-      });
+      (r.items||[]).forEach((item,i)=>{const row=rows[i];if(!row)return;row.dataset.sessionId=item.id;const open=row.querySelector('.leshy-session-open')||row.querySelector('button');if(!open)return;open.querySelectorAll('.leshy-session-work,.leshy-session-unread').forEach(x=>x.remove());open.classList.remove('is-working','has-unread');if(streams.has(item.id)){const d=document.createElement('i');d.className='leshy-session-work';d.title='Леший отвечает';open.appendChild(d);open.classList.add('is-working')}else if(unread.has(item.id)){const d=document.createElement('i');d.className='leshy-session-unread';d.title='Новый ответ';open.appendChild(d);open.classList.add('has-unread')}});
     }catch(_e){}
   }
 

@@ -8,28 +8,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebFollowupStreamRegressionTests(unittest.TestCase):
-    def test_old_terminal_wrapper_remains_available_but_is_not_runtime_owner(self) -> None:
-        source = (ROOT / "web" / "chat-followup-finalizer.js").read_text(encoding="utf-8")
-        self.assertIn("TERMINAL_EVENTS=new Set(['done','error','duplicate'])", source)
-        self.assertIn("reader.cancel('leshy logical stream terminal')", source)
-        self.assertIn("/v1/chat/stream", source)
+    def test_reference_multitask_owns_followup_lifecycle(self) -> None:
+        source = (ROOT / "web" / "chat-multitask.js").read_text(encoding="utf-8")
+        self.assertIn("const streams=new Map();", source)
+        self.assertIn("runStream(text,requested);", source)
+        self.assertIn("streams.delete(stream.sessionId||stream.tempKey)", source)
+        self.assertIn("await refreshActiveView(stream)", source)
 
-    def test_runtime_loads_canonical_controller_after_existing_web_guards(self) -> None:
+    def test_extra_chat_wrappers_are_not_injected_into_runtime_page(self) -> None:
         source = (ROOT / "src" / "leshy" / "web_server_impl7.py").read_text(encoding="utf-8")
-        idem = source.index('chat-idempotency.js')
-        watchdog = source.index('chat-stall-watchdog.js')
-        canonical = source.index('chat-controller-canonical.js')
-        self.assertLess(idem, watchdog)
-        self.assertLess(watchdog, canonical)
-        self.assertIn("html = html.replace('<script src=\"/chat-followup-finalizer.js\"></script>\\n', \"\")", source)
+        runtime = source[source.index("def _runtime_html"):source.index("def make_handler")]
+        self.assertIn("return shell._runtime_html(settings)", runtime)
+        self.assertNotIn("html.replace", runtime)
+        self.assertNotIn("chat-controller-canonical.js", runtime)
+        self.assertNotIn("chat-idempotency.js", runtime)
+        self.assertNotIn("chat-stall-watchdog.js", runtime)
+        self.assertNotIn("chat-followup-finalizer.js", runtime)
 
-    def test_canonical_controller_uses_new_request_id_and_current_session_for_each_followup(self) -> None:
-        source = (ROOT / "web" / "chat-controller-canonical.js").read_text(encoding="utf-8")
-        self.assertIn("requestId:rid()", source)
-        self.assertIn("sessionId:sid()", source)
-        self.assertIn("session_id:req.sessionId", source)
-        self.assertIn("request_id:req.requestId", source)
-        self.assertIn("if(active===req)active=null;", source)
+    def test_reference_transport_still_uses_unique_request_id(self) -> None:
+        source = (ROOT / "web" / "chat-multitask.js").read_text(encoding="utf-8")
+        self.assertIn("const requestId=(crypto.randomUUID?crypto.randomUUID()", source)
+        self.assertIn("request_id:requestId", source)
+        self.assertIn("session_id:requestedSession||''", source)
 
 
 if __name__ == "__main__":
