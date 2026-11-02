@@ -10,6 +10,12 @@ from urllib import parse
 # не превращает LeshyBrain в нелегальную копию научных издательств.
 SCIENTIFIC_MATERIAL_TARGET = 2000
 
+# Точный размер закрытых frontier-моделей в параметрах публично не известен.
+# Поэтому программа самоизучения задаёт большой практический минимум: миллион
+# содержательно различных задач. Они НЕ материализуются в SQLite заранее, а
+# детерминированно выдаются по cursor одну за другой. Это не раздувает базу.
+SELF_STUDY_TASK_TARGET = 1_000_000
+
 ACADEMIC_DOMAINS = (
     "arxiv.org",
     "pubmed.ncbi.nlm.nih.gov",
@@ -62,6 +68,61 @@ SCIENCE_TOPICS = (
     "education science learning science and knowledge retention",
 )
 
+# Независимые оси делают задачи содержательно различными. Вместо старых
+# 30*16=480 комбинаций используется пространство в десятки миллионов задач.
+STUDY_LENSES = (
+    "foundations terminology and conceptual models",
+    "historical development and landmark results",
+    "state of the art methods and strongest baselines",
+    "measurement metrics and evaluation methodology",
+    "failure modes limitations and negative results",
+    "robustness uncertainty and out of distribution behavior",
+    "efficiency latency memory compute and energy cost",
+    "safety security misuse and adversarial resilience",
+    "reproducibility replication and research quality",
+    "deployment operations monitoring and maintenance",
+    "human factors accessibility usability and interaction",
+    "ethics governance law standards and accountability",
+    "datasets benchmarks data quality and contamination",
+    "causal mechanisms interpretation and explainability",
+    "applications case studies and real world evidence",
+    "open problems future directions and research gaps",
+)
+
+EVIDENCE_MODES = (
+    "systematic review and meta analysis",
+    "review survey and tutorial synthesis",
+    "benchmark and comparative evaluation",
+    "replication reproducibility and ablation evidence",
+    "longitudinal observational and real world evidence",
+    "randomized controlled or experimental evidence",
+    "standards best practices and consensus guidance",
+    "datasets methods protocols and measurement resources",
+)
+
+CROSS_DISCIPLINARY_FOCI = (
+    "mathematical foundations",
+    "software implementation",
+    "hardware acceleration",
+    "data engineering",
+    "information retrieval",
+    "human cognition",
+    "decision making",
+    "privacy",
+    "cybersecurity",
+    "reliability engineering",
+    "economics",
+    "education",
+    "health and medicine",
+    "biology",
+    "physics",
+    "chemistry",
+    "climate and energy",
+    "robotics",
+    "public policy",
+    "open source ecosystems",
+)
+
 NEWS_TOPICS = (
     "artificial intelligence and machine learning",
     "cybersecurity vulnerabilities and defensive security",
@@ -75,12 +136,30 @@ NEWS_TOPICS = (
     "economics technology business and regulation",
 )
 
+# Для каждой основной темы сравниваем её с любой другой темой, кроме самой себя.
+COMPARISON_TOPIC_COUNT = len(SCIENCE_TOPICS) - 1
+CURRICULUM_CAPACITY = (
+    len(SCIENCE_TOPICS)
+    * len(ACADEMIC_DOMAINS)
+    * len(STUDY_LENSES)
+    * len(EVIDENCE_MODES)
+    * len(CROSS_DISCIPLINARY_FOCI)
+    * COMPARISON_TOPIC_COUNT
+)
+if CURRICULUM_CAPACITY < SELF_STUDY_TASK_TARGET:  # pragma: no cover - защита конфигурации
+    raise RuntimeError("Пространство curriculum меньше целевого числа уникальных задач")
+
 
 @dataclass(frozen=True)
 class ScientificQuery:
     topic: str
     domain: str
     query: str
+    task_id: int = 0
+    lens: str = ""
+    evidence_mode: str = ""
+    cross_focus: str = ""
+    comparison_topic: str = ""
 
 
 def host_of(url: str) -> str:
@@ -96,29 +175,69 @@ def is_academic_url(url: str) -> bool:
     return any(host == domain or host.endswith("." + domain) for domain in ACADEMIC_DOMAINS)
 
 
+def _curriculum_coordinates(index: int) -> tuple[int, int, int, int, int, int]:
+    """Биективно раскладывает index в координаты curriculum без повторов."""
+    value = int(index)
+    if value < 0 or value >= CURRICULUM_CAPACITY:
+        raise IndexError(f"Задача самоизучения вне диапазона 0..{CURRICULUM_CAPACITY - 1}")
+
+    topic_i, value = value % len(SCIENCE_TOPICS), value // len(SCIENCE_TOPICS)
+    domain_i, value = value % len(ACADEMIC_DOMAINS), value // len(ACADEMIC_DOMAINS)
+    lens_i, value = value % len(STUDY_LENSES), value // len(STUDY_LENSES)
+    evidence_i, value = value % len(EVIDENCE_MODES), value // len(EVIDENCE_MODES)
+    focus_i, value = value % len(CROSS_DISCIPLINARY_FOCI), value // len(CROSS_DISCIPLINARY_FOCI)
+    compare_i = value % COMPARISON_TOPIC_COUNT
+    return topic_i, domain_i, lens_i, evidence_i, focus_i, compare_i
+
+
 def scientific_query(cursor: int) -> ScientificQuery:
+    """Вернуть уникальную задачу автономного самоизучения.
+
+    В старой схеме после 480 запросов комбинации начинали повторяться. Теперь
+    mixed-radix координаты дают десятки миллионов неповторяющихся задач; первый
+    миллион является обязательным минимумом, после него обучение не останавливается.
+    """
     cursor = max(0, int(cursor))
-    topic = SCIENCE_TOPICS[cursor % len(SCIENCE_TOPICS)]
-    domain = ACADEMIC_DOMAINS[(cursor // len(SCIENCE_TOPICS)) % len(ACADEMIC_DOMAINS)]
-    # Review/survey/systematic review дают Лешему фундаментальную базу, а не набор
-    # случайных одиночных публикаций. После полного прохода комбинации повторяются:
-    # поисковая выдача со временем меняется и пополняет знания новыми работами.
-    query = f'{topic} review survey systematic review site:{domain}'
-    return ScientificQuery(topic=topic, domain=domain, query=query)
+    topic_i, domain_i, lens_i, evidence_i, focus_i, compare_i = _curriculum_coordinates(cursor)
+    topic = SCIENCE_TOPICS[topic_i]
+    domain = ACADEMIC_DOMAINS[domain_i]
+    lens = STUDY_LENSES[lens_i]
+    evidence = EVIDENCE_MODES[evidence_i]
+    focus = CROSS_DISCIPLINARY_FOCI[focus_i]
+    comparison_topic = SCIENCE_TOPICS[(topic_i + 1 + compare_i) % len(SCIENCE_TOPICS)]
+    query = (
+        f"{topic}; {lens}; {evidence}; cross-disciplinary focus: {focus}; "
+        f"compare and connect with: {comparison_topic}; review survey systematic review site:{domain}"
+    )
+    return ScientificQuery(
+        topic=topic,
+        domain=domain,
+        query=query,
+        task_id=cursor,
+        lens=lens,
+        evidence_mode=evidence,
+        cross_focus=focus,
+        comparison_topic=comparison_topic,
+    )
 
 
 def news_query(cursor: int, now: datetime | None = None) -> str:
     now = now or datetime.now(timezone.utc)
     topic = NEWS_TOPICS[max(0, int(cursor)) % len(NEWS_TOPICS)]
-    # Дата заставляет поисковик предпочитать текущий новостной цикл и не повторять
-    # одну и ту же старую выдачу бесконечно.
+    # Дата делает каждую суточную итерацию отдельной актуальной задачей, а не
+    # повтором старой новостной выдачи.
     return f'{topic} latest news research {now:%Y-%m-%d}'
 
 
 __all__ = [
     "SCIENTIFIC_MATERIAL_TARGET",
+    "SELF_STUDY_TASK_TARGET",
+    "CURRICULUM_CAPACITY",
     "ACADEMIC_DOMAINS",
     "SCIENCE_TOPICS",
+    "STUDY_LENSES",
+    "EVIDENCE_MODES",
+    "CROSS_DISCIPLINARY_FOCI",
     "NEWS_TOPICS",
     "ScientificQuery",
     "host_of",
