@@ -20,7 +20,7 @@ $autoRoot = Join-Path $repoRoot '.autobuild'
 $packageDist = Join-Path $autoRoot 'package-dist'
 $packageRoot = Join-Path $packageDist 'Leshy'
 $packageWork = Join-Path $autoRoot 'pyinstaller-work'
-$smokeRoot = Join-Path $autoRoot 'frozen-smoke-brain'
+$smokePackageRoot = Join-Path $autoRoot 'frozen-smoke-package'
 $liveRoot = Join-Path $repoRoot 'dist\Leshy'
 $liveExe = Join-Path $liveRoot 'Leshy.exe'
 $brainRoot = Join-Path $liveRoot 'LeshyBrain'
@@ -56,7 +56,7 @@ python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://
 # .autobuild is disposable compiler workspace only. Finished output is published
 # to dist\Leshy either here (manual build) or by AutoBuilder after it creates its
 # rollback backup (StageOnly/AutoBuilder mode).
-Remove-Item -Recurse -Force $packageDist, $packageWork, $smokeRoot -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $packageDist, $packageWork, $smokePackageRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
 
 python -m PyInstaller --noconfirm --clean --onedir --console `
@@ -107,15 +107,24 @@ function Get-FreeTcpPort {
 
 function Invoke-FrozenSmokeTest {
   param(
-    [Parameter(Mandatory=$true)][string]$Executable,
-    [Parameter(Mandatory=$true)][string]$DataRoot
+    [Parameter(Mandatory=$true)][string]$SourcePackageRoot,
+    [Parameter(Mandatory=$true)][string]$SmokePackageRoot
   )
 
-  if (Test-Path -LiteralPath $DataRoot) {
-    Remove-Item -LiteralPath $DataRoot -Recurse -Force
+  if (Test-Path -LiteralPath $SmokePackageRoot) {
+    Remove-Item -LiteralPath $SmokePackageRoot -Recurse -Force
   }
-  New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
+  New-Item -ItemType Directory -Force -Path $SmokePackageRoot | Out-Null
+  Copy-Item -Path (Join-Path $SourcePackageRoot '*') -Destination $SmokePackageRoot -Recurse -Force
 
+  $executable = Join-Path $SmokePackageRoot 'Leshy.exe'
+  if (-not (Test-Path -LiteralPath $executable)) {
+    throw "Frozen smoke package does not contain Leshy.exe: $executable"
+  }
+
+  # Launcher intentionally keeps LeshyBrain next to Leshy.exe. Running smoke from
+  # a disposable full package copy verifies that exact production behaviour while
+  # preventing test data from contaminating the package used by the installer.
   $port = Get-FreeTcpPort
   $baseUrl = "http://127.0.0.1:$port"
   $oldBackend = $env:LESHY_LLM_BACKEND
@@ -130,13 +139,11 @@ function Invoke-FrozenSmokeTest {
     $env:LESHY_BROWSER_HEADLESS = '1'
     $env:LESHY_API_TOKEN = ''
 
-    Write-Host "FROZEN SMOKE: starting $Executable on $baseUrl"
-    $process = Start-Process -FilePath $Executable -ArgumentList @(
+    Write-Host "FROZEN SMOKE: starting $executable on $baseUrl"
+    $process = Start-Process -FilePath $executable -ArgumentList @(
       '--host', '127.0.0.1',
       '--port', [string]$port,
-      '--no-browser',
-      '--smoke-seconds', '90',
-      '--data-root', ('"' + $DataRoot + '"')
+      '--no-browser'
     ) -PassThru -WindowStyle Hidden
 
     $deadline = (Get-Date).AddSeconds(60)
@@ -174,13 +181,13 @@ function Invoke-FrozenSmokeTest {
     if ($null -eq $oldEmbeddings) { Remove-Item Env:LESHY_EMBEDDINGS_ENABLED -ErrorAction SilentlyContinue } else { $env:LESHY_EMBEDDINGS_ENABLED = $oldEmbeddings }
     if ($null -eq $oldHeadless) { Remove-Item Env:LESHY_BROWSER_HEADLESS -ErrorAction SilentlyContinue } else { $env:LESHY_BROWSER_HEADLESS = $oldHeadless }
     if ($null -eq $oldToken) { Remove-Item Env:LESHY_API_TOKEN -ErrorAction SilentlyContinue } else { $env:LESHY_API_TOKEN = $oldToken }
-    Remove-Item -LiteralPath $DataRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $SmokePackageRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
 
-# Quality gate is run against the actual PyInstaller output before publication or
-# installer creation. Existence of Leshy.exe alone is not considered a successful build.
-Invoke-FrozenSmokeTest -Executable $packageExe -DataRoot $smokeRoot
+# Quality gate is run against a disposable copy of the actual PyInstaller package.
+# Existence of Leshy.exe alone is not considered a successful build.
+Invoke-FrozenSmokeTest -SourcePackageRoot $packageRoot -SmokePackageRoot $smokePackageRoot
 
 function Get-LiveProcesses {
   $root = Normalize-PathText $liveRoot
