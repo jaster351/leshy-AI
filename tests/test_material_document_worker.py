@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from leshy.document_learning import DocumentAdapterUnavailable
 from leshy.document_pipeline import DocumentIngestResult
-from leshy.material_document_worker import process_material_document
+from leshy.material_document_worker import finish_material_document, process_material_document
 
 
 class MaterialDocumentWorkerTests(unittest.TestCase):
@@ -67,6 +67,40 @@ class MaterialDocumentWorkerTests(unittest.TestCase):
         with patch("leshy.material_document_worker.ingest_document", side_effect=ValueError("corrupt internal state")):
             with self.assertRaisesRegex(ValueError, "corrupt internal state"):
                 process_material_document("manual.pdf", object())
+
+    def test_finish_bridge_persists_verified_outcome_with_provenance(self):
+        coordinator = Mock()
+        result = DocumentIngestResult(
+            title="guide.docx",
+            source_uri="file:///guide.docx",
+            adapter="docx",
+            source_sha256="c" * 64,
+            source_bytes=2048,
+            pages_or_slides=1,
+            characters=700,
+            candidate_claims=3,
+            verification_requested=True,
+        )
+        row = {"id": 42, "source": "guide.docx", "title": "Руководство"}
+        with patch("leshy.material_document_worker.ingest_document", return_value=result):
+            outcome = finish_material_document(coordinator, row, object())
+        self.assertEqual(outcome.status, "done")
+        coordinator.finish_material.assert_called_once()
+        args, kwargs = coordinator.finish_material.call_args
+        self.assertEqual(args, (42,))
+        self.assertEqual(kwargs["status"], "done")
+        self.assertEqual(kwargs["metadata"]["source_sha256"], "c" * 64)
+        self.assertEqual(kwargs["metadata"]["adapter"], "docx")
+
+    def test_finish_bridge_persists_blocked_ocr_without_marking_done(self):
+        coordinator = Mock()
+        row = {"id": 7, "source": "scan.pdf", "title": "Скан"}
+        with patch("leshy.material_document_worker.ingest_document", side_effect=ValueError("нужен OCR: не найден извлекаемый текст")):
+            outcome = finish_material_document(coordinator, row, object())
+        self.assertEqual(outcome.status, "blocked")
+        _, kwargs = coordinator.finish_material.call_args
+        self.assertEqual(kwargs["status"], "blocked")
+        self.assertTrue(kwargs["metadata"]["ocr_or_vision_pending"])
 
 
 if __name__ == "__main__":
