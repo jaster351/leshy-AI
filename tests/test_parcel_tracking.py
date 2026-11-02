@@ -6,7 +6,7 @@ import unittest
 
 from leshy.browser_skills import BrowserSkillExecution
 from leshy.parcel_tracking import (
-    GDEPOSYLKA_SKILL,
+    PARCELRADAR_SKILL,
     ParcelTrackingService,
     extract_tracking_numbers,
     parse_parcel_intent,
@@ -22,12 +22,13 @@ class FakeRunner:
     def __init__(self):
         self.calls: list[str] = []
         self.text = (
-            "Отслеживание почтового отправления\n"
+            "Tracking number\n"
             f"{TRACK}\n"
-            "Почта Китая\n"
-            "Прибыло в сортировочный центр\n"
-            "Челябинск\n"
-            "02 ноября 2026 13:40\n"
+            "China Post\n"
+            "In transit\n"
+            "Arrived at sorting center\n"
+            "Chelyabinsk\n"
+            "02 November 2026 13:40\n"
         )
 
     def run_form_skill(self, skill, value, *, activity=None):
@@ -37,11 +38,11 @@ class FakeRunner:
         return BrowserSkillExecution(
             skill_id=skill.skill_id,
             status="success",
-            page_url="https://gdeposylka.ru/track/" + value,
-            page_title="Отслеживание посылки",
+            page_url="https://parcelradar.app/track/" + value,
+            page_title="ParcelRadar tracking",
             visible_text=self.text.replace(TRACK, value),
             input_value=value,
-            browser_name="Edge",
+            browser_name="Firefox",
             elapsed_ms=100,
         )
 
@@ -97,18 +98,29 @@ class ParcelTrackingTests(unittest.TestCase):
         self.assertEqual(parse_parcel_intent("Покажи мои посылки").action, "list")
         self.assertIsNone(parse_parcel_intent("Расскажи про Челябинск"))
 
-    def test_gdeposylka_skill_uses_human_visible_form_hints(self) -> None:
-        self.assertEqual(GDEPOSYLKA_SKILL.start_url, "https://gdeposylka.ru/")
-        self.assertIn("Номер отслеживания", GDEPOSYLKA_SKILL.input_hints)
-        self.assertIn("Отследить посылку", GDEPOSYLKA_SKILL.submit_hints)
+    def test_parcelradar_skill_uses_free_no_signup_tracker(self) -> None:
+        self.assertEqual(PARCELRADAR_SKILL.start_url, "https://parcelradar.app/")
+        self.assertIn("Enter tracking number", PARCELRADAR_SKILL.input_hints)
+        self.assertIn("Track", PARCELRADAR_SKILL.submit_hints)
+        self.assertEqual(PARCELRADAR_SKILL.allowed_hosts, ("parcelradar.app",))
 
-    def test_page_parser_extracts_stable_status(self) -> None:
-        parsed = parse_parcel_page(TRACK, self.runner.text, "https://gdeposylka.ru/track/test", browser_name="Edge")
+    def test_page_parser_extracts_english_status(self) -> None:
+        parsed = parse_parcel_page(TRACK, self.runner.text, "https://parcelradar.app/track/test", browser_name="Firefox")
         self.assertEqual(parsed.tracking_number, TRACK)
         self.assertEqual(parsed.status_category, "in_transit")
-        self.assertIn("сортировочный центр", parsed.status.lower())
+        self.assertIn("in transit", parsed.status.lower())
         self.assertTrue(parsed.fingerprint)
-        self.assertEqual(parsed.browser_name, "Edge")
+        self.assertEqual(parsed.browser_name, "Firefox")
+
+    def test_page_parser_understands_not_found(self) -> None:
+        parsed = parse_parcel_page(
+            TRACK,
+            f"{TRACK}\nShipment not found\nCheck the number and try again later",
+            "https://parcelradar.app/track/test",
+            browser_name="Firefox",
+        )
+        self.assertEqual(parsed.status_category, "unknown")
+        self.assertIn("не найдены", parsed.status)
 
     def test_follow_persists_subscription_and_does_not_need_llm(self) -> None:
         result = self.service.follow(
@@ -135,9 +147,9 @@ class ParcelTrackingTests(unittest.TestCase):
         )
         self.runner.text = (
             f"{TRACK}\n"
-            "Посылка доставлена получателю\n"
-            "Челябинск\n"
-            "02 ноября 2026 18:00\n"
+            "Delivered to recipient\n"
+            "Chelyabinsk\n"
+            "02 November 2026 18:00\n"
         )
         with self.app.storage.connection() as conn:
             row = conn.execute("SELECT * FROM parcel_subscriptions WHERE owner_id='telegram:123'").fetchone()
@@ -160,7 +172,7 @@ class ParcelTrackingTests(unittest.TestCase):
             notify_target="web:local",
             session_id="web-session",
         )
-        self.runner.text = f"{TRACK}\nПосылка доставлена получателю\n"
+        self.runner.text = f"{TRACK}\nDelivered to recipient\n"
         with self.app.storage.connection() as conn:
             row = conn.execute("SELECT * FROM parcel_subscriptions WHERE owner_id='web:local'").fetchone()
         self.service._check_row(row)
