@@ -63,12 +63,69 @@ class TelegramAccessTests(unittest.TestCase):
             status = bridge.status()
             self.assertEqual(status["owner_id"], "100")
             self.assertFalse(status["allow_all"])
+            self.assertTrue(status["reply_target_priority"])
 
     def test_single_legacy_allowed_user_is_migrated_as_owner(self):
         with tempfile.TemporaryDirectory() as temp:
             _, bridge, _, _ = self.make_bridge(Path(temp))
             bridge.configure("", ["77"])
             self.assertEqual(bridge.status()["owner_id"], "77")
+
+    def test_plain_message_is_not_rewritten_without_reply(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app, bridge, _, _ = self.make_bridge(Path(temp))
+            bridge.configure("", [], allow_all=True, owner_id="100")
+            bridge._handle_message({
+                "message_id": 20,
+                "chat": {"id": 1, "type": "private"},
+                "from": {"id": 200, "first_name": "User"},
+                "text": "обычное сообщение",
+            })
+            self.assertEqual(app.chat_calls[0][0], "обычное сообщение")
+
+    def test_reply_targets_selected_old_message_even_if_chat_has_newer_messages(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app, bridge, _, _ = self.make_bridge(Path(temp))
+            bridge.configure("", [], allow_all=True, owner_id="100")
+            bridge._handle_message({
+                "message_id": 30,
+                "chat": {"id": 1, "type": "private"},
+                "from": {"id": 200, "first_name": "Михаил"},
+                "text": "А вот про это расскажи подробнее",
+                "reply_to_message": {
+                    "message_id": 10,
+                    "chat": {"id": 1, "type": "private"},
+                    "from": {"id": 100, "first_name": "Леший", "is_bot": True},
+                    "text": "Именно это старое сообщение пользователь выбрал через Ответить.",
+                },
+            })
+            self.assertEqual(len(app.chat_calls), 1)
+            prompt = app.chat_calls[0][0]
+            self.assertIn("Контекст Telegram Reply", prompt)
+            self.assertIn("ID выбранного сообщения: 10", prompt)
+            self.assertIn("Именно это старое сообщение пользователь выбрал через Ответить.", prompt)
+            self.assertIn("не подменяй цель ответа последним сообщением", prompt)
+            self.assertTrue(prompt.endswith("А вот про это расскажи подробнее"))
+
+    def test_reply_preserves_explicit_quote(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app, bridge, _, _ = self.make_bridge(Path(temp))
+            bridge.configure("", [], allow_all=True, owner_id="100")
+            bridge._handle_message({
+                "message_id": 31,
+                "chat": {"id": 1, "type": "private"},
+                "from": {"id": 200},
+                "text": "Что значит эта часть?",
+                "quote": {"text": "важный фрагмент"},
+                "reply_to_message": {
+                    "message_id": 11,
+                    "from": {"id": 100, "first_name": "Леший"},
+                    "text": "Длинное исходное сообщение с важным фрагментом внутри.",
+                },
+            })
+            prompt = app.chat_calls[0][0]
+            self.assertIn("Выделенная пользователем цитата:", prompt)
+            self.assertIn("важный фрагмент", prompt)
 
 
 if __name__ == "__main__":
