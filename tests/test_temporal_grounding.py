@@ -40,6 +40,10 @@ class TemporalGroundingTests(unittest.TestCase):
         self.assertEqual(ground_search_query(phrase, now=self.now), phrase)
         self.assertEqual(temporal_system_instruction(phrase, now=self.now), "")
 
+    def test_training_course_is_not_mistaken_for_exchange_rate(self):
+        phrase = "Посоветуй курс по Python"
+        self.assertEqual(ground_search_query(phrase, now=self.now), phrase)
+
     def test_system_instruction_contains_current_and_target_date(self):
         text = temporal_system_instruction("Расскажи погоду в Челябинске на сегодня", now=self.now)
         self.assertIn("2026-11-02 12:57:00 UTC+05:00", text)
