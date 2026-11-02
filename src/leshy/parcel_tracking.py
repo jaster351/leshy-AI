@@ -12,17 +12,21 @@ from .diagnostics import event, problem
 from .storage import utcnow
 
 
-GDEPOSYLKA_SKILL = BrowserSkillDefinition(
-    skill_id="parcel.gdeposylka.browser.v1",
-    name="ГдеПосылка — отслеживание через браузер",
-    start_url="https://gdeposylka.ru/",
-    allowed_hosts=("gdeposylka.ru",),
-    input_hints=("Номер отслеживания", "Трек-код", "трек"),
-    submit_hints=("Отследить посылку", "Отследить", "Найти"),
+PARCELRADAR_SKILL = BrowserSkillDefinition(
+    skill_id="parcel.parcelradar.browser.v1",
+    name="ParcelRadar — бесплатное отслеживание без регистрации",
+    start_url="https://parcelradar.app/",
+    allowed_hosts=("parcelradar.app",),
+    input_hints=("Enter tracking number", "Tracking number", "трек"),
+    submit_hints=("Track", "Отследить", "Search"),
     result_markers=(
-        "История отслеживания",
-        "Последнее событие",
-        "Служба доставки",
+        "In transit",
+        "Out for delivery",
+        "Delivered",
+        "Customs",
+        "Carrier",
+        "Tracking",
+        "Not found",
         "Посылка",
         "Отправление",
         "трек",
@@ -94,6 +98,7 @@ def _clean_lines(text: str) -> list[str]:
     ignored = {
         "форум", "войти", "регистрация", "главная", "сервисы", "поддержка",
         "политика конфиденциальности", "пользовательское соглашение",
+        "sign in", "sign up", "privacy policy", "terms of use", "cookie policy",
     }
     result: list[str] = []
     for value in str(text or "").splitlines():
@@ -115,6 +120,8 @@ def _relevant_excerpt(text: str, track: str) -> list[str]:
         "достав", "вруч", "получ", "сортиров", "прибыл", "покинул", "принят",
         "тамож", "курьер", "в пути", "отправлено", "отправлен из", "статус", "событ", "служба доставки",
         "не найден", "нет информации",
+        "delivered", "out for delivery", "in transit", "customs", "arrived", "departed", "accepted",
+        "picked up", "shipment", "tracking", "carrier", "status", "not found", "no information",
     )
     selected = [line for line in lines if any(word in line.lower() for word in keywords)]
     return selected[:70] if selected else lines[:50]
@@ -122,27 +129,40 @@ def _relevant_excerpt(text: str, track: str) -> list[str]:
 
 def _category(text: str) -> str:
     value = text.lower().replace("ё", "е")
-    if any(marker in value for marker in ("доставлен", "доставлено", "вручено", "вручен", "получено получателем", "получен адресатом")):
+    if any(marker in value for marker in (
+        "доставлен", "доставлено", "вручено", "вручен", "получено получателем", "получен адресатом",
+        "delivered", "delivered to recipient", "received by recipient",
+    )):
         return "delivered"
-    if any(marker in value for marker in ("передан курьеру", "курьер получил", "доставка курьером", "готов к выдаче", "ожидает в отделении", "прибыло в место вручения")):
+    if any(marker in value for marker in (
+        "передан курьеру", "курьер получил", "доставка курьером", "готов к выдаче", "ожидает в отделении", "прибыло в место вручения",
+        "out for delivery", "with courier", "ready for pickup", "ready for collection",
+    )):
         return "out_for_delivery"
-    if any(marker in value for marker in ("возврат", "неудачная попытка", "утерян", "задержан", "проблем", "исключение", "не вручено")):
+    if any(marker in value for marker in (
+        "возврат", "неудачная попытка", "утерян", "задержан", "проблем", "исключение", "не вручено",
+        "return to sender", "delivery failed", "failed delivery", "lost", "exception", "delivery exception",
+    )):
         return "exception"
-    if any(marker in value for marker in ("в пути", "сортиров", "прибыл", "покинул", "принят", "экспорт", "импорт", "отправлено", "отправлен из", "тамож")):
+    if any(marker in value for marker in (
+        "в пути", "сортиров", "прибыл", "покинул", "принят", "экспорт", "импорт", "отправлено", "отправлен из", "тамож",
+        "in transit", "arrived", "departed", "accepted", "picked up", "customs", "export", "import", "shipment received",
+    )):
         return "in_transit"
     return "unknown"
 
 
 def _status_line(lines: list[str], category: str, track: str) -> str:
     category_words = {
-        "delivered": ("достав", "вруч", "получ"),
-        "out_for_delivery": ("курьер", "готов к выдаче", "место вручения", "отделени"),
-        "exception": ("возврат", "неудач", "утерян", "задерж", "проблем"),
-        "in_transit": ("сортиров", "прибыл", "покинул", "принят", "экспорт", "импорт", "тамож", "в пути", "отправлено", "отправлен из"),
+        "delivered": ("достав", "вруч", "получ", "delivered", "received by"),
+        "out_for_delivery": ("курьер", "готов к выдаче", "место вручения", "отделени", "out for delivery", "with courier", "ready for"),
+        "exception": ("возврат", "неудач", "утерян", "задерж", "проблем", "return", "failed", "lost", "exception"),
+        "in_transit": ("сортиров", "прибыл", "покинул", "принят", "экспорт", "импорт", "тамож", "в пути", "отправлено", "отправлен из", "in transit", "arrived", "departed", "accepted", "customs", "export", "import"),
     }
     generic_ui = (
         "отслеживание почтов", "почтового отправления", "почтовое отправление",
         "номер отслеживания", "трек-код", "отследить посылку", "история отслеживания",
+        "tracking number", "track every parcel", "track a parcel", "free parcel tracking",
     )
     words = category_words.get(category, ())
     for line in lines:
@@ -167,7 +187,8 @@ def parse_parcel_page(track: str, visible_text: str, source_url: str, *, browser
     lower = excerpt.lower().replace("ё", "е")
     not_found = any(marker in lower for marker in (
         "не найден", "ничего не найдено", "нет информации", "информация об отправлении не найдена",
-        "пока нет данных", "не удалось найти отправление",
+        "пока нет данных", "не удалось найти отправление", "not found", "no information", "no tracking information",
+        "shipment not found", "tracking number not found",
     ))
     if not_found:
         status = "Сведения по этому трек-номеру пока не найдены."
@@ -208,7 +229,7 @@ class ParcelTrackingService:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS parcel_subscriptions("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT,owner_id TEXT NOT NULL,tracking_number TEXT NOT NULL,"
-                "site TEXT NOT NULL DEFAULT 'gdeposylka',status TEXT NOT NULL DEFAULT '',status_category TEXT NOT NULL DEFAULT 'unknown',"
+                "site TEXT NOT NULL DEFAULT 'parcelradar',status TEXT NOT NULL DEFAULT '',status_category TEXT NOT NULL DEFAULT 'unknown',"
                 "last_event_text TEXT NOT NULL DEFAULT '',fingerprint TEXT NOT NULL DEFAULT '',source_url TEXT NOT NULL DEFAULT '',"
                 "last_checked_at TEXT,last_change_at TEXT,next_check_epoch REAL NOT NULL DEFAULT 0,consecutive_failures INTEGER NOT NULL DEFAULT 0,"
                 "state TEXT NOT NULL DEFAULT 'active',notify_channel TEXT NOT NULL DEFAULT 'web',notify_target TEXT NOT NULL DEFAULT '',"
@@ -255,7 +276,7 @@ class ParcelTrackingService:
         track = _normalize_track(tracking_number)
         if not track:
             raise ValueError("Трек-номер не указан")
-        execution = self.runner.run_form_skill(GDEPOSYLKA_SKILL, track, activity=activity)
+        execution = self.runner.run_form_skill(PARCELRADAR_SKILL, track, activity=activity)
         if execution.status == "needs_user_action":
             return ParcelResult(
                 tracking_number=track,
@@ -493,7 +514,7 @@ def format_parcel_list(items: list[dict[str, Any]]) -> str:
 
 
 __all__ = [
-    "GDEPOSYLKA_SKILL",
+    "PARCELRADAR_SKILL",
     "ParcelIntent",
     "ParcelResult",
     "ParcelTrackingService",
