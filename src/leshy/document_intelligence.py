@@ -67,7 +67,11 @@ class DocumentIntelligence:
             converter = MarkItDown(enable_plugins=False)
             convert_local = getattr(converter, "convert_local", None)
             result = convert_local(str(file_path)) if callable(convert_local) else converter.convert(str(file_path))
-            markdown = str(getattr(result, "markdown", "") or "").strip()
+            markdown = str(
+                getattr(result, "markdown", None)
+                or getattr(result, "text_content", None)
+                or ""
+            ).strip()
             if not markdown:
                 raise RuntimeError("MarkItDown вернул пустой результат")
             engine = "markitdown"
