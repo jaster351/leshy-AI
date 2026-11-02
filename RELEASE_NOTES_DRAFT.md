@@ -4,6 +4,7 @@
 
 - Добавлен универсальный Browser Agent: Browser Use для семантического веб-исследования и Playwright для детерминированных действий.
 - Родная локальная LLM Лешего подключена к Browser Use без обязательного платного API.
+- Read-only режим Browser Use теперь технически отключает click/input/send_keys/select_dropdown, произвольный JavaScript и локальный file I/O, а не полагается только на prompt.
 - Добавлен Human Approval Gate: одноразовое подтверждение `mutate`, `commit` и `financial` действий; оплата требует суммы/валюты и отдельного подтверждения.
 - Web UI показывает `Подтвердить` / `Отмена` и отдельную кнопку подтверждения оплаты.
 - Результаты поиска вариантов сохраняются в SQLite и восстанавливаются после перезапуска.
@@ -19,5 +20,5 @@
 
 ## Проверки
 
-- Добавлены regression-тесты intent routing, approvals, restart recovery, domain allowlist, Document Intelligence, MCP Registry/Marketplace и локального Browser Use LLM bridge.
+- Добавлены regression-тесты intent routing, approvals, restart recovery, read-only tool registry, domain allowlist, Document Intelligence, MCP Registry/Marketplace и локального Browser Use LLM bridge.
 - CI дополнительно проверяет JavaScript Browser Approval, Marketplace и Module Settings.
