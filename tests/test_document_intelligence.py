@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
 
 from leshy.document_intelligence import DocumentIntelligence
 
@@ -13,9 +12,6 @@ class _TextContentResult:
 
 
 class _Converter:
-    def __init__(self, *args, **kwargs):
-        pass
-
     def convert_local(self, path):
         return _TextContentResult()
 
@@ -25,10 +21,16 @@ class DocumentIntelligenceCompatibilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.txt"
             path.write_text("fallback", encoding="utf-8")
-            with patch("markitdown.MarkItDown", _Converter):
-                result = DocumentIntelligence().convert(path)
+            result = DocumentIntelligence(converter_factory=_Converter).convert(path)
         self.assertEqual(result.engine, "markitdown")
         self.assertEqual(result.markdown, "Актуальный API MarkItDown")
+
+    def test_result_text_prefers_current_text_content_api(self) -> None:
+        class Both:
+            text_content = "current"
+            markdown = "legacy"
+
+        self.assertEqual(DocumentIntelligence._result_text(Both()), "current")
 
 
 if __name__ == "__main__":
