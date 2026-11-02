@@ -22,6 +22,7 @@ _HELP_PHRASES = {
     "справка",
     "/справка",
 }
+_NORMALIZED_HELP_PHRASES = frozenset()
 
 
 def _normalize(text: str) -> str:
@@ -31,8 +32,11 @@ def _normalize(text: str) -> str:
     return value
 
 
+_NORMALIZED_HELP_PHRASES = frozenset(_normalize(item) for item in _HELP_PHRASES)
+
+
 def is_help_request(text: str) -> bool:
-    return _normalize(text) in {_normalize(item) for item in _HELP_PHRASES}
+    return _normalize(text) in _NORMALIZED_HELP_PHRASES
 
 
 def build_help_text() -> str:
@@ -115,39 +119,90 @@ Document Intelligence использует MarkItDown и умеет извлек
 
 
 def install_help_routing(app_cls: type[Any]) -> None:
-    """Добавляет детерминированный help-ответ без обращения к LLM."""
-    if getattr(app_cls, "_leshy_help_routing_installed", False):
+    """Добавляет детерминированный help-ответ в обычный и потоковый чат без обращения к LLM."""
+    if not getattr(app_cls, "_leshy_help_routing_installed", False):
+        original_chat = app_cls.chat
+
+        def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None):
+            if not is_help_request(message):
+                return original_chat(self, message, owner_id=owner_id, session_id=session_id)
+
+            message_value = str(message or "").strip()
+            owner_value = (owner_id or "web:local").strip()[:200]
+            sid = self._ensure_session(owner_value, session_id)
+            now = utcnow()
+            with self.storage.connection() as conn:
+                conn.execute(
+                    "INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)",
+                    (sid, "user", message_value, now),
+                )
+                count = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE session_id=?", (sid,)).fetchone()["c"]
+                if int(count) == 1:
+                    conn.execute("UPDATE sessions SET title=?,updated_at=? WHERE id=?", (message_value[:80], now, sid))
+
+            answer = build_help_text()
+            return {
+                "session_id": sid,
+                "answer": answer,
+                "created_at": self._save_assistant(sid, answer),
+                "sources": [],
+            }
+
+        app_cls.chat = chat
+        app_cls._leshy_help_routing_installed = True
+
+    from .realtime_chat import RealtimeChatManager, StreamEvent
+
+    if getattr(RealtimeChatManager, "_leshy_help_routing_installed", False):
         return
 
-    original_chat = app_cls.chat
+    original_stream = RealtimeChatManager.stream
 
-    def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None):
+    def stream(
+        self,
+        message: str,
+        *,
+        owner_id: str = "web:local",
+        session_id: str | None = None,
+        request_id: str | None = None,
+    ):
         if not is_help_request(message):
-            return original_chat(self, message, owner_id=owner_id, session_id=session_id)
-
-        message_value = str(message or "").strip()
-        owner_value = (owner_id or "web:local").strip()[:200]
-        sid = self._ensure_session(owner_value, session_id)
-        now = utcnow()
-        with self.storage.connection() as conn:
-            conn.execute(
-                "INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)",
-                (sid, "user", message_value, now),
+            yield from original_stream(
+                self,
+                message,
+                owner_id=owner_id,
+                session_id=session_id,
+                request_id=request_id,
             )
-            count = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE session_id=?", (sid,)).fetchone()["c"]
-            if int(count) == 1:
-                conn.execute("UPDATE sessions SET title=?,updated_at=? WHERE id=?", (message_value[:80], now, sid))
+            return
 
-        answer = build_help_text()
-        return {
-            "session_id": sid,
-            "answer": answer,
-            "created_at": self._save_assistant(sid, answer),
-            "sources": [],
-        }
+        rid, cancel = self._register(request_id)
+        try:
+            result = self.app.chat(message, owner_id=owner_id, session_id=session_id)
+            answer = str(result.get("answer") or "")
+            yield StreamEvent("start", {"request_id": rid, "session_id": result["session_id"]})
+            if answer and not cancel.is_set():
+                for chunk in self._chunk_fallback(answer, 180):
+                    if cancel.is_set():
+                        break
+                    yield StreamEvent("delta", {"text": chunk})
+            yield StreamEvent(
+                "done",
+                {
+                    "request_id": rid,
+                    "session_id": result["session_id"],
+                    "answer": answer,
+                    "created_at": result.get("created_at"),
+                    "sources": [],
+                    "stopped": bool(cancel.is_set()),
+                    "help": True,
+                },
+            )
+        finally:
+            self._unregister(rid)
 
-    app_cls.chat = chat
-    app_cls._leshy_help_routing_installed = True
+    RealtimeChatManager.stream = stream
+    RealtimeChatManager._leshy_help_routing_installed = True
 
 
 __all__ = ["build_help_text", "install_help_routing", "is_help_request"]
