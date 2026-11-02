@@ -15,8 +15,18 @@ from .owner_identity_runtime import install_owner_identity_runtime
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
 
 
-def _runtime_html(settings) -> bytes:
+def _runtime_html(settings, owner_id: str = "") -> bytes:
     html_text = previous._runtime_html(settings).decode("utf-8")
+    # Bootstrap ставится ДО старого inline runtime, чтобы даже самый первый
+    # запрос страницы уже использовал UUID этого браузера, а не общий web:local.
+    if owner_id:
+        safe_owner = json.dumps(str(owner_id), ensure_ascii=False)
+        bootstrap = f"<script>try{{localStorage.setItem('leshy.owner_id',{safe_owner});}}catch(_e){{}}</script>"
+        first_script = html_text.find("<script>")
+        if first_script >= 0:
+            html_text = html_text[:first_script] + bootstrap + "\n" + html_text[first_script:]
+        else:
+            html_text = html_text.replace("</body>", bootstrap + "\n</body>")
     marker = '<script src="/owner-identity-panel.js"></script>'
     if marker not in html_text:
         html_text = html_text.replace("</body>", marker + "\n</body>")
@@ -53,20 +63,29 @@ def make_handler(app, telegram, settings, model_catalog):
                 str(presented_owner or "web:local")[:200],
             )
 
+        def _existing_web_owner(self) -> str:
+            return identity.owner_for_web_cookie(self._cookie_value(identity.cookie_name))
+
+        def _identity_cookie_header(self, new_cookie: str | None) -> str:
+            if not new_cookie:
+                return ""
+            value = (
+                f"{identity.cookie_name}={new_cookie}; Path=/; Max-Age={180 * 24 * 60 * 60}; "
+                "HttpOnly; SameSite=Strict"
+            )
+            if str(self.headers.get("X-Forwarded-Proto") or "").lower() == "https":
+                value += "; Secure"
+            return value
+
         def _identity_json(self, status: int, payload: dict, new_cookie: str | None = None):
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
-            if new_cookie:
-                value = (
-                    f"{identity.cookie_name}={new_cookie}; Path=/; Max-Age={180 * 24 * 60 * 60}; "
-                    "HttpOnly; SameSite=Strict"
-                )
-                if str(self.headers.get("X-Forwarded-Proto") or "").lower() == "https":
-                    value += "; Secure"
-                self.send_header("Set-Cookie", value)
+            cookie_header = self._identity_cookie_header(new_cookie)
+            if cookie_header:
+                self.send_header("Set-Cookie", cookie_header)
             self.end_headers()
             self.wfile.write(data)
             return None
@@ -85,14 +104,49 @@ def make_handler(app, telegram, settings, model_catalog):
             })
             return payload
 
+        def _rewrite_owner_query(self) -> None:
+            owner_id = self._existing_web_owner()
+            if not owner_id:
+                return
+            parsed = parse.urlparse(self.path)
+            if not parsed.path.startswith("/v1/"):
+                return
+            pairs = parse.parse_qsl(parsed.query, keep_blank_values=True)
+            changed = False
+            rewritten = []
+            for key, value in pairs:
+                if key == "owner_id":
+                    value = owner_id
+                    changed = True
+                rewritten.append((key, value))
+            if changed:
+                self.path = parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, parse.urlencode(rewritten), parsed.fragment))
+
+        def _body(self):
+            body = super()._body()
+            if isinstance(body, dict) and "owner_id" in body:
+                owner_id = self._existing_web_owner()
+                if owner_id:
+                    body["owner_id"] = owner_id
+            return body
+
         def do_GET(self):
             parsed = parse.urlparse(self.path)
             if parsed.path == "/":
-                data = _runtime_html(settings)
+                try:
+                    owner_id, new_cookie, _session_hash = self._identity_context("web:local")
+                    data = _runtime_html(settings, owner_id)
+                except Exception as exc:
+                    problem("owner_identity_page_bootstrap_failed", str(exc))
+                    owner_id, new_cookie = "", None
+                    data = _runtime_html(settings)
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "no-store")
+                cookie_header = self._identity_cookie_header(new_cookie)
+                if cookie_header:
+                    self.send_header("Set-Cookie", cookie_header)
                 self.end_headers()
                 self.wfile.write(data)
                 return
@@ -115,6 +169,9 @@ def make_handler(app, telegram, settings, model_catalog):
                     problem("owner_identity_status_failed", str(exc))
                     return self._identity_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
+            # Старый UI всё ещё умеет присылать owner_id сам. Серверная cookie
+            # является источником истины и подменяет query до любого parent handler.
+            self._rewrite_owner_query()
             return super().do_GET()
 
         def do_POST(self):
