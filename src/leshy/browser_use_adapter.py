@@ -13,14 +13,13 @@ from .system_browser import ensure_system_browser
 
 
 class BrowserUseAdapter:
-    """Интеллектуальный read-only исследователь поверх Browser Use.
+    """Интеллектуальный Browser Agent поверх Browser Use.
 
-    Browser Use используется для поиска, навигации, сравнения и извлечения данных.
-    Внешние обязательства (заказ, бронирование, оплата, отправка формы) выполняются
-    отдельным детерминированным Playwright workflow после Human Approval Gate.
-
-    `llm` передаётся из Leshy runtime. Поэтому адаптер не требует OpenAI/Ollama и
-    не создаёт отдельную личность/память внутри проекта.
+    По умолчанию работает только на чтение. Изменяющие/commit/financial задачи
+    принимаются исключительно с `_approval_verified`, который ставит BrowserAgent
+    после Human Approval Gate. Это позволяет использовать Browser Use на сайтах с
+    динамическим DOM, сохраняя Playwright как детерминированный исполнитель для
+    известных и проверенных workflow.
     """
 
     adapter_id = "browser-use"
@@ -54,7 +53,7 @@ class BrowserUseAdapter:
         primary = (urlparse(action.url).hostname or "").lower().strip(".")
         if primary and primary not in hosts:
             hosts.append(primary)
-        return tuple(hosts)
+        return tuple(dict.fromkeys(hosts))
 
     @staticmethod
     def _domain_patterns(hosts: tuple[str, ...]) -> list[str]:
@@ -88,6 +87,39 @@ class BrowserUseAdapter:
             raise error["value"]
         return result.get("value")
 
+    @staticmethod
+    def _guard(action: BrowserAction, hosts: tuple[str, ...]) -> str:
+        common = (
+            "\n\nОБЯЗАТЕЛЬНЫЕ ОГРАНИЧЕНИЯ ЛЕШЕГО: "
+            "не обходи CAPTCHA, challenge, 2FA или подтверждение присутствия человека; "
+            "если они появились — остановись и сообщи пользователю. Не переходи на домены вне списка. "
+            "Не раскрывай пароли, токены, cookies, CVV и другие секреты в результате или логах. "
+            f"Начальный URL: {action.url}. Разрешённые домены: {', '.join(hosts)}. "
+        )
+        if action.risk is BrowserRisk.READ:
+            return common + (
+                "РЕЖИМ ТОЛЬКО ЧТЕНИЯ: можно искать, открывать страницы, сравнивать и извлекать данные. "
+                "Нельзя входить в аккаунт, менять данные, добавлять товар в корзину, отправлять формы, "
+                "бронировать, публиковать, оформлять заказ или выполнять финансовое действие."
+            )
+        if action.risk is BrowserRisk.MUTATE:
+            return common + (
+                "Пользователь подтвердил изменение данных, описанное в задаче. Выполняй только это изменение. "
+                "Нельзя оформлять заказ/бронирование, принимать финансовое обязательство или проводить оплату."
+            )
+        if action.risk is BrowserRisk.COMMIT:
+            return common + (
+                "Пользователь явно подтвердил внешнее действие, описанное в задаче. Разрешено выполнить только "
+                "указанное бронирование/заказ/публикацию. Если появляется списание денег или новый платёжный шаг, "
+                "остановись ДО него: финансовое действие требует отдельного подтверждения."
+            )
+        summary = str(action.arguments.get("approval_summary") or "").strip()
+        return common + (
+            "Пользователь отдельно подтвердил финансовое действие. Выполни только транзакцию из подтверждённого "
+            f"резюме: {summary}. Не меняй сумму, валюту, получателя, количество или дополнительные услуги. "
+            "При любом отличии остановись без оплаты."
+        )
+
     async def _run(self, action: BrowserAction) -> BrowserActionResult:
         from browser_use import Agent, Browser
 
@@ -108,28 +140,26 @@ class BrowserUseAdapter:
         if not user_task:
             user_task = f"Изучи страницу {action.url} и верни полезную информацию."
 
-        guard = (
-            "\n\nОБЯЗАТЕЛЬНЫЕ ОГРАНИЧЕНИЯ ЛЕШЕГО: режим только чтения. "
-            "Можно переходить по страницам, раскрывать элементы навигации и выполнять поиск, "
-            "но нельзя входить в аккаунт, передавать персональные/платёжные данные, добавлять товар "
-            "в корзину, оформлять заказ, бронировать, публиковать, отправлять сообщения или формы, "
-            "подтверждать условия либо совершать любое внешнее обязательство. Если для продолжения "
-            "нужно такое действие, остановись и явно сообщи, какое подтверждение требуется. "
-            f"Начальный URL: {action.url}. Разрешённые домены: {', '.join(hosts)}."
-        )
+        provider = str(getattr(self.llm, "provider", "") or "").lower()
+        default_vision = provider != "leshy"
         agent = Agent(
-            task=user_task + guard,
+            task=user_task + self._guard(action, hosts),
             llm=self.llm,
             browser=browser,
-            use_vision=bool(action.arguments.get("use_vision", True)),
+            use_vision=bool(action.arguments.get("use_vision", default_vision)),
         )
         try:
             history = await agent.run(max_steps=min(self.max_steps, int(action.arguments.get("max_steps", self.max_steps))))
             final = history.final_result() if hasattr(history, "final_result") else str(history)
-            event("browser_agent_browser_use_completed", hosts=list(hosts))
+            event(
+                "browser_agent_browser_use_completed",
+                hosts=list(hosts),
+                risk=action.risk.value,
+                action=action.name,
+            )
             return BrowserActionResult(
                 "ok",
-                "Browser Use завершил исследование.",
+                "Browser Use завершил браузерную задачу.",
                 {"result": str(final or ""), "allowed_hosts": list(hosts)},
             )
         finally:
@@ -143,19 +173,19 @@ class BrowserUseAdapter:
                 pass
 
     def execute(self, action: BrowserAction) -> BrowserActionResult:
-        if action.name not in {"research", "agent_read"}:
-            return BrowserActionResult("unsupported", "Browser Use адаптер предназначен для интеллектуального исследования")
-        if action.risk is not BrowserRisk.READ:
-            return BrowserActionResult(
-                "unsupported",
-                "Изменяющие действия Browser Use не выполняет: используйте Playwright после подтверждения.",
-            )
+        supported = {"research", "agent_read", "agent_mutate", "agent_commit", "agent_financial"}
+        if action.name not in supported:
+            return BrowserActionResult("unsupported", "Browser Use не поддерживает этот тип browser-действия")
+        if action.risk is not BrowserRisk.READ and not bool(action.arguments.get("_approval_verified")):
+            return BrowserActionResult("blocked", "Изменяющее browser-действие не прошло Human Approval Gate")
+        if action.risk is BrowserRisk.FINANCIAL and not str(action.arguments.get("approval_summary") or "").strip():
+            return BrowserActionResult("blocked", "Финансовое действие требует подтверждённого резюме суммы и условий")
         if not self.available():
             return BrowserActionResult("unavailable", "Browser Use или совместимая LLM недоступны")
         try:
             return self._run_sync(self._run(action))
         except Exception as exc:
-            problem("browser_agent_browser_use_failed", str(exc))
+            problem("browser_agent_browser_use_failed", str(exc), risk=action.risk.value, action=action.name)
             return BrowserActionResult("failed", str(exc))
 
 
