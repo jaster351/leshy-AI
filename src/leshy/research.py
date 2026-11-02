@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import html
 import ipaddress
 import json
@@ -43,6 +44,10 @@ class SearchResult:
     snippet: str
 
 
+class SearchUnavailable(RuntimeError):
+    """Все доступные поисковые каналы временно недоступны или пусты."""
+
+
 class SearxngSearch:
     def __init__(self, base_url: str, timeout: int = 20):
         self.base_url = base_url.rstrip("/")
@@ -54,7 +59,7 @@ class SearxngSearch:
             with request.urlopen(url, timeout=self.timeout) as response:
                 body = json.loads(response.read().decode())
         except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"SearXNG недоступен: {exc}") from exc
+            raise SearchUnavailable(f"SearXNG недоступен: {exc}") from exc
         return [
             SearchResult(str(x.get("title", x.get("url", ""))), str(x.get("url", "")), str(x.get("content", "")))
             for x in body.get("results", [])[:limit]
@@ -63,21 +68,70 @@ class SearxngSearch:
 
 
 class DdgsSearch:
-    def search(self, query: str, limit: int = 5) -> list[SearchResult]:
-        try:
-            from ddgs import DDGS
-            rows = DDGS().text(query, max_results=limit)
-        except Exception as exc:
-            raise RuntimeError(f"DDGS-поиск недоступен: {exc}") from exc
+    """Безключевой метапоиск с быстрым переключением между независимыми backend'ами.
+
+    `backend="auto"` иногда выбирает один медленный/заблокированный источник
+    (например Brave) и роняет весь запрос. Здесь каждый backend имеет короткий
+    timeout и сбой одного источника не мешает попробовать следующий.
+    """
+
+    DEFAULT_BACKENDS = (
+        "duckduckgo",
+        "bing",
+        "google",
+        "mojeek",
+        "startpage",
+        "yandex",
+        "yahoo",
+        "wikipedia",
+        "brave",
+    )
+
+    def __init__(self, timeout: int = 5, backends: tuple[str, ...] | None = None):
+        self.timeout = max(2, min(int(timeout), 15))
+        self.backends = tuple(backends or self.DEFAULT_BACKENDS)
+
+    @staticmethod
+    def _rows_to_results(rows, limit: int) -> list[SearchResult]:
         out: list[SearchResult] = []
+        seen: set[str] = set()
         for item in rows or []:
-            url = str(item.get("href") or item.get("url") or "")
-            if not url.startswith(("http://", "https://")):
+            url = str(item.get("href") or item.get("url") or "").strip()
+            if not url.startswith(("http://", "https://")) or url in seen:
                 continue
-            out.append(SearchResult(str(item.get("title") or url), url, str(item.get("body") or item.get("content") or "")))
+            seen.add(url)
+            out.append(
+                SearchResult(
+                    str(item.get("title") or url),
+                    url,
+                    str(item.get("body") or item.get("content") or ""),
+                )
+            )
             if len(out) >= limit:
                 break
         return out
+
+    def search(self, query: str, limit: int = 5) -> list[SearchResult]:
+        try:
+            from ddgs import DDGS
+        except Exception as exc:
+            raise SearchUnavailable(f"DDGS-пакет недоступен: {exc}") from exc
+
+        errors: list[str] = []
+        for backend in self.backends:
+            try:
+                rows = DDGS(timeout=self.timeout).text(
+                    query,
+                    max_results=max(1, int(limit)),
+                    backend=backend,
+                )
+                results = self._rows_to_results(rows, max(1, int(limit)))
+                if results:
+                    return results
+                errors.append(f"{backend}: 0 результатов")
+            except Exception as exc:
+                errors.append(f"{backend}: {exc}")
+        raise SearchUnavailable("DDGS backend-цепочка недоступна: " + "; ".join(errors))
 
 
 class FallbackSearch:
@@ -92,13 +146,10 @@ class FallbackSearch:
                 results = provider.search(query, limit=limit)
                 if results:
                     return results
-                # Пустой ответ тоже важен для диагностики fallback-цепочки.
-                # Раньше он терялся, поэтому из runtime-лога было невозможно
-                # понять, запускался ли последний резервный провайдер вообще.
                 errors.append(f"{provider_name}: 0 результатов")
             except Exception as exc:
                 errors.append(f"{provider_name}: {exc}")
-        raise RuntimeError("Все поисковые провайдеры недоступны или не дали результатов: " + "; ".join(errors))
+        raise SearchUnavailable("Все поисковые провайдеры недоступны или не дали результатов: " + "; ".join(errors))
 
 
 class SafeWebFetcher:
@@ -167,6 +218,8 @@ PROMPT_INJECTION_MARKERS = (
 
 
 class ResearchEngine:
+    SEARCH_RETRY_SECONDS = 60
+
     def __init__(
         self,
         storage: Storage,
@@ -197,6 +250,47 @@ class ResearchEngine:
         self.storage.audit("research.queued", {"id": task_id, "query": query, "reason": reason})
         return task_id
 
+    def _queue_retry(self, task_id: int, query: str, exc: Exception, *, live: bool = False) -> dict:
+        message = str(exc)[:1000]
+        now = utcnow()
+        with self.storage.connection() as conn:
+            if live:
+                conn.execute(
+                    """
+                    UPDATE research_tasks
+                    SET status='queued',
+                        attempts=CASE WHEN attempts < 1 THEN 1 ELSE attempts END,
+                        updated_at=?,
+                        last_error=?
+                    WHERE id=? AND status='queued'
+                    """,
+                    (now, message, task_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE research_tasks SET status='queued',updated_at=?,last_error=? WHERE id=? AND status='running'",
+                    (now, message, task_id),
+                )
+        event_name = "research.live_search_retry_queued" if live else "research.retry_queued"
+        self.storage.audit(
+            event_name,
+            {
+                "id": task_id,
+                "query": query,
+                "error": message,
+                "retry_after_seconds": self.SEARCH_RETRY_SECONDS,
+            },
+        )
+        return {
+            "task_id": task_id,
+            "query": query,
+            "status": "retry_queued",
+            "error": message,
+            "results": [],
+            "accepted_claims": 0,
+            "retry_after_seconds": self.SEARCH_RETRY_SECONDS,
+        }
+
     def live_query(self, query: str, reason: str = "запрос пользователя", limit: int = 5) -> dict:
         """Быстрый интернет-поиск для ответа без тяжёлой синхронной верификации.
 
@@ -211,6 +305,8 @@ class ResearchEngine:
         task_id = self.enqueue(query, reason=f"live-search: {reason}")
         try:
             results = self.search_provider.search(query, limit=limit)
+        except SearchUnavailable as exc:
+            return self._queue_retry(task_id, query, exc, live=True)
         except Exception as exc:
             self.storage.audit("research.live_search_failed", {"task_id": task_id, "query": query, "error": str(exc)[:1000]})
             return {"task_id": task_id, "query": query, "status": "search_failed", "error": str(exc), "results": [], "accepted_claims": 0}
@@ -263,13 +359,31 @@ class ResearchEngine:
             "verification_queued": True,
         }
 
+    def _retry_before(self) -> str:
+        return (datetime.now(timezone.utc) - timedelta(seconds=self.SEARCH_RETRY_SECONDS)).isoformat()
+
     def _claim(self, task_id: int | None = None):
+        retry_before = self._retry_before()
         with self.storage.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if task_id is None:
-                task = conn.execute("SELECT * FROM research_tasks WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+                task = conn.execute(
+                    """
+                    SELECT * FROM research_tasks
+                    WHERE status='queued' AND (attempts=0 OR updated_at<=?)
+                    ORDER BY id
+                    LIMIT 1
+                    """,
+                    (retry_before,),
+                ).fetchone()
             else:
-                task = conn.execute("SELECT * FROM research_tasks WHERE id=? AND status='queued'", (task_id,)).fetchone()
+                task = conn.execute(
+                    """
+                    SELECT * FROM research_tasks
+                    WHERE id=? AND status='queued' AND (attempts=0 OR updated_at<=?)
+                    """,
+                    (task_id, retry_before),
+                ).fetchone()
             if not task:
                 return None
             claimed = int(task["id"])
@@ -336,6 +450,8 @@ class ResearchEngine:
             result = {"task_id": task_id, "query": query, "accepted_claims": accepted, "quarantined_sources": quarantined, **verification}
             self.storage.audit("research.completed", {"id": task_id, **result})
             return result
+        except SearchUnavailable as exc:
+            return self._queue_retry(task_id, query, exc, live=False)
         except Exception as exc:
             with self.storage.connection() as conn:
                 conn.execute(
