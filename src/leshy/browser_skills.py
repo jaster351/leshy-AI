@@ -3,9 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import platform
 import re
-import shutil
 import time
 from typing import Callable, Iterable
 
@@ -52,14 +50,14 @@ class BrowserSkillUnavailable(RuntimeError):
 
 
 class HumanBrowserSkillRunner:
-    """Выполняет декларативный browser-skill через настоящий браузер.
+    """Декларативные browser-skills через собственный Firefox Лешего.
 
-    Приоритет — установленный системный Edge/Chrome. Леший работает через DOM и
-    accessibility Playwright: открыть страницу -> найти смысловой элемент ->
-    действие -> снова прочитать страницу -> подтвердить результат.
+    Системные Edge/Chrome/Firefox никогда не используются. Playwright запускает
+    только свой Firefox из PLAYWRIGHT_BROWSERS_PATH, который поставляется рядом
+    с Leshy.exe. Cookies/localStorage сохраняются в LeshyBrain между запусками.
 
-    Никаких обходов CAPTCHA/challenge, скрытого антибот-stealth или API-подмены
-    здесь нет. Если сайт требует участия человека, возвращается needs_user_action.
+    Никаких обходов CAPTCHA/challenge или stealth-подмены нет: если сайт требует
+    участия человека, возвращается needs_user_action.
     """
 
     def __init__(self, *, headless: bool | None = None, timeout_ms: int = 30_000):
@@ -68,6 +66,10 @@ class HumanBrowserSkillRunner:
             headless = raw not in {"0", "false", "no", "off"}
         self.headless = bool(headless)
         self.timeout_ms = max(5_000, min(int(timeout_ms), 120_000))
+        brain_root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
+        self.state_dir = brain_root / "browser"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.storage_state_path = self.state_dir / "browser-skill-storage-state.json"
 
     @staticmethod
     def _activity(callback: ActivityCallback | None, name: str, **payload) -> None:
@@ -78,64 +80,29 @@ class HumanBrowserSkillRunner:
             except Exception:
                 pass
 
-    @staticmethod
-    def _system_executables() -> tuple[tuple[str, str], ...]:
-        values: list[tuple[str, str]] = []
-        system = platform.system().lower()
-        if system == "windows":
-            roots = [
-                os.getenv("PROGRAMFILES(X86)", ""),
-                os.getenv("PROGRAMFILES", ""),
-                os.getenv("LOCALAPPDATA", ""),
-            ]
-            candidates = [
-                ("edge", Path(roots[0]) / "Microsoft/Edge/Application/msedge.exe" if roots[0] else None),
-                ("edge", Path(roots[1]) / "Microsoft/Edge/Application/msedge.exe" if roots[1] else None),
-                ("chrome", Path(roots[1]) / "Google/Chrome/Application/chrome.exe" if roots[1] else None),
-                ("chrome", Path(roots[2]) / "Google/Chrome/Application/chrome.exe" if roots[2] else None),
-            ]
-            for name, path in candidates:
-                if path and path.is_file():
-                    values.append((name, str(path)))
-        elif system == "darwin":
-            for name, value in (
-                ("edge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-                ("chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-                ("chromium", "/Applications/Chromium.app/Contents/MacOS/Chromium"),
-            ):
-                if Path(value).is_file():
-                    values.append((name, value))
-        else:
-            for executable in ("microsoft-edge", "microsoft-edge-stable", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
-                found = shutil.which(executable)
-                if found:
-                    values.append((executable, found))
-        return tuple(values)
-
     def _launch(self, playwright):
-        errors: list[str] = []
-        for channel, label in (("msedge", "Edge"), ("chrome", "Chrome")):
-            try:
-                browser = playwright.chromium.launch(channel=channel, headless=self.headless)
-                return browser, label
-            except Exception as exc:
-                errors.append(f"{label}: {exc}")
-        for label, executable in self._system_executables():
-            try:
-                browser = playwright.chromium.launch(executable_path=executable, headless=self.headless)
-                return browser, label
-            except Exception as exc:
-                errors.append(f"{label}: {exc}")
         try:
-            browser = playwright.chromium.launch(headless=self.headless)
-            return browser, "Chromium"
+            return playwright.firefox.launch(headless=self.headless), "Mozilla Firefox"
         except Exception as exc:
-            errors.append(f"Chromium: {exc}")
-        detail = "; ".join(errors[-4:])
-        raise BrowserSkillUnavailable(
-            "Не удалось запустить Edge/Chrome/Chromium для browser-навыка. "
-            "Установите Microsoft Edge или Google Chrome. " + detail
-        )
+            raise BrowserSkillUnavailable(
+                "Не удалось запустить встроенный Firefox Лешего. "
+                "Проверьте наличие каталога playwright-browsers в дистрибутиве. " + str(exc)
+            ) from exc
+
+    def _new_context(self, browser):
+        kwargs = {
+            "locale": "ru-RU",
+            "viewport": {"width": 1366, "height": 768},
+        }
+        if self.storage_state_path.is_file():
+            kwargs["storage_state"] = str(self.storage_state_path)
+        return browser.new_context(**kwargs)
+
+    def _persist_context(self, context) -> None:
+        try:
+            context.storage_state(path=str(self.storage_state_path))
+        except Exception as exc:
+            problem("browser_skill_state_save_failed", str(exc))
 
     @staticmethod
     def _host_allowed(url: str, allowed_hosts: Iterable[str]) -> bool:
@@ -162,7 +129,7 @@ class HumanBrowserSkillRunner:
             candidates = page.locator("input:not([type]),input[type=text],input[type=search]")
             best = None
             best_score = -1
-            for index in range(min(candidates.count(), 30)):
+            for index in range(min(candidates.count(), 40)):
                 node = candidates.nth(index)
                 if not node.is_visible():
                     continue
@@ -196,11 +163,15 @@ class HumanBrowserSkillRunner:
                 pass
         try:
             submits = page.locator("button,input[type=submit]")
-            for index in range(min(submits.count(), 30)):
+            for index in range(min(submits.count(), 40)):
                 node = submits.nth(index)
                 if not node.is_visible():
                     continue
-                text = (node.inner_text() if node.evaluate("el => el.tagName.toLowerCase() === 'button'") else node.get_attribute("value") or "").lower()
+                text = (
+                    node.inner_text()
+                    if node.evaluate("el => el.tagName.toLowerCase() === 'button'")
+                    else node.get_attribute("value") or ""
+                ).lower()
                 if any(word in text for word in ("отслед", "найти", "провер", "track", "search")):
                     return node
         except Exception:
@@ -210,7 +181,11 @@ class HumanBrowserSkillRunner:
     @staticmethod
     def _body_text(page) -> str:
         try:
-            return "\n".join(line.strip() for line in page.locator("body").inner_text(timeout=5_000).splitlines() if line.strip())
+            return "\n".join(
+                line.strip()
+                for line in page.locator("body").inner_text(timeout=5_000).splitlines()
+                if line.strip()
+            )
         except Exception:
             return ""
 
@@ -236,8 +211,8 @@ class HumanBrowserSkillRunner:
             browser, browser_name = self._launch(pw)
             context = None
             try:
-                context = browser.new_context(locale="ru-RU", viewport={"width": 1280, "height": 900})
-                page = context.new_page()
+                context = self._new_context(browser)
+                page = context.pages[0] if context.pages else context.new_page()
                 page.set_default_timeout(self.timeout_ms)
                 self._activity(activity, "browser_skill_opening", skill_id=skill.skill_id, status="Открываю сайт")
                 page.goto(skill.start_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
@@ -248,8 +223,14 @@ class HumanBrowserSkillRunner:
                 lowered = before.lower()
                 if any(marker.lower() in lowered for marker in skill.user_action_markers):
                     return BrowserSkillExecution(
-                        skill.skill_id, "needs_user_action", page.url, page.title(), before, value,
-                        browser_name, int((time.monotonic() - started) * 1000),
+                        skill.skill_id,
+                        "needs_user_action",
+                        page.url,
+                        page.title(),
+                        before,
+                        value,
+                        browser_name,
+                        int((time.monotonic() - started) * 1000),
                         "Сайт требует действия пользователя (CAPTCHA/challenge).",
                     )
 
@@ -280,8 +261,14 @@ class HumanBrowserSkillRunner:
                     marker_seen = any(marker.lower() in low for marker in skill.result_markers)
                     if any(marker.lower() in low for marker in skill.user_action_markers):
                         return BrowserSkillExecution(
-                            skill.skill_id, "needs_user_action", page.url, page.title(), text, value,
-                            browser_name, int((time.monotonic() - started) * 1000),
+                            skill.skill_id,
+                            "needs_user_action",
+                            page.url,
+                            page.title(),
+                            text,
+                            value,
+                            browser_name,
+                            int((time.monotonic() - started) * 1000),
                             "Сайт требует действия пользователя (CAPTCHA/challenge).",
                         )
                     if changed and (marker_seen or value.lower() in low or page.url != skill.start_url):
@@ -321,6 +308,10 @@ class HumanBrowserSkillRunner:
                 raise
             finally:
                 if context is not None:
+                    try:
+                        self._persist_context(context)
+                    except Exception:
+                        pass
                     try:
                         context.close()
                     except Exception:
