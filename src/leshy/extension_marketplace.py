@@ -64,7 +64,7 @@ class ExtensionMarketplace:
     Python-расширения ставятся в отдельные venv. Никакой shell-строки из manifest
     не выполняется: запускается только `python -m <module>` из изолированного venv.
     После установки MCP server обязан успешно объявить хотя бы один tool, иначе
-    расширение не считается установленным.
+    новая версия откатывается, а предыдущая рабочая версия восстанавливается.
     """
 
     def __init__(self, registry: ToolRegistry | None = None, *, root: str | Path | None = None):
@@ -120,9 +120,21 @@ class ExtensionMarketplace:
 
         directory = self._extension_dir(entry.extension_id)
         staging = self.root / (entry.extension_id + ".installing")
+        backup = self.root / (entry.extension_id + ".backup")
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
+        if backup.exists():
+            shutil.rmtree(backup, ignore_errors=True)
+
+        previous_manifest: ToolManifest | None = None
+        try:
+            previous_manifest = self.registry.get(entry.extension_id)
+        except KeyError:
+            pass
+
         staging.mkdir(parents=True)
+        promoted = False
+        registry_replaced = False
         try:
             subprocess.run(
                 [sys.executable, "-m", "venv", str(staging / "venv")],
@@ -153,9 +165,13 @@ class ExtensionMarketplace:
                 tail = "\n".join((install.stdout or "").splitlines()[-30:])
                 raise RuntimeError("pip install завершился ошибкой:\n" + tail)
 
+            # Двухфазная замена: старая рабочая версия не удаляется, а атомарно
+            # уходит в backup до завершения health-check новой версии.
             if directory.exists():
-                shutil.rmtree(directory, ignore_errors=True)
+                directory.replace(backup)
             staging.replace(directory)
+            promoted = True
+
             python = self._venv_python(directory)
             manifest = ToolManifest(
                 tool_id=entry.extension_id,
@@ -168,6 +184,7 @@ class ExtensionMarketplace:
                 enabled=True,
             )
             self.registry.register(manifest)
+            registry_replaced = True
 
             gateway = McpToolsGateway(self.registry)
             tools = gateway.list_tools(entry.extension_id)
@@ -183,14 +200,25 @@ class ExtensionMarketplace:
             (directory / "leshy-install.json").write_text(
                 json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            shutil.rmtree(backup, ignore_errors=True)
             event("extension_installed", extension_id=entry.extension_id, tool_count=len(tools))
             return receipt
         except Exception as exc:
             problem("extension_install_failed", str(exc), extension_id=entry.extension_id)
-            self.registry.remove(entry.extension_id)
             shutil.rmtree(staging, ignore_errors=True)
-            if directory.exists() and not (directory / "leshy-install.json").is_file():
+
+            # Если новая версия уже была выдвинута на рабочий путь, удаляем её.
+            # Затем возвращаем предыдущий каталог и предыдущий ToolManifest.
+            if promoted and directory.exists():
                 shutil.rmtree(directory, ignore_errors=True)
+            if backup.exists():
+                backup.replace(directory)
+                event("extension_install_rolled_back", extension_id=entry.extension_id)
+
+            if registry_replaced:
+                self.registry.remove(entry.extension_id)
+            if previous_manifest is not None:
+                self.registry.register(previous_manifest)
             raise
 
     def uninstall(self, extension_id: str, *, approved: bool = False) -> None:
