@@ -48,6 +48,9 @@ jobs:
           Path('/tmp/leshy-web.js').write_text(m.group(1),encoding='utf-8')
           PY
           node --check /tmp/leshy-web.js
+          node --check web/browser-approval-panel.js
+          node --check web/marketplace-panel.js
+          node --check web/module-settings-panel.js
       - name: Проверить UI 4→3 и самообучение
         run: |
           grep -q 'Я здесь. Слушаю. Думаю. Помогаю.' web/index.html
