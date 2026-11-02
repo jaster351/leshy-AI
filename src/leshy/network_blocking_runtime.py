@@ -42,6 +42,99 @@ def _matches(app, text: str) -> bool:
         return False
 
 
+def _service_text(metadata: dict[str, Any]) -> str:
+    profile = str(metadata.get("profile") or "Не определён")
+    ports = [int(value) for value in (metadata.get("service_ports") or []) if str(value).isdigit()]
+    if profile == "Linux/SSH" or ports == [22]:
+        return "Сервер определяется как Linux/SSH, рабочий сервис — TCP/22."
+    if profile == "Windows/RDP" or ports == [3389]:
+        return "Сервер определяется как Windows/RDP, рабочий сервис — TCP/3389."
+    if set(ports) == {22, 3389}:
+        return "На сервере доступны и SSH/22, и RDP/3389; ОС по портам однозначно не определяется."
+    return "Рабочий сервис по TCP/22 и TCP/3389 однозначно не определён."
+
+
+def _compact_answer(metadata: dict[str, Any]) -> str:
+    """Пользовательский вывод: диагноз + основание + действие, без сырого дампа probe-узлов."""
+    target = str(metadata.get("target") or "").strip()
+    probability = max(0, min(100, int(metadata.get("tspu_probability") or 0)))
+    profile_text = _service_text(metadata)
+    local = list(metadata.get("local") or [])
+    remote = list(metadata.get("remote") or [])
+    probe = metadata.get("chebur_probe") or {}
+    chebur = metadata.get("cheburcheck") or {}
+
+    official_tspu = any(
+        "tspu_block" in [str(value) for value in (item.get("verdicts") or [])]
+        for item in (probe.get("observations") or [])
+        if isinstance(item, dict)
+    )
+    geographic_tspu = False
+    for port in (22, 3389):
+        rows = [item for item in remote if isinstance(item, dict) and int(item.get("port") or 0) == port]
+        ru_failed = any(
+            str(item.get("country_code") or "").lower() == "ru"
+            and str(item.get("status") or "") in {"timeout", "error"}
+            for item in rows
+        )
+        foreign_ok = any(
+            str(item.get("country_code") or "").lower() not in {"", "ru"}
+            and str(item.get("status") or "") == "connected"
+            for item in rows
+        )
+        if ru_failed and foreign_ok:
+            geographic_tspu = True
+            break
+
+    local_timeout_ports = sorted(
+        int(item.get("port") or 0)
+        for item in local
+        if isinstance(item, dict) and str(item.get("status") or "") == "timeout" and int(item.get("port") or 0) in {22, 3389}
+    )
+
+    prefix = f"{target}: " if target else ""
+    if probability >= 100:
+        answer = [f"{prefix}IP с высокой вероятностью заблокирован средствами ТСПУ.", profile_text]
+        evidence: list[str] = []
+        if official_tspu:
+            evidence.append("распределённый Cheburcheck Probe массово возвращает `tspu_block`")
+        if geographic_tspu:
+            evidence.append("зарубежные точки подключаются, а часть российских получает timeout")
+        if local_timeout_ports:
+            evidence.append("из сети Лешего соединение с рабочим портом не устанавливается")
+        if evidence:
+            answer.append("Основание: " + "; ".join(evidence) + ".")
+        answer.append("Решение: сменить или выдать серверу другой IP-адрес и повторить проверку нового IP.")
+        return "\n".join(answer)
+
+    if probability >= 70:
+        answer = [f"{prefix}есть сильные признаки блокировки или попадания IP в блокировочный диапазон.", profile_text]
+        if bool(chebur.get("blocked")):
+            answer.append("Cheburcheck также отмечает адрес или его диапазон как заблокированный.")
+        answer.append("Решение: повторить проверку; если результат сохраняется — сменить IP и проверить новый адрес.")
+        return "\n".join(answer)
+
+    if probability >= 30:
+        return "\n".join([
+            f"{prefix}однозначная блокировка ТСПУ не подтверждена, но есть косвенные признаки.",
+            profile_text,
+            "Решение: повторить проверку позже и отдельно проверить маршрут/фаервол. IP менять только если географический признак повторяется.",
+        ])
+
+    if any(isinstance(item, dict) and str(item.get("status") or "") == "connected" for item in remote):
+        return "\n".join([
+            f"{prefix}признаки блокировки ТСПУ не подтверждены.",
+            profile_text,
+            "Если подключение не работает именно из Вашей сети, проверяйте локальный маршрут, фаервол или провайдера — сам IP извне доступен.",
+        ])
+
+    return "\n".join([
+        f"{prefix}данных недостаточно для уверенного вывода о ТСПУ.",
+        profile_text,
+        "Решение: повторить проверку. Если 22 и 3389 не отвечают ни из России, ни из других стран, сначала проверять сам сервер и его фаервол.",
+    ])
+
+
 def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     response = _module(app).handle(
         ModuleRequest(
@@ -58,7 +151,7 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     if source_url:
         sources.append({"title": "Cheburcheck", "url": source_url})
     sources.append({"title": "Check-Host", "url": "https://check-host.net/check-tcp"})
-    return response.text, sources, response.metadata
+    return _compact_answer(response.metadata), sources, response.metadata
 
 
 def _save_user(app, message: str, owner_id: str, session_id: str | None) -> str:
@@ -133,7 +226,7 @@ def install_network_blocking_routing(app_class, app=None) -> None:
             yield StreamEvent("activity", {
                 "kind": "network_blocking",
                 "phase": "local_tcp",
-                "text": "Проверяю TCP/22 и TCP/3389 из своей сети и одновременно сверяю внешние источники…",
+                "text": "Проверяю доступность IP и признаки блокировки ТСПУ…",
             })
             answer, sources, metadata = _run(self.app, value)
             if cancel.is_set():
