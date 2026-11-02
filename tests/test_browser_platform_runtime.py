@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from leshy.action_approvals import ApprovalBroker
 from leshy.browser_agent import ApprovalRequired, BrowserAction, BrowserActionResult, BrowserAgent, BrowserRisk
-from leshy.browser_platform_runtime import parse_browser_conversation_intent
+from leshy.browser_platform_runtime import BrowserPlatform, parse_browser_conversation_intent
 from leshy.browser_use_adapter import BrowserUseAdapter
 from leshy.document_intelligence import DocumentIntelligence
 from leshy.extension_marketplace import ExtensionApprovalRequired, ExtensionMarketplace, MarketplaceEntry
+from leshy.playwright_browser_adapter import PlaywrightBrowserAdapter
+from leshy.storage import Storage
 from leshy.tools_gateway import McpToolsGateway, ToolApprovalRequired, ToolManifest, ToolPermission, ToolRegistry
 
 
@@ -27,9 +31,20 @@ class _CaptureAdapter:
         return BrowserActionResult("ok", "done", {"approved": action.arguments.get("_approval_verified")})
 
 
+class _FakeApp:
+    def __init__(self, root: Path):
+        self.storage = Storage(root / "leshy.db")
+        self.llm = object()
+
+
 class BrowserConversationIntentTests(unittest.TestCase):
     def test_product_search_is_research_first(self) -> None:
         intent = parse_browser_conversation_intent("Найди мне хороший ноутбук в магазине и сравни цены")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.kind, "research")
+
+    def test_initial_buy_request_is_research_first_even_without_generic_noun(self) -> None:
+        intent = parse_browser_conversation_intent("Купи мне iPhone 18 Pro")
         self.assertIsNotNone(intent)
         self.assertEqual(intent.kind, "research")
 
@@ -71,10 +86,7 @@ class ApprovalBrokerTests(unittest.TestCase):
 
     def test_read_action_never_gets_approval_token(self) -> None:
         with self.assertRaises(ValueError):
-            self.broker.request(
-                "owner",
-                BrowserAction("research", "https://example.com", BrowserRisk.READ),
-            )
+            self.broker.request("owner", BrowserAction("research", "https://example.com", BrowserRisk.READ))
 
     def test_approval_is_owner_bound_and_one_time(self) -> None:
         pending = self.broker.request("owner-a", self.action)
@@ -128,6 +140,38 @@ class BrowserAgentApprovalTests(unittest.TestCase):
         result = adapter.execute(action)
         self.assertEqual(result.status, "blocked")
 
+    def test_explicit_allowlist_cannot_be_widened_by_start_url(self) -> None:
+        action = BrowserAction(
+            "research",
+            "https://evil.example/path",
+            BrowserRisk.READ,
+            {"allowed_hosts": ("trusted.example",)},
+        )
+        self.assertEqual(BrowserUseAdapter._hosts(action), ("trusted.example",))
+        self.assertEqual(PlaywrightBrowserAdapter._allowed_hosts(action), ("trusted.example",))
+        self.assertFalse(BrowserUseAdapter._host_allowed(action.url, BrowserUseAdapter._hosts(action)))
+
+
+class BrowserResearchRecoveryTests(unittest.TestCase):
+    def test_selected_results_survive_platform_recreation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(os.environ, {"LESHY_BRAIN_DIR": str(root / "brain")}, clear=False):
+                app = _FakeApp(root)
+                first = BrowserPlatform(app)
+                first._remember_results(
+                    "session-1",
+                    [
+                        {"title": "Первый", "url": "https://one.example/item", "snippet": "one"},
+                        {"title": "Второй", "url": "https://two.example/item", "snippet": "two"},
+                    ],
+                )
+                second = BrowserPlatform(app)
+                restored = second._last_results("session-1")
+                self.assertEqual([item["title"] for item in restored], ["Первый", "Второй"])
+                intent = parse_browser_conversation_intent("Купи второй вариант")
+                self.assertEqual(second._selected_url(intent, "session-1"), "https://two.example/item")
+
 
 class DocumentIntelligenceTests(unittest.TestCase):
     def test_local_text_document_is_read(self) -> None:
@@ -164,14 +208,7 @@ class ToolsRegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             registry = ToolRegistry(Path(tmp) / "registry.json")
             with self.assertRaises(ValueError):
-                registry.register(
-                    ToolManifest(
-                        tool_id="remote",
-                        title="Remote",
-                        transport="http",
-                        url="http://example.com/mcp",
-                    )
-                )
+                registry.register(ToolManifest(tool_id="remote", title="Remote", transport="http", url="http://example.com/mcp"))
 
     def test_dangerous_mcp_tool_requires_approval_before_network(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
