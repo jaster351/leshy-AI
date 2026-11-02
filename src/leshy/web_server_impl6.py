@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from . import web_server_impl5 as previous
 from .app import LeshyApp
+from .freshness_memory_runtime import install_freshness_memory_runtime
 from .identity_runtime import install_creator_identity_routing
 from .learning_command_runtime import install_explicit_learning_routing
 from .reliable_web_runtime import install_reliable_web_runtime
@@ -29,6 +30,7 @@ def _install_russian_voice_tts() -> None:
 def make_handler(app, telegram, settings, model_catalog):
     install_explicit_learning_routing(LeshyApp)
     install_reliable_web_runtime(LeshyApp)
+    install_freshness_memory_runtime(app)
     install_runtime_latency_fixes(app)
     install_creator_identity_routing(LeshyApp)
     _install_russian_voice_tts()
@@ -40,6 +42,9 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     # Web, голос, Telegram и startup recovery используют один и тот же контур.
     install_explicit_learning_routing(LeshyApp)
     install_reliable_web_runtime(LeshyApp)
+    # Freshness должен ставиться до latency-layer: тогда stale fallback входит
+    # в окончательную компактизацию prompt и не переполняет 4096-token backend.
+    install_freshness_memory_runtime()
     install_runtime_latency_fixes()
     install_creator_identity_routing(LeshyApp)
     _install_russian_voice_tts()
