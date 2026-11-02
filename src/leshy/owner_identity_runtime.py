@@ -47,6 +47,33 @@ def _link_code(text: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", match.group(1).upper()) if match else ""
 
 
+def _wrap_owner_sensitive_resolvers(app) -> None:
+    """Канонизировать owner_id в подтверждениях, которые идут мимо chat()."""
+    controller = getattr(app, "os_control", None)
+    if controller is None or getattr(controller, "_leshy_owner_identity_wrapped", False):
+        return
+    original_resolve = getattr(controller, "resolve", None)
+    if callable(original_resolve):
+        def resolve(approval_id, *, owner_id: str, allow: bool, **kwargs):
+            return original_resolve(
+                approval_id,
+                owner_id=canonical_owner(app, owner_id),
+                allow=allow,
+                **kwargs,
+            )
+        controller.resolve = resolve
+    original_pending = getattr(controller, "pending", None)
+    if callable(original_pending):
+        def pending(*, owner_id: str, session_id: str | None = None, **kwargs):
+            return original_pending(
+                owner_id=canonical_owner(app, owner_id),
+                session_id=session_id,
+                **kwargs,
+            )
+        controller.pending = pending
+    controller._leshy_owner_identity_wrapped = True
+
+
 def install_owner_identity_runtime(app_class, app, telegram: FastTelegramBridge | None = None) -> None:
     """Подключить единую идентичность без требования Web-авторизации для Telegram.
 
@@ -57,6 +84,7 @@ def install_owner_identity_runtime(app_class, app, telegram: FastTelegramBridge 
     Telegram ID хозяина существующей политикой TelegramBridge._is_owner().
     """
     global _INSTALLED, _ORIGINAL_STREAM, _ORIGINAL_CHAT, _ORIGINAL_TG_HANDLE, _ORIGINAL_TG_STATUS
+    _wrap_owner_sensitive_resolvers(app)
     if _INSTALLED:
         if telegram is not None:
             telegram.owner_identity = getattr(app, "owner_identity", None)
