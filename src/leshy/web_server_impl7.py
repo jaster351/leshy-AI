@@ -13,6 +13,7 @@ from .freshness_cache_runtime import install_freshness_cache_runtime
 from .freshness_memory_runtime import install_freshness_memory_runtime
 from .identity_runtime import install_creator_identity_routing
 from .learning_command_runtime import install_explicit_learning_routing
+from .parcel_tracking_runtime import install_parcel_tracking_routing
 from .reliable_web_runtime import install_reliable_web_runtime
 from .runtime_latency_fix import install_runtime_latency_fixes
 from .session_admin import SessionAdminService
@@ -48,6 +49,9 @@ def _install_runtime_contracts(app=None) -> None:
     install_freshness_cache_runtime()
     install_runtime_latency_fixes(app)
     install_creator_identity_routing(LeshyApp)
+    # Browser Skills — отдельный fast-path. Он не меняет Web transport/SSE:
+    # только перехватывает естественные команды отслеживания до общего LLM.
+    install_parcel_tracking_routing(LeshyApp, app)
     _restore_reference_chat_timing()
     install_telegram_exact_once_finalization()
     install_global_chat_idempotency()
