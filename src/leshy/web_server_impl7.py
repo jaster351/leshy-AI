@@ -15,6 +15,7 @@ from .freshness_memory_runtime import install_freshness_memory_runtime
 from .identity_runtime import install_creator_identity_routing
 from .interactive_search_budget import install_interactive_search_budget
 from .learning_command_runtime import install_explicit_learning_routing
+from .lenta_runtime import install_lenta_routing
 from .module_settings import list_module_states, set_module_enabled
 from .network_blocking_runtime import install_network_blocking_routing
 from .parcel_tracking_runtime import install_parcel_tracking_routing, sync_parcel_runtime_state
@@ -54,6 +55,9 @@ def _install_runtime_contracts(app=None) -> None:
     install_network_blocking_routing(LeshyApp, app)
     install_superagent_background_scheduler()
     install_superagent_routing(LeshyApp, app)
+    # Browser Platform уже ставится внешним impl8. «Лента» должна оборачивать его,
+    # чтобы продолжения «да/нет/измени» не перехватывались общим Browser Agent.
+    install_lenta_routing(LeshyApp, app)
     install_activity_visibility(app)
     _restore_reference_chat_timing()
     install_telegram_exact_once_finalization()
