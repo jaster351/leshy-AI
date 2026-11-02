@@ -4,8 +4,6 @@ from http import HTTPStatus
 from urllib import parse
 
 from . import web_server_impl8 as previous
-from .app import LeshyApp
-from .lenta_runtime import install_lenta_routing
 
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
@@ -21,9 +19,8 @@ def _runtime_html(settings) -> bytes:
 
 
 def make_handler(app, telegram, settings, model_catalog):
-    # Lenta routing ставится до общих browser/chat обёрток. Общий Browser Agent
-    # пропускает явные запросы «Ленты», а глобальная idempotency impl7 остаётся внешней.
-    install_lenta_routing(LeshyApp, app)
+    # Разговорные runtime-контракты, включая «Ленту», ставит impl7 до глобальной
+    # idempotency. Здесь намеренно меняется только внешний визуальный слой Web UI.
     Parent = _PREVIOUS_MAKE_HANDLER(app, telegram, settings, model_catalog)
 
     class Handler(Parent):
