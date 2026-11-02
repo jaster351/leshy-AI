@@ -15,7 +15,9 @@ from .freshness_memory_runtime import install_freshness_memory_runtime
 from .identity_runtime import install_creator_identity_routing
 from .interactive_search_budget import install_interactive_search_budget
 from .learning_command_runtime import install_explicit_learning_routing
-from .parcel_tracking_runtime import install_parcel_tracking_routing
+from .module_settings import list_module_states, set_module_enabled
+from .network_blocking_runtime import install_network_blocking_routing
+from .parcel_tracking_runtime import install_parcel_tracking_routing, sync_parcel_runtime_state
 from .reliable_web_runtime import install_reliable_web_runtime
 from .runtime_latency_fix import install_runtime_latency_fixes
 from .session_admin import SessionAdminService
@@ -27,12 +29,7 @@ _ORIGINAL_SHELL_MAKE_HANDLER = shell.make_handler
 
 
 def _restore_reference_chat_timing() -> None:
-    """Вернуть Telegram-поведение эталона 1.10.35 без потери новых функций.
-
-    В эталонной версии не было отдельного pre-wait перед запуском realtime
-    stream, а видимые правки шли раз в 0.55 секунды. Сохраняем новые Reply,
-    exact-once и flood-control, но убираем дополнительную задержку старта.
-    """
+    """Вернуть Telegram-поведение эталона 1.10.35 без потери новых функций."""
     FastTelegramBridge.edit_interval_seconds = 0.55
 
     def no_foreground_pre_wait(self) -> None:
@@ -45,19 +42,14 @@ def _install_runtime_contracts(app=None) -> None:
     """Ставить idempotency последним, поверх всех специальных chat routing."""
     install_explicit_learning_routing(LeshyApp)
     install_reliable_web_runtime(LeshyApp)
-    # Freshness/cache должны быть внутри latency-layer, чтобы stale fallback и
-    # свежие локальные сведения попали в общую компактизацию prompt.
     install_freshness_memory_runtime(app)
     install_freshness_cache_runtime()
     install_runtime_latency_fixes(app)
-    # Поиск идёт до inference scheduler, поэтому ему нужен отдельный общий
-    # wall-clock budget: иначе failover нескольких backend'ов задерживает ответ.
     install_interactive_search_budget(LeshyApp)
     install_creator_identity_routing(LeshyApp)
-    # Browser Skills — отдельный fast-path. Он не меняет Web transport/SSE:
-    # только перехватывает естественные команды отслеживания до общего LLM.
+    # Специализированные модули идут до общей LLM и могут быть выключены из Settings.
     install_parcel_tracking_routing(LeshyApp, app)
-    # Web activity уже идёт через SSE; Telegram получает временное статус-сообщение.
+    install_network_blocking_routing(LeshyApp, app)
     install_activity_visibility(app)
     _restore_reference_chat_timing()
     install_telegram_exact_once_finalization()
@@ -65,16 +57,12 @@ def _install_runtime_contracts(app=None) -> None:
 
 
 def _runtime_html(settings) -> bytes:
-    """Эталонный chat transport + изолированные UI-модули вокруг него.
-
-    `chat-multitask.js` остаётся единственным владельцем send/stream lifecycle.
-    Sidebar и layout/status модули работают только с DOM/событиями и не меняют
-    sendFrom, SSE, request_id или session transport.
-    """
+    """Эталонный chat transport + изолированные UI-модули вокруг него."""
     html_text = shell._runtime_html(settings).decode("utf-8")
     for marker in (
         '<script src="/sidebar-session-actions.js"></script>',
         '<script src="/chat-layout-status.js"></script>',
+        '<script src="/module-settings-panel.js"></script>',
     ):
         if marker not in html_text:
             html_text = html_text.replace("</body>", marker + "\n</body>")
@@ -101,6 +89,12 @@ main{{max-width:820px;margin:0 auto;padding:34px 18px 70px}}h1{{font-size:20px;m
 .msg{{margin:0 0 18px;line-height:1.55;word-break:break-word}}.msg.user{{width:fit-content;max-width:78%;margin-left:auto;background:#303030;padding:10px 15px;border-radius:20px}}.msg.assistant{{padding:4px 0 16px}}.who{{font-size:11px;color:#9b9b9b;margin-bottom:6px}}
 </style></head><body><main><h1>{title}</h1><div class="muted">Общая ссылка · только чтение</div>{''.join(blocks)}</main></body></html>"""
     return page.encode("utf-8")
+
+
+def _sync_runtime_after_module_change(app, module_name: str) -> None:
+    """Применить переключатель сразу, без перезапуска Лешего."""
+    if module_name in {"parcel-tracking", "human-browser"}:
+        sync_parcel_runtime_state(app)
 
 
 def make_handler(app, telegram, settings, model_catalog):
@@ -160,12 +154,17 @@ def make_handler(app, telegram, settings, model_catalog):
                 "/chat-followup-finalizer.js",
                 "/sidebar-session-actions.js",
                 "/chat-layout-status.js",
+                "/module-settings-panel.js",
             }:
                 name = parsed.path.rsplit("/", 1)[-1]
                 try:
                     return self._send_asset(name, "application/javascript; charset=utf-8")
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": f"{name} не найден"})
+            if parsed.path == "/v1/modules":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                return self._json(HTTPStatus.OK, {"items": list_module_states(app.storage)})
             if parsed.path == "/v1/chat-projects":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
@@ -176,6 +175,30 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             parsed = parse.urlparse(self.path)
+            if parsed.path == "/v1/modules/toggle":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                try:
+                    body = self._body()
+                    name = str(body.get("name") or "").strip()
+                    enabled = body.get("enabled")
+                    if not name or not isinstance(enabled, bool):
+                        raise ValueError("Нужны name и enabled=true/false")
+                    state = set_module_enabled(app.storage, name, enabled)
+                    _sync_runtime_after_module_change(app, name)
+                    items = list_module_states(app.storage)
+                    message = f"Модуль «{state['title']}» {'включён' if enabled else 'выключен'}."
+                    if enabled and not state.get("enabled"):
+                        disabled = [dep.get("name") for dep in state.get("dependencies", []) if not dep.get("enabled")]
+                        if disabled:
+                            message += " Для работы нужно включить зависимость: " + ", ".join(disabled) + "."
+                    return self._json(HTTPStatus.OK, {"state": state, "items": items, "message": message})
+                except (KeyError, ValueError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                except Exception as exc:
+                    problem("module_setting_operation_failed", str(exc))
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+
             if parsed.path in {
                 "/v1/chat-projects/create",
                 "/v1/sessions/project",
@@ -240,9 +263,6 @@ def make_handler(app, telegram, settings, model_catalog):
 
 
 def serve(host: str | None = None, port: int | None = None) -> None:
-    # impl6 устанавливает verified runtime policies до создания приложения.
-    # Подменяем фабрику impl5, потому что именно она каскадно передаётся вниз до
-    # ThreadingHTTPServer в текущей совместимой цепочке impl3→impl4→impl5→impl6.
     original = shell.make_handler
     shell.make_handler = make_handler
     try:
