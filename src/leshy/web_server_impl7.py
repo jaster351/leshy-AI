@@ -12,6 +12,7 @@ from .identity_runtime import install_creator_identity_routing
 from .learning_command_runtime import install_explicit_learning_routing
 from .reliable_web_runtime import install_reliable_web_runtime
 from .runtime_latency_fix import install_runtime_latency_fixes
+from .telegram_exact_once import install_telegram_exact_once_finalization
 
 
 _ORIGINAL_SHELL_MAKE_HANDLER = shell.make_handler
@@ -23,6 +24,7 @@ def _install_runtime_contracts(app=None) -> None:
     install_reliable_web_runtime(LeshyApp)
     install_runtime_latency_fixes(app)
     install_creator_identity_routing(LeshyApp)
+    install_telegram_exact_once_finalization()
     install_global_chat_idempotency()
 
 
