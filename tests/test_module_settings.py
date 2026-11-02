@@ -18,21 +18,33 @@ class ModuleSettingsTests(unittest.TestCase):
         states = {item["name"]: item for item in list_module_states(self.storage)}
         self.assertEqual(
             set(states),
-            {"human-browser", "parcel-tracking", "network-blocking", "support-consultant"},
+            {
+                "human-browser",
+                "browser-agent",
+                "document-intelligence",
+                "computer-use",
+                "tools-marketplace",
+                "parcel-tracking",
+                "network-blocking",
+                "support-consultant",
+                "superagent",
+            },
         )
         self.assertTrue(all(item["enabled"] for item in states.values()))
 
-    def test_parcel_tracking_depends_on_human_browser(self) -> None:
+    def test_browser_modules_depend_on_human_browser(self) -> None:
         set_module_enabled(self.storage, "human-browser", False)
         self.assertFalse(module_enabled(self.storage, "human-browser"))
         self.assertFalse(module_enabled(self.storage, "parcel-tracking"))
+        self.assertFalse(module_enabled(self.storage, "browser-agent"))
 
         states = {item["name"]: item for item in list_module_states(self.storage)}
-        parcel = states["parcel-tracking"]
-        self.assertTrue(parcel["configured_enabled"])
-        self.assertFalse(parcel["enabled"])
-        self.assertEqual(parcel["dependencies"][0]["name"], "human-browser")
-        self.assertFalse(parcel["dependencies"][0]["enabled"])
+        for name in ("parcel-tracking", "browser-agent"):
+            state = states[name]
+            self.assertTrue(state["configured_enabled"])
+            self.assertFalse(state["enabled"])
+            self.assertEqual(state["dependencies"][0]["name"], "human-browser")
+            self.assertFalse(state["dependencies"][0]["enabled"])
 
     def test_switch_survives_new_storage_instance(self) -> None:
         path = self.storage.path
