@@ -38,6 +38,11 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         title="Консультант техподдержки",
         description="Диагностика серверов и подготовка ответов по заявкам; профиль сервера определяется по фактической доступности SSH/RDP.",
     ),
+    ModuleSettingDefinition(
+        name="superagent",
+        title="SuperAgent",
+        description="Автономные фоновые задания по схеме Trigger → Mandate → Ticket → Assignment → Report: состояние переживает перезапуск, временные ошибки повторяются, а к человеку возвращаются только результат или один блокирующий вопрос.",
+    ),
 )
 
 
