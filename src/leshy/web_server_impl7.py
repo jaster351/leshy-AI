@@ -22,6 +22,7 @@ from .reliable_web_runtime import install_reliable_web_runtime
 from .runtime_latency_fix import install_runtime_latency_fixes
 from .session_admin import SessionAdminService
 from .superagent_runtime import install_superagent_routing, sync_superagent_runtime_state
+from .superagent_scheduler import install_superagent_background_scheduler
 from .telegram_exact_once import install_telegram_exact_once_finalization
 from .telegram_fast import FastTelegramBridge
 
@@ -51,6 +52,7 @@ def _install_runtime_contracts(app=None) -> None:
     # Специализированные модули идут до общей LLM и могут быть выключены из Settings.
     install_parcel_tracking_routing(LeshyApp, app)
     install_network_blocking_routing(LeshyApp, app)
+    install_superagent_background_scheduler()
     install_superagent_routing(LeshyApp, app)
     install_activity_visibility(app)
     _restore_reference_chat_timing()
