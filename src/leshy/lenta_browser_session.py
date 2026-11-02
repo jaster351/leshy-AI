@@ -34,6 +34,8 @@ class LentaBrowserSession:
 
     brain_dir: Path
     owner_id: str
+    root: Path
+    state_path: Path
 
     def __init__(self, brain_dir: Path | str, owner_id: str):
         self.brain_dir = Path(brain_dir)
