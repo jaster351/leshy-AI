@@ -69,7 +69,7 @@ SCIENCE_TOPICS = (
 )
 
 # Независимые оси делают задачи содержательно различными. Вместо старых
-# 30*16=480 комбинаций используется пространство >1,2 млн комбинаций.
+# 30*16=480 комбинаций используется пространство в десятки миллионов задач.
 STUDY_LENSES = (
     "foundations terminology and conceptual models",
     "historical development and landmark results",
@@ -136,12 +136,15 @@ NEWS_TOPICS = (
     "economics technology business and regulation",
 )
 
+# Для каждой основной темы сравниваем её с любой другой темой, кроме самой себя.
+COMPARISON_TOPIC_COUNT = len(SCIENCE_TOPICS) - 1
 CURRICULUM_CAPACITY = (
     len(SCIENCE_TOPICS)
     * len(ACADEMIC_DOMAINS)
     * len(STUDY_LENSES)
     * len(EVIDENCE_MODES)
     * len(CROSS_DISCIPLINARY_FOCI)
+    * COMPARISON_TOPIC_COUNT
 )
 if CURRICULUM_CAPACITY < SELF_STUDY_TASK_TARGET:  # pragma: no cover - защита конфигурации
     raise RuntimeError("Пространство curriculum меньше целевого числа уникальных задач")
@@ -156,6 +159,7 @@ class ScientificQuery:
     lens: str = ""
     evidence_mode: str = ""
     cross_focus: str = ""
+    comparison_topic: str = ""
 
 
 def host_of(url: str) -> str:
@@ -171,37 +175,39 @@ def is_academic_url(url: str) -> bool:
     return any(host == domain or host.endswith("." + domain) for domain in ACADEMIC_DOMAINS)
 
 
-def _curriculum_coordinates(index: int) -> tuple[int, int, int, int, int]:
+def _curriculum_coordinates(index: int) -> tuple[int, int, int, int, int, int]:
     """Биективно раскладывает index в координаты curriculum без повторов."""
     value = int(index)
-    if value < 0 or value >= SELF_STUDY_TASK_TARGET:
-        raise IndexError(f"Задача самоизучения вне диапазона 0..{SELF_STUDY_TASK_TARGET - 1}")
+    if value < 0 or value >= CURRICULUM_CAPACITY:
+        raise IndexError(f"Задача самоизучения вне диапазона 0..{CURRICULUM_CAPACITY - 1}")
 
     topic_i, value = value % len(SCIENCE_TOPICS), value // len(SCIENCE_TOPICS)
     domain_i, value = value % len(ACADEMIC_DOMAINS), value // len(ACADEMIC_DOMAINS)
     lens_i, value = value % len(STUDY_LENSES), value // len(STUDY_LENSES)
     evidence_i, value = value % len(EVIDENCE_MODES), value // len(EVIDENCE_MODES)
-    focus_i = value % len(CROSS_DISCIPLINARY_FOCI)
-    return topic_i, domain_i, lens_i, evidence_i, focus_i
+    focus_i, value = value % len(CROSS_DISCIPLINARY_FOCI), value // len(CROSS_DISCIPLINARY_FOCI)
+    compare_i = value % COMPARISON_TOPIC_COUNT
+    return topic_i, domain_i, lens_i, evidence_i, focus_i, compare_i
 
 
 def scientific_query(cursor: int) -> ScientificQuery:
     """Вернуть уникальную задачу автономного самоизучения.
 
-    В старой схеме после 480 запросов комбинации начинали повторяться. Здесь
-    каждый cursor от 0 до 999999 отображается в уникальный набор из пяти осей.
-    Никакого modulo-wrap в пределах целевого миллиона нет.
+    В старой схеме после 480 запросов комбинации начинали повторяться. Теперь
+    mixed-radix координаты дают десятки миллионов неповторяющихся задач; первый
+    миллион является обязательным минимумом, после него обучение не останавливается.
     """
     cursor = max(0, int(cursor))
-    topic_i, domain_i, lens_i, evidence_i, focus_i = _curriculum_coordinates(cursor)
+    topic_i, domain_i, lens_i, evidence_i, focus_i, compare_i = _curriculum_coordinates(cursor)
     topic = SCIENCE_TOPICS[topic_i]
     domain = ACADEMIC_DOMAINS[domain_i]
     lens = STUDY_LENSES[lens_i]
     evidence = EVIDENCE_MODES[evidence_i]
     focus = CROSS_DISCIPLINARY_FOCI[focus_i]
+    comparison_topic = SCIENCE_TOPICS[(topic_i + 1 + compare_i) % len(SCIENCE_TOPICS)]
     query = (
         f"{topic}; {lens}; {evidence}; cross-disciplinary focus: {focus}; "
-        f"review survey systematic review site:{domain}"
+        f"compare and connect with: {comparison_topic}; review survey systematic review site:{domain}"
     )
     return ScientificQuery(
         topic=topic,
@@ -211,6 +217,7 @@ def scientific_query(cursor: int) -> ScientificQuery:
         lens=lens,
         evidence_mode=evidence,
         cross_focus=focus,
+        comparison_topic=comparison_topic,
     )
 
 
