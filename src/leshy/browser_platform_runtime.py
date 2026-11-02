@@ -38,6 +38,20 @@ _COMMERCE_NOUNS = (
 _COMMIT_VERBS = ("купи", "купить", "закаж", "оформи", "заброниру", "подтверди брон", "заброн")
 _FINANCIAL_VERBS = ("оплати", "оплатить", "заплати", "проведи оплат", "подтверди оплат")
 
+_RESEARCH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS browser_research_results(
+    session_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL,
+    snippet TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(session_id, position)
+);
+CREATE INDEX IF NOT EXISTS ix_browser_research_session
+ON browser_research_results(session_id, position);
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class BrowserConversationIntent:
@@ -95,6 +109,8 @@ class BrowserPlatform:
         self.documents = DocumentIntelligence()
         self._research: dict[str, list[dict[str, str]]] = {}
         self._lock = RLock()
+        with self.app.storage.connection() as conn:
+            conn.executescript(_RESEARCH_SCHEMA)
 
     def enabled(self) -> bool:
         try:
@@ -106,7 +122,8 @@ class BrowserPlatform:
     def _host(url: str) -> str:
         return (urlparse(str(url or "")).hostname or "").lower().strip(".")
 
-    def _remember_results(self, session_id: str, rows: list[dict[str, Any]]) -> None:
+    @staticmethod
+    def _sanitize_rows(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
         safe: list[dict[str, str]] = []
         for row in rows[:12]:
             url = str(row.get("url") or "").strip()
@@ -114,15 +131,46 @@ class BrowserPlatform:
                 continue
             safe.append({
                 "title": str(row.get("title") or url)[:500],
-                "url": url,
+                "url": url[:4000],
                 "snippet": str(row.get("snippet") or "")[:1500],
             })
+        return safe
+
+    def _remember_results(self, session_id: str, rows: list[dict[str, Any]]) -> None:
+        sid = str(session_id)
+        safe = self._sanitize_rows(rows)
         with self._lock:
-            self._research[str(session_id)] = safe
+            self._research[sid] = safe
+        now = utcnow()
+        with self.app.storage.connection() as conn:
+            conn.execute("DELETE FROM browser_research_results WHERE session_id=?", (sid,))
+            for position, row in enumerate(safe):
+                conn.execute(
+                    "INSERT INTO browser_research_results(session_id,position,title,url,snippet,updated_at) VALUES(?,?,?,?,?,?)",
+                    (sid, position, row["title"], row["url"], row["snippet"], now),
+                )
+        event("browser_research_state_saved", session_id=sid, results=len(safe))
 
     def _last_results(self, session_id: str) -> list[dict[str, str]]:
+        sid = str(session_id)
         with self._lock:
-            return list(self._research.get(str(session_id), ()))
+            cached = self._research.get(sid)
+            if cached is not None:
+                return list(cached)
+        with self.app.storage.connection() as conn:
+            rows = conn.execute(
+                "SELECT title,url,snippet FROM browser_research_results WHERE session_id=? ORDER BY position",
+                (sid,),
+            ).fetchall()
+        restored = [
+            {"title": str(row["title"]), "url": str(row["url"]), "snippet": str(row["snippet"])}
+            for row in rows
+        ]
+        with self._lock:
+            self._research[sid] = restored
+        if restored:
+            event("browser_research_state_restored", session_id=sid, results=len(restored))
+        return list(restored)
 
     @staticmethod
     def _fallback_summary(rows: list[dict[str, str]]) -> str:
