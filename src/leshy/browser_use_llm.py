@@ -34,6 +34,18 @@ class LeshyBrowserUseLLM:
     def model_name(self) -> str:
         return self.model
 
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: type, handler: Any) -> Any:
+        """Поддержать runtime-протокол BaseChatModel Browser Use 0.13.x.
+
+        BaseChatModel является runtime-checkable Protocol и включает этот hook.
+        Без него структурный isinstance(adapter, BaseChatModel) возвращает False,
+        хотя ainvoke/provider/name/model реализованы корректно.
+        """
+        from pydantic_core import core_schema
+
+        return core_schema.any_schema()
+
     @staticmethod
     def _role(message: Any) -> str:
         raw = str(getattr(message, "role", "") or "").lower()
