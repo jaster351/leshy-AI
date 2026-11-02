@@ -1,9 +1,10 @@
-# Build Status
+# Статус сборки
 
-Version: 1.10.3
+- Текущая версия ветки Browser Platform: `1.10.12`.
+- Основной CI: Python 3.11/3.12, compileall, импорт runtime, unit/regression, Web JavaScript.
+- Browser Platform: Browser Use + Playwright + Human Approval Gate + restart recovery.
+- MCP/Skills: Tools Gateway + изолированный Extension Marketplace.
+- Документы: MarkItDown Document Intelligence.
+- Computer Use: отдельный модуль существующего desktop runtime.
 
-Первый рабочий контур Web + Telegram + локальный чат + управляемое самообучение восстановлен в `main`.
-
-Windows build workflow должен собрать `LeshySetup-1.10.3.exe` и обязательно пройти frozen smoke-test `/v1/status` + `/v1/chat` перед публикацией artifact.
-
-Статус считается готовым только после успешного GitHub Actions Windows Build и наличия установщика artifact.
+Статус готовности определяется только успешным GitHub Actions CI и безопасным слиянием PR в `main`.
