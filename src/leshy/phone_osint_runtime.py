@@ -4,6 +4,7 @@ import uuid
 from typing import Iterator
 
 from .diagnostics import problem
+from .module_settings import module_enabled
 from .phone_osint import PhoneOsintService, is_phone_osint_request
 from .realtime_chat import RealtimeChatManager, StreamEvent
 from .storage import utcnow
@@ -20,6 +21,13 @@ def _service(app) -> PhoneOsintService:
         current = PhoneOsintService(app)
         app.phone_osint = current
     return current
+
+
+def _enabled(app) -> bool:
+    try:
+        return module_enabled(app.storage, "phone-osint")
+    except Exception:
+        return True
 
 
 def _save_user(app, message: str, owner_id: str, session_id: str | None) -> str:
@@ -50,7 +58,7 @@ def install_phone_osint_runtime(app_class) -> None:
 
     def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None, **kwargs):
         value = str(message or "").strip()
-        if not is_phone_osint_request(value):
+        if not _enabled(self) or not is_phone_osint_request(value):
             return _ORIGINAL_CHAT(self, message, owner_id=owner_id, session_id=session_id, **kwargs)
 
         owner_id = (owner_id or "web:local").strip()[:200]
@@ -85,7 +93,7 @@ def install_phone_osint_runtime(app_class) -> None:
         request_id: str | None = None,
     ) -> Iterator[StreamEvent]:
         value = str(message or "").strip()
-        if not is_phone_osint_request(value):
+        if not _enabled(self.app) or not is_phone_osint_request(value):
             yield from _ORIGINAL_STREAM(
                 self,
                 message,
