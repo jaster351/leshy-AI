@@ -58,6 +58,21 @@ class AppRuntimeTests(unittest.TestCase):
                     restarted.stop_background()
                 app.stop_background()
 
+    def test_stop_background_waits_for_learning_workers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = LeshyApp(self.make_settings(Path(temp)))
+            app.start_background()
+            app.stop_background()
+            # Не учитывать одноимённые потоки других экземпляров в общем runner.
+            workers = (
+                app.self_learning._thread,
+                app.self_learning.material_learning._thread,
+                app.self_learning.social_watch._thread,
+            )
+            self.assertTrue(all(worker is not None for worker in workers))
+            self.assertFalse(any(worker.is_alive() for worker in workers))
+            self.assertFalse(app.self_learning.status()["running"])
+
     def test_explicit_memory_is_persistent_and_isolated(self):
         with tempfile.TemporaryDirectory() as temp:
             settings = self.make_settings(Path(temp))
