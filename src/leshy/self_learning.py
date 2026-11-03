@@ -29,6 +29,7 @@ class SelfLearningWorker:
     AUTONOMOUS_INTERVAL_SECONDS = 45.0
     NEWS_INTERVAL_SECONDS = 15 * 60.0
     ERROR_BACKOFF_SECONDS = 90.0
+    STOP_JOIN_TIMEOUT_SECONDS = 5.0
 
     def __init__(self, storage: Storage, learning_control, research_engine):
         self.storage = storage
@@ -60,9 +61,28 @@ class SelfLearningWorker:
         self._thread.start()
 
     def stop(self) -> None:
+        """Останавливает все learning workers и дожидается прекращения записи.
+
+        Раньше метод только выставлял Event. Из-за этого ``stop_background()``
+        мог вернуться, пока daemon-потоки ещё работали с SQLite/brain_dir. Это
+        создавало гонку при штатном завершении, перезапуске и очистке временного
+        профиля. Join выполняется только для чужого потока, поэтому вызов остаётся
+        безопасным и идемпотентным.
+        """
         self._stop.set()
         self.material_learning.stop()
         self.social_watch.stop()
+        current = threading.current_thread()
+        workers = (
+            self._thread,
+            getattr(self.material_learning, "_thread", None),
+            getattr(self.social_watch, "_thread", None),
+        )
+        for worker in workers:
+            if worker is None or worker is current or not worker.is_alive():
+                continue
+            worker.join(timeout=self.STOP_JOIN_TIMEOUT_SECONDS)
+        self._state = "stopped"
 
     def _meta_int(self, key: str, default: int = 0) -> int:
         with self.storage.connection() as conn:
