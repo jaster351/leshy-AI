@@ -193,6 +193,15 @@ class BrowserUseAdapter:
 
         browser_info = ensure_system_browser(auto_install=True)
         profile_dir = self._profile_for_action(action)
+        event(
+            "browser_agent_browser_launch_config",
+            browser=browser_info.name,
+            executable_name=Path(browser_info.executable).name,
+            headless=self.headless,
+            isolated_profile=profile_dir != self.profile_dir,
+            profile_has_lock=any((profile_dir / name).exists() for name in ("SingletonLock", "lockfile")),
+            action=action.name,
+        )
         browser = Browser(
             executable_path=browser_info.executable,
             user_data_dir=str(profile_dir),
