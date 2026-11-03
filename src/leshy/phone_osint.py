@@ -10,6 +10,7 @@ import phonenumbers
 from phonenumbers import PhoneNumberFormat, PhoneNumberType, carrier, geocoder, timezone
 
 from .diagnostics import event, problem
+from .phone_footprint import PhonePublicFootprint
 from .research import SearchUnavailable
 
 
@@ -18,6 +19,7 @@ _INTENT_MARKERS = (
     "/phone", "/номер", "кто звонил", "кто звонит", "что за номер",
     "проверь номер", "проверить номер", "пробей номер", "пробить номер",
     "определи номер", "определить номер", "caller id", "phone osint",
+    "где зарегистрирован номер", "в каких сервисах номер", "как подписан номер",
 )
 _SPAM_MARKERS = (
     "спам", "мошенник", "мошеннич", "обман", "нежелательный звонок", "реклама",
@@ -182,7 +184,6 @@ def _risk_score(meta: PhoneMetadata, evidence: list[Evidence]) -> tuple[int, flo
     if meta.line_type == "платная линия":
         score += 12
         reasons.append("номер относится к платной линии")
-
     if fraud:
         score += min(55, len(fraud) * 14)
         reasons.append(f"найдено публичных негативных упоминаний: {len(fraud)}")
@@ -194,9 +195,6 @@ def _risk_score(meta: PhoneMetadata, evidence: list[Evidence]) -> tuple[int, flo
     if strong_count:
         score += min(18, strong_count * 6)
         reasons.append(f"явных упоминаний мошенничества: {strong_count}")
-
-    # Публичная принадлежность организации уменьшает риск только немного:
-    # Caller ID может быть подменён, поэтому бизнес-совпадение не является доказательством звонящего.
     if business_hosts and not fraud:
         score -= min(15, 5 + len(business_hosts) * 3)
         reasons.append(f"номер встречается в публичных контактах организаций: {len(business_hosts)} источников")
@@ -221,7 +219,7 @@ def _risk_score(meta: PhoneMetadata, evidence: list[Evidence]) -> tuple[int, flo
 
 
 class PhoneOsintService:
-    """Пассивный антифрод OSINT по телефонному номеру только из открытых источников."""
+    """Глубокий публичный phone intelligence + антифрод без закрытых баз и утечек."""
 
     def __init__(self, app):
         self.app = app
@@ -246,12 +244,7 @@ class PhoneOsintService:
                 errors.append(str(exc))
                 continue
             except Exception as exc:  # noqa: BLE001 — внешние поисковые провайдеры изолируем.
-                problem(
-                    "phone_osint_search_failed",
-                    str(exc),
-                    number_hash=number_hash,
-                    query_variant=query_index,
-                )
+                problem("phone_osint_search_failed", str(exc), number_hash=number_hash, query_variant=query_index)
                 errors.append(str(exc))
                 continue
 
@@ -263,13 +256,16 @@ class PhoneOsintService:
                 snippet = " ".join(str(getattr(row, "snippet", "") or "").split())[:900]
                 host = (urlparse(url).hostname or "").lower().removeprefix("www.")
                 kind, strong = _classify_result(title, snippet, host)
-                # Не используем утечки/доксинг и не показываем нейтральные совпадения,
-                # которые могут случайно деанонимизировать частного человека.
                 if kind in {"private-data", "other"}:
                     continue
                 by_url.setdefault(url, Evidence(kind, title, url, host, snippet, strong))
 
         evidence = list(by_url.values())[:30]
+        footprint = PhonePublicFootprint(provider).analyze(
+            e164=meta.e164,
+            international=meta.international,
+            national=meta.national,
+        )
         score, confidence, verdict, reasons = _risk_score(meta, evidence)
         result = {
             "number": {
@@ -291,12 +287,16 @@ class PhoneOsintService:
             "verdict": verdict,
             "reasons": reasons,
             "evidence": [item.public() for item in evidence],
+            "public_footprint": footprint,
             "search_errors": errors[:3],
             "caller_id_spoofing_warning": (
                 "Номер в Caller ID может быть подменён. OSINT оценивает репутацию отображённого номера, "
                 "но не доказывает личность фактического звонящего."
             ),
-            "privacy_mode": "Только открытые источники; утечки, закрытые базы, адреса, паспорта и родственники не используются.",
+            "privacy_mode": (
+                "Только открытые или явно авторизованные пользователем источники; утечки, закрытые базы, "
+                "адреса, паспорта, родственники и обход защиты сервисов не используются."
+            ),
         }
         event(
             "phone_osint_finished",
@@ -304,6 +304,7 @@ class PhoneOsintService:
             risk_score=score,
             confidence=confidence,
             evidence=len(evidence),
+            public_service_matches=int(footprint.get("public_matches") or 0),
         )
         return result
 
@@ -314,12 +315,15 @@ class PhoneOsintService:
         confidence = float(result.get("confidence") or 0.0)
         evidence = list(result.get("evidence") or [])
         reasons = list(result.get("reasons") or [])
+        footprint = dict(result.get("public_footprint") or {})
+        services = list(footprint.get("services") or [])
+        caller_tags = dict(footprint.get("caller_tags") or {})
         fraud = [item for item in evidence if item.get("kind") == "fraud-report"]
         business = [item for item in evidence if item.get("kind") == "business"]
 
         lines = [
             f"Проверил {number.get('international') or number.get('e164')}. Антифрод-риск: {score}/100 — {result.get('verdict')}.",
-            f"Уверенность оценки: {int(confidence * 100)}%.",
+            f"Уверенность антифрод-оценки: {int(confidence * 100)}%.",
         ]
         meta = []
         if number.get("region_name"):
@@ -332,6 +336,26 @@ class PhoneOsintService:
             lines.append("Метаданные номера: " + ", ".join(meta) + ".")
         if reasons:
             lines.append("Почему такая оценка: " + "; ".join(str(x) for x in reasons) + ".")
+
+        public_matches = [item for item in services if item.get("status") == "public_match"]
+        if public_matches:
+            lines.append("Публичные связи с сервисами:")
+            for item in public_matches[:8]:
+                item_evidence = list(item.get("evidence") or [])
+                first = item_evidence[0] if item_evidence else {}
+                url = str(first.get("url") or "")
+                suffix = f" — {url}" if url else ""
+                lines.append(f"• {item.get('title')}: найдено открытое совпадение{suffix}")
+            lines.append("Это подтверждает публичное упоминание номера, но само по себе не доказывает регистрацию аккаунта.")
+        else:
+            lines.append("Публично индексируемых связей номера с проверяемыми сервисами не найдено или поиск недоступен.")
+
+        tags = list(caller_tags.get("tags") or [])
+        if tags:
+            lines.append("Авторизованные теги контакта: " + ", ".join(str(tag) for tag in tags[:12]) + ".")
+        elif caller_tags:
+            lines.append("Теги чужих контактов: " + str(caller_tags.get("message") or "авторизованный источник не подключён"))
+
         if fraud:
             lines.append("Негативные публичные сигналы:")
             for item in fraud[:6]:
@@ -341,7 +365,9 @@ class PhoneOsintService:
             for item in business[:4]:
                 lines.append(f"• {item.get('title') or item.get('host')} — {item.get('url')}")
         if not evidence:
-            lines.append("Надёжных публичных совпадений не найдено. Это не означает, что звонок безопасен.")
+            lines.append("Надёжных антифрод-совпадений не найдено. Это не означает, что звонок безопасен.")
+        if footprint.get("registration_warning"):
+            lines.append(str(footprint["registration_warning"]))
         lines.append(str(result.get("caller_id_spoofing_warning") or ""))
         lines.append("Не сообщайте коды из SMS, пароли и данные карты только на основании определившегося номера.")
         return "\n".join(line for line in lines if line)
