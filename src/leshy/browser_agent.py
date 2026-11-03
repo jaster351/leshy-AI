@@ -68,9 +68,12 @@ class BrowserAgent:
             if parsed.username is not None or parsed.password is not None:
                 return False
             port = parsed.port
-            if port is not None and port != (443 if parsed.scheme == "https" else 80):
-                return False
             host = parsed.hostname.lower().strip(".")
+            # Только явно разрешённый loopback может использовать случайный
+            # порт локального тестового HTTP-сервера; внешние порты запрещены.
+            loopback_allowed = host in {"127.0.0.1", "::1", "localhost"} and host in self.allowed_hosts
+            if port is not None and port != (443 if parsed.scheme == "https" else 80) and not loopback_allowed:
+                return False
         except (TypeError, ValueError):
             return False
         if not self.allowed_hosts:
