@@ -56,3 +56,32 @@ def test_allowlist_accepts_subdomains():
     agent = BrowserAgent([adapter], allowed_hosts=("example.com",))
     result = agent.execute(BrowserAction("read", "https://shop.example.com/item", BrowserRisk.READ))
     assert result.status == "ok"
+
+
+@pytest.mark.parametrize("url", [
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+    "ftp://example.com/file",
+    "https://example.com:8443/admin",
+    "http://example.com:8080/",
+    "https://user:password@example.com/",
+    "https://[invalid/",
+    "https://",
+])
+def test_unsafe_browser_url_is_blocked_even_without_allowlist(url):
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    result = agent.execute(BrowserAction("read", url, BrowserRisk.READ))
+    assert result.status == "blocked"
+    assert adapter.calls == []
+
+
+@pytest.mark.parametrize("url", [
+    "https://example.com",
+    "https://example.com:443/path",
+    "http://example.com:80/path",
+])
+def test_standard_http_https_urls_remain_allowed(url):
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    assert agent.execute(BrowserAction("read", url, BrowserRisk.READ)).status == "ok"
