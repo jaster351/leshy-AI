@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: read
+
 concurrency:
   group: leshy-windows-${{ github.ref }}
   cancel-in-progress: true
@@ -49,6 +53,7 @@ jobs:
         shell: pwsh
         run: |
           $v=(Get-Content VERSION -Raw).Trim()
+          if ($v -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') { throw "Некорректная версия в VERSION: $v" }
           "version=$v" >> $env:GITHUB_OUTPUT
       - name: Inno Setup
         shell: pwsh
@@ -62,9 +67,37 @@ jobs:
           $p="dist/LeshySetup-${{ steps.version.outputs.version }}.exe"
           if (-not (Test-Path $p)) { throw "Не найден $p" }
           Get-Item $p | Format-List Name,Length,LastWriteTime
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LeshySetup-${{ steps.version.outputs.version }}
-          path: dist/LeshySetup-${{ steps.version.outputs.version }}.exe
-          if-no-files-found: error
-          retention-days: 14
+          Get-FileHash $p -Algorithm SHA256 | Format-List
+      - name: Дождаться успешного Linux CI для того же коммита
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $headSha = '${{ github.sha }}'
+          for ($attempt = 1; $attempt -le 30; $attempt++) {
+            $json = gh api "repos/${{ github.repository }}/actions/runs?head_sha=$headSha&per_page=20" | ConvertFrom-Json
+            $run = $json.workflow_runs | Where-Object { $_.name -eq 'Leshy AI CI' } | Select-Object -First 1
+            if ($null -eq $run) {
+              Write-Host 'Linux CI: missing'
+            } else {
+              Write-Host "Linux CI: $($run.status):$($run.conclusion)"
+              if ($run.status -eq 'completed' -and $run.conclusion -eq 'success') { exit 0 }
+              if ($run.status -eq 'completed') { exit 1 }
+            }
+            Start-Sleep -Seconds 10
+          }
+          throw 'Linux CI did not complete successfully in time'
+      - name: Опубликовать проверенный Windows installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $tag = "v$version"
+          $asset = "dist/LeshySetup-$version.exe"
+          gh release view $tag --repo '${{ github.repository }}' *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $asset --repo '${{ github.repository }}' --clobber
+          } else {
+            gh release create $tag $asset --repo '${{ github.repository }}' --target '${{ github.sha }}' --title "Леший $version" --notes "Проверенный релиз Лешего $version. Перед публикацией успешно пройдены Linux CI, Windows frozen smoke-test и проверка установщика."
+          }
