@@ -59,9 +59,22 @@ class BrowserAgent:
         self.allowed_hosts = tuple(x.lower().strip(".") for x in allowed_hosts if x)
 
     def _host_allowed(self, url: str) -> bool:
+        # Проверка схемы/порта обязательна даже без явного allowlist:
+        # file:, javascript:, ftp: и нестандартные порты не должны попадать в адаптер.
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                return False
+            if parsed.username is not None or parsed.password is not None:
+                return False
+            port = parsed.port
+            if port is not None and port != (443 if parsed.scheme == "https" else 80):
+                return False
+            host = parsed.hostname.lower().strip(".")
+        except (TypeError, ValueError):
+            return False
         if not self.allowed_hosts:
             return True
-        host = (urlparse(url).hostname or "").lower().strip(".")
         return any(host == allowed or host.endswith("." + allowed) for allowed in self.allowed_hosts)
 
     def execute(self, action: BrowserAction, *, approved: bool = False) -> BrowserActionResult:
