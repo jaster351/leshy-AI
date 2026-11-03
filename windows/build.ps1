@@ -75,6 +75,8 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --collect-all hf_xet `
   --collect-all playwright `
   --collect-all browser_use `
+  --exclude-module browser_use.llm.oci_raw `
+  --exclude-module oci `
   --collect-all markitdown `
   --collect-all mcp `
   --collect-all mss `
