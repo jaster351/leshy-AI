@@ -30,6 +30,7 @@ class ModuleSettingsTests(unittest.TestCase):
                 "distributed-cluster",
                 "parcel-tracking",
                 "network-blocking",
+                "phone-osint",
                 "support-consultant",
                 "lenta",
                 "superagent",
@@ -58,6 +59,11 @@ class ModuleSettingsTests(unittest.TestCase):
         self.assertFalse(module_enabled(reopened, "network-blocking"))
         set_module_enabled(reopened, "network-blocking", True)
         self.assertTrue(module_enabled(self.storage, "network-blocking"))
+
+    def test_phone_osint_switch_is_available(self) -> None:
+        self.assertTrue(module_enabled(self.storage, "phone-osint"))
+        set_module_enabled(self.storage, "phone-osint", False)
+        self.assertFalse(module_enabled(self.storage, "phone-osint"))
 
     def test_unknown_module_is_rejected(self) -> None:
         with self.assertRaises(KeyError):
