@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 import os
 import re
 from urllib.parse import urlparse
@@ -132,6 +133,10 @@ def _parse_number(raw: str) -> tuple[PhoneMetadata, object]:
     )
 
 
+def _number_log_id(e164: str) -> str:
+    return sha256(str(e164).encode("utf-8")).hexdigest()[:16]
+
+
 def _classify_result(title: str, snippet: str, host: str) -> tuple[str, bool]:
     haystack = f"{title} {snippet} {host}".lower()
     if any(marker in haystack for marker in _PRIVATE_DATA_MARKERS):
@@ -155,7 +160,6 @@ def _search_queries(meta: PhoneMetadata) -> list[str]:
     ]
     if national_digits and national_digits != digits:
         values.append(f'"{national_digits}" мошенники спам отзывы')
-    # Сохраняем порядок, удаляя дубли.
     return list(dict.fromkeys(values))[:5]
 
 
@@ -229,19 +233,25 @@ class PhoneOsintService:
         except phonenumbers.NumberParseException as exc:
             raise ValueError(f"Не удалось разобрать номер: {exc}") from exc
 
-        event("phone_osint_started", number=meta.e164)
+        number_hash = _number_log_id(meta.e164)
+        event("phone_osint_started", number_hash=number_hash)
         by_url: dict[str, Evidence] = {}
         errors: list[str] = []
         provider = self.app.research.search_provider
 
-        for query in _search_queries(meta):
+        for query_index, query in enumerate(_search_queries(meta), start=1):
             try:
                 rows = provider.search(query, limit=7)
             except SearchUnavailable as exc:
                 errors.append(str(exc))
                 continue
             except Exception as exc:  # noqa: BLE001 — внешние поисковые провайдеры изолируем.
-                problem("phone_osint_search_failed", str(exc), query=query[:500])
+                problem(
+                    "phone_osint_search_failed",
+                    str(exc),
+                    number_hash=number_hash,
+                    query_variant=query_index,
+                )
                 errors.append(str(exc))
                 continue
 
@@ -288,7 +298,13 @@ class PhoneOsintService:
             ),
             "privacy_mode": "Только открытые источники; утечки, закрытые базы, адреса, паспорта и родственники не используются.",
         }
-        event("phone_osint_finished", number=meta.e164, risk_score=score, confidence=confidence, evidence=len(evidence))
+        event(
+            "phone_osint_finished",
+            number_hash=number_hash,
+            risk_score=score,
+            confidence=confidence,
+            evidence=len(evidence),
+        )
         return result
 
     @staticmethod
