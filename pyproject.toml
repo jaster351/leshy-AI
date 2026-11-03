@@ -25,6 +25,7 @@ dependencies = [
   "pyautogui>=0.9.54,<1",
   "huggingface_hub>=0.36,<2",
   "hf_xet>=1.1,<2",
+  "phonenumbers>=8.13,<10",
 ]
 
 [project.optional-dependencies]
