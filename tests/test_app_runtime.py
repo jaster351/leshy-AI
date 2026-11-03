@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 
 from leshy.app import LeshyApp
@@ -57,6 +58,20 @@ class AppRuntimeTests(unittest.TestCase):
                 if restarted is not None:
                     restarted.stop_background()
                 app.stop_background()
+
+    def test_stop_background_waits_for_learning_workers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = LeshyApp(self.make_settings(Path(temp)))
+            app.start_background()
+            app.stop_background()
+            worker_names = {
+                "leshy-self-learning",
+                "leshy-material-learning",
+                "leshy-social-watch",
+            }
+            alive = {thread.name for thread in threading.enumerate() if thread.name in worker_names}
+            self.assertEqual(alive, set())
+            self.assertFalse(app.self_learning.status()["running"])
 
     def test_explicit_memory_is_persistent_and_isolated(self):
         with tempfile.TemporaryDirectory() as temp:
