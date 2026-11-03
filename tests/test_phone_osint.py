@@ -1,6 +1,11 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from leshy.phone_footprint import AuthorizedTagFileProvider, PhonePublicFootprint
 from leshy.phone_osint import PhoneOsintService, extract_phone_candidate, is_phone_osint_request
 from leshy.research import SearchResult
 
@@ -23,6 +28,7 @@ class PhoneOsintTests(unittest.TestCase):
     def test_phone_request_detection_and_extraction(self):
         text = "Кто звонил с +1 (415) 555-2671?"
         self.assertTrue(is_phone_osint_request(text))
+        self.assertTrue(is_phone_osint_request("как подписан номер +1 415 555 2671"))
         self.assertEqual(extract_phone_candidate(text), "+1 (415) 555-2671")
         self.assertFalse(is_phone_osint_request("Позвони мне на +1 415 555 2671"))
 
@@ -63,6 +69,45 @@ class PhoneOsintTests(unittest.TestCase):
         result = PhoneOsintService(_app(rows)).analyze("проверь номер +1 415 555 2671")
         self.assertEqual(result["evidence"], [])
         self.assertEqual(result["verdict"], "данных недостаточно")
+
+    def test_public_service_hit_requires_number_on_matching_service_domain(self):
+        rows = [
+            SearchResult("Public Telegram mention", "https://t.me/example", "Контакт +1 (415) 555-2671"),
+            SearchResult("Unrelated profile", "https://instagram.com/example", "another person"),
+        ]
+        footprint = PhonePublicFootprint(FakeSearch(rows)).analyze(
+            e164="+14155552671",
+            international="+1 415-555-2671",
+            national="(415) 555-2671",
+        )
+        telegram = next(item for item in footprint["services"] if item["service"] == "telegram")
+        instagram = next(item for item in footprint["services"] if item["service"] == "instagram")
+        self.assertEqual(telegram["status"], "public_match")
+        self.assertGreaterEqual(telegram["confidence"], 0.7)
+        self.assertEqual(instagram["status"], "no_public_evidence")
+
+    def test_caller_tags_require_authorized_source_by_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            result = AuthorizedTagFileProvider().lookup("+14155552671")
+        self.assertEqual(result["status"], "requires_authorized_source")
+        self.assertEqual(result["tags"], [])
+
+    def test_authorized_tag_file_is_supported_without_network_scraping(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "tags.json"
+            path.write_text('{"+14155552671": ["Мастер Алексей", "Сервис"]}', encoding="utf-8")
+            result = AuthorizedTagFileProvider(str(path)).lookup("+14155552671")
+        self.assertEqual(result["status"], "found")
+        self.assertEqual(result["tags"], ["Мастер Алексей", "Сервис"])
+
+    def test_formatted_answer_reports_public_service_and_registration_limit(self):
+        rows = [SearchResult("Telegram contact", "https://t.me/example", "Телефон +1 415 555 2671")]
+        with patch.dict(os.environ, {}, clear=True):
+            result = PhoneOsintService(_app(rows)).analyze("где зарегистрирован номер +1 415 555 2671")
+        answer = PhoneOsintService.format_answer(result)
+        self.assertIn("Telegram", answer)
+        self.assertIn("не доказывает регистрацию", answer)
+        self.assertIn("скрейпинг", answer)
 
     def test_answer_always_warns_about_caller_id_spoofing(self):
         rows = [SearchResult("Spam caller", "https://spam.example/x", "spam robocall")]
