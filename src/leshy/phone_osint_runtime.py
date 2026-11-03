@@ -47,8 +47,32 @@ def _save_user(app, message: str, owner_id: str, session_id: str | None) -> str:
     return sid
 
 
+def _sources(result: dict[str, object]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(title: str, url: str) -> None:
+        value = str(url or "").strip()
+        if not value.startswith(("http://", "https://")) or value in seen:
+            return
+        seen.add(value)
+        items.append({"title": str(title or "Источник"), "url": value})
+
+    for item in list(result.get("evidence") or []):
+        add(str(item.get("title") or item.get("host") or "Источник"), str(item.get("url") or ""))
+
+    footprint = dict(result.get("public_footprint") or {})
+    for service in list(footprint.get("services") or []):
+        for item in list(service.get("evidence") or []):
+            add(
+                str(item.get("title") or service.get("title") or item.get("host") or "Публичный след"),
+                str(item.get("url") or ""),
+            )
+    return items[:30]
+
+
 def install_phone_osint_runtime(app_class) -> None:
-    """Подключить пассивный антифрод OSINT к Web/Telegram без изменения LLM."""
+    """Подключить phone intelligence к Web/Telegram без изменения LLM."""
     global _INSTALLED, _ORIGINAL_CHAT, _ORIGINAL_STREAM
     if _INSTALLED:
         return
@@ -68,19 +92,14 @@ def install_phone_osint_runtime(app_class) -> None:
             answer = PhoneOsintService.format_answer(result)
         except Exception as exc:  # noqa: BLE001 — внешний поиск не должен ломать чат.
             problem("phone_osint_chat_failed", str(exc), session_id=sid, owner_id=owner_id)
-            result = {"error": str(exc), "evidence": []}
+            result = {"error": str(exc), "evidence": [], "public_footprint": {}}
             answer = "Не удалось выполнить OSINT-проверку номера: " + str(exc)
 
-        sources = [
-            {"title": str(item.get("title") or item.get("host") or "Источник"), "url": str(item.get("url") or "")}
-            for item in list(result.get("evidence") or [])
-            if str(item.get("url") or "").startswith(("http://", "https://"))
-        ]
         return {
             "session_id": sid,
             "answer": answer,
             "created_at": self._save_assistant(sid, answer),
-            "sources": sources,
+            "sources": _sources(result),
             "phone_osint": result,
         }
 
@@ -108,7 +127,7 @@ def install_phone_osint_runtime(app_class) -> None:
             yield StreamEvent("activity", {
                 "kind": "phone_osint",
                 "phase": "searching",
-                "text": "Проверяю номер по открытым источникам и антифрод-сигналам…",
+                "text": "Проверяю номер: публичные сервисы, репутация и антифрод-сигналы…",
             })
             result = self.app.chat(value, owner_id=owner_id, session_id=session_id)
             sid = str(result.get("session_id") or "")
