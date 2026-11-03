@@ -76,6 +76,20 @@ def test_unsafe_browser_url_is_blocked_even_without_allowlist(url):
     assert adapter.calls == []
 
 
+def test_explicit_loopback_allowlist_permits_local_ephemeral_port():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter], allowed_hosts=("127.0.0.1",))
+    assert agent.execute(BrowserAction("read", "http://127.0.0.1:39123/", BrowserRisk.READ)).status == "ok"
+    assert len(adapter.calls) == 1
+
+
+def test_loopback_nonstandard_port_without_explicit_allowlist_is_blocked():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    assert agent.execute(BrowserAction("read", "http://127.0.0.1:39123/", BrowserRisk.READ)).status == "blocked"
+    assert adapter.calls == []
+
+
 @pytest.mark.parametrize("url", [
     "https://example.com",
     "https://example.com:443/path",
