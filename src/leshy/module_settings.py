@@ -75,6 +75,11 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         description="TCP 22/3389 из сети Лешего + Cheburcheck + географические TCP-проверки Check-Host с оценкой вероятности блокировки.",
     ),
     ModuleSettingDefinition(
+        name="phone-osint",
+        title="Антифрод OSINT по телефону",
+        description="Глубокая пассивная проверка входящего номера по открытым источникам: нормализация, регион/оператор/тип линии, независимые публичные жалобы, бизнес-совпадения, антифрод risk score и confidence. Утечки, закрытые базы, адреса, паспорта и родственники не используются.",
+    ),
+    ModuleSettingDefinition(
         name="support-consultant",
         title="Консультант техподдержки",
         description="Диагностика серверов и подготовка ответов по заявкам; профиль сервера определяется по фактической доступности SSH/RDP.",
