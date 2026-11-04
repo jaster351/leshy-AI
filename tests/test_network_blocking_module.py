@@ -30,7 +30,7 @@ class NetworkBlockingModuleTests(unittest.TestCase):
         self.assertEqual(profile, "Windows/RDP")
         self.assertEqual(ports, (3389,))
 
-    def test_ru_timeout_and_foreign_success_is_max_tspu_heuristic(self) -> None:
+    def test_ru_timeout_and_foreign_success_is_only_indirect_signal(self) -> None:
         local = (
             TcpObservation("local", 22, "timeout"),
             TcpObservation("local", 3389, "refused"),
@@ -62,7 +62,7 @@ class NetworkBlockingModuleTests(unittest.TestCase):
         chebur = CheburcheckEvidence(ok=True, blocked=False, target="203.0.113.10")
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, remote, chebur)
         self.assertLessEqual(result.tspu_probability, 20)
-        self.assertIn("не подтверждены", result.verdict.lower())
+        self.assertIn("не подтверждена", result.verdict.lower())
 
     def test_cheburcheck_listing_without_geographic_proof_is_probabilistic(self) -> None:
         local = (
