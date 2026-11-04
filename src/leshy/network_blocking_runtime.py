@@ -55,45 +55,19 @@ def _service_label(metadata: dict[str, Any]) -> str:
 
 
 def _compact_answer(metadata: dict[str, Any]) -> str:
-    """Короткий ответ пользователю. Полная диагностика остаётся в metadata/logs."""
+    """Only a separately verified TSPU attribution permits a copyable categorical conclusion.
+
+    Legacy probability/heuristic scores are never proof, even when equal to 100.
+    """
     target = str(metadata.get("target") or "").strip()
-    prefix = f"{target}: " if target else ""
-    probability = max(0, min(100, int(metadata.get("tspu_probability") or 0)))
-    service = _service_label(metadata)
-    remote = list(metadata.get("remote") or [])
-
-    if probability >= 100:
-        return (
-            f"{prefix}IP заблокирован ТСПУ с высокой уверенностью (100%). {service}.\n"
-            "Решение: сменить IP-адрес и повторить проверку нового адреса."
-        )
-
-    if probability >= 70:
-        return (
-            f"{prefix}сильные признаки блокировки ТСПУ ({probability}%). {service}.\n"
-            "Решение: повторить проверку; при повторении результата сменить IP."
-        )
-
-    if probability >= 30:
-        return (
-            f"{prefix}блокировка ТСПУ не доказана, но есть косвенные признаки ({probability}%). {service}.\n"
-            "Решение: повторить проверку и проверить маршрут/фаервол."
-        )
-
-    external_available = any(
-        isinstance(item, dict) and str(item.get("status") or "") == "connected"
-        for item in remote
-    )
-    if external_available:
-        return (
-            f"{prefix}блокировка ТСПУ не подтверждена ({probability}%). {service}.\n"
-            "Решение: IP менять не нужно; проверить локальную сеть, маршрут и фаервол."
-        )
-
-    return (
-        f"{prefix}данных недостаточно для уверенного решения. {service}.\n"
-        "Решение: повторить проверку; если порты недоступны из всех локаций, проверять сервер и фаервол."
-    )
+    if (
+        target
+        and metadata.get("blocking_attribution") == "confirmed_tspu"
+        and metadata.get("proof_verification") == "verified"
+        and str(metadata.get("proof_record_id") or "").strip()
+    ):
+        return f"IP-адрес {target} заблокирован ТСПУ."
+    return f"IP-адрес {target}. Блокировка ТСПУ не подтверждена." if target else "Блокировка ТСПУ не подтверждена."
 
 
 def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
@@ -112,7 +86,16 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     if source_url:
         sources.append({"title": "Cheburcheck", "url": source_url})
     sources.append({"title": "Check-Host", "url": "https://check-host.net/check-tcp"})
-    return _compact_answer(response.metadata), sources, response.metadata
+    summary = _compact_answer(response.metadata)
+    if response.metadata.get("blocking_attribution") != "confirmed_tspu" or not response.metadata.get("proof_record_id") or response.metadata.get("proof_verification") != "verified":
+        # Do not hide missing or conflicting measurements from the operator.
+        summary += "\n\n" + response.text
+    response.metadata["copyable_conclusion"] = (
+        summary if response.metadata.get("blocking_attribution") == "confirmed_tspu"
+        and response.metadata.get("proof_verification") == "verified"
+        and response.metadata.get("proof_record_id") else ""
+    )
+    return summary, sources, response.metadata
 
 
 def _save_user(app, message: str, owner_id: str, session_id: str | None) -> str:
