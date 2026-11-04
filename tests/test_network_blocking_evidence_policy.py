@@ -64,7 +64,7 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
         self.assertLessEqual(result.tspu_probability, 10)
         self.assertTrue(any("не предоставил" in text for text in result.reasons))
         output = NetworkBlockingChecker.format(result)
-        self.assertIn("Индекс признаков ТСПУ:", output)
+        self.assertIn("Оценка уверенности в признаках блокировки ТСПУ:", output)
         self.assertIn("Check-Host: результатов нет", output)
         self.assertIn("Статус подтверждения:", output)
 
