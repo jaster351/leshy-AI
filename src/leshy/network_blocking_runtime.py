@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Iterator
 
@@ -41,6 +42,89 @@ def _matches(app, text: str) -> bool:
     except Exception:
         return False
 
+
+
+# Match short clarifying questions only. Never re-interpret a new target as a follow-up.
+_FOLLOWUP_MARKERS = (
+    "как ты это понял", "как это понял", "откуда ты это взял",
+    "откуда информация", "почему ты так решил", "почему решил",
+    "почему заблокирован", "чем подтверждается", "какие доказательства",
+    "какие проверки", "что ты проверял", "что проверял",
+    "покажи диагностику", "покажи результаты", "покажи проверки",
+    "покажи логи проверки", "объясни проверку", "объясни вывод",
+    "на основании чего", "как проверял", "как ты проверил",
+    "каким способом проверил", "распиши механизм", "как определил блокировку",
+)
+
+
+def _is_diagnostic_followup(message: str) -> bool:
+    normalized = " ".join(str(message or "").lower().replace("ё", "е").split())
+    if not normalized or len(normalized) > 220:
+        return False
+    return any(phrase in normalized for phrase in _FOLLOWUP_MARKERS)
+
+
+def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | None:
+    """Read only the immediately preceding assistant response in this owner's session.
+
+    This does not rerun probes or consult the LLM: the answer must be grounded in
+    evidence that was actually saved during the preceding diagnostic request.
+    """
+    if not session_id:
+        return None
+    with app.storage.connection() as conn:
+        session = conn.execute(
+            "SELECT id FROM sessions WHERE id=? AND owner_id=?",
+            (session_id, owner_id),
+        ).fetchone()
+        if session is None:
+            return None
+        row = conn.execute(
+            "SELECT role, content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+    if row is None or row["role"] != "assistant":
+        return None
+    answer = str(row["content"] or "")
+    # Both the older short-answer implementation and the new evidence-first
+    # implementation may be present in persistent user history.
+    legacy = bool(re.search(
+        r"(?m)^\\d{1,3}(?:\\.\\d{1,3}){3}: IP заблокирован ТСПУ",
+        answer,
+    ))
+    modern = bool(re.search(
+        r"(?m)^IP-адрес \\S+\\. Блокировка ТСПУ не подтверждена\\.",
+        answer,
+    )) and "Проверка " in answer
+    confirmed = bool(re.search(
+        r"(?m)^IP-адрес \\S+ заблокирован ТСПУ\\.",
+        answer,
+    ))
+    if not (legacy or modern or confirmed):
+        return None
+    return answer
+
+
+def _explain_saved_diagnostic(previous: str) -> str:
+    """Replay previous measured results or explicitly admit missing evidence."""
+    marker = previous.find("\\n\\nПроверка ")
+    if marker >= 0 and "Запуски инструментов (ID;" in previous:
+        report = previous[marker:].strip()
+        return (
+            "Объяснение по предыдущему запросу — только сохранённые результаты "
+            "его диагностики. Я не выполнял новую проверку и не использовал "
+            "поисковые системы для обоснования прошлого вывода. "
+            "Отдельный индекс признаков не является доказательством причины ТСПУ.\\n\\n"
+            + report
+        )
+    return (
+        "Предыдущий ответ о блокировке ТСПУ нельзя достоверно обосновать: "
+        "в истории этого диалога нет полного протокола TCP Connect, Чебурчека "
+        "и Check-Host с результатами по узлам и подтверждениями выполнения. "
+        "Утверждение «100% ТСПУ» без этих доказательств недопустимо. "
+        "Я не буду придумывать команды, результаты поиска или объяснение "
+        "задним числом. Отправьте IP снова для новой проверки с полным отчётом."
+    )
 
 def _service_label(metadata: dict[str, Any]) -> str:
     profile = str(metadata.get("profile") or "").strip()
@@ -142,7 +226,12 @@ def install_network_blocking_routing(app_class, app=None) -> None:
         request_id: str | None = None,
     ) -> Iterator[StreamEvent]:
         value = str(message or "").strip()
-        if not _matches(self.app, value):
+        owner = (owner_id or "web:local").strip()[:200]
+        followup = (
+            _previous_diagnostic(self.app, owner, session_id)
+            if _is_diagnostic_followup(value) else None
+        )
+        if followup is None and not _matches(self.app, value):
             yield from _ORIGINAL_STREAM(
                 self,
                 value,
@@ -152,7 +241,6 @@ def install_network_blocking_routing(app_class, app=None) -> None:
             )
             return
 
-        owner = (owner_id or "web:local").strip()[:200]
         rid, cancel = self._register(request_id)
         sid = ""
         started = time.monotonic()
@@ -177,9 +265,20 @@ def install_network_blocking_routing(app_class, app=None) -> None:
             yield StreamEvent("activity", {
                 "kind": "network_blocking",
                 "phase": "local_tcp",
-                "text": "Проверяю доступность IP и признаки блокировки ТСПУ…",
+                "text": (
+                    "Поднимаю сохранённый протокол проверки…"
+                    if followup is not None
+                    else "Проверяю доступность IP и признаки блокировки ТСПУ…"
+                ),
             })
-            answer, sources, metadata = _run(self.app, value)
+            if followup is not None:
+                answer, sources, metadata = _explain_saved_diagnostic(followup), [], {
+                    "network_blocking_followup": True,
+                    "new_probes_executed": False,
+                    "blocking_attribution": "unconfirmed",
+                }
+            else:
+                answer, sources, metadata = _run(self.app, value)
             if cancel.is_set():
                 return
             for chunk in self._chunk_fallback(answer, 190):
@@ -221,11 +320,22 @@ def install_network_blocking_routing(app_class, app=None) -> None:
 
     def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None, **kwargs) -> dict[str, Any]:
         value = str(message or "").strip()
-        if not _matches(self, value):
-            return _ORIGINAL_CHAT(self, value, owner_id=owner_id, session_id=session_id, **kwargs)
         owner = (owner_id or "web:local").strip()[:200]
+        followup = (
+            _previous_diagnostic(self, owner, session_id)
+            if _is_diagnostic_followup(value) else None
+        )
+        if followup is None and not _matches(self, value):
+            return _ORIGINAL_CHAT(self, value, owner_id=owner_id, session_id=session_id, **kwargs)
         sid = _save_user(self, value, owner, session_id)
-        answer, sources, metadata = _run(self, value)
+        if followup is not None:
+            answer, sources, metadata = _explain_saved_diagnostic(followup), [], {
+                "network_blocking_followup": True,
+                "new_probes_executed": False,
+                "blocking_attribution": "unconfirmed",
+            }
+        else:
+            answer, sources, metadata = _run(self, value)
         created_at = self._save_assistant(sid, answer)
         event(
             "network_blocking_chat_answered",
