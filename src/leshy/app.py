@@ -10,6 +10,7 @@ from typing import Any
 from .accelerator_runtime import LlamaCppRuntimeManager, LlamaServerLLM
 from .adaptive_backend import AdaptiveLLM
 from .config import Settings
+from .cinema_research import cinema_query, cinema_instruction, cinema_search
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
 from .image_generation import ImageGenerationManager
@@ -352,6 +353,9 @@ class LeshyApp:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
 
+        cinema_plan = cinema_query(message, rows)
+        if cinema_plan is not None:
+            context.append(ChatMessage("system", cinema_instruction(cinema_plan)))
         sources: list[dict[str, str]] = []
         search_attempted = False
         search_error = ""
@@ -360,7 +364,8 @@ class LeshyApp:
             nonlocal sources, search_attempted, search_error
             search_attempted = True
             try:
-                search_result = self.live_search(message, limit=5, reason=reason_text)
+                search_result = (cinema_search(self, cinema_plan) if cinema_plan is not None
+                                 else self.live_search(message, limit=5, reason=reason_text))
                 sources = [
                     {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
                     for item in search_result.get("results", [])
@@ -385,7 +390,7 @@ class LeshyApp:
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
         reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
-        if reason or self._needs_live_search(message):
+        if cinema_plan is not None or reason or self._needs_live_search(message):
             append_live_search(reason or "требуются актуальные данные")
 
         history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]

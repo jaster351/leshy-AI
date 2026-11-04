@@ -7,6 +7,7 @@ import uuid
 from typing import Any, Iterator
 
 from .diagnostics import event, problem
+from .cinema_research import cinema_query, cinema_instruction, cinema_search
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .research_policy import research_reason
@@ -95,7 +96,7 @@ class RealtimeChatManager:
         trusted = self.app.knowledge.search(message, trusted_only=True, limit=5)
         candidates = self.app.knowledge.search_candidates(message, limit=5)
         reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
-        needed = bool(reason or self.app._needs_live_search(message))
+        needed = bool(reason or self.app._needs_live_search(message) or cinema_query(message))
         return {
             "trusted": trusted,
             "candidates": candidates,
@@ -129,11 +130,15 @@ class RealtimeChatManager:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
 
+        cinema_plan = cinema_query(message, rows)
+        if cinema_plan is not None:
+            context.append(ChatMessage("system", cinema_instruction(cinema_plan)))
         sources: list[dict[str, str]] = []
-        search_attempted = bool(plan.get("needed"))
+        search_attempted = bool(plan.get("needed")) or cinema_plan is not None
         if search_attempted:
             try:
-                search_result = self.app.live_search(message, limit=5, reason=str(plan.get("reason") or "требуются актуальные данные"))
+                search_result = (cinema_search(self.app, cinema_plan) if cinema_plan is not None
+                                 else self.app.live_search(message, limit=5, reason=str(plan.get("reason") or "требуются актуальные данные")))
                 sources = [
                     {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
                     for item in search_result.get("results", [])
