@@ -66,7 +66,7 @@ class CheburcheckProbeAssessmentTests(unittest.TestCase):
         )
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, (), static, probe)
         self.assertLessEqual(result.tspu_probability, 20)
-        self.assertTrue(any("динамическая проверка" in reason for reason in result.reasons))
+        self.assertTrue(any("Динамический Cheburcheck Probe" in reason for reason in result.reasons))
 
 
 if __name__ == "__main__":
