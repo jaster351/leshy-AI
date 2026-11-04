@@ -63,7 +63,6 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
         )
         self.assertLessEqual(result.tspu_probability, 10)
         self.assertTrue(any("не предоставил" in text for text in result.reasons))
-        self.assertTrue(any("не предоставил" in text for text in result.reasons))
         output = NetworkBlockingChecker.format(result)
         self.assertIn("Индекс признаков ТСПУ:", output)
         self.assertIn("Check-Host: результатов нет", output)
@@ -74,10 +73,12 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
         chebur = CheburcheckEvidence(ok=True, blocked=False, target=TEST_IP, query_id="test-query")
         probe = CheburProbeSummary(ok=True, online_probes=1, responded_probes=1,
                                    observations=(CheburProbeObservation(probe_id="x", verdicts=("ok",)),))
-        with patch.object(checker, "_check_local_ports", return_value=_local()), \\
-             patch.object(checker, "_cheburcheck", return_value=chebur), \\
-             patch.object(checker, "_check_host", return_value=_checkhost_ru_foreign()), \\
-             patch.object(checker, "_chebur_probe", return_value=probe):
+        with (
+            patch.object(checker, "_check_local_ports", return_value=_local()),
+            patch.object(checker, "_cheburcheck", return_value=chebur),
+            patch.object(checker, "_check_host", return_value=_checkhost_ru_foreign()),
+            patch.object(checker, "_chebur_probe", return_value=probe),
+        ):
             result = checker.check(TEST_IP)
         self.assertEqual(len(result.tool_receipts), 4)
         self.assertEqual({receipt.tool for receipt in result.tool_receipts},
