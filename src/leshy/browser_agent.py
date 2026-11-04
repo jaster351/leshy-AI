@@ -81,6 +81,12 @@ class BrowserAgent:
         return any(host == allowed or host.endswith("." + allowed) for allowed in self.allowed_hosts)
 
     def execute(self, action: BrowserAction, *, approved: bool = False) -> BrowserActionResult:
+        # Маркер подтверждения является внутренним: не доверять значению,
+        # поступившему через arguments от модели, инструмента или API.
+        # READ также не должен передавать поддельное подтверждение адаптерам.
+        arguments = dict(action.arguments)
+        arguments.pop("_approval_verified", None)
+        action = replace(action, arguments=arguments)
         if not self._host_allowed(action.url):
             event("browser_agent_blocked_host", url=action.url, action=action.name)
             return BrowserActionResult("blocked", "Домен не разрешён политикой Browser Agent.")
