@@ -432,7 +432,7 @@ class NetworkBlockingChecker:
         text = str(row or "")
         if text:
             lower = text.lower()
-            status = "timeout" if "timeout" in lower or "timed out" in lower else "error"
+            status = "timeout" if "timeout" in lower or "timed out" in lower else "refused" if "refused" in lower else "error"
             return TcpObservation(
                 source="check-host",
                 port=port,
@@ -496,14 +496,27 @@ class NetworkBlockingChecker:
             return tuple(observations)
         except Exception as exc:
             problem("network_blocking_check_host_failed", str(exc), target=target, port=port)
-            return ()
+            return tuple(
+                TcpObservation(
+                    source="check-host", port=int(port), status="error",
+                    country_code=self._node_location(meta)[0], node=name,
+                    error=f"Ошибка сервиса Check-Host: {type(exc).__name__}: {str(exc)[:180]}",
+                )
+                for name, meta in nodes.items()
+            )
 
     def _check_host(self, target: str) -> tuple[TcpObservation, ...]:
         try:
             nodes = self._select_nodes()
         except Exception as exc:
             problem("network_blocking_check_host_nodes_failed", str(exc), target=target)
-            return ()
+            return tuple(
+                TcpObservation(
+                    source="check-host", port=port, status="error",
+                    error=f"Не удалось получить список узлов Check-Host: {type(exc).__name__}",
+                )
+                for port in DEFAULT_PORTS
+            )
         if not nodes:
             return ()
         observations: list[TcpObservation] = []
@@ -734,7 +747,7 @@ class NetworkBlockingChecker:
                 latency = f" за {item.latency_ms} мс" if item.latency_ms is not None else ""
                 lines.append(f"Локально TCP/{port} ({label}): доступен{latency}")
             else:
-                lines.append(f"Локально TCP/{port} ({label}): {item.status}")
+                lines.append(f"Локально TCP/{port} ({label}): {item.status}" + (f" ({item.error[:180]})" if item.error else ""))
 
         chebur = result.cheburcheck
         if chebur.ok:
@@ -768,6 +781,8 @@ class NetworkBlockingChecker:
                 lines.append(f"Cheburcheck Probe: результатов нет ({probe.responded_probes}/{probe.online_probes})")
         elif probe.error:
             lines.append("Cheburcheck Probe: " + probe.error)
+        else:
+            lines.append("Cheburcheck Probe: результат отсутствует")
 
         for port in DEFAULT_PORTS:
             observations = [item for item in result.remote if item.port == port]
@@ -776,7 +791,7 @@ class NetworkBlockingChecker:
             parts = []
             for item in observations:
                 location = "/".join(x for x in (item.country_code.upper(), item.city) if x) or item.node
-                parts.append(f"{location}: {item.status}")
+                parts.append(f"{location}: {item.status}" + (f" ({item.error[:180]})" if item.error else ""))
             lines.append(f"Check-Host TCP/{port}: " + "; ".join(parts))
 
         lines.append(f"Вывод по ТСПУ: {result.verdict}.")
