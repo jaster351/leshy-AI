@@ -44,7 +44,9 @@ def _require_owner(owner_id: str) -> str:
     owner = str(owner_id or "").strip()
     if not owner:
         raise ValueError("Для подтверждения требуется идентификатор владельца")
-    return owner[:200]
+    if len(owner) > 200:
+        raise ValueError("Идентификатор владельца превышает 200 символов")
+    return owner
 
 
 class ApprovalBroker:
