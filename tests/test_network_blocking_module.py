@@ -48,7 +48,7 @@ class NetworkBlockingModuleTests(unittest.TestCase):
         self.assertEqual(result.tspu_probability, 45)
         self.assertIn("не подтверждена", result.verdict)
         self.assertIn("ТСПУ", result.verdict)
-        self.assertTrue(any("российская точка" in reason for reason in result.reasons))
+        self.assertTrue(any("узел Check-Host в РФ" in reason for reason in result.reasons))
 
     def test_ru_and_foreign_success_do_not_indicate_tspu(self) -> None:
         local = (
