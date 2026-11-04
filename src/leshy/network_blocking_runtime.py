@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Iterator
 
@@ -42,6 +43,94 @@ def _matches(app, text: str) -> bool:
         return False
 
 
+
+# Match short clarifying questions only. Never re-interpret a new target as a follow-up.
+_FOLLOWUP_MARKERS = (
+    "как ты это понял", "как это понял", "откуда ты это взял",
+    "откуда информация", "почему ты так решил", "почему решил",
+    "почему заблокирован", "чем подтверждается", "какие доказательства",
+    "какие проверки", "что ты проверял", "что проверял",
+    "покажи диагностику", "покажи результаты", "покажи проверки",
+    "покажи логи проверки", "объясни проверку", "объясни вывод",
+    "на основании чего", "как проверял", "как ты проверил",
+    "каким способом проверил", "распиши механизм", "как определил блокировку",
+)
+
+
+def _is_diagnostic_followup(message: str) -> bool:
+    normalized = " ".join(str(message or "").lower().replace("ё", "е").split())
+    if not normalized or len(normalized) > 220:
+        return False
+    return any(phrase in normalized for phrase in _FOLLOWUP_MARKERS)
+
+
+def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | None:
+    """Read only the immediately preceding assistant response in this owner's session.
+
+    This does not rerun probes or consult the LLM: the answer must be grounded in
+    evidence that was actually saved during the preceding diagnostic request.
+    """
+    if not session_id:
+        return None
+    with app.storage.connection() as conn:
+        session = conn.execute(
+            "SELECT id FROM sessions WHERE id=? AND owner_id=?",
+            (session_id, owner_id),
+        ).fetchone()
+        if session is None:
+            return None
+        row = conn.execute(
+            "SELECT role, content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+    if row is None or row["role"] != "assistant":
+        return None
+    answer = str(row["content"] or "")
+    # Both the older short-answer implementation and the new evidence-first
+    # implementation may be present in persistent user history.
+    legacy = bool(re.search(
+        r"(?m)^\d{1,3}(?:\.\d{1,3}){3}: IP заблокирован ТСПУ",
+        answer,
+    ))
+    modern = bool(re.search(
+        r"(?m)^IP-адрес \S+\. Блокировка ТСПУ не подтверждена\.",
+        answer,
+    )) and "Проверка " in answer
+    confirmed = bool(re.search(
+        r"(?m)^IP-адрес \S+ заблокирован ТСПУ\.",
+        answer,
+    ))
+    if not (legacy or modern or confirmed):
+        return None
+    return answer
+
+
+def _explain_saved_diagnostic(previous: str) -> str:
+    """Replay previous measured results or explicitly admit missing evidence."""
+    marker = previous.find("\n\nПроверка ")
+    if marker >= 0 and "Запуски инструментов (ID;" in previous:
+        report = previous[marker:].strip()
+        return (
+            "Механизм проверки: Леший выполняет TCP Connect к портам 22 и 3389 "
+            "со своего сервера, запрашивает Чебурчек (список и распределённый Probe), "
+            "затем Check-Host из российских и зарубежных узлов. "
+            "Далее он сопоставляет доступность портов и независимые сигналы. "
+            "Ни тайм-аут, ни совпадение нескольких ответов сами по себе не доказывают "
+            "фильтрацию именно ТСПУ. Ниже — фактические данные предыдущего запуска. "
+            "Для этого пояснения я не выполнял новую проверку и не использовал "
+            "поисковые системы. Отдельный индекс признаков не является "
+            "доказательством причины ТСПУ.\n\n"
+            + report
+        )
+    return (
+        "Предыдущий ответ о блокировке ТСПУ нельзя достоверно обосновать: "
+        "в истории этого диалога нет полного протокола TCP Connect, Чебурчека "
+        "и Check-Host с результатами по узлам и подтверждениями выполнения. "
+        "Утверждение «100% ТСПУ» без этих доказательств недопустимо. "
+        "Я не буду придумывать команды, результаты поиска или объяснение "
+        "задним числом. Отправьте IP снова для новой проверки с полным отчётом."
+    )
+
 def _service_label(metadata: dict[str, Any]) -> str:
     profile = str(metadata.get("profile") or "").strip()
     ports = [int(value) for value in (metadata.get("service_ports") or []) if str(value).isdigit()]
@@ -55,45 +144,19 @@ def _service_label(metadata: dict[str, Any]) -> str:
 
 
 def _compact_answer(metadata: dict[str, Any]) -> str:
-    """Короткий ответ пользователю. Полная диагностика остаётся в metadata/logs."""
+    """Only a separately verified TSPU attribution permits a copyable categorical conclusion.
+
+    Legacy probability/heuristic scores are never proof, even when equal to 100.
+    """
     target = str(metadata.get("target") or "").strip()
-    prefix = f"{target}: " if target else ""
-    probability = max(0, min(100, int(metadata.get("tspu_probability") or 0)))
-    service = _service_label(metadata)
-    remote = list(metadata.get("remote") or [])
-
-    if probability >= 100:
-        return (
-            f"{prefix}IP заблокирован ТСПУ с высокой уверенностью (100%). {service}.\n"
-            "Решение: сменить IP-адрес и повторить проверку нового адреса."
-        )
-
-    if probability >= 70:
-        return (
-            f"{prefix}сильные признаки блокировки ТСПУ ({probability}%). {service}.\n"
-            "Решение: повторить проверку; при повторении результата сменить IP."
-        )
-
-    if probability >= 30:
-        return (
-            f"{prefix}блокировка ТСПУ не доказана, но есть косвенные признаки ({probability}%). {service}.\n"
-            "Решение: повторить проверку и проверить маршрут/фаервол."
-        )
-
-    external_available = any(
-        isinstance(item, dict) and str(item.get("status") or "") == "connected"
-        for item in remote
-    )
-    if external_available:
-        return (
-            f"{prefix}блокировка ТСПУ не подтверждена ({probability}%). {service}.\n"
-            "Решение: IP менять не нужно; проверить локальную сеть, маршрут и фаервол."
-        )
-
-    return (
-        f"{prefix}данных недостаточно для уверенного решения. {service}.\n"
-        "Решение: повторить проверку; если порты недоступны из всех локаций, проверять сервер и фаервол."
-    )
+    if (
+        target
+        and metadata.get("blocking_attribution") == "confirmed_tspu"
+        and metadata.get("proof_verification") == "verified"
+        and str(metadata.get("proof_record_id") or "").strip()
+    ):
+        return f"IP-адрес {target} заблокирован ТСПУ."
+    return f"IP-адрес {target}. Блокировка ТСПУ не подтверждена." if target else "Блокировка ТСПУ не подтверждена."
 
 
 def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
@@ -109,10 +172,26 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     chebur = response.metadata.get("cheburcheck") or {}
     sources: list[dict[str, str]] = []
     source_url = str(chebur.get("source_url") or "")
-    if source_url:
+    if chebur.get("ok") and source_url.startswith("https://cheburcheck.ru/"):
         sources.append({"title": "Cheburcheck", "url": source_url})
-    sources.append({"title": "Check-Host", "url": "https://check-host.net/check-tcp"})
-    return _compact_answer(response.metadata), sources, response.metadata
+    check_host_reports = sorted({
+        str(row.get("source_url") or "") for row in response.metadata.get("remote") or []
+        if isinstance(row, dict)
+        and row.get("status") in {"connected", "refused", "timeout"}
+        and str(row.get("source_url") or "").startswith("https://check-host.net/")
+    })
+    for url in check_host_reports:
+        sources.append({"title": "Результаты Check-Host", "url": url})
+    summary = _compact_answer(response.metadata)
+    if response.metadata.get("blocking_attribution") != "confirmed_tspu" or not response.metadata.get("proof_record_id") or response.metadata.get("proof_verification") != "verified":
+        # Do not hide missing or conflicting measurements from the operator.
+        summary += "\n\n" + response.text
+    response.metadata["copyable_conclusion"] = (
+        summary if response.metadata.get("blocking_attribution") == "confirmed_tspu"
+        and response.metadata.get("proof_verification") == "verified"
+        and response.metadata.get("proof_record_id") else ""
+    )
+    return summary, sources, response.metadata
 
 
 def _save_user(app, message: str, owner_id: str, session_id: str | None) -> str:
@@ -152,7 +231,12 @@ def install_network_blocking_routing(app_class, app=None) -> None:
         request_id: str | None = None,
     ) -> Iterator[StreamEvent]:
         value = str(message or "").strip()
-        if not _matches(self.app, value):
+        owner = (owner_id or "web:local").strip()[:200]
+        followup = (
+            _previous_diagnostic(self.app, owner, session_id)
+            if _is_diagnostic_followup(value) else None
+        )
+        if followup is None and not _matches(self.app, value):
             yield from _ORIGINAL_STREAM(
                 self,
                 value,
@@ -162,7 +246,6 @@ def install_network_blocking_routing(app_class, app=None) -> None:
             )
             return
 
-        owner = (owner_id or "web:local").strip()[:200]
         rid, cancel = self._register(request_id)
         sid = ""
         started = time.monotonic()
@@ -187,9 +270,20 @@ def install_network_blocking_routing(app_class, app=None) -> None:
             yield StreamEvent("activity", {
                 "kind": "network_blocking",
                 "phase": "local_tcp",
-                "text": "Проверяю доступность IP и признаки блокировки ТСПУ…",
+                "text": (
+                    "Поднимаю сохранённый протокол проверки…"
+                    if followup is not None
+                    else "Проверяю доступность IP и признаки блокировки ТСПУ…"
+                ),
             })
-            answer, sources, metadata = _run(self.app, value)
+            if followup is not None:
+                answer, sources, metadata = _explain_saved_diagnostic(followup), [], {
+                    "network_blocking_followup": True,
+                    "new_probes_executed": False,
+                    "blocking_attribution": "unconfirmed",
+                }
+            else:
+                answer, sources, metadata = _run(self.app, value)
             if cancel.is_set():
                 return
             for chunk in self._chunk_fallback(answer, 190):
@@ -231,11 +325,22 @@ def install_network_blocking_routing(app_class, app=None) -> None:
 
     def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None, **kwargs) -> dict[str, Any]:
         value = str(message or "").strip()
-        if not _matches(self, value):
-            return _ORIGINAL_CHAT(self, value, owner_id=owner_id, session_id=session_id, **kwargs)
         owner = (owner_id or "web:local").strip()[:200]
+        followup = (
+            _previous_diagnostic(self, owner, session_id)
+            if _is_diagnostic_followup(value) else None
+        )
+        if followup is None and not _matches(self, value):
+            return _ORIGINAL_CHAT(self, value, owner_id=owner_id, session_id=session_id, **kwargs)
         sid = _save_user(self, value, owner, session_id)
-        answer, sources, metadata = _run(self, value)
+        if followup is not None:
+            answer, sources, metadata = _explain_saved_diagnostic(followup), [], {
+                "network_blocking_followup": True,
+                "new_probes_executed": False,
+                "blocking_attribution": "unconfirmed",
+            }
+        else:
+            answer, sources, metadata = _run(self, value)
         created_at = self._save_assistant(sid, answer)
         event(
             "network_blocking_chat_answered",
