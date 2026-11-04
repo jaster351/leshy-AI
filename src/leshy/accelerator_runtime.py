@@ -352,8 +352,23 @@ class LlamaServerLLM:
                 )
                 with request.urlopen(req, timeout=self.request_timeout) as response:
                     body = json.loads(response.read().decode("utf-8"))
-                text = str(body["choices"][0]["message"]["content"] or "").strip()
+                choice = body["choices"][0]
+                message = choice["message"]
+                text = str(message.get("content") or "").strip()
                 if not text:
+                    usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+                    event(
+                        "accelerator_empty_completion_diagnostic",
+                        backend=self.backend,
+                        device=self.device,
+                        finish_reason=str(choice.get("finish_reason") or "")[:80],
+                        content_present=message.get("content") is not None,
+                        reasoning_present=bool(message.get("reasoning_content")),
+                        reasoning_length=len(str(message.get("reasoning_content") or "")),
+                        completion_tokens=usage.get("completion_tokens"),
+                        prompt_tokens=usage.get("prompt_tokens"),
+                        max_tokens=self.max_tokens,
+                    )
                     raise LLMUnavailable("Ускоренный backend вернул пустой ответ")
                 return text
             except error.HTTPError as exc:
