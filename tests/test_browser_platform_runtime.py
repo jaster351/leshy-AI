@@ -202,6 +202,42 @@ class BrowserResearchRecoveryTests(unittest.TestCase):
                 self.assertEqual(second._selected_url(intent, "session-1"), "https://two.example/item")
 
 
+class BrowserOwnerProfileIsolationTests(unittest.TestCase):
+    def test_profile_key_is_stable_and_owner_scoped(self) -> None:
+        first = BrowserPlatform._profile_arguments("telegram:123")
+        self.assertEqual(first, BrowserPlatform._profile_arguments("telegram:123"))
+        self.assertNotEqual(first, BrowserPlatform._profile_arguments("telegram:456"))
+        self.assertNotEqual(first, BrowserPlatform._profile_arguments("web:123"))
+        self.assertEqual(first["profile_namespace"], "owner")
+        self.assertNotIn("telegram", first["profile_key"])
+
+    def test_missing_owner_is_rejected(self) -> None:
+        for owner in ("", "   ", None):
+            with self.subTest(owner=owner), self.assertRaises(ValueError):
+                BrowserPlatform._profile_arguments(owner)
+
+    def test_research_and_commit_use_same_owner_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(os.environ, {"LESHY_BRAIN_DIR": str(root / "brain")}, clear=False):
+                app = _FakeApp(root)
+                platform = BrowserPlatform(app)
+                capture = _CaptureAdapter()
+                platform.agent = BrowserAgent([capture])
+                app.live_search = lambda *_args, **_kwargs: {
+                    "results": [{"title": "Магазин", "url": "https://shop.example/item", "snippet": "ok"}]
+                }
+                platform.research("найди товар", owner_id="telegram:123", session_id="s1")
+                research_profile = capture.last.arguments["profile_key"]
+                intent = parse_browser_conversation_intent("Купи первый вариант")
+                pending = platform.request_external_action(intent, owner_id="telegram:123", session_id="s1")
+                platform.resolve_approval("telegram:123", pending["approval_id"], approved=True)
+                self.assertEqual(capture.last.arguments["profile_key"], research_profile)
+                self.assertTrue(capture.last.arguments["_approval_verified"])
+                platform.research("найди товар", owner_id="telegram:456", session_id="s2")
+                self.assertNotEqual(capture.last.arguments["profile_key"], research_profile)
+
+
 class DocumentIntelligenceTests(unittest.TestCase):
     def test_local_text_document_is_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
