@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import ipaddress
 import json
 import re
@@ -12,6 +12,7 @@ from urllib import parse, request
 
 from .diagnostics import event, problem
 from .modules import ModuleManifest, ModuleRequest, ModuleResponse
+from .verified_tool_receipts import VerifiedToolReceipts, ToolReceipt
 
 
 DEFAULT_PORTS = (22, 3389)
@@ -37,6 +38,7 @@ class TcpObservation:
     latency_ms: int | None = None
     address: str = ""
     error: str = ""
+    source_url: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +90,7 @@ class BlockingAssessment:
     chebur_probe: CheburProbeSummary
     reasons: tuple[str, ...]
     checked_at_epoch: float
+    tool_receipts: tuple[ToolReceipt, ...] = ()
 
 
 class NetworkBlockingChecker:
@@ -119,6 +122,7 @@ class NetworkBlockingChecker:
         self.check_host_wait_seconds = max(3.0, min(float(check_host_wait_seconds), 30.0))
         self.chebur_probe_wait_seconds = max(10.0, min(float(chebur_probe_wait_seconds), 135.0))
         self._nodes_cache: tuple[float, dict[str, dict[str, Any]]] = (0.0, {})
+        self._receipts = VerifiedToolReceipts()
 
     @staticmethod
     def normalize_target(value: str) -> str:
@@ -129,8 +133,13 @@ class NetworkBlockingChecker:
             raw = parse.urlparse(raw).hostname or raw
         raw = raw.strip().strip("[]").rstrip(".")
         try:
-            return str(ipaddress.ip_address(raw))
-        except ValueError:
+            ip = ipaddress.ip_address(raw)
+            if not ip.is_global:
+                raise ValueError("Диагностика локальных, служебных и частных IP-адресов запрещена")
+            return str(ip)
+        except ValueError as exc:
+            if "запрещена" in str(exc):
+                raise
             pass
         if len(raw) > 253 or not re.fullmatch(r"[A-Za-z0-9.-]+", raw) or "." not in raw:
             raise ValueError("Некорректный IP-адрес или домен")
@@ -229,6 +238,11 @@ class NetworkBlockingChecker:
         url = CHEBURCHECK_ENDPOINT + "?" + parse.urlencode({"target": target})
         try:
             payload = self._http_json(url, timeout=self.http_timeout_seconds)
+            if not isinstance(payload, dict) or type(payload.get("blocked")) is not bool:
+                raise ValueError("Cheburcheck вернул неполный или некорректный ответ")
+            response_target = str(payload.get("target") or target).strip()
+            if response_target.lower() != target.lower():
+                raise ValueError("Cheburcheck вернул ответ для другой цели")
             providers = payload.get("cdn_providers") or {}
             whitelist = payload.get("whitelist")
             return CheburcheckEvidence(
@@ -448,9 +462,12 @@ class NetworkBlockingChecker:
         try:
             start = self._http_json(start_url, timeout=self.http_timeout_seconds)
             request_id = str(start.get("request_id") or "") if isinstance(start, dict) else ""
-            if not request_id:
-                raise RuntimeError("Check-Host не вернул request_id")
+            if not request_id or start.get("ok") != 1:
+                raise RuntimeError("Check-Host не подтвердил запуск диагностики")
             result_url = CHECK_HOST_RESULT_ENDPOINT.format(request_id=parse.quote(request_id, safe=""))
+            report_url = str(start.get("permanent_link") or "")
+            if not (report_url.startswith("https://check-host.net/check-report/") and len(report_url) < 240):
+                report_url = result_url
             deadline = time.monotonic() + self.check_host_wait_seconds
             latest: dict[str, Any] = {}
             while time.monotonic() < deadline:
@@ -475,7 +492,7 @@ class NetworkBlockingChecker:
                         node=node,
                         error="Результат не получен до истечения времени ожидания",
                     )
-                observations.append(parsed_result)
+                observations.append(replace(parsed_result, source_url=report_url))
             return tuple(observations)
         except Exception as exc:
             problem("network_blocking_check_host_failed", str(exc), target=target, port=port)
@@ -556,12 +573,13 @@ class NetworkBlockingChecker:
                 all_relevant_remote_success = False
 
             for item in port_remote:
-                total_observations += 1
-                if item.status == "connected":
-                    successful_observations += 1
+                if item.status in {"connected", "refused", "timeout"}:
+                    total_observations += 1
+                    if item.status == "connected":
+                        successful_observations += 1
 
         for item in local:
-            if item.port in ports_to_assess:
+            if item.port in ports_to_assess and item.status in {"connected", "refused", "timeout"}:
                 total_observations += 1
                 if item.status == "connected":
                     successful_observations += 1
@@ -651,6 +669,22 @@ class NetworkBlockingChecker:
             probe = probe_future.result()
 
         result = self._assessment(normalized, local, remote, chebur, probe)
+        receipts = [
+            self._receipts.record("tcp.connect", "success" if local else "error", [asdict(x) for x in local]),
+            self._receipts.record("cheburcheck.check", "success" if chebur.ok else "error", asdict(chebur)),
+            self._receipts.record(
+                "check_host.tcp",
+                "success" if any(x.status in {"connected", "refused", "timeout"} for x in remote) else "error",
+                [asdict(x) for x in remote],
+            ),
+        ]
+        if chebur.query_id:
+            receipts.append(self._receipts.record(
+                "cheburcheck.probe",
+                "success" if probe.ok and probe.observations else "error",
+                asdict(probe),
+            ))
+        result = replace(result, tool_receipts=tuple(receipts))
         event(
             "network_blocking_check_finished",
             target=normalized,
@@ -727,8 +761,15 @@ class NetworkBlockingChecker:
         lines.append(f"Успешные TCP-подключения среди завершённых наблюдений: {result.availability_percent}% (не вероятность блокировки).")
         if result.reasons:
             lines.append("Почему: " + " ".join(result.reasons))
-        if chebur.source_url:
+        if chebur.ok and chebur.source_url:
             lines.append("Источник Cheburcheck: " + chebur.source_url)
+        report_links = sorted({item.source_url for item in result.remote if item.source_url and item.status not in {"pending", "error"}})
+        for link in report_links:
+            lines.append("Отчёт Check-Host: " + link)
+        if result.tool_receipts:
+            lines.append("Запуски инструментов (ID; статус; время UTC):")
+            for receipt in result.tool_receipts:
+                lines.append(f"{receipt.tool}: {receipt.receipt_id}; {receipt.status}; {receipt.timestamp_utc}")
         return "\n".join(lines)
 
 
@@ -771,6 +812,8 @@ class NetworkBlockingModule:
                 "cheburcheck": asdict(result.cheburcheck),
                 "chebur_probe": asdict(result.chebur_probe),
                 "reasons": list(result.reasons),
+                "checked_at_epoch": result.checked_at_epoch,
+                "tool_receipts": [asdict(r) for r in result.tool_receipts],
             },
         )
 
