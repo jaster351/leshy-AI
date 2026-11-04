@@ -83,9 +83,16 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     chebur = response.metadata.get("cheburcheck") or {}
     sources: list[dict[str, str]] = []
     source_url = str(chebur.get("source_url") or "")
-    if source_url:
+    if chebur.get("ok") and source_url.startswith("https://cheburcheck.ru/"):
         sources.append({"title": "Cheburcheck", "url": source_url})
-    sources.append({"title": "Check-Host", "url": "https://check-host.net/check-tcp"})
+    check_host_reports = sorted({
+        str(row.get("source_url") or "") for row in response.metadata.get("remote") or []
+        if isinstance(row, dict)
+        and row.get("status") in {"connected", "refused", "timeout"}
+        and str(row.get("source_url") or "").startswith("https://check-host.net/")
+    })
+    for url in check_host_reports:
+        sources.append({"title": "Результаты Check-Host", "url": url})
     summary = _compact_answer(response.metadata)
     if response.metadata.get("blocking_attribution") != "confirmed_tspu" or not response.metadata.get("proof_record_id") or response.metadata.get("proof_verification") != "verified":
         # Do not hide missing or conflicting measurements from the operator.
