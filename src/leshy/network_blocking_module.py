@@ -547,84 +547,102 @@ class NetworkBlockingChecker:
         ) and any("ok" in item.verdicts for item in probe.observations)
 
         ports_to_assess = service_ports or DEFAULT_PORTS
-        successful_observations = 0
-        total_observations = 0
+        local_timeouts = any(item.port in ports_to_assess and item.status == "timeout" for item in local)
+        completed_remote = tuple(
+            item for item in remote
+            if item.port in ports_to_assess and item.status in {"connected", "timeout", "refused"}
+        )
+        successful_observations = sum(
+            item.status == "connected" for item in (*local, *completed_remote)
+            if item.port in ports_to_assess and item.status in {"connected", "timeout", "refused"}
+        )
+        total_observations = sum(
+            item.port in ports_to_assess and item.status in {"connected", "timeout", "refused"}
+            for item in (*local, *completed_remote)
+        )
         geographic_tspu = False
-        all_relevant_remote_success = True
-        any_remote_data = False
-
+        foreign_success_any = False
+        ru_success_any = False
         for port in ports_to_assess:
-            port_remote = [item for item in remote if item.port == port and item.status != "pending"]
-            ru = [item for item in port_remote if item.country_code == "ru"]
-            foreign = [item for item in port_remote if item.country_code and item.country_code != "ru"]
-            ru_fail = any(item.status in {"timeout", "error"} for item in ru)
-            foreign_success = any(item.status == "connected" for item in foreign)
-            if ru_fail and foreign_success:
+            ru = [item for item in completed_remote if item.port == port and item.country_code == "ru"]
+            foreign = [
+                item for item in completed_remote
+                if item.port == port and item.country_code and item.country_code != "ru"
+            ]
+            ru_timeout = any(item.status == "timeout" for item in ru)
+            ru_connected = any(item.status == "connected" for item in ru)
+            foreign_connected = any(item.status == "connected" for item in foreign)
+            foreign_success_any = foreign_success_any or foreign_connected
+            ru_success_any = ru_success_any or ru_connected
+            if ru_timeout and foreign_connected and not ru_connected:
                 geographic_tspu = True
                 reasons.append(
-                    f"TCP/{port}: российская точка Check-Host даёт timeout/сетевую ошибку, а зарубежная точка подключается."
+                    f"TCP/{port}: узел Check-Host в РФ получает timeout, а зарубежный подключается. "
+                    "Это признак сетевой фильтрации, не доказательство механизма ТСПУ."
+                )
+            if ru_timeout and foreign_connected and ru_connected:
+                reasons.append(
+                    f"TCP/{port}: ответы российских узлов противоречивы; некоторые узлы подключаются."
                 )
 
-            if port_remote:
-                any_remote_data = True
-                if not all(item.status == "connected" for item in port_remote):
-                    all_relevant_remote_success = False
-            else:
-                all_relevant_remote_success = False
-
-            for item in port_remote:
-                if item.status in {"connected", "refused", "timeout"}:
-                    total_observations += 1
-                    if item.status == "connected":
-                        successful_observations += 1
-
-        for item in local:
-            if item.port in ports_to_assess and item.status in {"connected", "refused", "timeout"}:
-                total_observations += 1
-                if item.status == "connected":
-                    successful_observations += 1
+        # Diagnostic index, not a calibrated probability. External services and
+        # multiple independent vantage points are required for a high score.
+        score = 0
+        if local_timeouts:
+            score += 10
+            reasons.append("Локальный TCP Connect завершился тайм-аутом.")
+        if chebur.ok and chebur.blocked:
+            score += 25
+            reasons.append("Cheburcheck сообщил о наличии цели в проверяемых списках.")
+        elif chebur.ok and chebur.blocked is False:
+            reasons.append("Cheburcheck не нашёл цель в проверяемых списках.")
+        elif not chebur.ok:
+            reasons.append("Чебурчек не предоставил достоверный ответ.")
 
         if official_tspu:
-            score = 85
-            reasons.append("Cheburcheck Probe сообщил tspu_block: это признак возможной ТСПУ-фильтрации, но вывод внешнего сервиса сам по себе не доказывает её механизм.")
-        elif geographic_tspu:
-            score = 55
-            reasons.append("Разница TCP-доступности из РФ и других стран является косвенным признаком фильтрации, но не доказательством блокировки ТСПУ.")
-        elif any_remote_data and all_relevant_remote_success:
-            score = 0
-            reasons.append("Рабочие порты доступны из всех завершивших проверку точек Check-Host.")
-        elif chebur.ok and chebur.blocked:
-            score = max(score, 70)
-            reasons.append("Cheburcheck нашёл адрес/подсеть в блокировочных или CDN-списках.")
-        elif chebur.ok and chebur.blocked is False:
-            reasons.append("Cheburcheck не обнаружил адрес в используемых блокировочных списках.")
+            score += 45
+            reasons.append(
+                "Распределённый Cheburcheck Probe сообщил tspu_block. "
+                "Вердикт сервиса — сильный признак, но не прямое доказательство ТСПУ."
+            )
+        elif official_ok:
+            reasons.append("Динамический Cheburcheck Probe сообщил о доступности.")
 
-        local_success = any(item.status == "connected" and item.port in ports_to_assess for item in local)
-        foreign_success_any = any(
-            item.status == "connected" and item.country_code and item.country_code != "ru" and item.port in ports_to_assess
-            for item in remote
-        )
-        ru_success_any = any(
-            item.status == "connected" and item.country_code == "ru" and item.port in ports_to_assess
-            for item in remote
-        )
-        if not official_tspu and not geographic_tspu and official_ok:
-            score = min(score, 20)
-            reasons.append("Cheburcheck Probe получил доступность без tspu_block; фактическая динамическая проверка сильнее одного попадания в статический список.")
-        if not official_tspu and not geographic_tspu and foreign_success_any and ru_success_any:
-            score = min(score, 20)
-            reasons.append("Рабочий порт отвечает и из России, и из зарубежных точек — географического признака ТСПУ нет.")
-        if not official_tspu and not geographic_tspu and not local_success and foreign_success_any and ru_success_any:
-            score = max(score, 25)
-            reasons.append("Локально соединение не удалось, но внешние российские и зарубежные точки отвечают: вероятнее локальная сеть/маршрут/фаервол.")
-        if not official_tspu and not geographic_tspu and not foreign_success_any and not ru_success_any and remote:
-            score = min(score if score else 15, 70)
-            reasons.append("Порт не отвечает одновременно из России и из других стран; это не характерный признак выборочной ТСПУ-фильтрации.")
+        if geographic_tspu:
+            score += 35
+            reasons.append(
+                "Различие TCP-доступности из России и из-за рубежа подтверждено "
+                "измерениями Check-Host."
+            )
+        elif foreign_success_any and ru_success_any:
+            reasons.append("Есть успешные подключения и из России, и из-за рубежа.")
 
-        if chebur.ok and chebur.whitelisted and score < 100:
+        if geographic_tspu and (official_tspu or (chebur.ok and chebur.blocked)):
+            score += 10
+            reasons.append(
+                "Географический признак Check-Host согласуется с независимыми данными Чебурчека."
+            )
+
+        if official_ok and not official_tspu and not geographic_tspu:
+            score = min(score, 20)
+        if foreign_success_any and ru_success_any and not official_tspu and not geographic_tspu:
+            score = min(score, 20)
+        if chebur.ok and chebur.whitelisted and not official_tspu:
             score = min(score, 30)
-            reasons.append("Cheburcheck сообщает об исключении/белом списке для цели.")
+            reasons.append("Cheburcheck сообщает об исключении/белом списке.")
 
+        if completed_remote and all(item.status == "refused" for item in completed_remote):
+            reasons.append(
+                "Все завершённые ответы Check-Host — Connection Refused: "
+                "это не признак региональной ТСПУ-фильтрации само по себе."
+            )
+            if not official_tspu:
+                score = min(score, 35 if chebur.ok and chebur.blocked else 10)
+
+        if not completed_remote:
+            reasons.append("Check-Host не предоставил завершённых TCP-измерений.")
+        if not probe.observations:
+            reasons.append("Нет завершённых измерений распределённого Cheburcheck Probe.")
         availability = int(round(successful_observations * 100 / total_observations)) if total_observations else 0
         if score >= 70:
             verdict = "Есть серьёзные признаки фильтрации, но блокировка ТСПУ не подтверждена"
@@ -700,7 +718,14 @@ class NetworkBlockingChecker:
     @staticmethod
     def format(result: BlockingAssessment) -> str:
         local_by_port = {item.port: item for item in result.local}
-        lines = [f"Проверка {result.target}", f"Профиль сервера: {result.profile}"]
+        checked = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(result.checked_at_epoch))
+        lines = [
+            f"Проверка {result.target}",
+            f"Время проверки: {checked}",
+            f"Индекс признаков ТСПУ: {result.tspu_probability}/100 (условная оценка; не статистическая вероятность).",
+            "Статус подтверждения: блокировка ТСПУ не подтверждена.",
+            f"Профиль сервера: {result.profile}",
+        ]
         for port, label in ((22, "SSH/Linux"), (3389, "RDP/Windows")):
             item = local_by_port.get(port)
             if item is None:
@@ -803,6 +828,8 @@ class NetworkBlockingModule:
                 "profile": result.profile,
                 "service_ports": list(result.service_ports),
                 "tspu_probability": result.tspu_probability,
+                "diagnostic_score": result.tspu_probability,
+                "diagnostic_score_type": "heuristic_not_calibrated_probability",
                 "blocking_attribution": "unconfirmed",
                 "copyable_conclusion": "",
                 "availability_percent": result.availability_percent,
