@@ -261,6 +261,15 @@ class BrowserUseAdapter:
         supported = {"research", "agent_read", "agent_mutate", "agent_commit", "agent_financial"}
         if action.name not in supported:
             return BrowserActionResult("unsupported", "Browser Use не поддерживает этот тип browser-действия")
+        expected_risks = {
+            "research": BrowserRisk.READ,
+            "agent_read": BrowserRisk.READ,
+            "agent_mutate": BrowserRisk.MUTATE,
+            "agent_commit": BrowserRisk.COMMIT,
+            "agent_financial": BrowserRisk.FINANCIAL,
+        }
+        if action.risk is not expected_risks[action.name]:
+            return BrowserActionResult("blocked", "Тип browser-действия не соответствует уровню риска")
         if action.risk is not BrowserRisk.READ and not bool(action.arguments.get("_approval_verified")):
             return BrowserActionResult("blocked", "Изменяющее browser-действие не прошло Human Approval Gate")
         if action.risk is BrowserRisk.FINANCIAL and not str(action.arguments.get("approval_summary") or "").strip():
