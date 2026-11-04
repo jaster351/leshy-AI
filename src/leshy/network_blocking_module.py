@@ -729,6 +729,68 @@ class NetworkBlockingChecker:
         return result
 
     @staticmethod
+    def _os_hypothesis(
+        local: tuple[TcpObservation, ...],
+        remote: tuple[TcpObservation, ...],
+    ) -> tuple[str, str]:
+        """Port-based service hint, never a verified OS fingerprint."""
+        connected_ports = {
+            item.port for item in (*local, *remote)
+            if item.port in DEFAULT_PORTS and item.status == "connected"
+        }
+        if connected_ports == {22}:
+            return (
+                "Возможно Linux/Unix: доступен TCP/22 (обычно SSH). "
+                "Но SSH поддерживается и на Windows, поэтому ОС не подтверждена.",
+                "possible_linux_unix",
+            )
+        if connected_ports == {3389}:
+            return (
+                "Возможно Windows: доступен TCP/3389 (обычно RDP). "
+                "Но этот порт бывает открыт и на Linux, поэтому ОС не подтверждена.",
+                "possible_windows",
+            )
+        if connected_ports == {22, 3389}:
+            return (
+                "ОС не подтверждена: доступны TCP/22 (SSH) и TCP/3389 (RDP). "
+                "Оба сервиса могут работать на разных операционных системах.",
+                "ambiguous",
+            )
+        return (
+            "ОС определить невозможно: нет подтверждения доступности ни TCP/22 (SSH), "
+            "ни TCP/3389 (RDP). Это не означает, что тесты не выполнялись.",
+            "unknown",
+        )
+
+    @staticmethod
+    def _port_results(result: BlockingAssessment) -> dict[int, dict[str, Any]]:
+        """Always surface both port probes and remote country results."""
+        data: dict[int, dict[str, Any]] = {}
+        for port in DEFAULT_PORTS:
+            local = next((item for item in result.local if item.port == port), None)
+            remote = [item for item in result.remote if item.port == port]
+            data[port] = {
+                "service": "SSH" if port == 22 else "RDP",
+                "local_status": local.status if local else "not_checked",
+                "local_error": local.error if local else "",
+                "remote": [
+                    {
+                        "node": item.node,
+                        "country_code": item.country_code,
+                        "status": item.status,
+                        "error": item.error,
+                    }
+                    for item in remote
+                ],
+                "any_connected": any(
+                    item.status == "connected"
+                    for item in (*result.local, *result.remote)
+                    if item.port == port
+                ),
+            }
+        return data
+
+    @staticmethod
     def format(result: BlockingAssessment) -> str:
         local_by_port = {item.port: item for item in result.local}
         checked = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(result.checked_at_epoch))
@@ -738,6 +800,8 @@ class NetworkBlockingChecker:
             f"Оценка уверенности в признаках блокировки ТСПУ: {result.tspu_probability}% (условный диагностический индекс, не статистическая вероятность).",
             "Статус подтверждения: блокировка ТСПУ не подтверждена.",
             f"Профиль сервера: {result.profile}",
+            "Проверка сервисов: SSH TCP/22 и RDP TCP/3389 — оба порта тестируются независимо.",
+            f"Предположение об ОС: {NetworkBlockingChecker._os_hypothesis(result.local, result.remote)[0]}",
         ]
         for port, label in ((22, "SSH/Linux"), (3389, "RDP/Windows")):
             item = local_by_port.get(port)
@@ -787,6 +851,10 @@ class NetworkBlockingChecker:
         for port in DEFAULT_PORTS:
             observations = [item for item in result.remote if item.port == port]
             if not observations:
+                lines.append(
+                    f"Check-Host TCP/{port} ({'SSH' if port == 22 else 'RDP'}): "
+                    "нет результатов по российским и зарубежным узлам"
+                )
                 continue
             parts = []
             for item in observations:
@@ -842,6 +910,10 @@ class NetworkBlockingModule:
                 "target": result.target,
                 "profile": result.profile,
                 "service_ports": list(result.service_ports),
+                "tested_ports": list(DEFAULT_PORTS),
+                "os_hypothesis": self.checker._os_hypothesis(result.local, result.remote)[0],
+                "os_hypothesis_status": self.checker._os_hypothesis(result.local, result.remote)[1],
+                "port_results": self.checker._port_results(result),
                 "tspu_probability": result.tspu_probability,
                 "diagnostic_score": result.tspu_probability,
                 "diagnostic_score_type": "heuristic_not_calibrated_probability",
