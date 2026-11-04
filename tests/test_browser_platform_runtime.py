@@ -84,6 +84,24 @@ class ApprovalBrokerTests(unittest.TestCase):
             "Оформить заказ",
         )
 
+    def test_missing_owner_cannot_request_or_access_approvals(self) -> None:
+        for owner in ("", "   ", None):
+            with self.subTest(owner=owner):
+                with self.assertRaises(ValueError):
+                    self.broker.request(owner, self.action)
+                with self.assertRaises(ValueError):
+                    self.broker.list(owner)
+                with self.assertRaises(ValueError):
+                    self.broker.deny(owner, "nonexistent")
+                with self.assertRaises(ValueError):
+                    self.broker.consume(owner, "nonexistent")
+
+    def test_missing_owner_cannot_consume_another_owners_approval(self) -> None:
+        pending = self.broker.request("owner-a", self.action)
+        with self.assertRaises(ValueError):
+            self.broker.consume(None, pending.approval_id)
+        self.assertEqual(self.broker.consume("owner-a", pending.approval_id).url, self.action.url)
+
     def test_read_action_never_gets_approval_token(self) -> None:
         with self.assertRaises(ValueError):
             self.broker.request("owner", BrowserAction("research", "https://example.com", BrowserRisk.READ))

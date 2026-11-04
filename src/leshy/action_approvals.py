@@ -39,6 +39,14 @@ class PendingApproval:
         }
 
 
+def _require_owner(owner_id: str) -> str:
+    """Не превращать отсутствующего владельца в общий web:local."""
+    owner = str(owner_id or "").strip()
+    if not owner:
+        raise ValueError("Для подтверждения требуется идентификатор владельца")
+    return owner[:200]
+
+
 class ApprovalBroker:
     """Одноразовый Human Approval Gate для браузерных/внешних действий.
 
@@ -68,7 +76,7 @@ class ApprovalBroker:
             created = _now()
             item = PendingApproval(
                 approval_id=approval_id,
-                owner_id=str(owner_id or "web:local")[:200],
+                owner_id=_require_owner(owner_id),
                 action=action,
                 summary=str(summary or action.description or action.name)[:2000],
                 created_at=created,
@@ -85,13 +93,13 @@ class ApprovalBroker:
         return item
 
     def list(self, owner_id: str) -> list[dict[str, Any]]:
-        owner = str(owner_id or "web:local")[:200]
+        owner = _require_owner(owner_id)
         with self._lock:
             self._purge()
             return [item.public() for item in self._items.values() if item.owner_id == owner]
 
     def deny(self, owner_id: str, approval_id: str) -> None:
-        owner = str(owner_id or "web:local")[:200]
+        owner = _require_owner(owner_id)
         with self._lock:
             self._purge()
             item = self._items.get(str(approval_id))
@@ -101,7 +109,7 @@ class ApprovalBroker:
         event("approval_denied", approval_id=item.approval_id, action=item.action.name, risk=item.action.risk.value)
 
     def consume(self, owner_id: str, approval_id: str) -> BrowserAction:
-        owner = str(owner_id or "web:local")[:200]
+        owner = _require_owner(owner_id)
         with self._lock:
             self._purge()
             item = self._items.get(str(approval_id))
