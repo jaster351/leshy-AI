@@ -567,11 +567,11 @@ class NetworkBlockingChecker:
                     successful_observations += 1
 
         if official_tspu:
-            score = 100
-            reasons.append("Распределённый Cheburcheck Probe вернул официальный verdict tspu_block (таймаут трассы после обнаруженного DPI-узла).")
+            score = 85
+            reasons.append("Cheburcheck Probe сообщил tspu_block: это признак возможной ТСПУ-фильтрации, но вывод внешнего сервиса сам по себе не доказывает её механизм.")
         elif geographic_tspu:
-            score = 100
-            reasons.append("По согласованной эвристике Лешего это максимальный географический признак фильтрации по российской сети/ТСПУ.")
+            score = 55
+            reasons.append("Разница TCP-доступности из РФ и других стран является косвенным признаком фильтрации, но не доказательством блокировки ТСПУ.")
         elif any_remote_data and all_relevant_remote_success:
             score = 0
             reasons.append("Рабочие порты доступны из всех завершивших проверку точек Check-Host.")
@@ -608,14 +608,12 @@ class NetworkBlockingChecker:
             reasons.append("Cheburcheck сообщает об исключении/белом списке для цели.")
 
         availability = int(round(successful_observations * 100 / total_observations)) if total_observations else 0
-        if score >= 100:
-            verdict = "Высокая вероятность блокировки средствами ТСПУ"
-        elif score >= 70:
-            verdict = "Вероятна блокировка или попадание в блокировочные диапазоны"
+        if score >= 70:
+            verdict = "Есть серьёзные признаки фильтрации, но блокировка ТСПУ не подтверждена"
         elif score >= 30:
-            verdict = "Есть косвенные признаки, требуется повторная проверка"
+            verdict = "Есть косвенные признаки фильтрации, но блокировка ТСПУ не подтверждена"
         else:
-            verdict = "Признаки блокировки ТСПУ не подтверждены"
+            verdict = "Блокировка ТСПУ не подтверждена"
 
         if not service_ports:
             reasons.append("Ни TCP/22, ни TCP/3389 не подтвердили работающий сервис; ОС не угадывается по закрытым портам.")
@@ -626,7 +624,7 @@ class NetworkBlockingChecker:
             target=target,
             profile=profile,
             service_ports=service_ports,
-            tspu_probability=max(0, min(100, int(score))),
+            tspu_probability=max(0, min(99, int(score))),
             verdict=verdict,
             availability_percent=max(0, min(100, availability)),
             local=local,
@@ -722,8 +720,11 @@ class NetworkBlockingChecker:
                 parts.append(f"{location}: {item.status}")
             lines.append(f"Check-Host TCP/{port}: " + "; ".join(parts))
 
-        lines.append(f"Оценка ТСПУ: {result.tspu_probability}% — {result.verdict}.")
-        lines.append(f"Доступность по завершённым TCP-наблюдениям: {result.availability_percent}%.")
+        lines.append(f"Вывод по ТСПУ: {result.verdict}.")
+        lines.append("Расчётный балл признаков не является процентом достоверности блокировки.")
+        if not result.remote:
+            lines.append("Check-Host: результатов нет; проверить российские и зарубежные узлы не удалось.")
+        lines.append(f"Успешные TCP-подключения среди завершённых наблюдений: {result.availability_percent}% (не вероятность блокировки).")
         if result.reasons:
             lines.append("Почему: " + " ".join(result.reasons))
         if chebur.source_url:
@@ -761,6 +762,8 @@ class NetworkBlockingModule:
                 "profile": result.profile,
                 "service_ports": list(result.service_ports),
                 "tspu_probability": result.tspu_probability,
+                "blocking_attribution": "unconfirmed",
+                "copyable_conclusion": "",
                 "availability_percent": result.availability_percent,
                 "verdict": result.verdict,
                 "local": [asdict(item) for item in result.local],
