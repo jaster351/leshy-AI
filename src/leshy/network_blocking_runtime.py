@@ -89,15 +89,15 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
     # Both the older short-answer implementation and the new evidence-first
     # implementation may be present in persistent user history.
     legacy = bool(re.search(
-        r"(?m)^\\d{1,3}(?:\\.\\d{1,3}){3}: IP заблокирован ТСПУ",
+        r"(?m)^\d{1,3}(?:\.\d{1,3}){3}: IP заблокирован ТСПУ",
         answer,
     ))
     modern = bool(re.search(
-        r"(?m)^IP-адрес \\S+\\. Блокировка ТСПУ не подтверждена\\.",
+        r"(?m)^IP-адрес \S+\. Блокировка ТСПУ не подтверждена\.",
         answer,
     )) and "Проверка " in answer
     confirmed = bool(re.search(
-        r"(?m)^IP-адрес \\S+ заблокирован ТСПУ\\.",
+        r"(?m)^IP-адрес \S+ заблокирован ТСПУ\.",
         answer,
     ))
     if not (legacy or modern or confirmed):
@@ -107,14 +107,14 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
 
 def _explain_saved_diagnostic(previous: str) -> str:
     """Replay previous measured results or explicitly admit missing evidence."""
-    marker = previous.find("\\n\\nПроверка ")
+    marker = previous.find("\n\nПроверка ")
     if marker >= 0 and "Запуски инструментов (ID;" in previous:
         report = previous[marker:].strip()
         return (
             "Объяснение по предыдущему запросу — только сохранённые результаты "
             "его диагностики. Я не выполнял новую проверку и не использовал "
             "поисковые системы для обоснования прошлого вывода. "
-            "Отдельный индекс признаков не является доказательством причины ТСПУ.\\n\\n"
+            "Отдельный индекс признаков не является доказательством причины ТСПУ.\n\n"
             + report
         )
     return (
