@@ -3,10 +3,9 @@ from __future__ import annotations
 """Context-aware, source-backed cinema queries for Web and Telegram chats."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import re
 from typing import Any
-from zoneinfo import ZoneInfo
 
 
 _CINEMA = re.compile(
@@ -65,7 +64,10 @@ def cinema_query(message: str, rows: Any = (), *, day: str | None = None) -> Cin
 
     # The latest explicit user message overrides older context.
     context = value if direct else previous + " " + value
-    city_match = re.search(r"Челябинск\w*|Екатеринбург\w*|Москв\w*|Санкт-Петербург\w*", context, re.IGNORECASE)
+    city_re = r"Челябинск\w*|Екатеринбург\w*|Москв\w*|Санкт-Петербург\w*"
+    city_match = re.search(city_re, context, re.IGNORECASE)
+    if city_match is None and direct and previous:
+        city_match = re.search(city_re, previous, re.IGNORECASE)
     city = ""
     if city_match:
         name = city_match.group(0).lower()
@@ -95,9 +97,9 @@ def cinema_query(message: str, rows: Any = (), *, day: str | None = None) -> Cin
         wants_now = True
         wants_upcoming = True
     if city == "Челябинск":
-        today = datetime.now(ZoneInfo("Asia/Yekaterinburg")).date()
+        today = datetime.now(timezone(timedelta(hours=5))).date()
     elif city == "Москва":
-        today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+        today = datetime.now(timezone(timedelta(hours=3))).date()
     else:
         today = datetime.now().astimezone().date()
     return CinemaQuery(venue, city, day or today.isoformat(), wants_now, wants_upcoming)
@@ -128,6 +130,8 @@ def cinema_instruction(query: CinemaQuery) -> str:
         "Если есть достоверная ссылка на постер, её можно дать; выдумывать изображения нельзя. "
         "Свободные места можно подтвердить ТОЛЬКО по актуальной схеме выбранного сеанса. "
         "Продажа билетов или цена сами по себе не подтверждают свободные места. "
+        "Не называй фильм будущим показом именно в этом кинотеатре, если он присутствует "
+        "только в общегородском календаре премьер, но отсутствует в афише кинотеатра. "
         "Указывай источник и различай дату публикации страницы и дату сеанса. "
         "Если фактов о конкретных сеансах либо премьерах не найдено, прямо скажи "
         "об отсутствии подтверждённых данных, не предлагай пользователю искать всё самостоятельно. "
@@ -158,3 +162,13 @@ def cinema_search(app: Any, query: CinemaQuery) -> dict[str, Any]:
         except Exception as exc:
             errors.append(str(exc))
     return {"results": results, "error": "; ".join(errors) if errors else ""}
+
+
+def cinema_no_data(query: CinemaQuery) -> str:
+    """A deterministic truthful result when all live lookups are empty or failed."""
+    return (
+        f"Не удалось получить подтверждённые сведения об афише и ближайших премьерах "
+        f"для «{query.label}» на {query.day}. "
+        "Я не буду придумывать названия фильмов, время сеансов, цены или свободные места. "
+        "Повторите запрос позже: источник расписания может быть временно недоступен."
+    )

@@ -58,6 +58,11 @@ class CinemaResearchTests(unittest.TestCase):
         self.assertEqual(len(result["results"]), 1)
         self.assertIn("timeout", result["error"])
 
+    def test_no_data_is_explicit(self):
+        from leshy.cinema_research import cinema_no_data
+        plan = cinema_query("Что нового в кинотеатре Алмаз в Челябинске")
+        self.assertIn("Не удалось получить подтверждённые сведения", cinema_no_data(plan))
+
     def test_guidance_rejects_invented_prices_seats(self):
         plan = cinema_query("Что нового в кинотеатре Алмаз в Челябинске")
         guidance = cinema_instruction(plan)

@@ -10,7 +10,7 @@ from typing import Any
 from .accelerator_runtime import LlamaCppRuntimeManager, LlamaServerLLM
 from .adaptive_backend import AdaptiveLLM
 from .config import Settings
-from .cinema_research import cinema_query, cinema_instruction, cinema_search
+from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
 from .image_generation import ImageGenerationManager
@@ -392,6 +392,10 @@ class LeshyApp:
         reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
         if cinema_plan is not None or reason or self._needs_live_search(message):
             append_live_search(reason or "требуются актуальные данные")
+
+        if cinema_plan is not None and not sources:
+            answer = cinema_no_data(cinema_plan)
+            return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
 
         history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
         messages = context + history_messages
