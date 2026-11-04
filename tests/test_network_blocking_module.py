@@ -45,7 +45,8 @@ class NetworkBlockingModuleTests(unittest.TestCase):
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, remote, chebur)
         self.assertEqual(result.profile, "Linux/SSH")
         self.assertEqual(result.service_ports, (22,))
-        self.assertEqual(result.tspu_probability, 100)
+        self.assertEqual(result.tspu_probability, 55)
+        self.assertIn("не подтверждена", result.verdict)
         self.assertIn("ТСПУ", result.verdict)
         self.assertTrue(any("российская точка" in reason for reason in result.reasons))
 
