@@ -149,6 +149,35 @@ class RabbitMQTopology:
         return "node." + task.origin_node_id
 
 
+def cluster_public_summary(status: dict[str, Any], *, enabled: bool) -> dict[str, Any]:
+    """Safe aggregate for all users; never publish peer addresses or node identities."""
+    if not enabled:
+        return {
+            "enabled": False, "scope": "trusted_lan", "node_count": 0,
+            "busy_nodes": 0, "available_nodes": 0, "cpu_threads": 0,
+            "ram_total_gb": 0.0, "gpu_count": 0, "npu_count": 0,
+        }
+    peers = list(status.get("peers") or [])
+    inflight = dict(status.get("inflight_by_node") or {})
+    busy = sum(
+        int(
+            int(peer.get("queue_depth") or 0) + int(inflight.get(peer.get("node_id"), 0)) > 0
+        )
+        for peer in peers
+    )
+    return {
+        "enabled": True,
+        "scope": "trusted_lan",
+        "node_count": len(peers),
+        "busy_nodes": busy,
+        "available_nodes": max(0, len(peers) - busy),
+        "cpu_threads": sum(int(peer.get("cpu_threads") or 0) for peer in peers),
+        "ram_total_gb": round(sum(float(peer.get("memory_total_gb") or 0) for peer in peers), 1),
+        "gpu_count": sum(len(peer.get("gpu_names") or ()) for peer in peers),
+        "npu_count": sum(len(peer.get("npu_names") or ()) for peer in peers),
+    }
+
+
 class ClusterOrchestrator:
     """Распределяет полезные подзадачи между компьютерами Лешего.
 
@@ -344,4 +373,5 @@ __all__ = [
     "ClusterTransport",
     "RabbitMQTopology",
     "ClusterOrchestrator",
+    "cluster_public_summary",
 ]
