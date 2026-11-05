@@ -31,6 +31,41 @@ def _existing(path: Path | str | None) -> str:
     return ""
 
 
+def _playwright_chromium(cache_root: Path) -> SystemBrowser | None:
+    """На Linux Playwright кладёт Chromium в cache, а не в системный PATH.
+
+    Используем обычный Chromium, не headless_shell: он подходит и для CDP
+    Browser Use, и для Playwright. Не скачиваем браузер при диагностике.
+    """
+    try:
+        releases = sorted(
+            (item for item in cache_root.glob("chromium-*") if item.is_dir()),
+            key=lambda item: item.name,
+            reverse=True,
+        )
+        for release in releases:
+            for relative in ("chrome-linux64/chrome", "chrome-linux/chrome"):
+                binary = release / relative
+                if binary.is_file() and os.access(binary, os.X_OK):
+                    return SystemBrowser("Playwright Chromium", str(binary.resolve()))
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _cached_playwright_browser() -> SystemBrowser | None:
+    root = os.getenv("PLAYWRIGHT_BROWSERS_PATH", "").strip()
+    if root and root != "0":
+        folders = (Path(root).expanduser(),)
+    else:
+        folders = (Path.home() / ".cache" / "ms-playwright",)
+    for folder in folders:
+        browser = _playwright_chromium(folder)
+        if browser is not None:
+            return browser
+    return None
+
+
 def _candidate_browsers() -> tuple[SystemBrowser, ...]:
     candidates: list[SystemBrowser] = []
 
@@ -78,6 +113,11 @@ def _candidate_browsers() -> tuple[SystemBrowser, ...]:
             executable = shutil.which(command)
             if executable:
                 candidates.append(SystemBrowser(name, executable))
+        # Headless Linux нередко не имеет Chrome в PATH, но Playwright уже
+        # установил свой Chromium в ~/.cache/ms-playwright.
+        cached = _cached_playwright_browser()
+        if cached is not None:
+            candidates.append(cached)
 
     unique: list[SystemBrowser] = []
     seen: set[str] = set()
@@ -164,8 +204,9 @@ def ensure_system_browser(*, auto_install: bool = True) -> SystemBrowser:
         if browser is not None:
             return browser
     raise RuntimeError(
-        "Поддерживаемый системный браузер не найден. Нужен Microsoft Edge, Google Chrome или Chromium. "
-        "На Windows Леший попытался установить браузер через winget, если winget доступен."
+        "Не найден Chrome/Chromium. На Ubuntu без графического интерфейса "
+        "выполните: python -m playwright install --with-deps chromium. "
+        "На Windows Леший может установить Edge/Chrome через winget."
     )
 
 
