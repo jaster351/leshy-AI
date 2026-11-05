@@ -27,6 +27,10 @@ class ClusterNode:
     load: float = 0.0
     accepting_tasks: bool = True
     last_seen: float = field(default_factory=time.time)
+    hostname: str = ""
+    os_name: str = ""
+    os_version: str = ""
+    cpu_name: str = ""
 
     def supports(self, task: "ClusterTask") -> bool:
         required = {str(item).lower() for item in task.requirements}
@@ -43,9 +47,9 @@ class ClusterNode:
                 minimum = float(item.split("=", 1)[1])
             except (TypeError, ValueError):
                 continue
-            if self.memory_available_gb and self.memory_available_gb < minimum:
+            if self.memory_available_gb < minimum:
                 return False
-        if task.model and self.models and task.model not in self.models:
+        if task.model and task.model not in self.models:
             return False
         if task.mode == MODEL_PARALLEL_MODE and task.model and task.model not in self.models:
             return False
@@ -347,6 +351,10 @@ class ClusterOrchestrator:
                 {
                     "node_id": node.node_id,
                     "endpoint": node.endpoint,
+                    "hostname": node.hostname,
+                    "os_name": node.os_name,
+                    "os_version": node.os_version,
+                    "cpu_name": node.cpu_name,
                     "cpu_threads": node.cpu_threads,
                     "gpu_names": list(node.gpu_names),
                     "npu_names": list(node.npu_names),
