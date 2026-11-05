@@ -165,6 +165,11 @@ class BrowserUseCDPTests(unittest.TestCase):
         self.assertIsNotNone(intent)
         self.assertEqual(intent.kind, "login")
 
+    def test_short_login_request_works_in_telegram(self) -> None:
+        intent = _parse_explicit_intent("войти в Ленту")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.kind, "login")
+
 
 if __name__ == "__main__":
     unittest.main()
