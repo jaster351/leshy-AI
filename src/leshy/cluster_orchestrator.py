@@ -176,6 +176,8 @@ class ClusterOrchestrator:
         self.peer_ttl_seconds = max(5.0, float(peer_ttl_seconds))
         self._lock = threading.RLock()
         self._peers: dict[str, ClusterNode] = {local_node.node_id: local_node}
+        # Unfinished placements from this origin must count before remote heartbeat catches up.
+        self._inflight: dict[str, int] = {}
 
     def announce_and_refresh(self) -> list[ClusterNode]:
         if self.discovery is None:
@@ -206,7 +208,7 @@ class ClusterOrchestrator:
             return list(self._peers.values())
 
     @staticmethod
-    def _score(node: ClusterNode, task: ClusterTask) -> tuple[float, str]:
+    def _score(node: ClusterNode, task: ClusterTask, *, inflight: int = 0) -> tuple[float, str]:
         required = set(task.requirements)
         accelerator_bonus = 0.0
         if node.gpu_names:
@@ -224,7 +226,7 @@ class ClusterOrchestrator:
 
         cpu_bonus = -min(max(0, node.cpu_threads), 64) * 0.10
         score = (
-            node.queue_depth * 20.0
+            (node.queue_depth + inflight) * 125.0
             + max(0.0, node.load) * 100.0
             + accelerator_bonus
             + memory_bonus
@@ -232,11 +234,29 @@ class ClusterOrchestrator:
         )
         return score, node.node_id
 
-    def choose_executor(self, task: ClusterTask) -> ClusterNode:
-        candidates = [node for node in self.peers() if node.supports(task)]
+    def _choose_executor_locked(self, task: ClusterTask) -> ClusterNode:
+        candidates = [node for node in self._peers.values() if node.supports(task)]
         if not candidates:
             return self.local_node
-        return min(candidates, key=lambda node: self._score(node, task))
+        # An idle compatible node takes precedence over another node's busy inference slot.
+        # This prevents a fast GPU from becoming the destination for every parallel task.
+        if task.kind == "agent.prompt":
+            idle = [
+                node for node in candidates
+                if node.queue_depth + self._inflight.get(node.node_id, 0) == 0
+            ]
+            if idle:
+                candidates = idle
+        return min(
+            candidates,
+            key=lambda node: self._score(
+                node, task, inflight=self._inflight.get(node.node_id, 0)
+            ),
+        )
+
+    def choose_executor(self, task: ClusterTask) -> ClusterNode:
+        with self._lock:
+            return self._choose_executor_locked(task)
 
     def execute_or_delegate(
         self,
@@ -253,27 +273,42 @@ class ClusterOrchestrator:
                 error="Срок жизни кластерной задачи истёк",
             )
 
-        node = self.choose_executor(task)
-        if node.node_id == self.local_node.node_id or self.transport is None:
-            event("cluster_task_local", task_id=task.task_id, kind=task.kind, priority=task.priority)
-            return local_handler(task)
+        # Selection and reservation are atomic: concurrent requests from this
+        # origin must see each other's unfinished placements immediately.
+        with self._lock:
+            node = self._choose_executor_locked(task)
+            self._inflight[node.node_id] = self._inflight.get(node.node_id, 0) + 1
+        try:
+            if node.node_id == self.local_node.node_id or self.transport is None:
+                event("cluster_task_local", task_id=task.task_id, kind=task.kind, priority=task.priority)
+                return local_handler(task)
 
-        event(
-            "cluster_task_delegated",
-            task_id=task.task_id,
-            kind=task.kind,
-            priority=task.priority,
-            origin_node_id=task.origin_node_id,
-            executor_node_id=node.node_id,
-        )
-        result = self.transport.submit(node, task)
-        if result.task_id != task.task_id or result.origin_node_id != task.origin_node_id:
-            raise RuntimeError("Удалённый узел вернул результат не для исходной задачи")
-        return result
+            event(
+                "cluster_task_delegated",
+                task_id=task.task_id,
+                kind=task.kind,
+                priority=task.priority,
+                origin_node_id=task.origin_node_id,
+                executor_node_id=node.node_id,
+            )
+            result = self.transport.submit(node, task)
+            if result.task_id != task.task_id or result.origin_node_id != task.origin_node_id:
+                raise RuntimeError("Удалённый узел вернул результат не для исходной задачи")
+            return result
+        finally:
+            with self._lock:
+                remaining = self._inflight.get(node.node_id, 1) - 1
+                if remaining > 0:
+                    self._inflight[node.node_id] = remaining
+                else:
+                    self._inflight.pop(node.node_id, None)
 
     def status(self) -> dict[str, Any]:
         peers = self.peers()
+        with self._lock:
+            pending = dict(self._inflight)
         return {
+            "inflight_by_node": pending,
             "local_node_id": self.local_node.node_id,
             "peer_count": len(peers),
             "discovery_enabled": self.discovery is not None,
