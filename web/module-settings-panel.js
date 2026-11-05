@@ -80,6 +80,7 @@
     try{
       const data=await api('/v1/modules/toggle',{method:'POST',body:JSON.stringify({name,enabled:!current})});
       render(data.items||[]);
+      if(name==='distributed-cluster')await loadClusterStats();
       if(status)status.textContent=data.message||'Настройка сохранена.';
     }catch(error){
       if(status)status.textContent='Ошибка: '+error.message;
@@ -106,9 +107,58 @@
     load();
   }
 
+  // Settings summary is deliberately aggregate-only: do not expose peers, IPs or secrets.
+  async function loadClusterStats(){
+    const state=$('leshyClusterStatus');
+    if(!state)return;
+    try{
+      const data=await api('/v1/cluster/summary');
+      const fill=(id,value)=>{const el=$(id);if(el)el.textContent=String(value)};
+      fill('leshyClusterNodes',data.node_count??0);
+      fill('leshyClusterBusy',data.busy_nodes??0);
+      fill('leshyClusterAvailable',data.available_nodes??0);
+      fill('leshyClusterCpu',data.cpu_threads??0);
+      fill('leshyClusterRam',(data.ram_total_gb??0)+' ГБ');
+      fill('leshyClusterGpu',data.gpu_count??0);
+      fill('leshyClusterNpu',data.npu_count??0);
+      state.textContent=data.enabled
+        ?'Работает локальный кластер доверенных компьютеров (LAN). Статистика отражает обнаруженные узлы, а не всю будущую публичную сеть.'
+        :'Модуль распределённого кластера выключен. Включить его можно переключателем «Распределённый кластер Лешего» выше.';
+    }catch(error){
+      state.textContent='Не удалось получить статистику кластера: '+error.message;
+    }
+  }
+
+  function installClusterStats(){
+    if($('leshyClusterCard'))return;
+    const pane=$('pane-settings');if(!pane)return;
+    const card=document.createElement('section');
+    card.id='leshyClusterCard';
+    card.className='card';
+    card.style.marginTop='12px';
+    card.innerHTML=`
+      <div class="row" style="align-items:center;justify-content:space-between;gap:12px">
+        <h3>Распределённые вычисления</h3>
+        <button type="button" id="leshyClusterRefresh" aria-label="Обновить статистику вычислительной сети">Обновить</button>
+      </div>
+      <div class="muted">Чем больше компьютеров запускают Лешего и добровольно предоставляют ресурсы, тем выше общая вычислительная мощность сети и быстрее выполняются параллельные задачи. Это не означает, что один ответ ускоряется пропорционально количеству компьютеров.</div>
+      <div class="list" style="margin-top:10px">
+        <div class="item"><div class="item-title">Компьютеров в кластере: <strong id="leshyClusterNodes">—</strong></div><div class="item-meta">Заняты задачами: <strong id="leshyClusterBusy">—</strong> · Свободны: <strong id="leshyClusterAvailable">—</strong></div></div>
+        <div class="item"><div class="item-title">Совокупные ресурсы обнаруженных узлов</div><div class="item-meta">CPU-потоков: <strong id="leshyClusterCpu">—</strong> · RAM: <strong id="leshyClusterRam">—</strong> · GPU: <strong id="leshyClusterGpu">—</strong> · NPU: <strong id="leshyClusterNpu">—</strong></div></div>
+      </div>
+      <div class="hint" id="leshyClusterStatus" role="status" style="margin-top:10px">Загрузка статистики…</div>
+      <div class="muted" style="margin-top:8px">Планировщик учитывает текущую занятость, доступную память и ускорители, чтобы не направлять все запросы на единственный мощный компьютер. Публичная P2P-сеть пока не реализована; данные относятся к существующему доверенному LAN-кластеру. IP-адреса, личные данные и ключи здесь не отображаются.</div>`;
+    const modules=$('leshyModulesCard');
+    if(modules)modules.insertAdjacentElement('afterend',card);else pane.appendChild(card);
+    $('leshyClusterRefresh').addEventListener('click',loadClusterStats);
+    loadClusterStats();
+  }
+
   function boot(){
     install();
-    new MutationObserver(install).observe(document.documentElement,{childList:true,subtree:true});
+    installClusterStats();
+    new MutationObserver(()=>{install();installClusterStats()}).observe(document.documentElement,{childList:true,subtree:true});
+    setInterval(()=>{const card=$('leshyClusterCard');if(card&&card.getClientRects().length&&document.visibilityState==='visible')loadClusterStats()},15000);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();

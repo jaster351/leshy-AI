@@ -308,7 +308,9 @@ class DistributedClusterRuntime:
             port = int(os.getenv("LESHY_PORT", "8765"))
             endpoint = f"http://{_local_ip()}:{port}"
         scheduler = get_inference_scheduler(self.app)
-        queue_depth = int(scheduler.status().get("queue_depth") or 0)
+        scheduler_state = scheduler.status()
+        # An active generation occupies the only local inference slot, even if nobody is queued.
+        queue_depth = int(scheduler_state.get("queue_depth") or 0) + int(bool(scheduler_state.get("active")))
         return ClusterNode(
             node_id=self.identity.node_id,
             endpoint=endpoint.rstrip("/"),
