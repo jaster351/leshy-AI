@@ -183,17 +183,21 @@ class TelegramVoiceTests(unittest.TestCase):
             bridge._finalize_answer = lambda chat_id, msg_id, text, reply_id, **kw: (
                 finalized.append((chat_id, text, reply_id)) or 300
             )
-            bridge._handle_message(self.message())
+            message = self.message()
+            message.pop("message_id")  # Обходим глобальный SQLite ledger в unit-тесте.
+            bridge._handle_message(message)
             self.assertEqual(streams[0][0], "Привет, Леший!")
             self.assertEqual(streams[0][1]["owner_id"], "telegram:200")
-            self.assertEqual(finalized, [(12, "Слушаю!", 77)])
+            self.assertEqual(finalized, [(12, "Слушаю!", None)])
             self.assertEqual(sent, [])
 
     def test_realtime_bridge_denied_group_not_downloaded(self):
         with tempfile.TemporaryDirectory() as temp:
             app, bridge, sent, _answers = self.make_bridge(temp, cls=FastTelegramBridge)
             bridge._download_telegram_voice = lambda voice: self.fail("unexpected download")
-            bridge._handle_message(self.message(chat_type="group"))
+            message = self.message(chat_type="group")
+            message.pop("message_id")
+            bridge._handle_message(message)
             self.assertEqual(app.chat_calls, [])
             self.assertEqual(sent, [])
 
