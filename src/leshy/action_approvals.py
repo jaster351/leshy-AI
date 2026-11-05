@@ -132,7 +132,7 @@ class ApprovalBroker:
         with self._lock:
             self._purge()
             item = self._items.get(str(approval_id))
-            if item is None or item.owner_id != owner:
+            if item is None or item.owner_id != owner or not _matches_session(item, session_id):
                 raise KeyError("Approval не найден или истёк")
             self._items.pop(item.approval_id, None)
         event("approval_consumed", approval_id=item.approval_id, action=item.action.name, risk=item.action.risk.value)
