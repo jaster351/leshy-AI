@@ -6,6 +6,7 @@ import threading
 from typing import Iterable
 
 from .llm import ChatMessage, LLMUnavailable, finalize_model_output
+from .context_budget import _normalize_system_messages
 
 
 _SYSTEM_PROMPT = (
@@ -63,8 +64,8 @@ class NativeGGUFLLM:
         return self._model
 
     def chat(self, messages: Iterable[ChatMessage]) -> str:
-        payload = [{"role": "system", "content": _SYSTEM_PROMPT}]
-        payload.extend({"role": m.role, "content": m.content} for m in messages if m.role in {"user", "assistant", "system"})
+        prepared = _normalize_system_messages([ChatMessage("system", _SYSTEM_PROMPT), *[m for m in messages if m.role in {"user", "assistant", "system"}]])
+        payload = [{"role": m.role, "content": m.content} for m in prepared]
         with self._lock:
             model = self._load()
             try:
