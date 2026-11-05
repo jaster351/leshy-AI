@@ -15,6 +15,7 @@ from urllib import request
 
 from .cluster_orchestrator import ClusterNode, ClusterOrchestrator, ClusterResult, ClusterTask
 from .diagnostics import event, problem
+from .cluster_telemetry import measure_device
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 
@@ -108,6 +109,7 @@ class LanPeerDiscovery:
         self.identity = identity
         self.port = int(port)
         self._peers: dict[str, ClusterNode] = {}
+        self._seen_packets: dict[str, float] = {}
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -131,6 +133,8 @@ class LanPeerDiscovery:
         payload = {
             "magic": _DISCOVERY_MAGIC,
             "cluster_id": self.identity.cluster_id,
+            "sent_at": int(time.time()),
+            "nonce": secrets.token_hex(12),
             "node": asdict(node),
         }
         signature = _hmac(self.identity.secret, _canonical(payload))
@@ -163,6 +167,20 @@ class LanPeerDiscovery:
             expected = _hmac(self.identity.secret, _canonical(data))
             if not hmac.compare_digest(signature, expected):
                 return
+            # Подпись проверяется до разбора характеристик, старые пакеты не
+            # могут бессрочно создавать «фантомные» устройства в списке.
+            sent_at = float(data.get("sent_at") or 0)
+            nonce = str(data.get("nonce") or "")
+            now = time.time()
+            if not nonce or abs(now - sent_at) > 30:
+                return
+            with self._lock:
+                old = self._seen_packets.get(nonce)
+                if old is not None:
+                    return
+                self._seen_packets[nonce] = now
+                if len(self._seen_packets) > 1024:
+                    self._seen_packets = {k: v for k, v in self._seen_packets.items() if now - v < 60}
             node_data = data.get("node") or {}
             node_id = str(node_data.get("node_id") or "")
             if not node_id or node_id == self.identity.node_id:
@@ -178,8 +196,12 @@ class LanPeerDiscovery:
                 memory_available_gb=float(node_data.get("memory_available_gb") or 0.0),
                 queue_depth=max(0, int(node_data.get("queue_depth") or 0)),
                 load=max(0.0, float(node_data.get("load") or 0.0)),
-                accepting_tasks=bool(node_data.get("accepting_tasks", True)),
+                accepting_tasks=bool(node_data.get("accepting_tasks", False)),
                 last_seen=time.time(),
+                hostname=str(node_data.get("hostname") or "")[:128],
+                os_name=str(node_data.get("os_name") or "")[:80],
+                os_version=str(node_data.get("os_version") or "")[:100],
+                cpu_name=str(node_data.get("cpu_name") or "")[:200],
             )
             if not peer.endpoint.startswith(("http://", "https://")):
                 return
@@ -289,20 +311,19 @@ class DistributedClusterRuntime:
         self._thread: threading.Thread | None = None
 
     def _models(self) -> tuple[str, ...]:
+        # Не рекламируем модель, если GGUF ещё не скачан: маршрутизатор
+        # должен получать фактические возможности, а не конфигурацию.
         values: list[str] = []
         model_path = getattr(self.app, "model_path", None)
-        if model_path is not None:
-            values.append(str(getattr(model_path, "name", model_path)))
-        model = str(getattr(getattr(self.app, "settings", None), "ollama_model", "") or "")
-        if model:
-            values.append(model)
-        return tuple(dict.fromkeys(value for value in values if value))
+        if model_path is not None and Path(model_path).is_file():
+            values.append(Path(model_path).name)
+        return tuple(values)
 
     def _build_local_node(self) -> ClusterNode:
         hardware = getattr(self.app, "hardware", None)
         gpu_names = tuple(str(x) for x in (getattr(hardware, "gpu_names", ()) or ()))
         npu_names = tuple(str(x) for x in (getattr(hardware, "npu_names", ()) or ()))
-        memory_total, memory_available = _memory_info()
+        telemetry = measure_device()
         endpoint = os.getenv("LESHY_CLUSTER_ADVERTISE", "").strip()
         if not endpoint:
             port = int(os.getenv("LESHY_PORT", "8765"))
@@ -314,14 +335,18 @@ class DistributedClusterRuntime:
         return ClusterNode(
             node_id=self.identity.node_id,
             endpoint=endpoint.rstrip("/"),
-            cpu_threads=max(1, int(os.cpu_count() or 1)),
+            cpu_threads=telemetry.cpu_threads,
             gpu_names=gpu_names,
             npu_names=npu_names,
             models=self._models(),
-            memory_total_gb=memory_total,
-            memory_available_gb=memory_available,
+            memory_total_gb=telemetry.memory_total_gb,
+            memory_available_gb=telemetry.memory_available_gb,
             queue_depth=queue_depth,
-            load=_load_ratio(),
+            load=telemetry.load,
+            hostname=telemetry.hostname,
+            os_name=telemetry.os_name,
+            os_version=telemetry.os_version,
+            cpu_name=telemetry.cpu_name,
             accepting_tasks=True,
             last_seen=time.time(),
         )
@@ -340,6 +365,10 @@ class DistributedClusterRuntime:
         current.load = refreshed.load
         current.accepting_tasks = refreshed.accepting_tasks
         current.last_seen = time.time()
+        current.hostname = refreshed.hostname
+        current.os_name = refreshed.os_name
+        current.os_version = refreshed.os_version
+        current.cpu_name = refreshed.cpu_name
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
