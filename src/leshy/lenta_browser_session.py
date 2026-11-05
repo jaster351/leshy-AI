@@ -9,6 +9,7 @@ import subprocess
 import time
 from typing import Any
 
+from .browser_launch_policy import chromium_launch_policy
 from .system_browser import ensure_system_browser
 
 
@@ -156,6 +157,13 @@ class LentaBrowserSession:
         самостоятельно ввести телефон, SMS/2FA и закрыть браузер после входа.
         Секреты не проходят через чат и не записываются Лешим отдельно.
         """
+        if not chromium_launch_policy().can_open_window:
+            raise RuntimeError(
+                "На Ubuntu Server без DISPLAY/Wayland нельзя открыть видимое окно входа в «Ленту». "
+                "Для первоначальной авторизации нужна интерактивная графическая сессия "
+                "(например, временный удалённый рабочий стол). "
+                "Чтение публичного каталога через headless Chromium доступно без рабочего стола."
+            )
         browser = ensure_system_browser(auto_install=True)
         args = [
             browser.executable,
