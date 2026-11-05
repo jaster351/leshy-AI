@@ -18,6 +18,7 @@ import zipfile
 from .diagnostics import event, exception
 from .llm import ChatMessage, LLMUnavailable
 from .logging_paths import central_log_path
+from .performance_runtime import LocalInferenceProfile, choose_llama_profile
 
 _GITHUB_RELEASES = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15"
 _RUNTIME_LOCK = threading.RLock()
@@ -215,6 +216,7 @@ class LlamaServerLLM:
         self._lock = threading.RLock()
         self._chat_lock = threading.RLock()
         self._ready_since: float | None = None
+        self._performance_profile: LocalInferenceProfile | None = None
 
     def _stop_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
@@ -230,6 +232,7 @@ class LlamaServerLLM:
         self._process = None
         self._port = None
         self._ready_since = None
+        self._performance_profile = None
 
     def _is_healthy(self, base: str, timeout: float = 0.75) -> bool:
         try:
@@ -252,7 +255,8 @@ class LlamaServerLLM:
             server = self.manager.ensure(self.backend)
             port = _free_local_port()
             env = dict(os.environ)
-            cpu_threads = max(1, int(os.cpu_count() or 1))
+            profile = choose_llama_profile(self.backend)
+            cpu_threads = profile.threads
             args = [
                 str(server),
                 "-m", str(self.model_path),
@@ -261,6 +265,7 @@ class LlamaServerLLM:
                 "-c", str(max(512, self.n_ctx)),
                 "-np", "1",
                 "-t", str(cpu_threads),
+                "-tb", str(profile.batch_threads),
             ]
             if self.backend == "vulkan":
                 # --fit сам подбирает число GPU-слоёв по реально свободной VRAM.
@@ -292,6 +297,7 @@ class LlamaServerLLM:
                 except Exception:
                     pass
             self._port = port
+            self._performance_profile = profile
             base = f"http://127.0.0.1:{port}"
             event(
                 "accelerator_server_start",
@@ -299,6 +305,8 @@ class LlamaServerLLM:
                 device=self.device,
                 gpu_count=self.gpu_count if self.backend == "vulkan" else 0,
                 cpu_threads=cpu_threads,
+                batch_threads=profile.batch_threads,
+                performance_profile=profile.mode,
                 startup_timeout_seconds=self.startup_timeout,
                 resident=True,
             )
@@ -331,6 +339,7 @@ class LlamaServerLLM:
             "resident": bool(alive),
             "port": self._port if alive else None,
             "ready_seconds": round(time.monotonic() - self._ready_since, 1) if alive and self._ready_since else 0.0,
+            "performance": self._performance_profile.as_dict() if alive and self._performance_profile else None,
         }
 
     def chat(self, messages: list[ChatMessage]) -> str:
