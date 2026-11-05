@@ -24,7 +24,11 @@ from .voice_tts import LocalVoiceTTS
 def make_handler(app, telegram, settings, model_catalog):
     Parent = base.make_handler(app, telegram, settings, model_catalog)
     dashboard = DashboardService(app)
-    voice_asr = LocalVoiceASR(settings.brain_dir)
+    # Telegram и Web должны разделять одну ASR-модель и ограничитель запросов.
+    voice_asr = getattr(app, "_voice_asr", None)
+    if voice_asr is None:
+        voice_asr = LocalVoiceASR(settings.brain_dir)
+        app._voice_asr = voice_asr
     voice_tts = LocalVoiceTTS(settings.brain_dir)
     hf_settings = HuggingFaceSettings(settings.brain_dir)
 
