@@ -208,7 +208,7 @@ class FastTelegramBridge(RichTelegramBridge):
         chat_id = chat.get("id")
         user_id = str(sender.get("id") or "")
         message_id = message.get("message_id")
-        if not text or chat_id is None or not user_id:
+        if (not text and message.get("voice") is None) or chat_id is None or not user_id:
             return
 
         addressed, address_reason = self._social.addressed_to_leshy(message, bot_id=self._bot_id, bot_username=self._bot_username)
@@ -219,6 +219,10 @@ class FastTelegramBridge(RichTelegramBridge):
             problem("telegram_access_denied", "Telegram ID не разрешён", telegram_user_id=user_id)
             if not self._social.is_group(message):
                 self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
+            return
+
+        text = self._resolve_message_text(message, chat_id=chat_id, user_id=user_id)
+        if not text:
             return
 
         owner = self._is_owner(user_id)

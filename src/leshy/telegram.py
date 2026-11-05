@@ -17,6 +17,8 @@ from .telegram_social import TelegramSocialPolicy
 
 _THINK_RE = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
 _ADMIN_COMMANDS = {"/learning_on", "/learning_off"}
+_MAX_TELEGRAM_VOICE_BYTES = 20 * 1024 * 1024
+_MAX_TELEGRAM_VOICE_SECONDS = 5 * 60
 
 
 def _telegram_answer_html(text: str) -> str:
@@ -286,6 +288,96 @@ class TelegramBridge:
             raise RuntimeError(str(body.get("description") or "Telegram API error"))
         return body.get("result")
 
+    def _download_telegram_voice(self, voice: dict) -> bytes:
+        """Скачивает голосовое через официальный Bot API с ограничением размера.
+
+        Telegram возвращает file_path только после getFile. Токен бота и URL
+        никогда не включаются в исключения или диагностические сообщения.
+        """
+        if not isinstance(voice, dict):
+            raise ValueError("Некорректное голосовое сообщение")
+        file_id = str(voice.get("file_id") or "").strip()
+        if not file_id:
+            raise ValueError("В голосовом сообщении отсутствует file_id")
+        try:
+            duration = int(voice.get("duration") or 0)
+            size = int(voice.get("file_size") or 0)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("Некорректные параметры голосового сообщения") from exc
+        if duration > _MAX_TELEGRAM_VOICE_SECONDS:
+            raise ValueError("Голосовое сообщение длиннее пяти минут")
+        if size > _MAX_TELEGRAM_VOICE_BYTES:
+            raise ValueError("Голосовое сообщение превышает 20 МБ")
+
+        metadata = self._api("getFile", {"file_id": file_id}, timeout=15)
+        if not isinstance(metadata, dict):
+            raise RuntimeError("Telegram не вернул сведения о голосовом файле")
+        try:
+            remote_size = int(metadata.get("file_size") or 0)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("Telegram вернул некорректный размер файла") from exc
+        if remote_size > _MAX_TELEGRAM_VOICE_BYTES:
+            raise ValueError("Голосовое сообщение превышает 20 МБ")
+
+        file_path = str(metadata.get("file_path") or "")
+        path_parts = file_path.split("/")
+        if (
+            not file_path or file_path.startswith("/") or "\\" in file_path
+            or any(part in ("", ".", "..") for part in path_parts)
+            or parse.urlsplit(file_path).scheme
+        ):
+            raise RuntimeError("Telegram вернул некорректный путь к голосовому файлу")
+        token = self._token()
+        if not token:
+            raise RuntimeError("Telegram token не настроен")
+        url = f"https://api.telegram.org/file/bot{token}/{parse.quote(file_path, safe='/')}"
+        try:
+            with request.urlopen(request.Request(url, method="GET"), timeout=30) as response:
+                length = response.headers.get("Content-Length") if response.headers else None
+                if length and str(length).isdigit() and int(length) > _MAX_TELEGRAM_VOICE_BYTES:
+                    raise ValueError("Голосовое сообщение превышает 20 МБ")
+                audio = response.read(_MAX_TELEGRAM_VOICE_BYTES + 1)
+        except error.HTTPError as exc:
+            raise RuntimeError(f"Telegram не отдал голосовой файл (HTTP {exc.code})") from None
+        except (error.URLError, OSError, TimeoutError):
+            raise RuntimeError("Ошибка скачивания голосового файла из Telegram") from None
+        if not audio:
+            raise ValueError("Telegram вернул пустой голосовой файл")
+        if len(audio) > _MAX_TELEGRAM_VOICE_BYTES:
+            raise ValueError("Голосовое сообщение превышает 20 МБ")
+        return audio
+
+    def _resolve_message_text(self, message: dict, *, chat_id: int | str, user_id: str) -> str | None:
+        """Преобразует голосовое в текст уже ПОСЛЕ проверки доступа и адресации.
+
+        None означает ошибку, о которой пользователь уже уведомлён. Для
+        Telegram и Web используется один ASR-экземпляр с общим request gate.
+        """
+        caption = str(message.get("text") or message.get("caption") or "").strip()
+        voice = message.get("voice")
+        if voice is None:
+            return caption
+        try:
+            audio = self._download_telegram_voice(voice)
+            asr = getattr(self.app, "_voice_asr", None)
+            if asr is None:
+                from .voice_asr import LocalVoiceASR
+
+                asr = LocalVoiceASR(self.brain_dir)
+                self.app._voice_asr = asr
+            transcript = str(asr.transcribe(audio, content_type="audio/ogg").text or "").strip()
+        except Exception as exc:
+            # Не записываем в логи текст ошибки: библиотека HTTP может
+            # включать в исключения секретный URL с Telegram bot token.
+            problem("telegram_voice_failed", type(exc).__name__, telegram_user_id=user_id)
+            self._send(chat_id, "Не удалось распознать голосовое сообщение. Попробуйте ещё раз или напишите текст.")
+            return None
+        if not transcript:
+            self._send(chat_id, "В голосовом сообщении не удалось разобрать речь. Попробуйте ещё раз.")
+            return None
+        event("telegram_voice_transcribed", telegram_user_id=user_id, chars=len(transcript))
+        return (caption + "\n" + transcript).strip() if caption else transcript
+
     def _refresh_bot_identity(self) -> None:
         try:
             me = self._api("getMe", timeout=10) or {}
@@ -347,7 +439,7 @@ class TelegramBridge:
         chat_id = chat.get("id")
         user_id = str(sender.get("id") or "")
         message_id = message.get("message_id")
-        if not text or chat_id is None or not user_id:
+        if (not text and message.get("voice") is None) or chat_id is None or not user_id:
             return
 
         addressed, address_reason = self._social.addressed_to_leshy(
@@ -368,6 +460,10 @@ class TelegramBridge:
             problem("telegram_access_denied", "Telegram ID не разрешён", telegram_user_id=user_id)
             if not self._social.is_group(message):
                 self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
+            return
+
+        text = self._resolve_message_text(message, chat_id=chat_id, user_id=user_id)
+        if not text:
             return
 
         owner = self._is_owner(user_id)
