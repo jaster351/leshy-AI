@@ -18,6 +18,7 @@ import zipfile
 from .diagnostics import event, exception
 from .llm import ChatMessage, LLMUnavailable
 from .logging_paths import central_log_path
+from .local_platform import runtime_platform, installed_llama_server
 
 _GITHUB_RELEASES = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15"
 _RUNTIME_LOCK = threading.RLock()
@@ -97,6 +98,18 @@ class LlamaCppRuntimeManager:
         existing = self.server_path(backend)
         if existing:
             return existing
+        if runtime_platform() != "windows":
+            # Windows-архивы llama.cpp нельзя запускать на Linux.
+            # Используем только установленный системный бинарник.
+            local = installed_llama_server()
+            if local is not None and backend in {"cpu", "vulkan"}:
+                event("accelerator_runtime_local_binary", platform=runtime_platform(), backend=backend, executable=str(local))
+                return local
+            raise RuntimeError(
+                "На Linux не найден исполняемый llama-server. "
+                "Установите локальный llama.cpp либо используйте cpu-native через llama-cpp-python. "
+                "Путь к серверу можно задать через LESHY_LLAMA_SERVER."
+            )
         with _RUNTIME_LOCK:
             existing = self.server_path(backend)
             if existing:
