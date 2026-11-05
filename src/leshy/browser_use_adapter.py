@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from .browser_agent import BrowserAction, BrowserActionResult, BrowserRisk
 from .diagnostics import event, problem
+from .browser_launch_policy import chromium_launch_policy
 from .system_browser import ensure_system_browser
 
 
@@ -50,10 +51,8 @@ class BrowserUseAdapter:
     def __init__(self, llm: Any | None = None, *, max_steps: int = 40, headless: bool | None = None):
         self.llm = llm
         self.max_steps = max(3, min(int(max_steps), 100))
-        if headless is None:
-            raw = os.getenv("LESHY_BROWSER_HEADLESS", "1").strip().lower()
-            headless = raw not in {"0", "false", "no", "off"}
-        self.headless = bool(headless)
+        policy = chromium_launch_policy()
+        self.headless = policy.headless if headless is None else (bool(headless) if policy.can_open_window else True)
         self.root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
         self.profile_dir = self.root / "browser" / "browser-use-profile"
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -198,14 +197,18 @@ class BrowserUseAdapter:
             browser=browser_info.name,
             executable_name=Path(browser_info.executable).name,
             headless=self.headless,
+            root_linux=chromium_launch_policy().root_linux,
             isolated_profile=profile_dir != self.profile_dir,
             profile_has_lock=any((profile_dir / name).exists() for name in ("SingletonLock", "lockfile")),
             action=action.name,
         )
+        policy = chromium_launch_policy()
         browser = Browser(
             executable_path=browser_info.executable,
             user_data_dir=str(profile_dir),
             headless=self.headless,
+            chromium_sandbox=policy.chromium_sandbox,
+            args=list(policy.args),
             allowed_domains=self._domain_patterns(hosts),
             keep_alive=False,
         )
