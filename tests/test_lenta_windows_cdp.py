@@ -15,7 +15,7 @@ from leshy.browser_agent import BrowserAction, BrowserRisk
 from leshy.browser_profile_cdp import profile_cdp_url
 from leshy.browser_use_adapter import BrowserUseAdapter
 from leshy.lenta_browser_session import LentaBrowserSession
-from leshy.lenta_runtime import _basket_task
+from leshy.lenta_runtime import _basket_task, _parse_explicit_intent
 
 
 class ProfileCDPTests(unittest.TestCase):
@@ -144,6 +144,26 @@ class BrowserUseCDPTests(unittest.TestCase):
         self.assertIn("РОВНО ОДНУ", instruction)
         self.assertIn("сравни цены", instruction)
         self.assertIn("НЕ нажимай финальную", instruction)
+
+    def test_telegram_icecream_command_is_basket_not_login(self) -> None:
+        intent = _parse_explicit_intent(
+            "https://lenta.com/ Зайди на сайт и добавь мне в корзину "
+            "мой профиль самое дешёвое мороженое"
+        )
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.kind, "basket")
+
+    def test_personal_cabinet_words_do_not_override_cart_operation(self) -> None:
+        intent = _parse_explicit_intent(
+            "Лента, добавь мороженое в корзину в моём личном кабинете"
+        )
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.kind, "basket")
+
+    def test_explicit_login_still_works(self) -> None:
+        intent = _parse_explicit_intent("Лента, войти в личный кабинет")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.kind, "login")
 
 
 if __name__ == "__main__":
