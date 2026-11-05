@@ -110,14 +110,18 @@ def _parse_explicit_intent(text: str) -> LentaIntent | None:
     payment = _payment(text)
     if any(marker in low for marker in _CAPABILITY):
         return LentaIntent("capability", text, payment)
-    if any(marker in low for marker in ("войти", "авториз", "личный кабинет", "личном кабинете")) and not any(
-        marker in low for marker in _ORDER
-    ):
-        return LentaIntent("login", text, payment)
+    # Действие имеет приоритет над словами о текущей авторизации.
+    # «Добавь мороженое в корзину в моём личном кабинете» — корзина,
+    # а не повторный вход. Вход нужен лишь при отдельной команде
+    # или когда соответствующий личный профиль ещё не авторизован.
     if any(marker in low for marker in _ORDER):
         return LentaIntent("checkout", text, payment)
-    if any(marker in low for marker in _CART):
+    if any(marker in low for marker in _CART) or (
+        "добавь" in low and any(x in low for x in ("морожен", "продукт", "товар"))
+    ):
         return LentaIntent("basket", text, payment)
+    if any(marker in low for marker in ("войти", "авториз", "личный кабинет", "личном кабинете")):
+        return LentaIntent("login", text, payment)
     if any(marker in low for marker in _PRICE):
         return LentaIntent("catalog", text, payment)
     return LentaIntent("catalog", text, payment)
