@@ -80,7 +80,7 @@ if __name__ == "__main__":
 
 def test_owner_identity_recognizes_natural_telegram_question():
     assert is_owner_identity_question("А я по-твоему кто?")
-    assert is_owner_identity_question("Ты меня узнаёшь?") is False
+    assert is_owner_identity_question("Ты меня узнаёшь?")
     assert is_owner_identity_question("Ты меня узнал?")
     assert not is_owner_identity_question("Добавь мороженое в корзину")
     assert not is_owner_identity_question("Я хозяин Лешего")
