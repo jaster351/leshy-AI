@@ -50,7 +50,7 @@ def is_owner_identity_question(message: str) -> bool:
     Сам этот предикат не выдаёт никаких полномочий.
     """
     value = " ".join(str(message or "").lower().replace("ё", "е").split())
-    value = re.sub(r"[^а-яa-z0-9\s-]", " ", value)
+    value = re.sub(r"[^а-яa-z0-9\s]", " ", value)
     value = " ".join(value.split())
     return any(phrase in value for phrase in (
         "а я по твоему кто",
