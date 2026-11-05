@@ -101,5 +101,29 @@ class AppRuntimeRoutingTests(unittest.TestCase):
         )
 
 
+class LlamaServerLinuxTests(unittest.TestCase):
+    def test_local_server_is_selected_without_windows_download(self):
+        from leshy.accelerator_runtime import LlamaCppRuntimeManager
+        with TemporaryDirectory() as root:
+            binary = Path(root) / "llama-server"
+            binary.write_bytes(b"dummy binary")
+            binary.chmod(0o755)
+            manager = LlamaCppRuntimeManager(Path(root) / "brain")
+            with patch("leshy.accelerator_runtime.runtime_platform", return_value="linux"), \
+                 patch("leshy.accelerator_runtime.installed_llama_server", return_value=binary), \
+                 patch.object(manager, "discover", side_effect=AssertionError("Windows assets forbidden")):
+                self.assertEqual(manager.ensure("cpu"), binary)
+
+    def test_linux_missing_server_has_actionable_error_without_download(self):
+        from leshy.accelerator_runtime import LlamaCppRuntimeManager
+        with TemporaryDirectory() as root:
+            manager = LlamaCppRuntimeManager(Path(root) / "brain")
+            with patch("leshy.accelerator_runtime.runtime_platform", return_value="linux"), \
+                 patch("leshy.accelerator_runtime.installed_llama_server", return_value=None), \
+                 patch.object(manager, "discover", side_effect=AssertionError("Windows assets forbidden")):
+                with self.assertRaisesRegex(RuntimeError, "Linux"):
+                    manager.ensure("cpu")
+
+
 if __name__ == "__main__":
     unittest.main()
