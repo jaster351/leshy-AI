@@ -112,6 +112,133 @@ $env:LESHY_LLM_BACKEND="echo"
 python -m leshy.web_server
 ```
 
+## Установка и локальная сборка на Ubuntu и CentOS
+
+Инструкция предназначена для **Ubuntu 24.04/26.04** и **CentOS Stream 9/10** на x86_64. Старые CentOS Linux 7/8 (EOL) не поддерживаются. Это сборка Linux-приложения из исходников, а не Windows EXE или Inno Setup. Требуется Python **3.11+**; перед установкой проверьте доступную версию. Для CentOS Stream при отсутствии подходящего Python в штатных репозиториях сначала установите его из доверенного репозитория вашей организации или соберите отдельно.
+
+### 1. Системные зависимости — Ubuntu
+
+```bash
+sudo apt update
+sudo apt install -y git curl ca-certificates build-essential cmake ninja-build pkg-config \
+  python3 python3-dev python3-venv python3-pip \
+  libopenblas-dev libssl-dev libffi-dev libgl1 libglib2.0-0 \
+  libx11-6 libxext6 libxrender1 libxtst6 libxi6
+python3 --version
+cmake --version
+git --version
+```
+
+Если `python3 --version` показывает версию ниже 3.11, установите поддерживаемую версию и используйте её явный бинарный файл при создании окружения.
+
+### 2. Системные зависимости — CentOS Stream 9/10
+
+```bash
+sudo dnf install -y git curl ca-certificates gcc gcc-c++ make cmake ninja-build \
+  pkgconf-pkg-config openssl-devel libffi-devel openblas-devel \
+  mesa-libGL glib2 libX11 libXext libXrender libXtst libXi
+sudo dnf install -y python3.11 python3.11-devel python3.11-pip
+python3.11 --version
+cmake --version
+git --version
+```
+
+Если `python3.11` недоступен в репозиториях конкретного выпуска, не подменяйте системный Python: установите Python 3.11+ отдельно и замените `python3.11` в командах ниже на путь к нему.
+
+### 3. Скачать исходники (обе системы)
+
+```bash
+git clone https://github.com/jaster351/leshy-AI.git
+cd leshy-AI
+git switch main
+```
+
+### 4. Создать окружение и установить зависимости
+
+Ubuntu:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e '.[test]'
+```
+
+CentOS Stream:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e '.[test]'
+```
+
+Если `python3.11 -m venv` недоступен в CentOS, установите `virtualenv` для выбранного Python и создайте окружение через `python3.11 -m virtualenv .venv`.
+
+### 5. Скомпилировать локальный CPU backend
+
+`llama-cpp-python` компилируется из исходников с помощью CMake. На машинах без OpenBLAS уберите `-DGGML_BLAS=ON` и `-DGGML_BLAS_VENDOR=OpenBLAS`.
+
+```bash
+export CMAKE_ARGS='-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS'
+export FORCE_CMAKE=1
+python -m pip install --no-cache-dir --no-binary=llama-cpp-python 'llama-cpp-python>=0.3.27,<0.4'
+unset FORCE_CMAKE CMAKE_ARGS
+```
+
+Это компиляция CPU backend; поддержка GPU/Vulkan требует отдельного набора драйверов и параметров сборки. GGUF-модель не входит в Git и должна быть загружена отдельно через интерфейс Лешего.
+
+### 6. Проверка и запуск
+
+```bash
+python -m compileall -q src
+python -m pytest -q
+LESHY_LLM_BACKEND=echo python -m leshy.web_server
+```
+
+Тестовый режим `echo` позволяет проверить веб-сервер без скачивания модели. Web UI использует порт **8765**. Для обычного режима остановите тестовый сервер и запустите `python -m leshy.web_server` после настройки GGUF-модели. Доступ по LAN ограничьте firewall и/или `LESHY_API_TOKEN`.
+
+### 7. Сборка исполняемого Linux-пакета (экспериментально)
+
+```bash
+python -m pip install 'pyinstaller>=6.11,<7'
+python -m PyInstaller --noconfirm --clean --onedir --name Leshy \
+  --collect-all leshy src/leshy/web_server.py
+```
+
+Результат будет в `dist/Leshy/`. **Это не проверенный релизный Linux-дистрибутив**: PyInstaller может потребовать дополнительные `--collect-*` для динамических зависимостей, а модель и runtime-файлы должны поставляться отдельно. Канонический способ запуска Linux сейчас — из `.venv`.
+
+### 8. Автозапуск через systemd (по желанию)
+
+Выполняйте от обычного пользователя, в каталоге клонированного проекта:
+
+```bash
+PROJECT_DIR="$(pwd)"
+mkdir -p "$HOME/.config/systemd/user"
+cat > "$HOME/.config/systemd/user/leshy.service" <<EOF
+[Unit]
+Description=Leshy AI Web Server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$PROJECT_DIR
+ExecStart=$PROJECT_DIR/.venv/bin/python -m leshy.web_server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable --now leshy.service
+systemctl --user status leshy.service
+```
+
+Чтобы пользовательский сервис продолжал работать после выхода из SSH, администратор может выполнить `sudo loginctl enable-linger "$USER"`. Логи: `journalctl --user -u leshy.service -f`.
+
+**Статус проверки:** команды документированы по конфигурации `pyproject.toml`, но полная установка и компиляция на обеих ОС должны быть подтверждены отдельными CI/VM-прогонами; до этого не считать их протестированными.
+
 ## Windows-сборка
 
 Локальная сборка выполняется из корня репозитория:
