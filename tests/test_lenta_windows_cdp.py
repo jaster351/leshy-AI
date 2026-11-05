@@ -22,7 +22,7 @@ class ProfileCDPTests(unittest.TestCase):
     def test_valid_local_debugger_is_discovered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "DevToolsActivePort").write_text(
-                "49321\\n/devtools/browser/exact-uuid\\n", encoding="utf-8"
+                "49321\n/devtools/browser/exact-uuid\n", encoding="utf-8"
             )
             response = {
                 "webSocketDebuggerUrl":
@@ -37,7 +37,7 @@ class ProfileCDPTests(unittest.TestCase):
     def test_stale_debugger_is_not_used_for_another_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "DevToolsActivePort").write_text(
-                "49321\\n/devtools/browser/original\\n", encoding="utf-8"
+                "49321\n/devtools/browser/original\n", encoding="utf-8"
             )
             client = types.SimpleNamespace(
                 open=lambda url, timeout: BytesIO(json.dumps({
@@ -51,7 +51,7 @@ class ProfileCDPTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(profile_cdp_url(tmp))
             (Path(tmp) / "DevToolsActivePort").write_text(
-                "0\\n/devtools/browser/uuid\\n", encoding="utf-8"
+                "0\n/devtools/browser/uuid\n", encoding="utf-8"
             )
             self.assertIsNone(profile_cdp_url(tmp))
 
@@ -60,12 +60,12 @@ class LentaLoginCDPTests(unittest.TestCase):
     def test_login_launches_debuggable_custom_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             session = LentaBrowserSession(tmp, "telegram:123")
-            system = types.SimpleNamespace(name="Microsoft Edge", executable=r"C:\\Edge\\msedge.exe")
-            with patch("leshy.lenta_browser_session.ensure_system_browser", return_value=system), \\
+            system = types.SimpleNamespace(name="Microsoft Edge", executable=r"C:\Edge\msedge.exe")
+            with patch("leshy.lenta_browser_session.ensure_system_browser", return_value=system), \
                  patch("leshy.lenta_browser_session.profile_cdp_url", side_effect=[
                      None, "http://127.0.0.1:49321"
-                 ]), \\
-                 patch("leshy.lenta_browser_session.profile_may_be_in_use", return_value=False), \\
+                 ]), \
+                 patch("leshy.lenta_browser_session.profile_may_be_in_use", return_value=False), \
                  patch("leshy.lenta_browser_session.subprocess.Popen") as spawn:
                 spawn.return_value.poll.return_value = None
                 result = session.open_login_window()
@@ -79,8 +79,8 @@ class LentaLoginCDPTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             session = LentaBrowserSession(tmp, "telegram:123")
             system = types.SimpleNamespace(name="Microsoft Edge", executable="msedge.exe")
-            with patch("leshy.lenta_browser_session.ensure_system_browser", return_value=system), \\
-                 patch("leshy.lenta_browser_session.profile_cdp_url", return_value="http://127.0.0.1:49321"), \\
+            with patch("leshy.lenta_browser_session.ensure_system_browser", return_value=system), \
+                 patch("leshy.lenta_browser_session.profile_cdp_url", return_value="http://127.0.0.1:49321"), \
                  patch("leshy.lenta_browser_session.subprocess.Popen") as spawn:
                 result = session.open_login_window()
             spawn.assert_not_called()
@@ -90,9 +90,9 @@ class LentaLoginCDPTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             session = LentaBrowserSession(tmp, "telegram:123")
             system = types.SimpleNamespace(name="Microsoft Edge", executable="msedge.exe")
-            with patch("leshy.lenta_browser_session.ensure_system_browser", return_value=system), \\
-                 patch("leshy.lenta_browser_session.profile_cdp_url", return_value=None), \\
-                 patch("leshy.lenta_browser_session.profile_may_be_in_use", return_value=True), \\
+            with patch("leshy.lenta_browser_session.ensure_system_browser", return_value=system), \
+                 patch("leshy.lenta_browser_session.profile_cdp_url", return_value=None), \
+                 patch("leshy.lenta_browser_session.profile_may_be_in_use", return_value=True), \
                  patch("leshy.lenta_browser_session.subprocess.Popen") as spawn:
                 with self.assertRaisesRegex(RuntimeError, "профил"):
                     session.open_login_window()
@@ -126,10 +126,10 @@ class BrowserUseCDPTests(unittest.TestCase):
                 },
             )
             system = types.SimpleNamespace(name="Microsoft Edge", executable="msedge.exe")
-            with patch.dict(os.environ, {"LESHY_BRAIN_DIR": tmp}), \\
-                 patch.dict(sys.modules, {"browser_use": stub}), \\
-                 patch("leshy.browser_use_adapter.ensure_system_browser", return_value=system), \\
-                 patch("leshy.browser_use_adapter.profile_cdp_url", return_value="http://127.0.0.1:49321"), \\
+            with patch.dict(os.environ, {"LESHY_BRAIN_DIR": tmp}), \
+                 patch.dict(sys.modules, {"browser_use": stub}), \
+                 patch("leshy.browser_use_adapter.ensure_system_browser", return_value=system), \
+                 patch("leshy.browser_use_adapter.profile_cdp_url", return_value="http://127.0.0.1:49321"), \
                  patch.object(BrowserUseAdapter, "_tools_for_action", return_value=object()):
                 adapter = BrowserUseAdapter(llm=object(), headless=False)
                 result = asyncio.run(adapter._run(action))
