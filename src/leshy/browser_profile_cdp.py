@@ -12,6 +12,7 @@ Chromium блокирует профиль, и Browser Use выдаёт ошиб
 import json
 from pathlib import Path
 from urllib import request
+from urllib.parse import urlsplit
 
 
 def profile_cdp_url(profile_dir: Path | str, *, timeout: float = 0.7) -> str | None:
@@ -35,11 +36,14 @@ def profile_cdp_url(profile_dir: Path | str, *, timeout: float = 0.7) -> str | N
         opener = request.build_opener(request.ProxyHandler({}))
         with opener.open(endpoint + "/json/version", timeout=timeout) as response:
             data = json.load(response)
-        expected = ws_path
         actual = str(data.get("webSocketDebuggerUrl") or "")
-        if actual.rsplit("/", 1)[-1] != expected.rsplit("/", 1)[-1]:
-            return None
-        if not actual.startswith(("ws://127.0.0.1:", "ws://localhost:", "ws://[::1]:")):
+        parsed = urlsplit(actual)
+        if (
+            parsed.scheme != "ws"
+            or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+            or parsed.port != port
+            or parsed.path != ws_path
+        ):
             return None
         return endpoint
     except (OSError, ValueError, TypeError, KeyError, TimeoutError, UnicodeError, json.JSONDecodeError):
