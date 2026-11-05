@@ -39,3 +39,12 @@ def test_reference_telegram_timing_is_restored_without_removing_new_features():
     bridge = object.__new__(FastTelegramBridge)
     assert bridge._wait_for_foreground_slot() is None
     assert hasattr(FastTelegramBridge, "_finalize_answer")
+
+
+def test_full_layout_injects_sidebar_only_once(monkeypatch):
+    reference = b'<html><body><aside class="sidebar"></aside><section id="pane-chat"></section></body></html>'
+    monkeypatch.setattr(web_server_impl7.shell, "_runtime_html", lambda _settings: reference)
+    rendered = web_server_impl7._runtime_html(object()).decode("utf-8")
+    for asset in ("sidebar-session-actions.js", "chat-layout-status.js", "module-settings-panel.js"):
+        assert rendered.count(f'<script src="/{asset}"></script>') == 1
+    assert "chat-controller-canonical.js" not in rendered
