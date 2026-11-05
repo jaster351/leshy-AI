@@ -146,6 +146,62 @@ def _windows_npus() -> tuple[str, ...]:
     return ()
 
 
+def _linux_pci_lines() -> tuple[str, ...]:
+    if os.name == "nt" or not Path("/sys").exists():
+        return ()
+    try:
+        result = subprocess.run(
+            ["lspci", "-nn"], capture_output=True, text=True,
+            timeout=4, check=False,
+        )
+        if result.returncode == 0:
+            return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ()
+
+
+def _linux_gpus() -> tuple[str, ...]:
+    lines = _linux_pci_lines()
+    gpu_lines = [
+        line.split("]: ", 1)[-1] if "]: " in line else line
+        for line in lines
+        if any(kind in line.lower() for kind in (
+            "vga compatible controller", "3d controller", "display controller",
+        ))
+    ]
+    if gpu_lines:
+        return tuple(dict.fromkeys(gpu_lines))
+    # На минимальных серверах lspci часто отсутствует; используем только
+    # реальные PCI IDs из DRM/sysfs, не предполагая марку или модель.
+    names: list[str] = []
+    seen: set[str] = set()
+    for path in sorted(Path("/sys/class/drm").glob("card[0-9]*/device")):
+        try:
+            resolved = str(path.resolve())
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            vendor = (path / "vendor").read_text(encoding="ascii").strip()
+            device = (path / "device").read_text(encoding="ascii").strip()
+            if vendor and device:
+                names.append(f"PCI GPU {vendor}:{device}")
+        except OSError:
+            continue
+    return tuple(names)
+
+
+def _linux_npus() -> tuple[str, ...]:
+    results: list[str] = []
+    for line in _linux_pci_lines():
+        lowered = line.lower()
+        if any(name in lowered for name in (
+            "neural processing unit", "npu", "neural accelerator", "ai boost",
+        )):
+            results.append(line.split("]: ", 1)[-1] if "]: " in line else line)
+    return tuple(dict.fromkeys(results))
+
+
 def _llama_gpu_offload_supported() -> bool:
     try:
         import llama_cpp
@@ -165,8 +221,8 @@ def _openvino_devices() -> tuple[str, ...]:
 
 def detect_hardware() -> HardwareCapabilities:
     cpu_name = platform.processor().strip() or os.getenv("PROCESSOR_IDENTIFIER", "").strip() or "CPU"
-    gpu_names = _windows_gpus() if os.name == "nt" else ()
-    npu_names = _windows_npus() if os.name == "nt" else ()
+    gpu_names = _windows_gpus() if os.name == "nt" else _linux_gpus() if platform.system() == "Linux" else ()
+    npu_names = _windows_npus() if os.name == "nt" else _linux_npus() if platform.system() == "Linux" else ()
     ov_devices = tuple(x.upper() for x in _openvino_devices())
     python_gpu = _llama_gpu_offload_supported()
     external_gpu = os.name == "nt" and bool(gpu_names)
