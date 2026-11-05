@@ -337,8 +337,14 @@ class LlamaServerLLM:
         with self._chat_lock:
             try:
                 base = self._ensure_server()
+                # GGUF chat templates (например Qwen3.5) требуют, чтобы system
+                # находился только в начале. Слои памяти и поиска могут
+                # добавлять system позже — нормализуем перед отправкой.
+                from .persona import with_leshy_identity
+
+                prepared_messages = with_leshy_identity(messages)
                 payload = json.dumps({
-                    "messages": [{"role": m.role, "content": m.content} for m in messages],
+                    "messages": [{"role": m.role, "content": m.content} for m in prepared_messages],
                     "temperature": 0.25,
                     "top_p": 0.92,
                     "max_tokens": self.max_tokens,
