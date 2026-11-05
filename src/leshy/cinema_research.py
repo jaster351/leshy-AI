@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 
 _CINEMA = re.compile(
@@ -135,8 +136,52 @@ def cinema_instruction(query: CinemaQuery) -> str:
         "Указывай источник и различай дату публикации страницы и дату сеанса. "
         "Если фактов о конкретных сеансах либо премьерах не найдено, прямо скажи "
         "об отсутствии подтверждённых данных, не предлагай пользователю искать всё самостоятельно. "
+        "Не отправляй пользователя звонить или переходить на сайт ради самостоятельного поиска: "
+        "сначала собери доступную афишу сам. При невозможности проверки укажи, что именно не найдено. "
         "Никогда не придумывай фильм, время, дату премьеры, цену или занятость зала."
     )
+
+
+def _source_excerpt(text: str, *, day: str, limit: int = 1000) -> str:
+    """Prefer schedule/price passages over the beginning of large pages."""
+    cleaned = " ".join(str(text or "").split())
+    if not cleaned or len(cleaned) <= limit:
+        return cleaned
+    hints = (day, "сеансы", "сеанс", "расписание", "афиша", "билет", "₽", "руб")
+    positions = [cleaned.lower().find(word.lower()) for word in hints]
+    positions = [pos for pos in positions if pos >= 0]
+    start = max(0, min(positions) - 110) if positions else 0
+    return cleaned[start:start + limit]
+
+
+def _fetch_schedule_details(app: Any, query: CinemaQuery, items: list[dict[str, str]]) -> None:
+    """Enrich up to two results with first-party SSRF-safe page content.
+
+    Results are not guaranteed to contain showtimes: many sites render them
+    using JavaScript. Never treat absent or stale showtimes as confirmed.
+    """
+    fetcher = getattr(getattr(app, "research", None), "fetcher", None)
+    if not callable(getattr(fetcher, "fetch_text", None)):
+        return
+    tokens = [w.lower() for w in query.venue.split() if len(w) >= 4]
+    checked = 0
+    for item in items:
+        if checked >= 2:
+            break
+        url = item["url"]
+        if urlsplit(url).scheme not in {"http", "https"}:
+            continue
+        title_and_snippet = (item["title"] + " " + item["snippet"]).lower()
+        if tokens and not any(token in title_and_snippet for token in tokens):
+            continue
+        checked += 1
+        try:
+            page = fetcher.fetch_text(url, timeout=6)
+        except Exception:
+            continue
+        excerpt = _source_excerpt(page, day=query.day)
+        if excerpt:
+            item["snippet"] = (item["snippet"][:250] + "\nТекст страницы источника: " + excerpt)[:1300]
 
 
 def cinema_search(app: Any, query: CinemaQuery) -> dict[str, Any]:
@@ -161,6 +206,7 @@ def cinema_search(app: Any, query: CinemaQuery) -> dict[str, Any]:
                 errors.append(str(response["error"]))
         except Exception as exc:
             errors.append(str(exc))
+    _fetch_schedule_details(app, query, results)
     return {"results": results, "error": "; ".join(errors) if errors else ""}
 
 
