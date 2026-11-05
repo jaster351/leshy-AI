@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import RLock
@@ -79,7 +80,7 @@ class ApprovalBroker:
             item = PendingApproval(
                 approval_id=approval_id,
                 owner_id=_require_owner(owner_id),
-                action=action,
+                action=deepcopy(action),
                 summary=str(summary or action.description or action.name)[:2000],
                 created_at=created,
                 expires_at=created + timedelta(seconds=self.ttl_seconds),
@@ -119,7 +120,7 @@ class ApprovalBroker:
                 raise KeyError("Approval не найден или истёк")
             self._items.pop(item.approval_id, None)
         event("approval_consumed", approval_id=item.approval_id, action=item.action.name, risk=item.action.risk.value)
-        return item.action
+        return deepcopy(item.action)
 
 
 __all__ = ["ApprovalBroker", "PendingApproval"]
