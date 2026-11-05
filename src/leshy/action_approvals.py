@@ -60,9 +60,11 @@ def _require_session(session_id: str) -> str:
 
 
 def _matches_session(item: PendingApproval, session_id: str | None) -> bool:
-    # Старые, не привязанные к сессии approvals сохраняют совместимость.
-    # Новые привязанные approvals нельзя подтвердить без точного session_id.
-    return item.session_id is None or (session_id is not None and item.session_id == _require_session(session_id))
+    # Legacy-approval без сессии доступен только старому явному вызову без
+    # session_id. Вызов с сессией никогда не получает права на legacy.
+    if item.session_id is None:
+        return session_id is None
+    return session_id is not None and item.session_id == _require_session(session_id)
 
 
 class ApprovalBroker:
