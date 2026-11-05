@@ -42,3 +42,18 @@ def test_tiny_budget_preserves_current_user_goal():
     assert result.tokens_after<=result.budget
     assert result.messages[-1].role=="user"
     assert "ВАЖНАЯ ЦЕЛЬ" in result.messages[-1].content or "Telegram reply quote" in result.messages[-1].content
+
+
+def test_latest_user_keeps_instruction_and_quote_tail_after_shrinking():
+    goal = "КРИТИЧЕСКАЯ ЦЕЛЬ: отвечать только на текущий вопрос. "
+    quote = "цитата " * 1500 + "КОНЕЦ ЦИТАТЫ"
+    messages = [
+        ChatMessage("system", "политика " * 1500),
+        ChatMessage("assistant", "предыдущее рассуждение " * 1500),
+        ChatMessage("user", goal + quote),
+    ]
+    result = apply_context_budget(messages, context_size=1024, reserve_tokens=512)
+    assert result.tokens_after <= result.budget
+    assert result.messages[-1].role == "user"
+    assert "КРИТИЧЕСКАЯ ЦЕЛЬ" in result.messages[-1].content
+    assert "КОНЕЦ ЦИТАТЫ" in result.messages[-1].content
