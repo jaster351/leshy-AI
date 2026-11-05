@@ -8,6 +8,11 @@ if [[ ! -x .venv/bin/python ]]; then
   exit 2
 fi
 PY="$ROOT/.venv/bin/python"
+# Устанавливаем все зависимости CPU-LLM перед созданием frozen package.
+# Ранее llama-cpp-python ставили с --no-deps; diskcache мог отсутствовать.
+"$PY" -m pip install -e '.[native,test,build]'
+"$PY" -m pip check
+"$PY" -c 'from llama_cpp import Llama; import diskcache; import jinja2; print("CPU GGUF runtime: import OK")'
 "$PY" -m compileall -q src
 "$PY" -m pytest -q
 "$PY" -m PyInstaller --noconfirm --clean --onedir --console \
@@ -40,6 +45,8 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 "$BIN" --help >/dev/null
+# Импорт из .venv недостаточен: проверяем само собранное приложение.
+"$BIN" --check-native-runtime
 echo "Linux-сборка готова: $BIN"
 echo "Запуск: $BIN --no-browser"
 echo "Проверка на Linux не подтверждена до выполнения скрипта на целевой машине."
