@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from ipaddress import ip_address
 from enum import Enum
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -69,6 +70,14 @@ class BrowserAgent:
                 return False
             port = parsed.port
             host = parsed.hostname.lower().strip(".")
+            # Прямой доступ к внутренним IP разрешается только при явном
+            # указании точного адреса в серверной политике.
+            try:
+                address = ip_address(host)
+            except ValueError:
+                address = None
+            if address is not None and not address.is_global and host not in self.allowed_hosts:
+                return False
             # Только явно разрешённый loopback может использовать случайный
             # порт локального тестового HTTP-сервера; внешние порты запрещены.
             loopback_allowed = host in {"127.0.0.1", "::1", "localhost"} and host in self.allowed_hosts
