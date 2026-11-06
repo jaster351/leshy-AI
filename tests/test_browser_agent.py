@@ -135,3 +135,29 @@ def test_explicit_approval_replaces_forged_marker_with_internal_one():
     assert agent.execute(action, approved=True).status == "ok"
     assert adapter.calls[0].arguments["_approval_verified"] is True
     assert action.arguments["_approval_verified"] == "forged"
+
+
+@pytest.mark.parametrize("host", [
+    "127.0.0.1", "127.1", "2130706433", "0x7f000001",
+    "0177.0.0.1", "0x7f.0.0.1", "10.0.0.1",
+    "192.168.1.1", "169.254.169.254", "[::1]",
+])
+def test_browser_ip_alias_and_private_targets_fail_closed(host):
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    result = agent.execute(BrowserAction("read", f"http://{host}/", BrowserRisk.READ))
+    assert result.status == "blocked"
+    assert adapter.calls == []
+
+
+def test_browser_alias_is_not_authorized_by_canonical_loopback_allowlist():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter], allowed_hosts=("127.0.0.1",))
+    assert agent.execute(BrowserAction("read", "http://127.1/", BrowserRisk.READ)).status == "blocked"
+    assert adapter.calls == []
+
+
+def test_browser_numeric_public_ip_is_not_rejected_as_private():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    assert agent.execute(BrowserAction("read", "https://8.8.8.8/", BrowserRisk.READ)).status == "ok"
