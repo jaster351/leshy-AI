@@ -163,3 +163,26 @@ def test_browser_numeric_public_ip_is_not_rejected_as_private():
     adapter = FakeAdapter()
     agent = BrowserAgent([adapter])
     assert agent.execute(BrowserAction("read", "https://8.8.8.8/", BrowserRisk.READ)).status == "ok"
+
+
+@pytest.mark.parametrize("host", ["localhost", "foo.localhost", "a.b.localhost"])
+def test_implicit_localhost_dns_names_are_blocked(host):
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    result = agent.execute(BrowserAction("read", f"http://{host}/", BrowserRisk.READ))
+    assert result.status == "blocked"
+    assert adapter.calls == []
+
+
+def test_explicit_localhost_allowlist_still_permits_local_service():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter], allowed_hosts=("localhost",))
+    assert agent.execute(BrowserAction("read", "http://localhost:39123/", BrowserRisk.READ)).status == "ok"
+    assert len(adapter.calls) == 1
+
+
+def test_localhost_allowlist_does_not_implicitly_authorize_subdomains():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter], allowed_hosts=("localhost",))
+    assert agent.execute(BrowserAction("read", "http://foo.localhost/", BrowserRisk.READ)).status == "blocked"
+    assert adapter.calls == []
