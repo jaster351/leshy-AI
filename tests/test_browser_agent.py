@@ -141,6 +141,8 @@ def test_explicit_approval_replaces_forged_marker_with_internal_one():
     "127.0.0.1", "127.1", "2130706433", "0x7f000001",
     "0177.0.0.1", "0x7f.0.0.1", "10.0.0.1",
     "192.168.1.1", "169.254.169.254", "[::1]",
+    "[::ffff:127.0.0.1]", "[::ffff:10.0.0.1]",
+    "0", "0x0", "0177.1", "127.0.1", "0x7f.1",
 ])
 def test_browser_ip_alias_and_private_targets_fail_closed(host):
     adapter = FakeAdapter()
