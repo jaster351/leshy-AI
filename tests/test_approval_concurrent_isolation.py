@@ -55,3 +55,23 @@ def test_concurrent_consume_has_exactly_one_winner():
         results = list(pool.map(attempt, range(8)))
     assert results.count(True) == 1
     assert results.count(False) == 7
+
+
+def test_request_and_consume_preserve_immutable_action_snapshot():
+    broker = ApprovalBroker()
+    original = _financial_action()
+    item = broker.request("owner-a", original)
+    original.arguments["amount"] = 999999
+    assert broker.consume("owner-a", item.approval_id).arguments["amount"] == 100
+    with pytest.raises(KeyError):
+        broker.consume("owner-a", item.approval_id)
+
+
+def test_oversized_owner_is_rejected_without_prefix_collision():
+    broker = ApprovalBroker()
+    prefix = "x" * 200
+    with pytest.raises(ValueError):
+        broker.request(prefix + "a", _financial_action())
+    with pytest.raises(ValueError):
+        broker.list(prefix + "b")
+    assert broker.list(prefix) == []
