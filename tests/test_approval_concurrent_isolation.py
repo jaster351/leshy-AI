@@ -75,3 +75,37 @@ def test_oversized_owner_is_rejected_without_prefix_collision():
     with pytest.raises(ValueError):
         broker.list(prefix + "b")
     assert broker.list(prefix) == []
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Issue #85: BrowserAgent пока доверяет approved=True без серверного grant",
+)
+def test_direct_approved_true_cannot_bypass_server_grant():
+    """Красный security-regression: флаг вызывающего кода не является разрешением.
+
+    После реализации серверной проверки убрать xfail; без grant адаптер
+    не должен получить FINANCIAL-действие даже при approved=True.
+    """
+    from leshy.browser_agent import BrowserActionResult, BrowserAgent
+
+    class RecordingAdapter:
+        adapter_id = "recording"
+
+        def __init__(self):
+            self.calls = []
+
+        def available(self):
+            return True
+
+        def execute(self, action):
+            self.calls.append(action)
+            return BrowserActionResult("ok", "выполнено")
+
+    adapter = RecordingAdapter()
+    agent = BrowserAgent([adapter])
+    try:
+        agent.execute(_financial_action(), approved=True)
+    except (PermissionError, ValueError):
+        pass
+    assert adapter.calls == [], "FINANCIAL-действие прошло без одноразового серверного grant"
