@@ -106,6 +106,10 @@ class BrowserAgent:
                 return False
             port = parsed.port
             host = parsed.hostname.lower().strip(".")
+            # .localhost зарезервирован для loopback: проверка только IP недостаточна.
+            # Исключение разрешается исключительно для точного имени хоста.
+            if (host == "localhost" or host.endswith(".localhost")) and host not in self.allowed_hosts:
+                return False
             ip = _browser_ip_literal(host)
             if ip is not None and not ip.is_global and host not in self.allowed_hosts:
                 return False
