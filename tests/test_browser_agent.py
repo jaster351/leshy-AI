@@ -186,3 +186,15 @@ def test_localhost_allowlist_does_not_implicitly_authorize_subdomains():
     agent = BrowserAgent([adapter], allowed_hosts=("localhost",))
     assert agent.execute(BrowserAction("read", "http://foo.localhost/", BrowserRisk.READ)).status == "blocked"
     assert adapter.calls == []
+
+
+@pytest.mark.parametrize("host", [
+    "0x08080808", "134744072", "010.010.010.010", "8.8.2056",
+])
+def test_public_numeric_ipv4_aliases_remain_accessible(host):
+    """Нормализация числовых IPv4 не должна запрещать публичные адреса."""
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    result = agent.execute(BrowserAction("read", f"https://{host}/", BrowserRisk.READ))
+    assert result.status == "ok"
+    assert len(adapter.calls) == 1
