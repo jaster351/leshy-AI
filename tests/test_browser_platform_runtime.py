@@ -96,6 +96,24 @@ class ApprovalBrokerTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.broker.consume(owner, "nonexistent")
 
+    def test_long_owner_ids_do_not_collide_or_consume_approvals(self) -> None:
+        first_owner = "x" * 200 + "a"
+        second_owner = "x" * 200 + "b"
+        for owner in (first_owner, second_owner):
+            with self.subTest(owner_suffix=owner[-1]):
+                with self.assertRaises(ValueError):
+                    self.broker.request(owner, self.action)
+                with self.assertRaises(ValueError):
+                    self.broker.list(owner)
+                with self.assertRaises(ValueError):
+                    self.broker.deny(owner, "nonexistent")
+                with self.assertRaises(ValueError):
+                    self.broker.consume(owner, "nonexistent")
+        pending = self.broker.request("x" * 200, self.action)
+        with self.assertRaises(ValueError):
+            self.broker.consume(first_owner, pending.approval_id)
+        self.assertEqual(self.broker.consume("x" * 200, pending.approval_id).url, self.action.url)
+
     def test_missing_owner_cannot_consume_another_owners_approval(self) -> None:
         pending = self.broker.request("owner-a", self.action)
         with self.assertRaises(ValueError):
