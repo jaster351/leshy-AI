@@ -24,11 +24,13 @@ class PendingApproval:
     created_at: datetime
     expires_at: datetime
     status: str = "pending"
+    session_id: str | None = None
 
     def public(self) -> dict[str, Any]:
         return {
             "approval_id": self.approval_id,
             "owner_id": self.owner_id,
+            "session_id": self.session_id,
             "action": self.action.name,
             "url": self.action.url,
             "risk": self.action.risk.value,
@@ -48,6 +50,21 @@ def _require_owner(owner_id: str) -> str:
     if len(owner) > 200:
         raise ValueError("Идентификатор владельца превышает 200 символов")
     return owner
+
+
+def _require_session(session_id: str) -> str:
+    session = str(session_id or "").strip()
+    if not session or len(session) > 200:
+        raise ValueError("Требуется корректный идентификатор сессии")
+    return session
+
+
+def _matches_session(item: PendingApproval, session_id: str | None) -> bool:
+    # Legacy-approval без сессии доступен только старому явному вызову без
+    # session_id. Вызов с сессией никогда не получает права на legacy.
+    if item.session_id is None:
+        return session_id is None
+    return session_id is not None and item.session_id == _require_session(session_id)
 
 
 class ApprovalBroker:
@@ -70,7 +87,7 @@ class ApprovalBroker:
             item = self._items.pop(key)
             event("approval_expired", approval_id=key, action=item.action.name, risk=item.action.risk.value)
 
-    def request(self, owner_id: str, action: BrowserAction, *, summary: str = "") -> PendingApproval:
+    def request(self, owner_id: str, action: BrowserAction, *, summary: str = "", session_id: str | None = None) -> PendingApproval:
         if action.risk is BrowserRisk.READ:
             raise ValueError("READ-действию не требуется Human Approval")
         with self._lock:
@@ -80,6 +97,7 @@ class ApprovalBroker:
             item = PendingApproval(
                 approval_id=approval_id,
                 owner_id=_require_owner(owner_id),
+                session_id=_require_session(session_id) if session_id is not None else None,
                 action=deepcopy(action),
                 summary=str(summary or action.description or action.name)[:2000],
                 created_at=created,
@@ -95,28 +113,28 @@ class ApprovalBroker:
         )
         return item
 
-    def list(self, owner_id: str) -> list[dict[str, Any]]:
+    def list(self, owner_id: str, *, session_id: str | None = None) -> list[dict[str, Any]]:
         owner = _require_owner(owner_id)
         with self._lock:
             self._purge()
-            return [item.public() for item in self._items.values() if item.owner_id == owner]
+            return [item.public() for item in self._items.values() if item.owner_id == owner and _matches_session(item, session_id)]
 
-    def deny(self, owner_id: str, approval_id: str) -> None:
+    def deny(self, owner_id: str, approval_id: str, *, session_id: str | None = None) -> None:
         owner = _require_owner(owner_id)
         with self._lock:
             self._purge()
             item = self._items.get(str(approval_id))
-            if item is None or item.owner_id != owner:
+            if item is None or item.owner_id != owner or not _matches_session(item, session_id):
                 raise KeyError("Approval не найден")
             self._items.pop(item.approval_id, None)
         event("approval_denied", approval_id=item.approval_id, action=item.action.name, risk=item.action.risk.value)
 
-    def consume(self, owner_id: str, approval_id: str) -> BrowserAction:
+    def consume(self, owner_id: str, approval_id: str, *, session_id: str | None = None) -> BrowserAction:
         owner = _require_owner(owner_id)
         with self._lock:
             self._purge()
             item = self._items.get(str(approval_id))
-            if item is None or item.owner_id != owner:
+            if item is None or item.owner_id != owner or not _matches_session(item, session_id):
                 raise KeyError("Approval не найден или истёк")
             self._items.pop(item.approval_id, None)
         event("approval_consumed", approval_id=item.approval_id, action=item.action.name, risk=item.action.risk.value)
