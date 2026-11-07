@@ -10,7 +10,7 @@ from .diagnostics import event, problem
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
-from .research_policy import research_reason
+from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context
 from .storage import utcnow
 from .verified_clock import current_clock_context
 from .source_reading import read_supplied_source, supplied_public_url
@@ -123,8 +123,17 @@ class RealtimeChatManager:
     def _search_plan(self, message: str) -> dict[str, Any]:
         trusted = self.app.knowledge.search(message, trusted_only=True, limit=5)
         candidates = self.app.knowledge.search_candidates(message, limit=5)
-        reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
+        reason = adaptive_research_reason(message, trusted, candidates)
         needed = bool(reason or self.app._needs_live_search(message) or cinema_query(message))
+        self.app._last_internet_route = {
+            "mode": "поиск" if needed else "локально",
+            "reason": str(reason or ("явный запрос" if needed else "TTL/контекст позволяют ответ без сети"))[:100],
+            "ttl_seconds": ttl_for_context(message),
+        }
+        event("internet_route_decided",
+              online=needed, reason=str(reason or "")[:100],
+              ttl_seconds=ttl_for_context(message),
+              trusted_hits=len(trusted), candidate_hits=len(candidates))
         return {
             "trusted": trusted,
             "candidates": candidates,
@@ -183,6 +192,11 @@ class RealtimeChatManager:
                     {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
                     for item in search_result.get("results", [])
                 )
+                if search_result.get("error") and not search_result.get("results"):
+                    context.append(ChatMessage(
+                        "system",
+                        "Текущий веб-поиск временно не выполнен: " + str(search_result["error"])[:400],
+                    ))
                 if search_result.get("results"):
                     snippets = "\n".join(
                         f"- {item.get('title','')}: {item.get('snippet','')} [{item.get('url','')}]"

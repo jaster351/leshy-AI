@@ -7,7 +7,7 @@ from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .realtime_chat import RealtimeChatManager
 from .research import DdgsSearch
-from .research_policy import research_reason
+from .adaptive_internet_policy import adaptive_research_reason
 from .temporal_grounding import ground_search_query
 
 # Подтверждено runtime-логом ddgs 2026-11-02. Несуществующие для текущего
@@ -138,7 +138,7 @@ def _base_search_plan(manager, message: str) -> dict[str, Any]:
     candidate_search = getattr(knowledge, "search_candidates", None)
     trusted = list(trusted_search(message, trusted_only=True, limit=5) or []) if callable(trusted_search) else []
     candidates = list(candidate_search(message, limit=5) or []) if callable(candidate_search) else []
-    reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
+    reason = adaptive_research_reason(message, trusted, candidates)
     marker_router = getattr(manager.app, "_needs_live_search", None)
     needed = bool(reason or (callable(marker_router) and marker_router(message)))
     return {
@@ -191,10 +191,10 @@ def install_runtime_latency_fixes(app=None) -> None:
         # уже нашёл в LeshyBrain релевантные сведения, проверенные в пределах TTL.
         # Тогда повторный интернет-поиск не нужен, если пользователь явно не
         # попросил перепроверить интернет прямо сейчас.
-        forced_reason = research_reason(
+        forced_reason = adaptive_research_reason(
             message,
-            trusted_count=len(plan.get("trusted") or []),
-            candidate_count=len(plan.get("candidates") or []),
+            list(plan.get("trusted") or []),
+            list(plan.get("candidates") or []),
         )
         freshness_satisfied = bool(plan.get("freshness_satisfied"))
         explicit_recheck = forced_reason == "явный запрос интернет-поиска"

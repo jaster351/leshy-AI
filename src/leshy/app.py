@@ -22,7 +22,7 @@ from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
-from .research_policy import research_reason
+from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_explicit_web_request
 from .self_learning import SelfLearningWorker
 from .storage import Storage, utcnow
 from .version import VERSION
@@ -276,13 +276,11 @@ class LeshyApp:
 
     @staticmethod
     def _needs_live_search(text: str) -> bool:
-        value = text.lower()
-        markers = (
-            "/search ", "найди в интернете", "поищи в интернете", "проверь в интернете",
-            "актуальн", "сегодня", "сейчас", "последн", "новый", "новая", "новое", "новые",
-            "вышел", "вышла", "вышло", "последняя версия", "текущая цена", "курс валют", "погода",
-        )
-        return any(marker in value for marker in markers)
+        # Только явная команда поиска. Динамическую актуальность, возраст
+        # фактов и контекст оценивает adaptive_research_reason; старый список
+        # подстрок ошибочно отправлял «напиши новый текст» в Интернет.
+        value = str(text or "").strip()
+        return value.lower().startswith("/search ") or is_explicit_web_request(value)
 
     @staticmethod
     def _answer_needs_research(answer: str) -> bool:
@@ -453,8 +451,8 @@ class LeshyApp:
                     )
                     context.append(ChatMessage(
                         "system",
-                        "Результаты текущего веб-поиска. Они уже сохранены в локальную базу как candidate-знания и "
-                        "поставлены на верификацию. Отвечай по этим данным, не утверждая непроверенное как бесспорный факт:\n"
+                        "Результаты текущего веб-поиска. Они не являются автоматически проверенными фактами. "
+                        "Используй их с указанием источника; сохраняй в базу знаний только если обучение разрешено:\n"
                         + snippets,
                     ))
                 elif search_result.get("error"):
@@ -465,8 +463,18 @@ class LeshyApp:
                 problem("live_search_failed", search_error, query=message[:500])
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
-        reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
-        if cinema_plan is not None or reason or self._needs_live_search(message):
+        reason = adaptive_research_reason(message, trusted, candidates)
+        needed = bool(cinema_plan is not None or reason or self._needs_live_search(message))
+        self._last_internet_route = {
+            "mode": "поиск" if needed else "локально",
+            "reason": str(reason or ("явный запрос" if needed else "TTL/контекст позволяют ответ без сети"))[:100],
+            "ttl_seconds": ttl_for_context(message),
+        }
+        event("internet_route_decided",
+              online=needed, reason=str(reason or "")[:100],
+              ttl_seconds=ttl_for_context(message),
+              trusted_hits=len(trusted), candidate_hits=len(candidates))
+        if needed:
             append_live_search(reason or "требуются актуальные данные")
 
         if cinema_plan is not None and not sources:
