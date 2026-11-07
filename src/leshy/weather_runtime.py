@@ -47,27 +47,15 @@ def is_weather_request(text: str) -> bool:
 
 def _city(text: str) -> str:
     q = " ".join(str(text or "").strip().split())
+    # Не захватываем всё до конца фразы: в запросе «посмотри в интернете
+    # погоду в Челябинске» слово «интернете» не является городом.
     candidates = re.findall(
-        r"\b(?:в|во)\s+([А-Яа-яЁёA-Za-z][А-Яа-яЁёA-Za-z\s-]{1,55})",
+        r"\b(?:в|во)\s+([А-Яа-яЁёA-Za-z-]{2,48})",
         q, flags=re.IGNORECASE,
     )
     for candidate in reversed(candidates):
-        parts = candidate.strip().split()
-        if not parts:
-            continue
-        if parts[0].lower() == "городе" and len(parts) > 1:
-            parts = parts[1:]
-        words: list[str] = []
-        for word in parts:
-            if word.lower() in {"сегодня", "завтра", "сейчас", "на", "и", "погода",
-                                "погоду", "погоды", "по", "интернете", "проверить",
-                                "какая", "покажи", "температура", "сколько"}:
-                break
-            words.append(word)
-            if len(words) >= 3:
-                break
-        city = " ".join(words).strip()
-        if city and city.lower() not in _NON_CITY:
+        city = candidate.strip()
+        if city.lower() not in _NON_CITY:
             return _CITY_ALIASES.get(city.lower(), city)
     return os.getenv("LESHY_WEATHER_CITY", "").strip()[:80]
 
