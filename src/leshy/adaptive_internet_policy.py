@@ -43,7 +43,10 @@ def _text(value: str) -> str:
 
 
 def is_explicit_web_request(query: str) -> bool:
-    return research_reason(query, trusted_count=1, candidate_count=1) == "явный запрос интернет-поиска"
+    q = str(query or "").strip()
+    return q.lower().startswith("/search ") or (
+        research_reason(q, trusted_count=1, candidate_count=1) == "явный запрос интернет-поиска"
+    )
 
 
 def ttl_for_context(query: str) -> int:
@@ -94,8 +97,8 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     q = _text(query)
     # Явное требование проверить интернет нельзя подавить даже свежим кэшем.
     basic = research_reason(query, trusted_count=len(trusted), candidate_count=len(candidates))
-    if basic == "явный запрос интернет-поиска":
-        return basic
+    if is_explicit_web_request(query):
+        return "явный запрос интернет-поиска"
     # Задания на генерацию текста и объяснение общих принципов не должны
     # обращаться к интернету только из-за слов «новый» или «последний».
     # Исключение: явно актуальные внешние факты (новости, цены, CVE, законы).
