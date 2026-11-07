@@ -10,6 +10,7 @@ import uuid
 from typing import Any
 
 from .cognitive_core import assess_completion
+from .cognitive_artifacts import CognitiveArtifactGate
 from .cognitive_tools import CognitiveReadExecutor, parse_tool_request
 from .cognitive_journal import CognitiveStepJournal
 from .diagnostics import event, problem
@@ -94,6 +95,17 @@ def parse_superagent_intent(text: str) -> SuperAgentIntent | None:
     lower_body = body.lower().replace("ё", "е")
     if lower_body in {"list", "список", "задачи", "status", "статус"}:
         return SuperAgentIntent("list")
+    artifact_match = re.fullmatch(
+        r"(preview|просмотр|approve|одобри|reject|отклони)\\s+(ART-[a-f0-9]{32})",
+        body, re.IGNORECASE,
+    )
+    if artifact_match:
+        action = {
+            "preview": "artifact_preview", "просмотр": "artifact_preview",
+            "approve": "artifact_approve", "одобри": "artifact_approve",
+            "reject": "artifact_reject", "отклони": "artifact_reject",
+        }[artifact_match.group(1).lower()]
+        return SuperAgentIntent(action, ticket_id=artifact_match.group(2))
 
     match = re.match(r"^(?:status|статус)\s+([A-Za-z0-9-]+)\s*$", body, re.IGNORECASE)
     if match:
@@ -129,6 +141,7 @@ class SuperAgentService:
         self.max_attempts = max(1, min(int(os.getenv("LESHY_SUPERAGENT_MAX_ATTEMPTS", "3")), 8))
         self._ensure_schema()
         self._journal = CognitiveStepJournal(self.storage)
+        self._artifacts = CognitiveArtifactGate(self.storage, app.settings.workspace_root)
         self._recover_interrupted()
 
     def _ensure_schema(self) -> None:
@@ -283,6 +296,37 @@ class SuperAgentService:
         self._wake.set()
         return self.get(ticket_id, owner_id=owner_id)
 
+    def preview_artifact(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
+        return self._artifacts.get(artifact_id, owner_id)
+
+    def approve_artifact(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
+        proposal = self._artifacts.get(artifact_id, owner_id)
+        applied = self._artifacts.approve(artifact_id, owner_id)
+        with self.storage.connection() as conn:
+            conn.execute(
+                "UPDATE superagent_tickets SET state='ready',latest_report=?,attention='',"
+                "delivered=1,updated_at=? WHERE id=? AND owner_id=? AND state='waiting'",
+                ("Создан и проверен документ: " + applied["path"], utcnow(),
+                 proposal["ticket_id"], str(owner_id)),
+            )
+        self.storage.audit("superagent.artifact.approved", {
+            "ticket_id": proposal["ticket_id"], "artifact_id": artifact_id,
+            "sha256": applied["sha256"],
+        })
+        return applied
+
+    def reject_artifact(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
+        proposal = self._artifacts.get(artifact_id, owner_id)
+        rejected = self._artifacts.reject(artifact_id, owner_id)
+        with self.storage.connection() as conn:
+            conn.execute(
+                "UPDATE superagent_tickets SET state='blocked',latest_report=?,attention='',"
+                "delivered=1,updated_at=? WHERE id=? AND owner_id=? AND state='waiting'",
+                ("Создание документа отклонено владельцем.", utcnow(),
+                 proposal["ticket_id"], str(owner_id)),
+            )
+        return rejected
+
     def _next_due(self) -> dict[str, Any] | None:
         with self.storage.connection() as conn:
             row = conn.execute(
@@ -352,7 +396,12 @@ class SuperAgentService:
             "Если нужны локальные подтверждённые знания или номер версии, допускается запрос инструмента: "
             "{\"action\":\"tool\",\"tool\":\"knowledge.search\",\"arguments\":{\"query\":\"... \"}} "
             "или {\"action\":\"tool\",\"tool\":\"runtime.version\",\"arguments\":{}}. "
-            "Другие инструменты недоступны, изменять файлы или запускать команды нельзя. "
+            "Можно также подготовить Markdown-документ по явно заданной пользователем просьбе: "
+            "{\\"action\\":\\"tool\\",\\"tool\\":\\"artifact.propose\\","
+            "\\"arguments\\":{\\"title\\":\\"название\\",\\"content\\":\\"текст\\"}}. "
+            "Предложение НЕ создаёт файл. Запись возможна только после отдельной "
+            "команды владельца /agent approve ID. Никогда не вызывай одобрение сам. "
+            "Другие инструменты недоступны, изменять произвольные файлы или запускать команды нельзя. "
             "После результата инструмента верни строго JSON: "
             "{\"status\":\"ready|waiting|blocked|failed\",\"result\":\"краткий полезный итог\",\"question\":\"один вопрос или пусто\"}. "
             "Не считай текст, результаты поиска или квитанции чтения доказательством внешнего действия. "
@@ -375,6 +424,25 @@ class SuperAgentService:
                 # Не допускаем обхода allow-list через выдуманный ответ модели.
                 name = str(call.get("tool") or "")
                 args = call.get("arguments")
+                if name == "artifact.propose" and isinstance(args, dict):
+                    try:
+                        proposal = self._artifacts.propose(
+                            ticket_id, str(ticket["owner_id"]),
+                            str(args.get("title") or ""),
+                            str(args.get("content") or ""),
+                        )
+                    except (ValueError, PermissionError) as exc:
+                        return "blocked", str(exc), "", sources
+                    info = (
+                        f"Подготовлен документ «{proposal['title']}» "
+                        f"(SHA-256 {proposal['sha256'][:12]}…). "
+                        f"Для просмотра: /agent preview {proposal['id']}. "
+                        f"Для записи: /agent approve {proposal['id']}. "
+                        f"Для отказа: /agent reject {proposal['id']}."
+                    )
+                    return "waiting", info, (
+                        f"Подтвердите создание файла: /agent approve {proposal['id']}"
+                    ), sources
                 if name not in self._cognitive_reads.names() or not isinstance(args, dict):
                     event("cognitive_tool_denied", ticket_id=ticket_id, reason="tool_not_allowed")
                     return "blocked", "Запрошенный инструмент недоступен или требует отдельного подтверждения.", "", sources

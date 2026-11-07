@@ -84,6 +84,21 @@ def _execute(service: SuperAgentService, intent: SuperAgentIntent, owner_id: str
     if intent.action == "answer":
         ticket = service.answer(intent.ticket_id, owner_id, intent.argument)
         return f"Ответ передан в {ticket['id']}. Продолжаю автономную работу."
+    if intent.action == "artifact_preview":
+        item = service.preview_artifact(intent.ticket_id, owner_id)
+        return (
+            f"Документ {item['id']}: «{item['title']}», состояние: {item['state']}."
+            f"\\nSHA-256: {item['sha256']}\\n"
+            f"----- Начало содержимого -----\\n{item['content']}"
+            f"\\n----- Конец содержимого -----\\n"
+            f"Подтвердить запись: /agent approve {item['id']}"
+        )
+    if intent.action == "artifact_approve":
+        result = service.approve_artifact(intent.ticket_id, owner_id)
+        return f"Документ записан и проверен: {result['path']} (SHA-256: {result['sha256']})."
+    if intent.action == "artifact_reject":
+        service.reject_artifact(intent.ticket_id, owner_id)
+        return "Создание документа отклонено. Файл не создавался."
     raise ValueError("Неизвестная команда SuperAgent")
 
 
@@ -159,7 +174,7 @@ def install_superagent_routing(app_class, app=None) -> None:
                 "superagent": True,
                 "latency_ms": latency_ms,
             })
-        except (KeyError, ValueError, PermissionError) as exc:
+        except (KeyError, ValueError, PermissionError, RuntimeError) as exc:
             answer = str(exc).strip("'")
             if sid:
                 self.app._save_assistant(sid, answer)
