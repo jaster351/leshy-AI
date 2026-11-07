@@ -39,7 +39,7 @@
   function cleanText(node){
     if(!node)return '';
     const clone=node.cloneNode(true);
-    clone.querySelectorAll('.who,.sources,.leshy-message-actions,.leshy-message-more,.leshy-stream-caret,.leshy-live-activity,button').forEach(x=>x.remove());
+    clone.querySelectorAll('.who,.sources,.leshy-message-actions,.leshy-message-more,.leshy-message-time,.leshy-stream-caret,.leshy-live-activity,button').forEach(x=>x.remove());
     const body=clone.querySelector('.chat-rich-body,.leshy-stream-plain')||clone;
     return String(body.innerText||body.textContent||'').replace(/\u00a0/g,' ').trim();
   }
@@ -58,6 +58,11 @@
   }
 
   async function createBranch(messages,title='Ветка разговора'){
+    // До изменения ветки завершаем активный поток исходного чата.
+    // Иначе поздний "start"/"done" старого ответа меняет уже новый диалог.
+    if(typeof window.stopCurrentLeshyStream==='function'){
+      await window.stopCurrentLeshyStream();
+    }
     const d=await api('/v1/chat/branch',{owner_id:OWNER,source_session_id:currentSession(),title,messages:messagePayload(messages)});
     const sid=String(d.session_id||'');if(!sid)throw new Error('Сервер не вернул ID ветки');
     localStorage.setItem('leshy.session',sid);

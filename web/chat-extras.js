@@ -30,6 +30,9 @@
     s.id='leshyChatExtrasStyle';
     s.textContent=`
       .chat-rich-body{display:grid;gap:9px;min-width:0}.chat-rich-text{white-space:pre-wrap;word-break:break-word;line-height:1.58}
+      .leshy-message-time{display:block;margin-top:7px;font-size:10px;line-height:1.25;text-align:right;font-weight:400;letter-spacing:0;font-variant-numeric:tabular-nums;color:#a1a8b3;opacity:.72;white-space:nowrap;user-select:text}
+      #messages .msg.user .leshy-message-time{color:#a6a6a6}
+      #messages .msg.assistant .leshy-message-time{color:#8995a1}
       .chat-rich-body p{margin:0}.chat-rich-body h1,.chat-rich-body h2,.chat-rich-body h3{margin:7px 0 1px;line-height:1.3}.chat-rich-body h1{font-size:20px}.chat-rich-body h2{font-size:17px}.chat-rich-body h3{font-size:15px}
       .chat-rich-body ul,.chat-rich-body ol{margin:0;padding-left:22px;display:grid;gap:4px}.chat-rich-body blockquote{margin:0;padding:3px 0 3px 12px;border-left:3px solid #3d4b5b;color:#b9c2cd}
       .chat-inline-code{font-family:Consolas,'Cascadia Code',ui-monospace,monospace;background:#171d24;border:1px solid #2d3640;border-radius:5px;padding:1px 5px;font-size:.94em;color:#e6edf3}
@@ -126,14 +129,25 @@
     for(const s of sources){const a=document.createElement('a');a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=s.title||s.url;src.appendChild(a)}box.appendChild(src);
   }
 
-  function makeMessage(role,text,sources=[],streaming=false){
+  function formatMessageTime(createdAt){
+    const raw=createdAt||new Date().toISOString();
+    const value=new Date(raw);
+    if(Number.isNaN(value.getTime()))return null;
+    const stamp=new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(value);
+    return {iso:value.toISOString(),label:stamp.replace(',','')};
+  }
+
+  function makeMessage(role,text,sources=[],streaming=false,createdAt=null){
     const box=document.createElement('div');box.className='msg '+role;const who=document.createElement('div');who.className='who';who.textContent=role==='user'?'Вы':'Леший';box.appendChild(who);
     const body=document.createElement('div');box.appendChild(body);
     if(role==='assistant') renderRich(body,text,{streaming}); else{body.className='chat-rich-text';body.textContent=String(text||'')}
-    appendSources(box,sources);byId('messages')?.appendChild(box);if(byId('messages'))byId('messages').scrollTop=byId('messages').scrollHeight;return {box,body};
+    appendSources(box,sources);
+    const stamp=formatMessageTime(createdAt);
+    if(stamp){const time=document.createElement('time');time.className='leshy-message-time';time.dateTime=stamp.iso;time.textContent=stamp.label;time.title=stamp.iso;box.appendChild(time);}
+    byId('messages')?.appendChild(box);if(byId('messages'))byId('messages').scrollTop=byId('messages').scrollHeight;return {box,body};
   }
 
-  window.addMessage=addMessage=function(role,text,sources=[]){return makeMessage(role,text,sources,false).box};
+  window.addMessage=addMessage=function(role,text,sources=[],createdAt=null){return makeMessage(role,text,sources,false,createdAt).box};
 
   function setSessionId(id){
     try{sessionId=id}catch(_e){}

@@ -5,6 +5,7 @@
   const SESSION_KEY='leshy.session';
   const streams=new Map();
   const unread=new Set();
+  let historyGeneration=0;
   let lastRequestMs=0;
   let requestSequence=0;
 
@@ -34,6 +35,8 @@
     const s=document.createElement('style');s.id='leshyMultitaskStyle';s.textContent=`
       .leshy-session-work,.leshy-session-unread{display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:7px;vertical-align:1px;flex:0 0 7px}.leshy-session-work{background:#9fb9d2;box-shadow:0 0 0 3px rgba(159,185,210,.08);animation:leshyWorkPulse 1.2s ease-in-out infinite}.leshy-session-unread{background:#7dbbff}.leshy-session-open.has-unread .leshy-session-title{font-weight:650;color:#fff}.leshy-session-open.is-working .leshy-session-title{color:#d9e6f3}@keyframes leshyWorkPulse{50%{opacity:.35;transform:scale(.8)}}
       .leshy-stream-plain{white-space:pre-wrap;word-break:break-word;line-height:1.58}.leshy-stream-caret{display:inline-block;width:6px;height:1em;background:#8eb8dc;margin-left:3px;vertical-align:-2px;animation:leshyBlink .8s steps(1) infinite}@keyframes leshyBlink{50%{opacity:0}}
+      #chatSend.streaming{cursor:pointer!important;opacity:1!important}#chatSend.streaming:focus-visible{outline:2px solid #dcefff!important;outline-offset:3px}
+      .leshy-background-stream .leshy-message-time{margin-top:7px;text-align:right;font-size:10px;color:#8f9baa;opacity:.72}
     `;document.head.appendChild(s);
   }
 
@@ -53,12 +56,34 @@
   }
   window.addEventListener('focus',()=>{if(!unread.size)document.title='Леший'});
 
+  function activeForCurrent(){
+    const id=sid();
+    const direct=streams.get(id);
+    if(direct)return direct;
+    // Новый чат ещё не имеет session_id; его единственная временная запись
+    // должна быть доступна кнопке остановки немедленно после отправки.
+    if(id===''){
+      for(const stream of streams.values()){
+        if(!stream.sessionId&&!stream.stopping)return stream;
+      }
+    }
+    return null;
+  }
+  function removeStream(stream){
+    for(const [key,value] of streams){
+      if(value===stream)streams.delete(key);
+    }
+  }
+
   function makeStreamingBox(raw=''){
     const messages=$('messages');if(!messages)return null;
     const box=document.createElement('div');box.className='msg assistant leshy-background-stream';
     const who=document.createElement('div');who.className='who';who.textContent='Леший';
     const body=document.createElement('div');body.className='leshy-stream-plain';body.textContent=raw;
-    const caret=document.createElement('span');caret.className='leshy-stream-caret';body.appendChild(caret);box.append(who,body);messages.appendChild(box);messages.scrollTop=messages.scrollHeight;return {box,body};
+    const caret=document.createElement('span');caret.className='leshy-stream-caret';body.appendChild(caret);box.append(who,body);
+    const time=document.createElement('time');time.className='leshy-message-time';
+    const now=new Date();time.dateTime=now.toISOString();time.textContent=new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(now).replace(',','');box.appendChild(time);
+    messages.appendChild(box);messages.scrollTop=messages.scrollHeight;return {box,body};
   }
   function updateStreamingBox(stream){
     if(sid()!==stream.sessionId||!stream.body||!stream.body.isConnected)return;
@@ -70,7 +95,19 @@
     setTimeout(()=>requestAnimationFrame(()=>{stream.renderPending=false;updateStreamingBox(stream)}),60);
   }
   function event(type,detail){try{window.dispatchEvent(new CustomEvent('leshy:'+type,{detail:detail||{}}))}catch(_e){}}
-  function stateForCurrent(){const current=streams.get(sid());const s=$('chatState');if(!s)return;if(current)s.textContent=current.activity||(current.raw?'Леший отвечает…':'Леший думает…');else s.textContent='Готов'}
+  function stateForCurrent(){
+    const current=activeForCurrent();
+    const send=$('chatSend');
+    if(send){
+      send.classList.toggle('streaming',!!current);
+      send.setAttribute('aria-label',current?'Прервать ответ Лешего':'Отправить сообщение');
+      send.title=current?'Прервать ответ':'Отправить';
+      // Существующая оболочка наблюдает за .streaming и рисует иконку ■.
+      if(!send.dataset.cgStableObserved)send.textContent=current?'■':'Отправить';
+    }
+    const s=$('chatState');
+    if(s)s.textContent=current?(current.activity||(current.raw?'Леший отвечает…':'Леший думает…')):'Готов';
+  }
 
   function parseSse(buffer,onEvent){
     let p;
@@ -83,24 +120,45 @@
   }
 
   async function stop(stream){
-    if(!stream)return;stream.stopping=true;
-    try{fetch('/v1/chat/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:stream.requestId}),keepalive:true})}catch(_e){}
+    if(!stream||stream.stopping)return;
+    stream.stopping=true;
+    // Не ждать ответа stop-endpoint: UI разблокируется немедленно.
+    // Сервер запоминает раннюю отмену, даже если SSE ещё не зарегистрирован.
+    try{
+      fetch('/v1/chat/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request_id:stream.requestId}),keepalive:true}).catch(()=>{});
+    }catch(_e){}
     try{stream.controller.abort()}catch(_e){}
-    streams.delete(stream.sessionId||stream.tempKey);stateForCurrent();decorateSidebar();event('done',{session_id:stream.sessionId,request_id:stream.requestId,stopped:true});
+    removeStream(stream);
+    if(stream.body&&stream.body.isConnected){
+      stream.body.textContent=stream.raw;
+      if(!stream.raw&&stream.box)stream.box.remove();
+    }
+    stateForCurrent();decorateSidebar();
+    event('done',{session_id:stream.sessionId,request_id:stream.requestId,stopped:true});
   }
-  window.stopCurrentLeshyStream=()=>stop(streams.get(sid()));
+  window.stopCurrentLeshyStream=()=>stop(activeForCurrent());
 
   async function loadHistory(id){
+    const generation=++historyGeneration;
     setSid(id);unread.delete(id);if(!unread.size)document.title='Леший';const messages=$('messages');if(messages)messages.textContent='';
     try{
       const r=await api('/v1/history?session_id='+encodeURIComponent(id)+'&owner_id='+encodeURIComponent(OWNER));
-      for(const m of r.items||[])window.addMessage(m.role,m.content);
+      if(generation!==historyGeneration||sid()!==id)return;
+      for(const m of r.items||[])window.addMessage(m.role,m.content,[],m.created_at);
       const live=streams.get(id);if(live){const ui=makeStreamingBox(live.raw);if(ui){live.box=ui.box;live.body=ui.body}event('activity',{session_id:id,request_id:live.requestId,kind:live.activityKind||'',text:live.activity||'Леший думает…'})}
-    }catch(e){if(messages){messages.textContent='';window.addMessage('assistant','Не удалось загрузить историю: '+e.message)}}
+    }catch(e){if(generation===historyGeneration&&sid()===id&&messages){messages.textContent='';window.addMessage('assistant','Не удалось загрузить историю: '+e.message)}}
     try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}stateForCurrent();decorateSidebar();
   }
   window.loadHistory=loadHistory;
-  window.newChat=function(){setSid('');const messages=$('messages');if(messages)messages.textContent='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}const input=$('chatInput');if(input){input.disabled=false;input.focus()}stateForCurrent();decorateSidebar()};
+  window.newChat=function(){
+    // Не теряем зависший первый поток без session_id.
+    if(sid()===''&&activeForCurrent())stop(activeForCurrent());
+    ++historyGeneration;
+    setSid('');const messages=$('messages');if(messages)messages.textContent='';
+    try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}
+    const input=$('chatInput');if(input){input.disabled=false;input.focus()}
+    stateForCurrent();decorateSidebar();
+  };
 
   async function refreshActiveView(stream){if(!stream.sessionId||sid()!==stream.sessionId)return;await loadHistory(stream.sessionId)}
 
@@ -111,12 +169,15 @@
     const ui=makeStreamingBox('');if(ui){stream.box=ui.box;stream.body=ui.body}stateForCurrent();decorateSidebar();event('activity',{session_id:requestedSession||'',request_id:requestId,text:'Леший думает…'});
     try{
       const response=await fetch('/v1/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,session_id:requestedSession||'',owner_id:OWNER,request_id:requestId}),signal:controller.signal});
+      if(stream.stopping)return;
       if(!response.ok)throw new Error('HTTP '+response.status);if(!response.body)throw new Error('Браузер не поддерживает потоковые ответы');
       const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',done=null,terminal=false;
-      while(!terminal){
+      while(!terminal&&!stream.stopping){
         const part=await reader.read();if(part.done)break;
+        if(stream.stopping)return;
         buffer+=decoder.decode(part.value,{stream:true});
         buffer=parseSse(buffer,(type,data)=>{
+          if(stream.stopping)return;
           if(type==='start'&&data.session_id){
             const old=stream.sessionId||stream.tempKey;stream.sessionId=String(data.session_id);streams.delete(old);streams.set(stream.sessionId,stream);
             if(!requestedSession&&sid()==='')setSid(stream.sessionId);stream.meta={title:'Диалог'};decorateSidebar();
@@ -134,15 +195,18 @@
         });
         if(terminal){try{await reader.cancel('leshy logical stream terminal')}catch(_e){}break}
       }
-      const answer=done&&typeof done.answer==='string'?done.answer:stream.raw;stream.raw=answer;streams.delete(stream.sessionId||stream.tempKey);event('done',{session_id:stream.sessionId,request_id:requestId,answer,duplicate:!!(done&&done.duplicate)});notifyDone(stream,answer);await refreshActiveView(stream);stateForCurrent();await Promise.allSettled([window.loadSessions?window.loadSessions():Promise.resolve(),typeof window.refreshStatus==='function'?window.refreshStatus():Promise.resolve()]);
+      if(stream.stopping)return;
+      if(!terminal&&!done)throw new Error('Поток прервался без завершающего события; проверьте доступность модели');
+      const answer=done&&typeof done.answer==='string'?done.answer:stream.raw;stream.raw=answer;removeStream(stream);event('done',{session_id:stream.sessionId,request_id:requestId,answer,duplicate:!!(done&&done.duplicate)});notifyDone(stream,answer);await refreshActiveView(stream);stateForCurrent();await Promise.allSettled([window.loadSessions?window.loadSessions():Promise.resolve(),typeof window.refreshStatus==='function'?window.refreshStatus():Promise.resolve()]);
     }catch(e){
-      streams.delete(stream.sessionId||stream.tempKey);if(e.name!=='AbortError'){if(sid()===stream.sessionId||(!stream.sessionId&&sid()===''))window.addMessage('assistant','Ошибка: '+e.message);toast('Ошибка ответа Лешего: '+e.message)}stateForCurrent();decorateSidebar();event('done',{session_id:stream.sessionId,request_id:requestId,error:e.message||''});
+      if(stream.stopping)return;
+      removeStream(stream);if(e.name!=='AbortError'){if(sid()===stream.sessionId||(!stream.sessionId&&sid()===''))window.addMessage('assistant','Ошибка: '+e.message);toast('Ошибка ответа Лешего: '+e.message)}stateForCurrent();decorateSidebar();event('done',{session_id:stream.sessionId,request_id:requestId,error:e.message||''});
     }
   }
 
   window.sendFrom=async function(input){
-    const current=streams.get(sid());if(current){await stop(current);return}
-    const text=String(input&&input.value||'').trim();if(!text)return;ensureNotifyPermission();const requested=sid();input.value='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}window.addMessage('user',text);runStream(text,requested);
+    const current=activeForCurrent();if(current){await stop(current);return}
+    const text=String(input&&input.value||'').trim();if(!text)return;ensureNotifyPermission();const requested=sid();input.value='';try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}window.addMessage('user',text,[],new Date().toISOString());runStream(text,requested);
   };
 
   async function decorateSidebar(){

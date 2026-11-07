@@ -28,11 +28,17 @@ class RealtimeChatManager:
         self.session_admin = session_admin
         self._lock = threading.RLock()
         self._cancellations: dict[str, threading.Event] = {}
+        # Ранние web-stop запросы: пользователь нажал Стоп до того,
+        # как сервер успел зарегистрировать request_id.
+        self._pending_stop: dict[str, float] = {}
 
     def _register(self, request_id: str | None) -> tuple[str, threading.Event]:
         rid = (request_id or str(uuid.uuid4())).strip()[:120]
         cancel = threading.Event()
         with self._lock:
+            expiry=self._pending_stop.pop(rid,0.0)
+            if expiry>time.monotonic():
+                cancel.set()
             self._cancellations[rid] = cancel
         return rid, cancel
 
@@ -41,6 +47,18 @@ class RealtimeChatManager:
         with self._lock:
             cancel = self._cancellations.get(rid)
         if cancel is None:
+            # При первом POST /stream соединение может ещё не войти в
+            # генератор: stop запоминается ненадолго и применяется при _register.
+            if rid.startswith("web:") and len(rid)<=120:
+                with self._lock:
+                    now=time.monotonic()
+                    self._pending_stop={k:until for k,until in self._pending_stop.items() if until>now}
+                    if len(self._pending_stop)>=128:
+                        oldest=next(iter(self._pending_stop))
+                        self._pending_stop.pop(oldest,None)
+                    self._pending_stop[rid]=now+30.0
+                event("chat_stream_early_stop_requested", request_id=rid)
+                return True
             return False
         cancel.set()
         event("chat_stream_stop_requested", request_id=rid)
@@ -257,6 +275,10 @@ class RealtimeChatManager:
         started = time.monotonic()
         try:
             sid, rows = self._save_user_and_history(message, owner_id, session_id)
+            if cancel.is_set():
+                yield StreamEvent("start", {"request_id": rid, "session_id": sid})
+                yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
+                return
             plan = self._search_plan(message)
             if plan.get("needed"):
                 yield StreamEvent("activity", {

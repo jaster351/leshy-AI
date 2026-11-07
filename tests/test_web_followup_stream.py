@@ -8,11 +8,29 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WebFollowupStreamRegressionTests(unittest.TestCase):
+    def test_stop_button_and_pending_first_message_are_supported(self) -> None:
+        source=(ROOT / "web" / "chat-multitask.js").read_text(encoding="utf-8")
+        assert "function activeForCurrent()" in source
+        assert "send.classList.toggle('streaming',!!current)" in source
+        assert "window.stopCurrentLeshyStream=()=>stop(activeForCurrent())" in source
+        assert "if(stream.stopping)return;" in source
+
+    def test_history_reuses_saved_dates_and_edit_cancels_old_stream(self) -> None:
+        multitask=(ROOT / "web" / "chat-multitask.js").read_text(encoding="utf-8")
+        extras=(ROOT / "web" / "chat-extras.js").read_text(encoding="utf-8")
+        actions=(ROOT / "web" / "message-actions.js").read_text(encoding="utf-8")
+        assert "window.addMessage(m.role,m.content,[],m.created_at)" in multitask
+        assert "formatMessageTime" in extras
+        assert "className='leshy-message-time'" in extras
+        assert ".leshy-message-time" in actions
+        assert "await window.stopCurrentLeshyStream()" in actions
+        assert "generation!==historyGeneration" in multitask
+
     def test_reference_multitask_owns_followup_lifecycle(self) -> None:
         source = (ROOT / "web" / "chat-multitask.js").read_text(encoding="utf-8")
         self.assertIn("const streams=new Map();", source)
         self.assertIn("runStream(text,requested);", source)
-        self.assertIn("streams.delete(stream.sessionId||stream.tempKey)", source)
+        self.assertIn("removeStream(stream)", source)
         self.assertIn("await refreshActiveView(stream)", source)
 
     def test_terminal_sse_releases_stream_without_waiting_for_physical_eof(self) -> None:
