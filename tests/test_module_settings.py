@@ -35,6 +35,7 @@ class ModuleSettingsTests(unittest.TestCase):
                 "support-consultant",
                 "lenta",
                 "superagent",
+                "aquarium",
             },
         )
         self.assertFalse(states["os-control"]["enabled"])
@@ -73,6 +74,13 @@ class ModuleSettingsTests(unittest.TestCase):
         self.assertFalse(module_enabled(reopened, "network-blocking"))
         set_module_enabled(reopened, "network-blocking", True)
         self.assertTrue(module_enabled(self.storage, "network-blocking"))
+
+    def test_aquarium_switch_survives_restart(self) -> None:
+        self.assertTrue(module_enabled(self.storage, "aquarium"))
+        set_module_enabled(self.storage, "aquarium", False)
+        self.assertFalse(module_enabled(Storage(self.storage.path), "aquarium"))
+        set_module_enabled(self.storage, "aquarium", True)
+        self.assertTrue(module_enabled(self.storage, "aquarium"))
 
     def test_phone_osint_switch_is_available(self) -> None:
         self.assertTrue(module_enabled(self.storage, "phone-osint"))

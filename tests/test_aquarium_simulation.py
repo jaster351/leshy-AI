@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 from leshy.aquarium_simulation import AquariumSimulation, SpeciesProfileService
 
@@ -15,6 +16,34 @@ class AquariumSimulationTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_disabled_aquarium_retains_state(self):
+        allowed = {"value": True}
+        sim = AquariumSimulation(self.root, enabled_check=lambda: allowed["value"])
+        sim.reset()
+        before = sim.snapshot()
+        allowed["value"] = False
+        for operation in (lambda: sim.tick(), lambda: sim.reset(),
+                          lambda: sim.add_species("Betta splendens"),
+                          lambda: sim.apply_action({"type": "feed"}),
+                          lambda: sim.leshy_step(Mock())):
+            with self.assertRaises(PermissionError):
+                operation()
+        self.assertEqual(before, sim.snapshot())
+
+    def test_disable_during_leshy_decision_blocks_changes(self):
+        allowed={"value": True}
+        sim=AquariumSimulation(self.root, enabled_check=lambda: allowed["value"])
+        sim.reset()
+        before=sim.snapshot()
+        model=Mock()
+        def respond(messages):
+            allowed["value"]=False
+            return '{"actions":[{"type":"water_change","percent":20}]}'
+        model.chat.side_effect=respond
+        with self.assertRaises(PermissionError):
+            sim.leshy_step(model)
+        self.assertEqual(before, sim.snapshot())
 
     def test_verified_profiles_offline(self):
         service = SpeciesProfileService(self.root / "species.json")

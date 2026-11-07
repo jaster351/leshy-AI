@@ -5,6 +5,7 @@ from urllib import parse
 
 from . import web_server_impl8 as previous
 from .aquarium_simulation import AquariumSimulation
+from .module_settings import module_enabled
 from .diagnostics import problem
 
 
@@ -26,7 +27,7 @@ def _runtime_html(settings) -> bytes:
 def _aquarium(app) -> AquariumSimulation:
     value = getattr(app, "aquarium_simulation", None)
     if not isinstance(value, AquariumSimulation):
-        value = AquariumSimulation(app.settings.brain_dir)
+        value = AquariumSimulation(app.settings.brain_dir, enabled_check=lambda: module_enabled(app.storage, 'aquarium'))
         setattr(app, "aquarium_simulation", value)
     return value
 
@@ -62,10 +63,14 @@ def make_handler(app, telegram, settings, model_catalog):
             if parsed.path == "/v1/aquarium/state":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                if not module_enabled(app.storage, "aquarium"):
+                    return self._json(HTTPStatus.LOCKED, {"error": "Аквариум выключен в настройках", "enabled": False})
                 return self._json(HTTPStatus.OK, aquarium.snapshot())
             if parsed.path == "/v1/aquarium/species":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                if not module_enabled(app.storage, "aquarium"):
+                    return self._json(HTTPStatus.LOCKED, {"error": "Аквариум выключен в настройках", "enabled": False})
                 args = parse.parse_qs(parsed.query)
                 try:
                     profile = aquarium.species.get(self._arg(args, "scientific_name", ""))
@@ -79,6 +84,8 @@ def make_handler(app, telegram, settings, model_catalog):
             if parsed.path.startswith("/v1/aquarium/"):
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                if not module_enabled(app.storage, "aquarium"):
+                    return self._json(HTTPStatus.LOCKED, {"error": "Аквариум выключен в настройках", "enabled": False})
                 try:
                     body = self._body()
                     if parsed.path == "/v1/aquarium/reset":
@@ -95,6 +102,8 @@ def make_handler(app, telegram, settings, model_catalog):
                         return self._json(HTTPStatus.OK, {"message": message, "state": aquarium.snapshot()})
                     if parsed.path == "/v1/aquarium/leshy-step":
                         return self._json(HTTPStatus.OK, aquarium.leshy_step(app.llm))
+                except PermissionError as exc:
+                    return self._json(HTTPStatus.LOCKED, {"error": str(exc), "enabled": False})
                 except (ValueError, LookupError, TypeError) as exc:
                     return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                 except Exception as exc:

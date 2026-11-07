@@ -8,7 +8,7 @@ from pathlib import Path
 import random
 import re
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib import error, parse, request
 
 from .llm import ChatMessage
@@ -269,7 +269,8 @@ class EquipmentState:
 
 
 class AquariumSimulation:
-    def __init__(self, brain_dir: Path, rng_seed: int = 351):
+    def __init__(self, brain_dir: Path, rng_seed: int = 351, enabled_check: Callable[[], bool] | None = None):
+        self.enabled_check = enabled_check or (lambda: True)
         self.data_dir = Path(brain_dir) / "data"
         self.state_path = self.data_dir / "aquarium_state.json"
         self.species = SpeciesProfileService(self.data_dir / "aquarium_species_cache.json")
@@ -284,6 +285,10 @@ class AquariumSimulation:
         self.last_leshy_actions: list[dict[str, Any]] = []
         self._load()
 
+    def _require_enabled(self):
+        if not self.enabled_check():
+            raise PermissionError("Аквариум выключен в настройках; сохранённое состояние не изменено.")
+
     @staticmethod
     def _default_water(mode: str) -> WaterState:
         if mode == "marine":
@@ -295,6 +300,7 @@ class AquariumSimulation:
         self.events = self.events[-250:]
 
     def reset(self, mode: str = "freshwater", volume_l: float = 120.0) -> None:
+        self._require_enabled()
         mode = mode.strip().lower()
         if mode not in {"freshwater", "marine"}:
             raise ValueError("mode должен быть freshwater или marine")
@@ -307,7 +313,9 @@ class AquariumSimulation:
         self._save()
 
     def add_species(self, scientific_name: str, count: int = 1) -> SpeciesProfile:
+        self._require_enabled()
         p = self.species.get(scientific_name)
+        self._require_enabled()
         if not p.supports_mode(self.mode):
             raise ValueError(f"{p.scientific_name} не подтверждён для {self.mode}; источники: {', '.join(p.environments) or 'неизвестно'}")
         count = max(1, min(int(count), 50))
@@ -330,10 +338,13 @@ class AquariumSimulation:
         return min(45.0, 8.0 + (low - value if value < low else value - high) * scale)
 
     def tick(self, hours: float = 1.0) -> dict[str, Any]:
+        self._require_enabled()
         hours = max(.05, min(float(hours), 24.0))
         steps = max(1, int(math.ceil(hours / .25)))
         for _ in range(steps):
+            self._require_enabled()
             self._tick_small(hours / steps)
+        self._require_enabled()
         self._save()
         return self.snapshot()
 
@@ -382,6 +393,7 @@ class AquariumSimulation:
             fish.alive = False; self._event("death", f"Погибла {fish.common_name} ({fish.scientific_name}).")
 
     def apply_action(self, action: dict[str, Any], actor: str = "leshy") -> str:
+        self._require_enabled()
         kind = str(action.get("type") or "").lower()
         if kind == "feed":
             amount = max(.1, min(float(action.get("amount", 1)), 2.0))
@@ -407,8 +419,10 @@ class AquariumSimulation:
         self._event("action",msg,actor); self._save(); return msg
 
     def leshy_step(self, llm: Any) -> dict[str, Any]:
+        self._require_enabled()
         prompt={"task":"Считай это настоящим аквариумом-питомцем. Не допускай гибели и хронического стресса.","aquarium":self.snapshot(False),"allowed_actions":["feed","water_change","set_temperature","aeration","filter","light","skimmer","auto_topoff","clean_filter","observe"],"output":{"thought_summary":"коротко владельцу","actions":[{"type":"observe"}]}}
         raw=str(llm.chat([ChatMessage("system","Ты Леший. Заботься об аквариуме как о реальном. Ответ только JSON."),ChatMessage("user",json.dumps(prompt,ensure_ascii=False))]) or "")
+        self._require_enabled()
         try:
             match=re.search(r"\{.*\}",raw,re.DOTALL); parsed=json.loads(match.group(0) if match else raw)
         except Exception:
@@ -416,8 +430,10 @@ class AquariumSimulation:
         actions=parsed.get("actions") if isinstance(parsed.get("actions"),list) else [{"type":"observe"}]
         safe=[]; applied=[]
         for action in [x for x in actions[:4] if isinstance(x,dict)]:
+            self._require_enabled()
             try: applied.append(self.apply_action(action,"leshy")); safe.append(dict(action))
             except (ValueError,TypeError): pass
+        self._require_enabled()
         self.last_leshy_message=str(parsed.get("thought_summary") or "")[:800]; self.last_leshy_actions=safe; self._save()
         return {"message":self.last_leshy_message,"actions":safe,"applied":applied,"state":self.snapshot()}
 

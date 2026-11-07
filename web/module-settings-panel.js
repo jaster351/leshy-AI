@@ -80,6 +80,7 @@
     try{
       const data=await api('/v1/modules/toggle',{method:'POST',body:JSON.stringify({name,enabled:!current})});
       render(data.items||[]);
+      window.dispatchEvent(new CustomEvent('leshy:module-changed',{detail:{name,enabled:!!(data.state&&data.state.enabled)}}));
       if(name==='distributed-cluster')await loadClusterStats();
       if(status)status.textContent=data.message||'Настройка сохранена.';
       if(name==='os-control'&&current)window.alert(data.message||'Управление ОС выключено; процессы Лешего остановлены.');

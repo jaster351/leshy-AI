@@ -97,6 +97,11 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         dependencies=("human-browser", "browser-agent"),
     ),
     ModuleSettingDefinition(
+        name="aquarium", title="Аквариум Лешего",
+        description="Отключает виртуальный аквариум, автопилот и решения LLM без удаления рыб или воды.",
+        default_enabled=True,
+    ),
+    ModuleSettingDefinition(
         name="superagent",
         title="SuperAgent",
         description="Автономные фоновые задания по схеме Trigger → Mandate → Ticket → Assignment → Report: состояние переживает перезапуск, временные ошибки повторяются, а к человеку возвращаются только результат или один блокирующий вопрос.",
