@@ -19,7 +19,8 @@ from .interactive_search_budget import install_interactive_search_budget
 from .learning_command_runtime import install_explicit_learning_routing
 from .lenta_preferences_runtime import install_lenta_preferences_runtime
 from .lenta_runtime import install_lenta_routing
-from .module_settings import list_module_states, set_module_enabled
+from .module_settings import list_module_states, module_enabled, set_module_enabled
+from .cluster_orchestrator import cluster_public_summary
 from .network_blocking_runtime import install_network_blocking_routing
 from .parcel_tracking_runtime import install_parcel_tracking_routing, sync_parcel_runtime_state
 from .reliable_web_runtime import install_reliable_web_runtime
@@ -76,7 +77,10 @@ def _install_runtime_contracts(app=None) -> None:
 
 def _runtime_html(settings) -> bytes:
     """Эталонный chat transport + изолированные UI-модули вокруг него."""
-    html_text = shell._runtime_html(settings).decode("utf-8")
+    reference_html = shell._runtime_html(settings)
+    html_text = reference_html.decode("utf-8")
+    if 'class="sidebar"' not in html_text and 'id="pane-chat"' not in html_text:
+        return reference_html
     for marker in (
         '<script src="/sidebar-session-actions.js"></script>',
         '<script src="/chat-layout-status.js"></script>',
@@ -182,6 +186,20 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._send_asset(name, "application/javascript; charset=utf-8")
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": f"{name} не найден"})
+            if parsed.path == "/v1/cluster/summary":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                enabled = module_enabled(app.storage, "distributed-cluster")
+                cluster = getattr(app, "distributed_cluster", None)
+                try:
+                    status = cluster.status() if enabled and cluster is not None else {}
+                    return self._json(
+                        HTTPStatus.OK,
+                        cluster_public_summary(status, enabled=enabled and cluster is not None),
+                    )
+                except Exception as exc:
+                    problem("cluster_public_summary_failed", str(exc))
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось получить статистику кластера"})
             if parsed.path == "/v1/modules":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})

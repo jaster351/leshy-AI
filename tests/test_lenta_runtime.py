@@ -34,3 +34,16 @@ def test_lenta_payment_variants():
 
 def test_unrelated_ribbon_is_not_lenta_store_intent():
     assert not _explicit_lenta("Добавь красную ленту на изображение")
+
+
+def test_lenta_telegram_ice_cream_request_is_basket_not_os():
+    from leshy.os_control import OperatingSystemController
+    message = "https://lenta.com/ Зайди на этот сайт и добавь мне в корзину моего профиля самое дешевое мороженое"
+    intent = _parse_explicit_intent(message)
+    assert intent is not None
+    assert intent.kind == "basket"
+    controller = OperatingSystemController.__new__(OperatingSystemController)
+    assert not controller.is_request("Выполни задачу. Запрещаю придумывать.")
+    assert not controller.is_request(message)
+    assert controller.is_request("Выполни команду PowerShell")
+    assert controller.is_request("/os status")

@@ -10,7 +10,7 @@ from leshy.network_blocking_module import (
 
 
 class CheburcheckProbeAssessmentTests(unittest.TestCase):
-    def test_official_tspu_block_is_maximum_probability(self) -> None:
+    def test_cheburcheck_tspu_signal_does_not_prove_blocking(self) -> None:
         local = (
             TcpObservation("local", 22, "timeout"),
             TcpObservation("local", 3389, "refused"),
@@ -35,7 +35,8 @@ class CheburcheckProbeAssessmentTests(unittest.TestCase):
             ),
         )
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, remote, static, probe)
-        self.assertEqual(result.tspu_probability, 100)
+        self.assertEqual(result.tspu_probability, 55)
+        self.assertIn("не подтверждена", result.verdict)
         self.assertTrue(any("tspu_block" in reason for reason in result.reasons))
 
     def test_official_ok_reduces_static_list_signal(self) -> None:
@@ -65,7 +66,7 @@ class CheburcheckProbeAssessmentTests(unittest.TestCase):
         )
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, (), static, probe)
         self.assertLessEqual(result.tspu_probability, 20)
-        self.assertTrue(any("динамическая проверка" in reason for reason in result.reasons))
+        self.assertTrue(any("Динамический Cheburcheck Probe" in reason for reason in result.reasons))
 
 
 if __name__ == "__main__":

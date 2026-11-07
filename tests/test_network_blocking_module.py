@@ -30,7 +30,7 @@ class NetworkBlockingModuleTests(unittest.TestCase):
         self.assertEqual(profile, "Windows/RDP")
         self.assertEqual(ports, (3389,))
 
-    def test_ru_timeout_and_foreign_success_is_max_tspu_heuristic(self) -> None:
+    def test_ru_timeout_and_foreign_success_is_only_indirect_signal(self) -> None:
         local = (
             TcpObservation("local", 22, "timeout"),
             TcpObservation("local", 3389, "refused"),
@@ -45,9 +45,10 @@ class NetworkBlockingModuleTests(unittest.TestCase):
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, remote, chebur)
         self.assertEqual(result.profile, "Linux/SSH")
         self.assertEqual(result.service_ports, (22,))
-        self.assertEqual(result.tspu_probability, 100)
+        self.assertEqual(result.tspu_probability, 45)
+        self.assertIn("не подтверждена", result.verdict)
         self.assertIn("ТСПУ", result.verdict)
-        self.assertTrue(any("российская точка" in reason for reason in result.reasons))
+        self.assertTrue(any("узел Check-Host в РФ" in reason for reason in result.reasons))
 
     def test_ru_and_foreign_success_do_not_indicate_tspu(self) -> None:
         local = (
@@ -61,7 +62,7 @@ class NetworkBlockingModuleTests(unittest.TestCase):
         chebur = CheburcheckEvidence(ok=True, blocked=False, target="203.0.113.10")
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, remote, chebur)
         self.assertLessEqual(result.tspu_probability, 20)
-        self.assertIn("не подтверждены", result.verdict.lower())
+        self.assertIn("не подтверждена", result.verdict.lower())
 
     def test_cheburcheck_listing_without_geographic_proof_is_probabilistic(self) -> None:
         local = (
@@ -75,7 +76,7 @@ class NetworkBlockingModuleTests(unittest.TestCase):
             blocked_subnets=("203.0.113.0/24",),
         )
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, (), chebur)
-        self.assertEqual(result.tspu_probability, 70)
+        self.assertEqual(result.tspu_probability, 35)
         self.assertNotEqual(result.tspu_probability, 100)
 
 

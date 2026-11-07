@@ -1,7 +1,7 @@
 (function(){
   'use strict';
 
-  const ownerId='web:local';
+  const sessionId=()=>{try{return String(localStorage.getItem('leshy.session')||'').trim()}catch(_e){return ''}};
   let busy=false;
   let lastResult='';
 
@@ -39,8 +39,8 @@
       <div style="font-size:14px;line-height:1.45;margin-top:8px;white-space:pre-wrap">${esc(item.summary||item.description||item.action)}</div>
       <div style="font-size:11px;color:#999;margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.url||'')}</div>
       <div style="display:flex;gap:8px;margin-top:13px">
-        <button data-resolve="approve" data-id="${esc(item.approval_id)}" style="border:0;border-radius:10px;padding:9px 13px;background:#ececec;color:#161616;font-weight:650;cursor:pointer">${financial?'Подтвердить оплату':'Подтвердить'}</button>
-        <button data-resolve="deny" data-id="${esc(item.approval_id)}" style="border:1px solid #555;border-radius:10px;padding:9px 13px;background:#303030;color:#eee;cursor:pointer">Отмена</button>
+        <button data-resolve="approve" data-id="${esc(item.approval_id)}" data-session-id="${esc(item.session_id)}" style="border:0;border-radius:10px;padding:9px 13px;background:#ececec;color:#161616;font-weight:650;cursor:pointer">${financial?'Подтвердить оплату':'Подтвердить'}</button>
+        <button data-resolve="deny" data-id="${esc(item.approval_id)}" data-session-id="${esc(item.session_id)}" style="border:1px solid #555;border-radius:10px;padding:9px 13px;background:#303030;color:#eee;cursor:pointer">Отмена</button>
       </div>
     </section>`;
   }
@@ -55,9 +55,12 @@
 
   async function load(){
     if(busy)return;
+    const current=sessionId();
+    if(!current){render([]);return;}
     try{
-      const data=await api('/v1/browser/approvals?owner_id='+encodeURIComponent(ownerId));
-      render(data.items||[]);
+      const data=await api('/v1/browser/approvals?session_id='+encodeURIComponent(current));
+      // Старый ответ на запрос другого чата не должен показывать чужую карточку.
+      if(current===sessionId())render((data.items||[]).filter(item=>item.session_id===current));
     }catch(_error){
       // Панель не мешает основному чату, если Browser Agent выключен/недоступен.
     }
@@ -65,6 +68,12 @@
 
   async function resolve(id,approved,button){
     if(busy)return;
+    const current=sessionId();
+    if(!current||current!==button.dataset.sessionId){
+      lastResult='Переключился диалог. Откройте подтверждение в исходном чате.';
+      load();
+      return;
+    }
     busy=true;
     const siblings=button.closest('[data-approval-card]')?.querySelectorAll('button')||[];
     siblings.forEach(item=>item.disabled=true);
@@ -73,7 +82,7 @@
     try{
       const data=await api('/v1/browser/approvals/resolve',{
         method:'POST',
-        body:JSON.stringify({owner_id:ownerId,approval_id:id,approved:!!approved})
+        body:JSON.stringify({session_id:current,approval_id:id,approved:!!approved})
       });
       const detail=(data.data&&data.data.result)?String(data.data.result):'';
       lastResult=(approved?'Результат: ':'Отменено: ')+(detail||data.message||data.status||'готово');
@@ -91,7 +100,9 @@
   function boot(){
     ensurePanel();
     load();
-    setInterval(load,2200);
+    setInterval(load,5000);
+    window.addEventListener('leshy:session-changed',load);
+    window.addEventListener('storage',event=>{if(event.key==='leshy.session')load();});
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
   }
 

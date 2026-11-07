@@ -159,7 +159,7 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings, mo
                     packet = f"event: {item.type}\ndata: {payload}\n\n".encode("utf-8")
                     self.wfile.write(packet)
                     self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 if request_id:
                     realtime.stop(request_id)
             finally:

@@ -10,12 +10,14 @@ from typing import Any
 from .accelerator_runtime import LlamaCppRuntimeManager, LlamaServerLLM
 from .adaptive_backend import AdaptiveLLM
 from .config import Settings
+from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
 from .image_generation import ImageGenerationManager
 from .knowledge import KnowledgeBase
 from .learning_control import LearningControl
 from .llm import ChatMessage, EchoLLM, LLMUnavailable, OllamaLLM
+from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
@@ -80,7 +82,7 @@ class LeshyApp:
         if backend != "native":
             raise ValueError(f"Неизвестный LLM backend: {backend}")
 
-        cpu_llm = NativeGGUFLLM(self.model_path, n_ctx=self.settings.native_context_size, n_gpu_layers=0)
+        cpu_llm = NativeGGUFLLM(self.model_path, n_ctx=self.settings.native_context_size, n_gpu_layers=0, ensure_model=self._require_model)
         cpu_server = LlamaServerLLM(
             self.accelerator_runtime,
             "cpu",
@@ -93,8 +95,9 @@ class LeshyApp:
         )
         candidates: list[tuple[str, Any]] = []
         caps = self.hardware
+        target_platform = runtime_platform()
 
-        if caps is not None and bool(getattr(caps, "gpu", False)):
+        if target_platform == "windows" and caps is not None and bool(getattr(caps, "gpu", False)):
             candidates.append((
                 "gpu-vulkan",
                 LlamaServerLLM(
@@ -110,7 +113,7 @@ class LeshyApp:
                 ),
             ))
 
-        if caps is not None and bool(getattr(caps, "npu", False)):
+        if target_platform == "windows" and caps is not None and bool(getattr(caps, "npu", False)):
             candidates.append((
                 "npu-openvino",
                 LlamaServerLLM(
@@ -126,10 +129,33 @@ class LeshyApp:
                 ),
             ))
 
-        # Fresh official llama-server is a robust CPU fallback when the bundled
-        # Python binding cannot open a newly released GGUF architecture/format.
-        candidates.append(("cpu-llama-server", cpu_server))
-        candidates.append(("cpu-native", cpu_llm))
+        if target_platform == "windows":
+            # Сохраняем прежнюю маршрутизацию Windows без изменений:
+            # GPU Vulkan, NPU OpenVINO, затем официальный CPU server и native.
+            candidates.append(("cpu-llama-server", cpu_server))
+            candidates.append(("cpu-native", cpu_llm))
+        else:
+            # Ubuntu/CentOS: не загружаем Win32-бинарники.
+            # Порядок определяется реально установленным локальным runtime.
+            if caps is not None and bool(getattr(caps, "gpu_offload_runtime", False)):
+                candidates.append((
+                    "gpu-native",
+                    NativeGGUFLLM(
+                        self.model_path,
+                        n_ctx=self.settings.native_context_size,
+                        n_gpu_layers=-1,
+                        ensure_model=self._require_model,
+                    ),
+                ))
+            candidates.append(("cpu-native", cpu_llm))
+            if installed_llama_server() is not None:
+                candidates.append(("cpu-llama-server", cpu_server))
+            event(
+                "local_runtime_autodetected",
+                platform=target_platform,
+                backends=[name for name, _provider in candidates],
+                installed_server=installed_llama_server() is not None,
+            )
         return AdaptiveLLM(
             candidates,
             cooldown_seconds=180,
@@ -352,6 +378,9 @@ class LeshyApp:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
 
+        cinema_plan = cinema_query(message, rows)
+        if cinema_plan is not None:
+            context.append(ChatMessage("system", cinema_instruction(cinema_plan)))
         sources: list[dict[str, str]] = []
         search_attempted = False
         search_error = ""
@@ -360,7 +389,8 @@ class LeshyApp:
             nonlocal sources, search_attempted, search_error
             search_attempted = True
             try:
-                search_result = self.live_search(message, limit=5, reason=reason_text)
+                search_result = (cinema_search(self, cinema_plan) if cinema_plan is not None
+                                 else self.live_search(message, limit=5, reason=reason_text))
                 sources = [
                     {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
                     for item in search_result.get("results", [])
@@ -385,8 +415,12 @@ class LeshyApp:
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
         reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
-        if reason or self._needs_live_search(message):
+        if cinema_plan is not None or reason or self._needs_live_search(message):
             append_live_search(reason or "требуются актуальные данные")
+
+        if cinema_plan is not None and not sources:
+            answer = cinema_no_data(cinema_plan)
+            return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
 
         history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
         messages = context + history_messages
