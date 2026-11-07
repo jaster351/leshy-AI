@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from .browser_agent import BrowserAction, BrowserActionResult, BrowserRisk
 from .diagnostics import event, problem
 from .browser_profile_cdp import profile_cdp_url, profile_may_be_in_use, profile_busy_message
+from .browser_launch_policy import chromium_launch_policy
 from .system_browser import ensure_system_browser
 
 
@@ -51,10 +52,10 @@ class BrowserUseAdapter:
     def __init__(self, llm: Any | None = None, *, max_steps: int = 40, headless: bool | None = None):
         self.llm = llm
         self.max_steps = max(3, min(int(max_steps), 100))
-        if headless is None:
-            raw = os.getenv("LESHY_BROWSER_HEADLESS", "0" if os.name == "nt" else "1").strip().lower()
-            headless = raw not in {"0", "false", "no", "off"}
-        self.headless = bool(headless)
+        launch_policy = chromium_launch_policy()
+        self.headless = launch_policy.headless if headless is None else (
+            bool(headless) if launch_policy.can_open_window else True
+        )
         self.root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
         self.profile_dir = self.root / "browser" / "browser-use-profile"
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -210,6 +211,7 @@ class BrowserUseAdapter:
             profile_has_lock=profile_may_be_in_use(profile_dir),
             attached_to_existing_window=bool(cdp_url),
             action=action.name,
+            root_linux=chromium_launch_policy().root_linux,
         )
         if cdp_url:
             browser = Browser(
@@ -218,12 +220,20 @@ class BrowserUseAdapter:
                 keep_alive=True,
             )
         else:
+            policy = chromium_launch_policy()
+            launch_options = {}
+            if policy.args or not policy.chromium_sandbox:
+                launch_options = {
+                    "chromium_sandbox": policy.chromium_sandbox,
+                    "args": list(policy.args),
+                }
             browser = Browser(
                 executable_path=browser_info.executable,
                 user_data_dir=str(profile_dir),
                 headless=self.headless,
                 allowed_domains=self._domain_patterns(hosts),
                 keep_alive=False,
+                **launch_options,
             )
         user_task = str(action.arguments.get("task") or action.description or "").strip()
         if not user_task:

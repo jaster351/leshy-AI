@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from .browser_agent import BrowserAction, BrowserActionResult
 from .diagnostics import event, problem
+from .browser_launch_policy import chromium_launch_policy
 from .system_browser import ensure_system_browser
 
 
@@ -27,10 +28,8 @@ class PlaywrightBrowserAdapter:
     adapter_id = "playwright"
 
     def __init__(self, *, headless: bool | None = None, timeout_ms: int = 30_000):
-        if headless is None:
-            raw = os.getenv("LESHY_BROWSER_HEADLESS", "1").strip().lower()
-            headless = raw not in {"0", "false", "no", "off"}
-        self.headless = bool(headless)
+        policy = chromium_launch_policy()
+        self.headless = policy.headless if headless is None else (bool(headless) if policy.can_open_window else True)
         self.timeout_ms = max(5_000, min(int(timeout_ms), 120_000))
         root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
         self.state_dir = root / "browser"
@@ -74,10 +73,12 @@ class PlaywrightBrowserAdapter:
 
     def _launch(self, pw):
         system_browser = ensure_system_browser(auto_install=True)
+        policy = chromium_launch_policy()
         browser = pw.chromium.launch(
             executable_path=system_browser.executable,
             headless=self.headless,
-            args=["--no-first-run", "--no-default-browser-check"],
+            chromium_sandbox=policy.chromium_sandbox,
+            args=["--no-first-run", "--no-default-browser-check", *policy.args],
         )
         event("browser_agent_playwright_started", browser=system_browser.name, executable=system_browser.executable)
         return browser, system_browser.name

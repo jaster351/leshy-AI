@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from .browser_profile_cdp import profile_cdp_url, profile_may_be_in_use, profile_busy_message
+from .browser_launch_policy import chromium_launch_policy
 from .system_browser import ensure_system_browser
 
 
@@ -167,6 +168,12 @@ class LentaBrowserSession:
                 "url": str(url or "https://lenta.com/"),
                 "reused": True,
             }
+        launch_policy = chromium_launch_policy()
+        if not launch_policy.can_open_window:
+            raise RuntimeError(
+                "Для первоначальной авторизации в «Ленте» нужна графическая сессия DISPLAY/Wayland. "
+                "Публичный каталог доступен через headless Browser Agent."
+            )
         if profile_may_be_in_use(self.profile_dir):
             raise RuntimeError(profile_busy_message())
         args = [
@@ -176,6 +183,7 @@ class LentaBrowserSession:
             "--remote-debugging-address=127.0.0.1",
             "--no-first-run",
             "--no-default-browser-check",
+            *launch_policy.args,
             str(url or "https://lenta.com/"),
         ]
         creationflags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
