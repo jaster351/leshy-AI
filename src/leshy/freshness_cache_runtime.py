@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from .diagnostics import event
+from .adaptive_internet_policy import knowledge_is_current, is_explicit_web_request
 from .freshness_memory_runtime import is_dynamic_query
 from .knowledge import KnowledgeBase, is_fresh
 from .llm import ChatMessage
@@ -42,7 +43,9 @@ def _search_fresh_dynamic(self: KnowledgeBase, query: str, *, limit: int = 5) ->
     scored: list[tuple[float, dict[str, Any]]] = []
     for raw in rows:
         row = dict(raw)
-        if not is_fresh(row):
+        # Не позволяем одному непроверенному candidate или старому сниппету
+        # отменить реальный интернет-поиск.
+        if row.get("status") != "trusted" or not is_fresh(row) or not knowledge_is_current(row, query):
             continue
         haystack = f"{row.get('topic','')} {row.get('claim','')}".lower()
         matches = sum(1 for term in terms if term in haystack)
@@ -74,11 +77,11 @@ def install_freshness_cache_runtime() -> None:
         plan["fresh_dynamic"] = fresh
         if fresh:
             plan["freshness_satisfied"] = True
-            # Runtime-latency layer уважает этот флаг и не делает повторный
-            # live-search, если пользователь не попросил явную перепроверку.
-            plan["needed"] = False
-            plan["reason"] = ""
-            event("fresh_dynamic_cache_hit", rows=len(fresh), query=str(message)[:500])
+            # Явная просьба зайти в интернет всегда сильнее локального кэша.
+            if not is_explicit_web_request(message):
+                plan["needed"] = False
+                plan["reason"] = ""
+            event("fresh_dynamic_cache_hit", rows=len(fresh), online_required=bool(plan.get("needed")))
         else:
             plan["freshness_satisfied"] = False
         return plan
