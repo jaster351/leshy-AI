@@ -109,6 +109,7 @@ class KnowledgeRelevanceRegressionTests(unittest.TestCase):
             )
             knowledge.verify_topic("Python 3.14")
             self.assertEqual(len(knowledge.search("Что такое Python 3.14?", trusted_only=True)), 1)
+            self.assertEqual(knowledge.search("Что такое Python 3.15?", trusted_only=True), [])
             self.assertEqual(knowledge.search("Что известно про CVE-2026-119977?", trusted_only=True), [])
             self.assertEqual(knowledge.search("Что такое архитектура процессора?", trusted_only=True), [])
 
