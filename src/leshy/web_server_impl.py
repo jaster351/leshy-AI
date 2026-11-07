@@ -104,6 +104,16 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings, mo
         def log_message(self, fmt: str, *args):
             return
 
+        def handle(self) -> None:
+            # Браузер может отменить fetch, закрыть вкладку или обновить страницу
+            # после того, как ответ уже подготовлен. На Windows это WinError
+            # 10053 (ConnectionAbortedError). Исключение должно погаситься
+            # в HTTP-слое, а не печататься socketserver как ошибка приложения.
+            try:
+                super().handle()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                self.close_connection = True
+
         def _authorized(self) -> bool:
             expected = os.getenv("LESHY_API_TOKEN", "").strip()
             return not expected or self.headers.get("Authorization", "") == f"Bearer {expected}"

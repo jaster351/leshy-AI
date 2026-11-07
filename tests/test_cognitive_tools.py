@@ -47,7 +47,7 @@ class CognitiveReadExecutorTests(unittest.TestCase):
 
     def test_version_tool_needs_no_context_or_arguments(self):
         result = self.executor.execute("runtime.version", {}, ticket_id="SA-test")
-        self.assertRegex(result["result"]["version"], r"^\\d+\\.\\d+\\.\\d+$")
+        self.assertRegex(result["result"]["version"], r"^\d+\.\d+\.\d+$")
         with self.assertRaises(ValueError):
             self.executor.execute("runtime.version", {"any": 1}, ticket_id="SA-test")
 
@@ -95,6 +95,17 @@ class SuperAgentCognitiveLoopTests(unittest.TestCase):
         state, report, _, _ = service._execute({"id": "SA-test", "request_text": "Установи программу"})
         self.assertEqual(state, "blocked")
         self.assertIn("не подтверждено", report)
+
+    def test_tool_call_limit_stops_third_execution(self):
+        service = self.service([
+            '{"action":"tool","tool":"runtime.version","arguments":{}}',
+            '{"action":"tool","tool":"knowledge.search","arguments":{"query":"Python"}}',
+            '{"action":"tool","tool":"runtime.version","arguments":{}}',
+        ])
+        state, report, _, _ = service._execute({"id": "SA-test", "request_text": "Назови версию и объясни Python"})
+        self.assertEqual(state, "blocked")
+        self.assertIn("лимит", report)
+        self.assertEqual(service.app.llm.chat.call_count, 3)
 
     def test_duplicate_tool_calls_stop(self):
         service = self.service([
