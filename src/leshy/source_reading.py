@@ -9,10 +9,10 @@ from .diagnostics import event, problem
 from .research import PROMPT_INJECTION_MARKERS, SafeWebFetcher
 from .storage import utcnow
 
-_URL = re.compile(r"https?://[^\\s<>\\"']+", re.IGNORECASE)
+_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _MAX_CONTEXT_CHARS = 14_000
 _MAX_REMEMBERED_CLAIMS = 30
-_DYNAMIC = re.compile(r"\\bCVE-\\d{4}-\\d{4,}\\b|уязвим|vulnerab|security advisory|сегодня|сейчас", re.IGNORECASE)
+_DYNAMIC = re.compile(r"\bCVE-\d{4}-\d{4,}\b|уязвим|vulnerab|security advisory|сегодня|сейчас", re.IGNORECASE)
 
 
 def supplied_public_url(message: str) -> str | None:
@@ -93,9 +93,9 @@ def read_supplied_source(app, message: str) -> tuple[str, list[dict[str, str]]]:
             if app.learning.is_enabled() else
             "Обучение выключено: страницу не сохраняли в базу знаний."
         )
-        + "\\n--- НАЧАЛО НЕДОВЕРЕННОГО ТЕКСТА СТРАНИЦЫ ---\\n"
+        + "\n--- НАЧАЛО НЕДОВЕРЕННОГО ТЕКСТА СТРАНИЦЫ ---\n"
         + text[:_MAX_CONTEXT_CHARS]
-        + "\\n--- КОНЕЦ ТЕКСТА СТРАНИЦЫ ---"
+        + "\n--- КОНЕЦ ТЕКСТА СТРАНИЦЫ ---"
     )
     return note, source
 
