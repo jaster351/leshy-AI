@@ -22,7 +22,7 @@ from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
-from .adaptive_internet_policy import adaptive_research_reason, is_explicit_web_request
+from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_explicit_web_request
 from .self_learning import SelfLearningWorker
 from .storage import Storage, utcnow
 from .version import VERSION
@@ -464,7 +464,17 @@ class LeshyApp:
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
         reason = adaptive_research_reason(message, trusted, candidates)
-        if cinema_plan is not None or reason or self._needs_live_search(message):
+        needed = bool(cinema_plan is not None or reason or self._needs_live_search(message))
+        self._last_internet_route = {
+            "mode": "поиск" if needed else "локально",
+            "reason": str(reason or ("явный запрос" if needed else "TTL/контекст позволяют ответ без сети"))[:100],
+            "ttl_seconds": ttl_for_context(message),
+        }
+        event("internet_route_decided",
+              online=needed, reason=str(reason or "")[:100],
+              ttl_seconds=ttl_for_context(message),
+              trusted_hits=len(trusted), candidate_hits=len(candidates))
+        if needed:
             append_live_search(reason or "требуются актуальные данные")
 
         if cinema_plan is not None and not sources:
