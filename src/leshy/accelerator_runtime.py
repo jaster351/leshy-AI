@@ -26,6 +26,24 @@ _RUNTIME_LOCK = threading.RLock()
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
+def _visible_answer_options(model_name: str) -> dict[str, Any]:
+    """Avoid Qwen3.x silently spending its entire token budget on hidden reasoning.
+
+    On supported llama.cpp builds reasoning_effort=none is preferred; the
+    template kwarg is retained for older builds. Opt in to deliberate
+    thinking explicitly via LESHY_QWEN_THINKING=on.
+    """
+    if "qwen3" not in str(model_name or "").lower():
+        return {}
+    if str(os.getenv("LESHY_QWEN_THINKING") or "").lower() in {"1", "true", "yes", "on"}:
+        return {}
+    return {
+        "reasoning_effort": "none",
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+
+
+
 @dataclass(frozen=True)
 class RuntimeAsset:
     backend: str
@@ -370,6 +388,7 @@ class LlamaServerLLM:
                     "top_p": 0.92,
                     "max_tokens": self.max_tokens,
                     "stream": False,
+                    **_visible_answer_options(self.model),
                 }).encode("utf-8")
                 req = request.Request(
                     base + "/v1/chat/completions",

@@ -91,14 +91,22 @@ class StreamingAutoContinueTests(unittest.TestCase):
                     time.sleep(0.01)
                     yield b'data: {"choices":[{"delta":{"content":"x"},"finish_reason":null}]}\n'
 
-        from leshy.llm import LLMUnavailable
         response = SlowResponse()
         with patch("leshy.streaming_backends.request.urlopen", return_value=response):
             started = time.monotonic()
-            with self.assertRaises(LLMUnavailable):
-                list(_llama_stream(provider, [ChatMessage("user", "Длинный запрос")]))
+            chunks = list(_llama_stream(provider, [ChatMessage("user", "Длинный запрос")]))
+        self.assertIn("Ответ остановлен по лимиту времени", "".join(chunks))
         self.assertLess(time.monotonic() - started, 2.0)
         self.assertTrue(response.was_closed.is_set())
+
+    def test_qwen_default_uses_visible_non_thinking_mode(self):
+        import os
+        from leshy.accelerator_runtime import _visible_answer_options
+        with patch.dict(os.environ, {"LESHY_QWEN_THINKING": ""}):
+            self.assertEqual(_visible_answer_options("Qwen3.5-9B")["reasoning_effort"], "none")
+        with patch.dict(os.environ, {"LESHY_QWEN_THINKING": "on"}):
+            self.assertEqual(_visible_answer_options("Qwen3.5-9B"), {})
+        self.assertEqual(_visible_answer_options("Llama-8B"), {})
 
     def test_cancel_closes_active_stream_without_waiting_socket_timeout(self):
         provider = _Provider()

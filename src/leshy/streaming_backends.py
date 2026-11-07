@@ -9,6 +9,7 @@ from types import MethodType
 from urllib import request, error
 
 from .diagnostics import event, exception
+from .accelerator_runtime import _visible_answer_options
 from .context_budget import _normalize_system_messages, apply_context_budget, estimate_tokens
 from .llm import ChatMessage, LLMUnavailable
 from .persona import with_leshy_identity
@@ -138,6 +139,7 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                         "top_p": 0.92,
                         "max_tokens": self.max_tokens,
                         "stream": True,
+                        **_visible_answer_options(getattr(self, "model", "")),
                     }).encode("utf-8")
                     req = request.Request(
                         base + "/v1/chat/completions",
@@ -158,9 +160,7 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                                 if cancel_event.is_set():
                                     break
                                 if watchdog_timeout.is_set() or time.monotonic() >= deadline:
-                                    raise LLMUnavailable(
-                                        "Потоковая генерация превысила общий лимит времени"
-                                    )
+                                    break
                                 line = raw_line.decode("utf-8", errors="replace").strip()
                                 if not line or line.startswith(":"):
                                     continue
@@ -185,14 +185,33 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                                 reason = choice.get("finish_reason")
                                 if reason is not None:
                                     finish_reason = str(reason)
+                        except Exception:
+                            # watchdog закрыл socket, чтобы прервать recv;
+                            # системная ошибка от закрытого сокета здесь ожидаема.
+                            if not watchdog_timeout.is_set() and not cancel_event.is_set():
+                                raise
                         finally:
                             watchdog_stop.set()
                         if watchdog_timeout.is_set() or time.monotonic() >= deadline:
                             event("accelerator_stream_deadline_exceeded", backend=self.backend,
                                   elapsed_ms=int((time.monotonic() - round_started) * 1000),
                                   output_chars=sum(map(len, round_chunks)))
+                            if round_chunks:
+                                # Пользователь уже получил часть видимого текста.
+                                # Не превращаем её в ошибку/тишину из-за дедлайна.
+                                if continuation_count:
+                                    remaining = _strip_continuation_overlap(
+                                        generated_text, "".join(round_chunks)
+                                    )
+                                    if remaining:
+                                        yield remaining
+                                yield "\n\n[Ответ остановлен по лимиту времени. Можно продолжить сообщением «продолжай».]"
+                                event("accelerator_stream_partial_preserved", backend=self.backend,
+                                      output_chars=sum(map(len, round_chunks)))
+                                return
                             raise LLMUnavailable(
-                                "Потоковая генерация превысила общий лимит времени"
+                                "Модель не сформировала видимый ответ за отведённое время; "
+                                "проверьте режим рассуждений Qwen"
                             )
                     if cancel_event.is_set():
                         return

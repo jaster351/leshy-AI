@@ -30,6 +30,14 @@ _AUTO_TITLE_QUIET_SECONDS = 180.0
 _TELEGRAM_MINIMUM_DELAY_SECONDS = 30.0
 
 
+def _startup_recovery_enabled() -> bool:
+    """Manual opt-in: never monopolize the single interactive LLM slot on boot."""
+    return str(os.getenv("LESHY_RECOVER_UNANSWERED_AT_STARTUP") or "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+
 _GITHUB_PLUGIN_MANIFEST = {
     "schema_version": 1,
     "id": "github",
@@ -190,6 +198,12 @@ def _delayed_recovery_after_ready(
         telegram.start()
     except Exception as exc:
         problem("telegram_delayed_start_failed", str(exc))
+    if not _startup_recovery_enabled():
+        # Восстановление старых ответов автоматически занимало очередь
+        # ~70+50 секунд после старта и мешало новым сообщениям Web.
+        # История остаётся в SQLite. Ручная повторная генерация доступна.
+        event("startup_recovery_skipped", reason="interactive_priority", opt_in="LESHY_RECOVER_UNANSWERED_AT_STARTUP")
+        return
     try:
         result = previous.base.recover_unanswered(app)
         event(

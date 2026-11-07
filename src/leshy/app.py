@@ -103,7 +103,7 @@ class LeshyApp:
             n_ctx=min(self.settings.native_context_size, 4096),
             n_gpu_layers=0,
             startup_timeout=45,
-            request_timeout=_inference_timeout(90),
+            request_timeout=_inference_timeout(180),
         )
         candidates: list[tuple[str, Any]] = []
         caps = self.hardware
@@ -121,7 +121,7 @@ class LeshyApp:
                     n_gpu_layers=-1,
                     gpu_count=max(1, len(getattr(caps, "gpu_names", ()) or ())),
                     startup_timeout=45,
-                    request_timeout=_inference_timeout(70),
+                    request_timeout=_inference_timeout(180),
                 ),
             ))
 
@@ -136,8 +136,8 @@ class LeshyApp:
                     n_ctx=min(self.settings.native_context_size, 2048),
                     n_gpu_layers=0,
                     device="NPU",
-                    startup_timeout=30,
-                    request_timeout=_inference_timeout(45),
+                    startup_timeout=60,
+                    request_timeout=_inference_timeout(120),
                 ),
             ))
 
