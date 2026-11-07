@@ -269,7 +269,8 @@ def install_freshness_memory_runtime(app=None) -> None:
 
         def live_query(self, query: str, reason: str = "запрос пользователя", limit: int = 5) -> dict:
             result = _ORIGINAL_RESEARCH_LIVE_QUERY(self, query, reason=reason, limit=limit)
-            _remember_dynamic_results(self, query, result)
+            if bool(getattr(self, "auto_learning_enabled", lambda: True)()):
+                _remember_dynamic_results(self, query, result)
             return result
 
         def search_plan(self, message: str) -> dict[str, Any]:
