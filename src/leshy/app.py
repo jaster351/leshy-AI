@@ -55,6 +55,7 @@ class LeshyApp:
             self.knowledge,
             FallbackSearch(SearxngSearch(self.settings.searxng_url, timeout=3), DdgsSearch()),
         )
+        self.research.auto_learning_enabled = self.learning.is_enabled
         self.hardware = self._detect_hardware()
         self.image_generation = ImageGenerationManager(self.settings.brain_dir, self.hardware)
         self.model_path = self.settings.native_models_dir / self.settings.native_chat_file
