@@ -24,7 +24,7 @@
 
 ## Совместимость и диагностика
 
-Публичные поля `HardwareCapabilities` и API сохранены. Добавлены только `gpu_devices` и `gpu_backend_verified`. Последнее поле фиксирует наличие поддержки GPU-offload у импортированного `llama_cpp`, **а не** результат реального inference.
+Публичные поля `HardwareCapabilities` и API сохранены. Добавлены только `gpu_devices` и `gpu_offload_compiled`. Последнее поле фиксирует наличие поддержки GPU-offload у импортированного `llama_cpp`, **а не** результат реального inference.
 
 Синтетические regression-тесты охватывают Windows с разными PCI Vendor ID, Linux с двумя адаптерами, работу без sysfs, macOS, неизвестный GPU, отсутствие GPU и сохранение auto-плана. Тесты не требуют настоящих карт.
 
