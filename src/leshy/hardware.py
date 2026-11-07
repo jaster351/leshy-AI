@@ -9,6 +9,7 @@ import subprocess
 from typing import Any
 
 from .memory_policy import memory_status
+from .gpu_detection import GPUDevice, detect_gpu_devices
 
 VALID_MODES = {
     "auto",
@@ -51,6 +52,10 @@ class HardwareCapabilities:
     npu_names: tuple[str, ...]
     openvino_npu: bool
     notes: tuple[str, ...]
+    # Дополнительные сведения: интерфейс старых потребителей не меняется.
+    gpu_devices: tuple[GPUDevice, ...] = ()
+    # True означает поддержку offload в загруженном llama_cpp, НЕ успешный inference.
+    gpu_backend_verified: bool = False
 
 
 @dataclass(frozen=True)
@@ -121,16 +126,9 @@ def _powershell_json(command: str) -> Any:
 
 
 def _windows_gpus() -> tuple[str, ...]:
-    data = _powershell_json(
-        "@(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) | ConvertTo-Json -Compress"
-    )
-    if isinstance(data, str):
-        values = (data,)
-    elif isinstance(data, list):
-        values = tuple(str(x) for x in data if str(x).strip())
-    else:
-        values = ()
-    return tuple(v for v in values if "Microsoft Basic Display" not in v)
+    """Совместимый старый API: имена берутся из единого системного обнаружения."""
+    return tuple(device.name for device in detect_gpu_devices(powershell_json=_powershell_json))
+
 
 
 def _windows_npus() -> tuple[str, ...]:
@@ -165,19 +163,21 @@ def _openvino_devices() -> tuple[str, ...]:
 
 def detect_hardware() -> HardwareCapabilities:
     cpu_name = platform.processor().strip() or os.getenv("PROCESSOR_IDENTIFIER", "").strip() or "CPU"
-    gpu_names = _windows_gpus() if os.name == "nt" else ()
+    gpu_devices = detect_gpu_devices(powershell_json=_powershell_json)
+    gpu_names = tuple(device.name for device in gpu_devices)
     npu_names = _windows_npus() if os.name == "nt" else ()
     ov_devices = tuple(x.upper() for x in _openvino_devices())
     python_gpu = _llama_gpu_offload_supported()
-    external_gpu = os.name == "nt" and bool(gpu_names)
+    # Это только кандидат для native Vulkan (Windows/Linux), не результат health-check.
+    external_gpu = platform.system() in {"Windows", "Linux"} and bool(gpu_names)
     gpu_runtime = python_gpu or external_gpu
     npu_detected = bool(npu_names) or any(x.startswith("NPU") for x in ov_devices)
     openvino_npu = bool(npu_detected and os.name == "nt") or any(x.startswith("NPU") for x in ov_devices)
     notes: list[str] = []
     if gpu_names and not python_gpu:
-        notes.append("Для GPU будет подготовлен локальный Vulkan runtime llama.cpp")
+        notes.append("GPU обнаружен; Vulkan является кандидатом, рабочее ускорение определяется при запуске модели")
     if len(gpu_names) > 1:
-        notes.append(f"Обнаружено GPU: {len(gpu_names)}; модель будет распределяться между доступными GPU")
+        notes.append(f"Обнаружено GPU: {len(gpu_names)}; совместимость multi-GPU проверяется выбранным backend")
     if npu_detected and not any(x.startswith("NPU") for x in ov_devices):
         notes.append("Для NPU будет подготовлен локальный OpenVINO runtime; требуется рабочий NPU-драйвер")
     return HardwareCapabilities(
@@ -190,6 +190,8 @@ def detect_hardware() -> HardwareCapabilities:
         npu_names=npu_names or tuple(x for x in ov_devices if x.startswith("NPU")),
         openvino_npu=openvino_npu,
         notes=tuple(notes),
+        gpu_devices=gpu_devices,
+        gpu_backend_verified=python_gpu,
     )
 
 
