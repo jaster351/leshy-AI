@@ -337,6 +337,11 @@ class RealtimeChatManager:
             yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": sources})
             event("chat_stream_started", request_id=rid, session_id=sid, owner_id=owner_id)
 
+            # Актуальные сведения (погода, новости и т.п.) проверяем до публикации
+            # текста: локальная модель иногда ошибочно заявляет, что интернет
+            # недоступен, даже когда поиск уже выполнен. Иначе неверный ответ
+            # успевает появиться в Telegram до финального редактирования.
+            hold_search_answer = bool(search_attempted)
             for delta in self._llm_stream(messages, cancel, owner_id):
                 if cancel.is_set():
                     break
@@ -344,11 +349,62 @@ class RealtimeChatManager:
                 if not text:
                     continue
                 answer_parts.append(text)
-                yield StreamEvent("delta", {"text": text})
+                if not hold_search_answer:
+                    yield StreamEvent("delta", {"text": text})
 
             answer = "".join(answer_parts).strip()
             stopped = cancel.is_set()
-            if answer:
+            if not stopped and search_attempted and self.app._answer_needs_research(answer):
+                event("chat_stream_web_refusal_detected", request_id=rid, source_count=len(sources))
+                if sources:
+                    try:
+                        instruction = ChatMessage(
+                            "system",
+                            "Предыдущий ответ ошибочно утверждал, что интернет недоступен. "
+                            "В текущем контексте уже приведены найденные веб-источники. "
+                            "Составь новый ответ только по этим источникам, без выдуманных "
+                            "фактов и без предложения пользователю искать самому. "
+                            "Если данных недостаточно, прямо сообщи, чего именно не хватает.",
+                        )
+                        retry_parts = []
+                        for delta in self._llm_stream(messages + [instruction], cancel, owner_id):
+                            if cancel.is_set():
+                                break
+                            retry_parts.append(str(delta or ""))
+                        if not cancel.is_set():
+                            repaired = "".join(retry_parts).strip()
+                            if repaired and not self.app._answer_needs_research(repaired):
+                                answer = repaired
+                            else:
+                                answer = (
+                                    "Я нашёл веб-источники, но не смог получить из них "
+                                    "достаточно надёжных данных для ответа."
+                                )
+                    except Exception as exc:
+                        problem("chat_stream_web_refusal_retry_failed", str(exc), request_id=rid)
+                        answer = "Интернет-поиск выполнен, но достоверный ответ сформировать не удалось."
+                else:
+                    failure_marker = "Текущий веб-поиск временно не выполнен:"
+                    failure = next(
+                        (
+                            str(item.content).split(failure_marker, 1)[-1].strip()
+                            for item in messages
+                            if item.role == "system" and failure_marker in str(item.content)
+                        ),
+                        "",
+                    )
+                    answer = (
+                        "Не удалось получить актуальные данные из интернета: " + failure
+                        if failure else
+                        "Я попробовал найти актуальную информацию в интернете, "
+                        "но подходящих подтверждённых источников не нашёл."
+                    )
+                event("chat_stream_web_refusal_handled", request_id=rid, source_count=len(sources))
+            if hold_search_answer and not cancel.is_set():
+                for part in self._chunk_fallback(answer, 160):
+                    yield StreamEvent("delta", {"text": part})
+            stopped = cancel.is_set()
+            if answer and not stopped:
                 answered_at = self.app._save_assistant(sid, answer)
             else:
                 answered_at = utcnow()
