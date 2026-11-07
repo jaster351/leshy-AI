@@ -294,18 +294,21 @@ class ResearchEngine:
     def live_query(self, query: str, reason: str = "запрос пользователя", limit: int = 5) -> dict:
         """Быстрый интернет-поиск для ответа без тяжёлой синхронной верификации.
 
-        Сниппеты сразу сохраняются как candidate-знания, поэтому база реально
-        растёт уже во время live-search. Полное чтение страниц и верификация
-        остаются отдельной queued-задачей и могут выполняться worker'ом в фоне.
+        Поиск всегда возвращает результаты для текущего ответа. Только при
+        включённом самообучении сниппеты сохраняются как candidate-знания,
+        а проверка страниц ставится в очередь. Без обучения база не меняется.
         """
         query = " ".join(str(query).split()).strip()
         if not query:
             return {"query": query, "status": "empty", "results": [], "accepted_claims": 0}
 
-        task_id = self.enqueue(query, reason=f"live-search: {reason}")
+        learning_allowed = bool(getattr(self, "auto_learning_enabled", lambda: True)())
+        task_id = self.enqueue(query, reason=f"live-search: {reason}") if learning_allowed else None
         try:
             results = self.search_provider.search(query, limit=limit)
         except SearchUnavailable as exc:
+            if not learning_allowed:
+                return {"query": query, "status": "search_failed", "error": str(exc), "results": [], "accepted_claims": 0}
             return self._queue_retry(task_id, query, exc, live=True)
         except Exception as exc:
             self.storage.audit("research.live_search_failed", {"task_id": task_id, "query": query, "error": str(exc)[:1000]})
@@ -317,7 +320,7 @@ class ResearchEngine:
             snippet = " ".join(str(result.snippet).split()).strip()
             title = " ".join(str(result.title).split()).strip()
             serialized.append({"title": title, "url": result.url, "snippet": snippet})
-            if not snippet:
+            if not snippet or not learning_allowed:
                 continue
             if any(marker in snippet.lower() for marker in PROMPT_INJECTION_MARKERS):
                 self.storage.audit("research.live_source_quarantined", {"task_id": task_id, "url": result.url})
@@ -347,16 +350,16 @@ class ResearchEngine:
                 "query": query,
                 "results": len(serialized),
                 "accepted_claims": accepted,
-                "verification_queued": True,
+                "verification_queued": learning_allowed,
             },
         )
         return {
             "task_id": task_id,
             "query": query,
-            "status": "queued_verification",
+            "status": "queued_verification" if learning_allowed else "search_complete",
             "results": serialized,
             "accepted_claims": accepted,
-            "verification_queued": True,
+            "verification_queued": learning_allowed,
         }
 
     def _retry_before(self) -> str:
