@@ -114,8 +114,11 @@ class LocalTelegramVision:
         if not token:
             raise TelegramImageError("Telegram token не настроен")
         url = f"https://api.telegram.org/file/bot{token}/{parse.quote(path, safe='/')}"
+        # Bot token is embedded in the download URL. Never use environment
+        # proxies or follow redirects when fetching Telegram image bytes.
+        downloader = request.build_opener(request.ProxyHandler({}), _RejectRedirects())
         try:
-            with request.urlopen(request.Request(url, method="GET"), timeout=20) as response:
+            with downloader.open(request.Request(url, method="GET"), timeout=20) as response:
                 image = response.read(MAX_IMAGE_BYTES + 1)
         except (error.URLError, OSError, TimeoutError):
             # URL содержит секрет bot token: не писать текст исключения в логи.
