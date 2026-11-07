@@ -380,6 +380,38 @@ class RealtimeChatManager:
             yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": sources})
             event("chat_stream_started", request_id=rid, session_id=sid, owner_id=owner_id)
 
+            # Если live-search не нашёл подтверждённых источников или упал,
+            # НЕ передаём текущие данные LLM: иначе она выдумает дату/цену.
+            # Такой отказ быстрый и прозрачный, обычные чаты не затронуты.
+            if search_attempted and not sources:
+                marker = "Текущий веб-поиск временно не выполнен:"
+                failure = next(
+                    (
+                        str(item.content).split(marker, 1)[-1].strip()
+                        for item in messages
+                        if item.role == "system" and marker in str(item.content)
+                    ),
+                    "",
+                )
+                answer = (
+                    "Не удалось проверить информацию через интернет: " + failure[:320]
+                    if failure else
+                    "Интернет-поиск выполнен, но надёжных источников для ответа не найдено. "
+                    "Я не буду выдавать догадки за проверенные факты."
+                )
+                event("chat_web_search_without_sources", request_id=rid, failed=bool(failure))
+                if not cancel.is_set():
+                    answered_at = self.app._save_assistant(sid, answer)
+                    yield StreamEvent("delta", {"text": answer})
+                else:
+                    answered_at = utcnow()
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid, "answer": answer if not cancel.is_set() else "",
+                    "created_at": answered_at, "sources": [], "stopped": bool(cancel.is_set()),
+                    "latency_ms": int((time.monotonic() - started) * 1000),
+                })
+                return
+
             # Актуальные сведения (погода, новости и т.п.) проверяем до публикации
             # текста: локальная модель иногда ошибочно заявляет, что интернет
             # недоступен, даже когда поиск уже выполнен. Иначе неверный ответ
