@@ -86,6 +86,33 @@ class KnowledgeSyncService:
         with self._lock:
             self._state.update(fields)
 
+    def _cursor_for(self, node_id: str) -> int:
+        if node_id in self._cursors:
+            return self._cursors[node_id]
+        with self.app.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key=?",
+                ("cluster.knowledge.cursor." + node_id[:100],),
+            ).fetchone()
+        try:
+            cursor = max(0, int(row["value"])) if row else 0
+        except (ValueError, TypeError):
+            cursor = 0
+        self._cursors[node_id] = cursor
+        return cursor
+
+    def _save_cursor(self, node_id: str, value: int) -> None:
+        previous = self._cursors.get(node_id, 0)
+        if previous == value:
+            return
+        with self.app.storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO meta(key,value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("cluster.knowledge.cursor." + node_id[:100], str(max(0, value))),
+            )
+        self._cursors[node_id] = value
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -259,12 +286,12 @@ class KnowledgeSyncService:
                 for peer in peers:
                     if self._stop.is_set():
                         break
-                    cursor = self._cursors.get(peer.node_id, 0)
+                    cursor = self._cursor_for(peer.node_id)
                     try:
                         page = self._pull_peer(peer, cursor)
                         next_cursor = max(0, int(page.get("cursor") or 0))
                         received = self._import_page(page)
-                        self._cursors[peer.node_id] = next_cursor
+                        self._save_cursor(peer.node_id, next_cursor)
                         total += received
                         self._patch(
                             state="synchronized", last_error="", last_sync=utcnow(),
