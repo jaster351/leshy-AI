@@ -141,6 +141,23 @@ def make_handler(app, telegram, settings, model_catalog):
                     problem("lenta_mark_authenticated_failed", str(exc))
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
 
+            if parsed.path == "/v1/cluster/update-info":
+                if not module_enabled(app.storage, "distributed-cluster"):
+                    return self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "Кластер выключен"})
+                try:
+                    # Сначала проверяем подпись и подтверждённую LAN-принадлежность.
+                    body = self._body()
+                    result = app.distributed_cluster.auto_update.describe(
+                        body, self.headers, str(self.client_address[0]),
+                    )
+                    return self._json(HTTPStatus.OK, result)
+                except PermissionError as exc:
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": str(exc)})
+                except ValueError as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                except Exception as exc:
+                    problem("cluster_update_info_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Ошибка проверки версии"})
             if parsed.path == "/v1/cluster/task":
                 if not module_enabled(app.storage, "distributed-cluster"):
                     return self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "Распределённый кластер выключен"})
