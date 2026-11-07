@@ -258,7 +258,7 @@ class RealtimeChatManager:
 
         # Мгновенный проверяемый ответ на дату/время; погода через API.
         # Обычные беседы и их быстрый streaming не затрагиваются.
-        from .verified_clock import clock_answer
+        from .verified_clock import clock_answer, checked_clock_answer
         from .weather_runtime import is_weather_request, weather_answer
         clock = clock_answer(message)
         if clock is not None or is_weather_request(message):
@@ -275,14 +275,25 @@ class RealtimeChatManager:
                         "kind": "weather", "phase": "fetching",
                         "text": "Получаю прогноз из погодного сервиса…",
                     })
-                answer = str(clock if clock is not None else weather_answer(message) or "Не удалось получить прогноз.")
+                    answer = str(weather_answer(message) or "Не удалось получить прогноз.")
+                    sources = (
+                        [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
+                        if "Источник: Open-Meteo" in answer else []
+                    )
+                else:
+                    from .research_policy import research_reason
+                    if research_reason(message) == "явный запрос интернет-поиска":
+                        yield StreamEvent("activity", {
+                            "kind": "web_search", "phase": "searching",
+                            "text": "Проверяю дату в интернете дополнительно к часам компьютера…",
+                        })
+                        answer, sources = checked_clock_answer(message, self.app.live_search)
+                        answer = str(answer or clock)
+                    else:
+                        answer, sources = clock, []
                 if cancel.is_set():
                     yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
                     return
-                sources = (
-                    [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
-                    if "Источник: Open-Meteo" in answer else []
-                )
                 answered_at = self.app._save_assistant(sid, answer)
                 event("chat_factual_tool_answered", kind="clock" if clock is not None else "weather",
                       session_id=sid, request_id=rid, source_count=len(sources))
