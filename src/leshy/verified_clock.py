@@ -51,4 +51,43 @@ def clock_answer(message: str) -> str | None:
     )
 
 
-__all__ = ["clock_answer", "is_clock_request"]
+def checked_clock_answer(message: str, live_search=None) -> tuple[str | None, list[dict[str, str]]]:
+    """На обычный вопрос ответ мгновенный; при ЯВНОЙ просьбе ищем и в сети.
+
+    Дата всегда определяется ОС, но приложение честно отчитывается об
+    отдельном интернет-поиске, не подменяя им локальные часы.
+    """
+    answer = clock_answer(message)
+    if answer is None:
+        return None, []
+    from .research_policy import research_reason
+    if research_reason(message) != "явный запрос интернет-поиска" or not callable(live_search):
+        return answer, []
+    try:
+        result = live_search(
+            "сегодняшняя дата и текущий год",
+            limit=3, reason="явная проверка даты в интернете",
+        )
+        sources = [
+            {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
+            for item in (result.get("results") or [])
+            if isinstance(item, dict) and str(item.get("url") or "").startswith(("https://", "http://"))
+        ]
+        if sources:
+            answer += (
+                f"\nДополнительно интернет-поиск нашёл {len(sources)} источника(ов). "
+                "Они показаны отдельно и не заменяют проверку системных часов."
+            )
+        else:
+            answer += "\nИнтернет-поиск выполнен, но подходящих источников для независимой проверки часов нет."
+        return answer, sources
+    except Exception as exc:
+        answer += (
+            "\nИнтернет-поиск по Вашему запросу не удался ("
+            + type(exc).__name__ + "). Я сообщил дату по локальным часам, "
+            "не выдавая её за результат проверки в сети."
+        )
+        return answer, []
+
+
+__all__ = ["clock_answer", "checked_clock_answer", "is_clock_request"]
