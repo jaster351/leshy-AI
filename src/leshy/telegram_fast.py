@@ -9,6 +9,7 @@ from urllib import parse, error
 
 from .diagnostics import event, problem
 from .realtime_chat import RealtimeChatManager
+from .telegram_vision import (LocalTelegramVision, image_attachment, VisionUnavailable, VisionNotConfigured, TelegramImageError)
 from .telegram_rich import TelegramBridge as RichTelegramBridge, telegram_html_chunks
 
 
@@ -201,6 +202,41 @@ class FastTelegramBridge(RichTelegramBridge):
             self._send_with_retry("sendMessage", {"chat_id": chat_id, "text": rendered, "parse_mode": "HTML"}, timeout=10)
         return first_id
 
+    def _handle_vision_message(self, message: dict, *, chat_id, user_id: str, message_id) -> None:
+        """Раздельный vision-маршрут, сохраняющий Telegram owner и Reply."""
+        try:
+            answer = LocalTelegramVision(self).describe(message)
+            outcome = "success"
+        except VisionNotConfigured as exc:
+            answer = str(exc)
+            outcome = "not_configured"
+        except (VisionUnavailable, TelegramImageError) as exc:
+            answer = str(exc)
+            outcome = type(exc).__name__
+        except Exception as exc:
+            # Не включать токен Bot API, file_path, фото или prompt в логи.
+            problem("telegram_vision_failed", type(exc).__name__)
+            answer = "Не удалось обработать изображение локальной vision-моделью. Проверьте её доступность."
+            outcome = "unexpected"
+        self._send_answer(chat_id, answer, reply_to_message_id=int(message_id) if message_id else None)
+        owner_id = f"telegram:{user_id}"
+        session_id = f"telegram:{chat_id}:{user_id}"
+        try:
+            sid = self.app._ensure_session(owner_id, session_id)
+            from .storage import utcnow
+            caption = str(message.get("caption") or "").strip()[:2000]
+            with self.app.storage.connection() as conn:
+                conn.execute(
+                    "INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)",
+                    (sid, "user", "[Фото] " + (caption or "Опиши изображение"), utcnow()),
+                )
+            self.app._save_assistant(sid, answer)
+        except Exception as exc:
+            problem("telegram_vision_history_failed", type(exc).__name__)
+        self._social.mark_leshy_answered(message)
+        event("telegram_vision_processed", result=outcome, telegram_user_id=user_id,
+              reply_to_message_id=int(message_id) if message_id else None)
+
     def _handle_message(self, message: dict) -> None:
         chat = message.get("chat") or {}
         sender = message.get("from") or {}
@@ -208,7 +244,8 @@ class FastTelegramBridge(RichTelegramBridge):
         chat_id = chat.get("id")
         user_id = str(sender.get("id") or "")
         message_id = message.get("message_id")
-        if (not text and message.get("voice") is None) or chat_id is None or not user_id:
+        media = image_attachment(message)
+        if (not text and message.get("voice") is None and media is None) or chat_id is None or not user_id:
             return
 
         addressed, address_reason = self._social.addressed_to_leshy(message, bot_id=self._bot_id, bot_username=self._bot_username)
@@ -221,6 +258,11 @@ class FastTelegramBridge(RichTelegramBridge):
                 self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
             return
 
+        # Изображение не должно уходить в text-only LLM по полю caption.
+        # Сначала проверены адресация группы и Telegram allow-list.
+        if media is not None:
+            self._handle_vision_message(message, chat_id=chat_id, user_id=user_id, message_id=message_id)
+            return
         text = self._resolve_message_text(message, chat_id=chat_id, user_id=user_id)
         if not text:
             return
