@@ -25,12 +25,13 @@ BitTorrent, torrent-файлы и magnet-ссылки являются нейт�
 
 
 def with_leshy_identity(messages: list[ChatMessage]) -> list[ChatMessage]:
-    """Возвращает сообщения с одним начальным system-блоком.
+    """Возвращает сообщения ровно с одним system-блоком в самом начале.
 
-    Некоторые современные GGUF-шаблоны (в частности Qwen3.5) разрешают system
-    только в самом начале и отклоняют несколько последовательных system-сообщений.
-    Поэтому личность, память, локальные знания и результаты поиска объединяются в
-    один начальный блок, не меняя порядок пользовательской истории.
+    Строгие GGUF-шаблоны (в частности Qwen3.5) отклоняют system-сообщение,
+    встретившееся после user/assistant. Системные слои могут появляться не только
+    в начале после сборки памяти, RAG и live-search, поэтому собираем *все*
+    system-сообщения в единый начальный блок, сохраняя их исходный порядок.
+    Порядок несистемной истории не меняется.
     """
     items = list(messages)
     latest_user = next((str(item.content) for item in reversed(items) if item.role == "user"), "")
@@ -38,19 +39,19 @@ def with_leshy_identity(messages: list[ChatMessage]) -> list[ChatMessage]:
     identity = LESHY_IDENTITY_PROMPT if not temporal else LESHY_IDENTITY_PROMPT + "\n\n" + temporal
 
     system_parts = [identity]
-    first_non_system = 0
-    for index, item in enumerate(items):
-        if item.role != "system":
-            first_non_system = index
-            break
-        content = str(item.content or "").strip()
-        if content:
-            system_parts.append(content)
-    else:
-        first_non_system = len(items)
+    conversation: list[ChatMessage] = []
+    for item in items:
+        if item.role == "system":
+            content = str(item.content or "").strip()
+            # Не дублируем собственный identity prompt при повторной подготовке
+            # уже нормализованного списка сообщений.
+            if content and content != LESHY_IDENTITY_PROMPT and not content.startswith(LESHY_IDENTITY_PROMPT + "\n\n"):
+                system_parts.append(content)
+            continue
+        conversation.append(item)
 
     merged_system = ChatMessage("system", "\n\n".join(system_parts))
-    return [merged_system, *items[first_non_system:]]
+    return [merged_system, *conversation]
 
 
 __all__ = ["LESHY_IDENTITY_PROMPT", "with_leshy_identity"]

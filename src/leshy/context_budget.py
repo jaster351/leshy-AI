@@ -37,12 +37,24 @@ def _normalize_system_messages(messages: list[ChatMessage]) -> list[ChatMessage]
     return [ChatMessage("system", "\n\n".join(system_parts))] + dialogue
 
 
-def _truncate_content(content: str, target_tokens: int) -> str:
+def _truncate_content(content: str, target_tokens: int, *, preserve_head: bool = False) -> str:
+    """Обрезать текст строго до лимита, сохранив формулировку текущей цели.
+
+    Пользовательская цель часто стоит в начале длинного сообщения, а
+    цитируемый документ или вложение — в конце. Для последнего user
+    сохраняем обе части, а не только хвост вложения.
+    """
     max_chars = max(64, int(target_tokens) * 2)
     value = str(content)
     if len(value) <= max_chars:
         return value
-    return "[…контекст сокращён…]\n" + value[-max_chars:]
+    marker = "[…контекст сокращён…]\n"
+    available = max(1, max_chars - len(marker))
+    if preserve_head:
+        head_chars = min(available, max(48, available // 2))
+        tail_chars = available - head_chars
+        return value[:head_chars] + marker + (value[-tail_chars:] if tail_chars else "")
+    return marker + value[-available:]
 
 
 def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
@@ -67,16 +79,27 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
         kept = system + tail
     truncated = 0
     while estimator(kept) > budget and kept:
-        candidates = sorted(range(len(kept)), key=lambda i: (kept[i].role == "user" and i == len(kept) - 1, len(kept[i].content)))
+        # Сначала ужимаем старый диалог и систему; актуальный запрос
+        # пользователя — последний кандидат на сокращение.
+        candidates = sorted(
+            range(len(kept)),
+            key=lambda i: (
+                kept[i].role == "user" and i == len(kept) - 1,
+                -len(kept[i].content),
+            ),
+        )
         changed = False
-        for index in reversed(candidates):
+        for index in candidates:
             current = kept[index]
             current_tokens = max(1, (len(current.content) + 1) // 2)
             if current_tokens <= 64:
                 continue
             overflow = estimator(kept) - budget
             target = max(64, current_tokens - overflow - 16)
-            shortened = _truncate_content(current.content, target)
+            is_current_user = current.role == "user" and index == len(kept) - 1
+            shortened = _truncate_content(
+                current.content, target, preserve_head=is_current_user or current.role == "system"
+            )
             if shortened != current.content:
                 kept[index] = ChatMessage(current.role, shortened)
                 truncated += 1

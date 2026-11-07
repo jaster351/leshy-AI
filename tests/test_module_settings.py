@@ -24,11 +24,16 @@ class ModuleSettingsTests(unittest.TestCase):
                 "document-intelligence",
                 "computer-use",
                 "tools-marketplace",
+                "intelligent-memory",
+                "knowledge-graph",
+                "agent-orchestrator",
+                "distributed-cluster",
                 "parcel-tracking",
                 "network-blocking",
+                "phone-osint",
                 "support-consultant",
-                "superagent",
                 "lenta",
+                "superagent",
             },
         )
         self.assertTrue(all(item["enabled"] for item in states.values()))
@@ -54,6 +59,11 @@ class ModuleSettingsTests(unittest.TestCase):
         self.assertFalse(module_enabled(reopened, "network-blocking"))
         set_module_enabled(reopened, "network-blocking", True)
         self.assertTrue(module_enabled(self.storage, "network-blocking"))
+
+    def test_phone_osint_switch_is_available(self) -> None:
+        self.assertTrue(module_enabled(self.storage, "phone-osint"))
+        set_module_enabled(self.storage, "phone-osint", False)
+        self.assertFalse(module_enabled(self.storage, "phone-osint"))
 
     def test_unknown_module_is_rejected(self) -> None:
         with self.assertRaises(KeyError):

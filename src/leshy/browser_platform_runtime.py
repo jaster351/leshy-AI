@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 import re
 from threading import RLock
 from typing import Any, Iterator
@@ -119,6 +120,14 @@ class BrowserPlatform:
             return True
 
     @staticmethod
+    def _profile_arguments(owner_id: str) -> dict[str, str]:
+        """Изолировать browser cookies по проверенному owner, не раскрывая его в пути."""
+        owner = str(owner_id or "").strip()
+        if not owner:
+            raise ValueError("Browser Agent требует идентификатор владельца")
+        return {"profile_namespace": "owner", "profile_key": sha256(owner.encode("utf-8")).hexdigest()}
+
+    @staticmethod
     def _host(url: str) -> str:
         return (urlparse(str(url or "")).hostname or "").lower().strip(".")
 
@@ -184,7 +193,7 @@ class BrowserPlatform:
         lines.append("\nВыберите вариант, например: «забронируй первый» или «купи вариант 2». Перед действием Леший отдельно попросит подтверждение.")
         return "\n".join(lines)
 
-    def research(self, query: str, *, session_id: str) -> tuple[str, list[dict[str, str]]]:
+    def research(self, query: str, *, owner_id: str, session_id: str) -> tuple[str, list[dict[str, str]]]:
         result = self.app.live_search(query, limit=8, reason="Browser Agent: запрос пользователя")
         rows = list(result.get("results") or [])
         self._remember_results(session_id, rows)
@@ -206,6 +215,7 @@ class BrowserPlatform:
                 "allowed_hosts": hosts,
                 "use_vision": False,
                 "max_steps": 28,
+                **self._profile_arguments(owner_id),
             },
             description=query,
         )
@@ -218,7 +228,7 @@ class BrowserPlatform:
         sources = [{"title": row["title"], "url": row["url"]} for row in safe_rows]
         return answer, sources
 
-    def research_url(self, intent: BrowserConversationIntent, *, session_id: str) -> tuple[str, list[dict[str, str]]]:
+    def research_url(self, intent: BrowserConversationIntent, *, owner_id: str, session_id: str) -> tuple[str, list[dict[str, str]]]:
         host = self._host(intent.url)
         if not host:
             raise ValueError("Некорректный URL")
@@ -226,7 +236,7 @@ class BrowserPlatform:
             "research",
             intent.url,
             BrowserRisk.READ,
-            {"task": intent.text, "allowed_hosts": (host,), "use_vision": False, "max_steps": 20},
+            {"task": intent.text, "allowed_hosts": (host,), "use_vision": False, "max_steps": 20, **self._profile_arguments(owner_id)},
             description=intent.text,
         )
         result = self.agent.execute(action)
@@ -249,7 +259,21 @@ class BrowserPlatform:
             return rows[0]["url"]
         raise ValueError("Укажите номер варианта, например «забронируй первый».")
 
+    def _require_owned_approval_session(self, owner_id: str, session_id: str) -> None:
+        """Проверять существующую сессию в БД, не создавать её из approval-запроса."""
+        owner = str(owner_id or "").strip()
+        sid = str(session_id or "").strip()
+        if not owner or owner == "web:local" or len(owner) > 200 or not sid or len(sid) > 200:
+            raise PermissionError("Требуется действующая сессия пользователя")
+        with self.app.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM sessions WHERE id=? AND owner_id=?", (sid, owner)
+            ).fetchone()
+        if row is None:
+            raise PermissionError("Подтверждение не найдено")
+
     def request_external_action(self, intent: BrowserConversationIntent, *, owner_id: str, session_id: str) -> dict[str, Any]:
+        self._require_owned_approval_session(owner_id, session_id)
         url = self._selected_url(intent, session_id)
         host = self._host(url)
         if not host:
@@ -267,25 +291,28 @@ class BrowserPlatform:
                 "approval_summary": summary,
                 "use_vision": False,
                 "max_steps": 35,
+                **self._profile_arguments(owner_id),
             }
         else:
             risk = BrowserRisk.COMMIT
             action_name = "agent_commit"
             summary = f"Внешнее действие на {host}: {intent.text}"
-            arguments = {"task": intent.text, "allowed_hosts": (host,), "use_vision": False, "max_steps": 35}
+            arguments = {"task": intent.text, "allowed_hosts": (host,), "use_vision": False, "max_steps": 35, **self._profile_arguments(owner_id)}
 
         pending = self.approvals.request(
             owner_id,
             BrowserAction(action_name, url, risk, arguments, description=intent.text),
             summary=summary,
+            session_id=session_id,
         )
         return pending.public()
 
-    def resolve_approval(self, owner_id: str, approval_id: str, *, approved: bool) -> BrowserActionResult:
+    def resolve_approval(self, owner_id: str, approval_id: str, *, session_id: str, approved: bool) -> BrowserActionResult:
+        self._require_owned_approval_session(owner_id, session_id)
         if not approved:
-            self.approvals.deny(owner_id, approval_id)
+            self.approvals.deny(owner_id, approval_id, session_id=session_id)
             return BrowserActionResult("cancelled", "Действие отменено пользователем.")
-        action = self.approvals.consume(owner_id, approval_id)
+        action = self.approvals.consume(owner_id, approval_id, session_id=session_id)
         result = self.agent.execute(action, approved=True)
         event(
             "browser_platform_approved_action_finished",
@@ -301,10 +328,10 @@ class BrowserPlatform:
         if intent is None:
             raise ValueError("Сообщение не является Browser Agent intent")
         if intent.kind == "research":
-            answer, sources = self.research(intent.text, session_id=session_id)
+            answer, sources = self.research(intent.text, owner_id=owner_id, session_id=session_id)
             return answer, sources, None
         if intent.kind == "research_url":
-            answer, sources = self.research_url(intent, session_id=session_id)
+            answer, sources = self.research_url(intent, owner_id=owner_id, session_id=session_id)
             return answer, sources, None
         pending = self.request_external_action(intent, owner_id=owner_id, session_id=session_id)
         answer = (

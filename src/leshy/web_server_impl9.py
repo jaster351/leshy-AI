@@ -7,15 +7,20 @@ from . import web_server_impl8 as previous
 from .aquarium_simulation import AquariumSimulation
 from .diagnostics import problem
 
+
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
 
 
 def _runtime_html(settings) -> bytes:
-    html = previous._runtime_html(settings).decode("utf-8")
-    marker = '<script src="/aquarium-panel.js"></script>'
-    if marker not in html:
-        html = html.replace("</body>", marker + "\n</body>")
-    return html.encode("utf-8")
+    """Добавить только визуальный слой темы v2 поверх уже настроенного Web UI."""
+    html_text = previous._runtime_html(settings).decode("utf-8")
+    marker = '<script src="/forest-theme-v2.js"></script>'
+    if marker not in html_text:
+        html_text = html_text.replace("</body>", marker + "\n</body>")
+    aquarium_script = '<script src="/aquarium-panel.js"></script>'
+    if aquarium_script not in html_text:
+        html_text = html_text.replace("</body>", aquarium_script + "\n</body>")
+    return html_text.encode("utf-8")
 
 
 def _aquarium(app) -> AquariumSimulation:
@@ -28,6 +33,8 @@ def _aquarium(app) -> AquariumSimulation:
 
 def make_handler(app, telegram, settings, model_catalog):
     aquarium = _aquarium(app)
+    # Разговорные runtime-контракты, включая «Ленту», ставит impl7 до глобальной
+    # idempotency. Здесь намеренно меняется только внешний визуальный слой Web UI.
     Parent = _PREVIOUS_MAKE_HANDLER(app, telegram, settings, model_catalog)
 
     class Handler(Parent):
@@ -42,6 +49,11 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if parsed.path == "/forest-theme-v2.js":
+                try:
+                    return self._send_asset("forest-theme-v2.js", "application/javascript; charset=utf-8")
+                except FileNotFoundError:
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "forest-theme-v2.js не найден"})
             if parsed.path == "/aquarium-panel.js":
                 try:
                     return self._send_asset("aquarium-panel.js", "application/javascript; charset=utf-8")
