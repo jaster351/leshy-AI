@@ -101,7 +101,11 @@ class SidebarSessionActionsTests(unittest.TestCase):
     def test_runtime_adds_only_sidebar_module_to_reference_shell(self) -> None:
         original = web_server_impl7.shell._runtime_html
         try:
-            web_server_impl7.shell._runtime_html = lambda _settings: b"<html><body><script src=\"/chat-multitask.js\"></script></body></html>"
+            web_server_impl7.shell._runtime_html = lambda _settings: (
+                b'<html><body><aside class="sidebar"></aside>'
+                b'<section id="pane-chat"></section>'
+                b'<script src="/chat-multitask.js"></script></body></html>'
+            )
             rendered = web_server_impl7._runtime_html(object()).decode("utf-8")
         finally:
             web_server_impl7.shell._runtime_html = original

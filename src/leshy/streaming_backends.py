@@ -252,7 +252,7 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
             exception("adaptive_llm_stream_backend_failed", exc, backend=state.name,
                       latency_ms=latency_ms, cooldown_seconds=self.cooldown_seconds,
                       quarantined=fatal, hardware_mode=self._hardware_mode(), routing=list(routing))
-            errors.append(f"{state.name}: {exc}")
+            errors.append(f"{state.name}: {type(exc).__name__}: {str(exc)[:240]}")
             if yielded:
                 raise
             continue

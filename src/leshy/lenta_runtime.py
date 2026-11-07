@@ -85,7 +85,7 @@ def _explicit_lenta(text: str) -> bool:
         marker in low
         for marker in (
             "магазин", "товар", "продукт", "корзин", "цен", "стоит", "заказ", "достав",
-            "самовывоз", "куп", "оформ", "личн", "кабинет", "оплат", "налич",
+            "самовывоз", "куп", "оформ", "личн", "кабинет", "оплат", "налич", "войти", "авториз",
         )
     )
 
@@ -110,14 +110,18 @@ def _parse_explicit_intent(text: str) -> LentaIntent | None:
     payment = _payment(text)
     if any(marker in low for marker in _CAPABILITY):
         return LentaIntent("capability", text, payment)
-    if any(marker in low for marker in ("войти", "авториз", "личный кабинет", "личном кабинете")) and not any(
-        marker in low for marker in _ORDER
-    ):
-        return LentaIntent("login", text, payment)
+    # Действие имеет приоритет над словами о текущей авторизации.
+    # «Добавь мороженое в корзину в моём личном кабинете» — корзина,
+    # а не повторный вход. Вход нужен лишь при отдельной команде
+    # или когда соответствующий личный профиль ещё не авторизован.
     if any(marker in low for marker in _ORDER):
         return LentaIntent("checkout", text, payment)
-    if any(marker in low for marker in _CART):
+    if any(marker in low for marker in _CART) or (
+        "добавь" in low and any(x in low for x in ("морожен", "продукт", "товар"))
+    ):
         return LentaIntent("basket", text, payment)
+    if any(marker in low for marker in ("войти", "авториз", "личный кабинет", "личном кабинете")):
+        return LentaIntent("login", text, payment)
     if any(marker in low for marker in _PRICE):
         return LentaIntent("catalog", text, payment)
     return LentaIntent("catalog", text, payment)
@@ -372,8 +376,12 @@ def _basket_task(request_text: str, payment: str = "") -> str:
         payment_rule = f" Если сайт поддерживает этот вариант, выбери способ оплаты: {_payment_label(payment)}."
     return (
         "Работай только с корзиной текущего пользователя на lenta.com. Найди товары по запросу, добавь подходящие "
-        "позиции в корзину, выставь количество и используй только реально доступные товары/цены. Можно заменять "
-        "недоступный товар только очевидным близким аналогом и обязательно укажи замену в результате. "
+        "позиции в корзину, выставь количество и используй только реально доступные товары/цены. "
+        "Если пользователь просит САМЫЙ ДЕШЁВЫЙ товар (например, мороженое), сначала сравни цены "
+        "доступных подходящих вариантов именно в выбранном магазине/регионе, затем добавь в корзину "
+        "РОВНО ОДНУ единицу наиболее дешёвого подтверждённого товара. Не заявляй, что он самый дешёвый, "
+        "если не удалось проверить цены конкурирующих вариантов. "
+        "Можно заменять недоступный товар только очевидным близким аналогом и обязательно укажи замену в результате. "
         "НЕ нажимай финальную кнопку оформления/заказа и НЕ инициируй оплату."
         + payment_rule
         + " В конце верни краткое подтверждение: что лежит в корзине, количество, текущую итоговую сумму, "
