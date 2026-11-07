@@ -11,7 +11,7 @@ import socket
 import threading
 import time
 from typing import Any
-from urllib import request
+from urllib import parse, request
 
 from .cluster_orchestrator import ClusterNode, ClusterOrchestrator, ClusterResult, ClusterTask
 from .cluster_controls import autodiscovery_enabled
@@ -186,7 +186,7 @@ class LanPeerDiscovery:
                 self._peers.pop(key, None)
             return list(self._peers.values())
 
-    def _accept_packet(self, raw: bytes) -> None:
+    def _accept_packet(self, raw: bytes, source_ip: str = "") -> None:
         try:
             data = json.loads(raw.decode("utf-8"))
             signature = str(data.pop("signature", ""))
@@ -206,7 +206,11 @@ class LanPeerDiscovery:
                 self._record("invalid_packet")
                 return
             if node_id == self.identity.node_id:
-                self._record("same_node_id")
+                # Broadcast возвращает собственные объявления. Их нельзя считать
+                # признаком клонированного node-id второго компьютера.
+                own_ip = parse.urlsplit(self._last_node.endpoint).hostname if self._last_node else _local_ip()
+                if source_ip and source_ip != own_ip:
+                    self._record("same_node_id")
                 return
             peer = ClusterNode(
                 node_id=node_id,
@@ -245,8 +249,8 @@ class LanPeerDiscovery:
                     self.announce(self._last_node)
                     next_announce = now + 5.0
                 try:
-                    raw, _address = sock.recvfrom(_MAX_DISCOVERY_PACKET)
-                    self._accept_packet(raw)
+                    raw, address = sock.recvfrom(_MAX_DISCOVERY_PACKET)
+                    self._accept_packet(raw, str(address[0]))
                 except socket.timeout:
                     continue
                 except OSError:
