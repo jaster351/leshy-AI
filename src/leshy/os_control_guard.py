@@ -17,6 +17,9 @@ class OSControlGate:
         self.generation = 0
         self.processes = {}
         self.active = 0
+        # Подкласс контроллера может назначить callback для отзыва
+        # ожидающих подтверждений при изменении настройки из другого процесса.
+        self.on_disabled = None
         threading.Thread(target=self._watch, daemon=True, name="leshy-os-revocation").start()
 
     def enabled(self):
@@ -83,18 +86,31 @@ class OSControlGate:
 
     def disable(self):
         with self.lock:
-            if not self.disabled:
+            revoked_now = not self.disabled
+            if revoked_now:
                 self.generation += 1
             self.disabled = True
             procs = list(self.processes.values())
             active = self.active
+            callback = self.on_disabled if revoked_now else None
+        # Завершение контролируемых процессов и отзыв подтверждений должны
+        # сработать при смене SQLite-настройки из любого процесса.
         stopped = sum(1 for proc in procs if self.terminate(proc))
+        outcome = {"processes_stopped": stopped, "active_actions": active}
+        if callable(callback):
+            try:
+                outcome.update(callback() or {})
+            except Exception:
+                # Не выдавать ложный успешный отчёт об отзыве подтверждений.
+                outcome["approvals_cancel_failed"] = True
         with self.lock:
             for pid, proc in list(self.processes.items()):
                 if proc.poll() is not None:
                     self.processes.pop(pid, None)
-            remaining = sum(p.poll() is None for p in self.processes.values())
-        return {"processes_stopped": stopped, "processes_remaining": remaining, "active_actions": active}
+            outcome["processes_remaining"] = sum(
+                p.poll() is None for p in self.processes.values()
+            )
+        return outcome
 
     def sync(self):
         try:
@@ -123,8 +139,9 @@ class OSControlGate:
                     for pid, proc in list(self.processes.items()):
                         if proc.poll() is not None:
                             self.processes.pop(pid, None)
-                    running = bool(self.processes or self.active)
-                if running and not self.enabled():
+                # Важно: когда остались только ожидающие подтверждения,
+                # процессов уже нет, но смена switch всё ещё должна их отзывать.
+                if not self.enabled():
                     self.disable()
             except Exception:
                 pass

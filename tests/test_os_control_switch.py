@@ -6,7 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from leshy.os_control import OSActionResult, OperatingSystemController
 from leshy.storage import Storage
 from leshy.module_settings import set_module_enabled
@@ -130,6 +130,70 @@ class OperatingSystemSwitchTests(unittest.TestCase):
         self.assertEqual(answer["result"]["status"], "interrupted")
         self.assertIn("проверьте", answer["result"]["message"])
         self.assertTrue(target.exists())
+
+    def test_non_owner_telegram_cannot_request_system_action(self):
+        self.enable()
+        self.app.telegram = Mock()
+        self.app.telegram._is_owner.side_effect = lambda uid: uid == "100"
+        denied = self.controller.execute(
+            "system_status", owner_id="telegram:200"
+        )
+        self.assertFalse(denied.ok)
+        self.assertIn("хозяину", denied.summary)
+        self.assertTrue(self.controller.execute(
+            "system_status", owner_id="telegram:100"
+        ).ok)
+
+    def test_telegram_identity_without_bridge_is_denied(self):
+        self.enable()
+        with self.assertRaises(PermissionError):
+            self.controller.request_delete(
+                {"path": str(Path(self.tmp.name) / "file")},
+                owner_id="telegram:123",
+            )
+
+    def test_queued_approvals_are_revoked_when_switch_changes_externally(self):
+        self.enable()
+        path = Path(self.tmp.name) / "untouched.txt"
+        path.write_text("keep", encoding="utf-8")
+        proposal = self.controller.request_delete(
+            {"path": str(path)}, owner_id="web:local",
+        )
+        # Моделируем другой процесс, записавший настройку в SQLite
+        # минуя HTTP toggle, и имитируем один цикл watchdog.
+        set_module_enabled(self.storage, "os-control", False)
+        self.controller._gate.disable()
+        with self.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT status FROM os_action_approvals WHERE id=?",
+                (proposal["id"],),
+            ).fetchone()
+        self.assertEqual(row["status"], "cancelled")
+        self.enable()
+        self.assertEqual(
+            self.controller.resolve(proposal["id"], owner_id="web:local", allow=True)["status"],
+            "cancelled",
+        )
+        self.assertEqual(path.read_text(encoding="utf-8"), "keep")
+
+    def test_restart_with_os_disabled_revokes_old_approval(self):
+        self.enable()
+        path = Path(self.tmp.name) / "restart.txt"
+        path.write_text("keep", encoding="utf-8")
+        proposal = self.controller.request_delete(
+            {"path": str(path)}, owner_id="web:local",
+        )
+        set_module_enabled(self.storage, "os-control", False)
+        # Имитируем перезапуск с той же SQLite: нет автопринятия старой кнопки.
+        another = ApprovalOperatingSystemController(self.app)
+        self.addCleanup(another._gate.disable)
+        with self.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT status FROM os_action_approvals WHERE id=?",
+                (proposal["id"],),
+            ).fetchone()
+        self.assertEqual(row["status"], "cancelled")
+        self.assertEqual(path.read_text(encoding="utf-8"), "keep")
 
     def test_untracked_opening_is_refused(self):
         self.enable()

@@ -31,18 +31,31 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                 "CREATE INDEX IF NOT EXISTS ix_os_action_approvals_owner_status "
                 "ON os_action_approvals(owner_id,status,created_at)"
             )
+        self._gate.on_disabled = self._revoke_pending
+        # После рестарта при выключенной настройке старые кнопки опасных
+        # действий не должны оживать при следующем включении ОС.
+        if not self.enabled():
+            self._revoke_pending()
+
+    def _revoke_pending(self) -> dict[str, int]:
+        with self.storage.connection() as conn:
+            result = conn.execute(
+                "UPDATE os_action_approvals SET status='cancelled',resolved_at=? "
+                "WHERE status='pending'",
+                (utcnow(),),
+            )
+        outcome = {"approvals_cancelled": result.rowcount}
+        if result.rowcount:
+            self.storage.audit("os.control.pending_revoked", outcome)
+        return outcome
 
     def sync_enabled(self):
-        status = super().sync_enabled()
+        result = super().sync_enabled()
         if not self.enabled():
-            with self.storage.connection() as conn:
-                result = conn.execute(
-                    "UPDATE os_action_approvals SET status='cancelled',resolved_at=? WHERE status='pending'",
-                    (utcnow(),),
-                )
-                status["approvals_cancelled"] = result.rowcount
-            self.storage.audit("os.control.disabled", status)
-        return status
+            # Повторная сверка идемпотентна и покрывает первоначально
+            # отключённый контроллер. Сброс без повторного исполнения ОС.
+            result.update(self._revoke_pending())
+        return result
 
     def is_request(self, message: str) -> bool:
         text = str(message or "")
@@ -50,6 +63,10 @@ class ApprovalOperatingSystemController(OperatingSystemController):
 
     def execute(self, action: str, args: dict[str, Any] | None = None, *, owner_id: str = "web:local", approved_delete: bool = False) -> OSActionResult:
         normalized = str(action or "").strip().lower()
+        try:
+            self._authorize_owner(owner_id)
+        except PermissionError as exc:
+            return OSActionResult(normalized, False, str(exc))
         if not self.enabled():
             return OSActionResult(normalized, False, DISABLED)
         values = dict(args or {})
@@ -64,6 +81,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         return super().execute(action, values, owner_id=owner_id)
 
     def request_delete(self, args: dict[str, Any], *, owner_id: str, session_id: str = "") -> dict[str, Any]:
+        self._authorize_owner(owner_id)
         generation = self._gate.begin()
         try:
             return self._request_delete_guarded(args, owner_id=owner_id, session_id=session_id, generation=generation)
@@ -118,6 +136,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         }
 
     def pending(self, *, owner_id: str, session_id: str = "") -> list[dict[str, Any]]:
+        self._authorize_owner(owner_id)
         if not self.enabled():
             return []
         owner = str(owner_id or "").strip()[:200]
@@ -158,6 +177,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         """Одноразовое подтверждение: claim до исполнения, без повторных эффектов."""
         approval_id = str(approval_id or "").strip()
         owner = str(owner_id or "").strip()[:200]
+        self._authorize_owner(owner)
         if not self.enabled():
             return {"id": approval_id, "status": "cancelled", "message": DISABLED}
         with self.storage.connection() as conn:
@@ -252,6 +272,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
     def handle_user_request(self, message: str, *, owner_id: str = "web:local", session_id: str = "") -> str | dict[str, Any] | None:
         if not self.is_request(message):
             return None
+        self._authorize_owner(owner_id)
         if not self.enabled():
             return DISABLED
         direct = self._direct_with_delete(message)
@@ -285,6 +306,16 @@ class ApprovalOperatingSystemController(OperatingSystemController):
 
     def status(self) -> dict[str, Any]:
         value = super().status()
+        with self.storage.connection() as conn:
+            rows = conn.execute(
+                "SELECT status,COUNT(*) AS n FROM os_action_approvals "
+                "WHERE status IN ('pending','executing','interrupted') "
+                "GROUP BY status"
+            ).fetchall()
+        value["approval_counts"] = {str(row["status"]): int(row["n"]) for row in rows}
+        value["unfinished_approval_warning"] = any(
+            row["status"] in {"executing", "interrupted"} for row in rows
+        )
         value["delete_requires_owner_approval"] = True
         value["shell_delete_bypass_blocked"] = True
         value["approval_ttl_minutes"] = 10

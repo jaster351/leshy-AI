@@ -66,6 +66,22 @@ class OperatingSystemController:
     def assert_allowed(self):
         self._gate.check()
 
+    def _authorize_owner(self, owner_id: str) -> None:
+        """Telegram OS privileges are owner-only even for direct calls.
+
+        Сеть/API и Telegram могут передавать owner_id в разные маршруты;
+        факт, что строка начинается с telegram:, НЕ подтверждает роль.
+        """
+        identity = str(owner_id or "").strip()
+        if identity.startswith("telegram:"):
+            identifier = identity.partition(":")[2]
+            telegram = getattr(self.app, "telegram", None)
+            check = getattr(telegram, "_is_owner", None)
+            if not identifier or not callable(check) or not check(identifier):
+                raise PermissionError(
+                    "Управление ОС доступно только подтверждённому хозяину Telegram."
+                )
+
     def is_request(self, message: str) -> bool:
         return bool(self._INTENT_RE.search(str(message or "")))
 
@@ -150,6 +166,7 @@ class OperatingSystemController:
         started = time.monotonic()
         generation = None
         try:
+            self._authorize_owner(owner_id)
             generation = self._gate.begin()
             self._local.generation = generation
             if action == "system_status":
@@ -351,6 +368,7 @@ class OperatingSystemController:
     def handle_user_request(self, message: str, *, owner_id: str = "web:local", planned: tuple[str, dict[str, Any]] | None = None) -> str | None:
         if not self.is_request(message):
             return None
+        self._authorize_owner(owner_id)
         if not self.enabled():
             return DISABLED
         action, args = planned if planned is not None else (self._direct_command(message) or self._plan_natural(message))
