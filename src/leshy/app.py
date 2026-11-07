@@ -455,6 +455,19 @@ class LeshyApp:
             answer = cinema_no_data(cinema_plan)
             return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
 
+        if search_attempted and not sources:
+            answer = (
+                "Не удалось проверить информацию через интернет: " + search_error[:320]
+                if search_error else
+                "Интернет-поиск выполнен, но проверенных источников не найдено. "
+                "Не буду выдавать предположения за актуальные факты."
+            )
+            event("chat_web_search_without_sources", session_id=sid, failed=bool(search_error))
+            return {
+                "session_id": sid, "answer": answer,
+                "created_at": self._save_assistant(sid, answer), "sources": [],
+            }
+
         history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
         messages = context + history_messages
         event("chat_generation_started", session_id=sid, owner_id=owner_id, context_messages=len(messages))
