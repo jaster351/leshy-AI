@@ -24,6 +24,7 @@ from .session_admin import SessionAdminService
 from .startup_recovery import recover_unanswered
 from .streaming_backends import install_streaming_backends
 from .telegram_rich import TelegramBridge
+from .version import VERSION
 
 
 def _web_asset(settings: Settings, name: str) -> Path:
@@ -320,6 +321,68 @@ def _delayed_recovery(app: LeshyApp, telegram: TelegramBridge, delay_seconds: fl
     except Exception as exc: problem("startup_recovery_cycle_failed", str(exc), delay_seconds=delay_seconds)
 
 
+def _console_live_status(app: LeshyApp, stop: threading.Event) -> None:
+    """Обновляем состояние консоли даже без событий в журнале.
+
+    Период опроса — 5 с, каждые 30 с печатаем heartbeat, а изменения
+    состояния модели, загрузки, очереди и кластера выводим сразу.
+    Не печатаем запросы пользователей, токены или содержимое секретов.
+    """
+    started = time.monotonic()
+    last_signature = None
+    last_printed = 0.0
+    while not stop.wait(5.0):
+        try:
+            mode = str(app.settings.llm_backend or "native")
+            if mode == "native":
+                model = app.model_downloader.status()
+                state = str(model.get("state") or "неизвестно")
+                ready = bool(model.get("exists")) and bool(model.get("verified"))
+                if ready:
+                    model_text = "готова"
+                elif state in {"downloading", "verifying"}:
+                    total = max(0, int(model.get("total") or 0))
+                    completed = max(0, int(model.get("downloaded") or 0))
+                    progress = f"{min(100.0, completed * 100.0 / total):.1f}%" if total else "ожидание"
+                    model_text = f"{state} {progress}"
+                else:
+                    model_text = f"не готова ({state})"
+                error = str(model.get("error") or "").replace("\n", " ").replace("\r", " ").strip()
+                if error:
+                    model_text += ": " + error[:140]
+            else:
+                model_text = f"backend {mode}"
+
+            scheduler = getattr(app, "inference_scheduler", None)
+            queue = scheduler.status() if scheduler is not None else {}
+            active = bool(queue.get("active"))
+            waiting = max(0, int(queue.get("queue_depth") or 0))
+
+            cluster = getattr(app, "distributed_cluster", None)
+            cluster_status = cluster.status() if cluster is not None else {}
+            peers = max(0, int(cluster_status.get("peer_count") or 0))
+            inflight = sum(int(v) for v in (cluster_status.get("inflight_by_node") or {}).values())
+
+            signature = (model_text, active, waiting, peers, inflight)
+            now = time.monotonic()
+            if signature != last_signature or now - last_printed >= 30.0:
+                print(
+                    f"[Леший {VERSION}] {time.strftime('%H:%M:%S')} | "
+                    f"в работе {int((now-started)//60)} мин | "
+                    f"модель: {model_text} | "
+                    f"генерация: {'идёт' if active else 'ожидание'} | "
+                    f"очередь {waiting} | кластер {peers} узл. | задачи {inflight}",
+                    flush=True,
+                )
+                last_signature = signature
+                last_printed = now
+        except Exception as exc:
+            # Сбой мониторинга не должен прерывать чат или кластер.
+            if time.monotonic() - last_printed >= 30.0:
+                print(f"[Леший {VERSION}] Монитор консоли: {type(exc).__name__}", flush=True)
+                last_printed = time.monotonic()
+
+
 def serve(host: str | None = None, port: int | None = None) -> None:
     settings = Settings.from_env(); model_catalog = apply_saved_model_to_settings(settings); app = LeshyApp(settings)
     app.accelerator_runtime = CompatibleRuntimeManager(settings.brain_dir, model_name_provider=lambda: app.model_path.name)
@@ -330,9 +393,20 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0"); bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
     server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
     print(f"Леший {app.status()['version']} запущен: http://{bind_host}:{bind_port}")
+    console_stop = threading.Event()
+    console_thread = threading.Thread(
+        target=_console_live_status, args=(app, console_stop),
+        name="leshy-console-live-status", daemon=True,
+    )
+    console_thread.start()
     try: server.serve_forever()
     except KeyboardInterrupt: pass
-    finally: telegram.stop(); app.stop_background(); server.server_close()
+    finally:
+        console_stop.set()
+        console_thread.join(timeout=1.0)
+        telegram.stop()
+        app.stop_background()
+        server.server_close()
 
 
 def main() -> None:
