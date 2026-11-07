@@ -136,6 +136,9 @@ class TelegramBridge:
         self._stop = threading.Event()
         self._queue: queue.Queue[dict | None] = queue.Queue(maxsize=200)
         self._last_error = ""
+        # Ошибку расшифровки одного и того же DPAPI-файла не нужно
+        # повторять при каждом запросе статуса из нескольких вкладок.
+        self._token_load_error_key: tuple[str, int, int] | None = None
         self._offset = 0
         self._social = TelegramSocialPolicy()
         self._bot_id: int | None = None
@@ -158,7 +161,21 @@ class TelegramBridge:
                     event("telegram_secret_migrated")
                     return legacy
         except Exception as exc:
-            problem("telegram_secret_load_failed", str(exc))
+            try:
+                stat = self.token_path.stat()
+                fingerprint = (type(exc).__name__ + ": " + str(exc), stat.st_size, stat.st_mtime_ns)
+            except OSError:
+                fingerprint = (type(exc).__name__ + ": " + str(exc), -1, -1)
+            if fingerprint != self._token_load_error_key:
+                self._token_load_error_key = fingerprint
+                detail = str(exc)
+                if "CryptUnprotectData failed" in detail:
+                    detail += (
+                        "; Telegram-токен DPAPI привязан к исходному Windows-профилю. "
+                        "После переноса LeshyBrain настройте токен заново на этом ПК; "
+                        "не копируйте и не расшифровывайте секрет на другом узле."
+                    )
+                problem("telegram_secret_load_failed", detail)
         return ""
 
     def _allowed(self) -> set[str]:
