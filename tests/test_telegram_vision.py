@@ -98,7 +98,7 @@ class TelegramVisionTests(unittest.TestCase):
         class Response:
             def __enter__(self): return self
             def __exit__(self, *_): return False
-            def read(self, *_): return b"\\xff\\xd8\\xffDATA"
+            def read(self, *_): return b"\xff\xd8\xffDATA"
         opener = Mock()
         opener.open.return_value = Response()
         with patch("leshy.telegram_vision.request.build_opener", return_value=opener) as build:
