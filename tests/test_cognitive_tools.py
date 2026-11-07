@@ -100,7 +100,7 @@ class SuperAgentCognitiveLoopTests(unittest.TestCase):
         service = self.service([
             '{"action":"tool","tool":"runtime.version","arguments":{}}',
             '{"action":"tool","tool":"knowledge.search","arguments":{"query":"Python"}}',
-            '{"action":"tool","tool":"runtime.version","arguments":{}}',
+            '{"action":"tool","tool":"knowledge.search","arguments":{"query":"Linux"}}',
         ])
         state, report, _, _ = service._execute({"id": "SA-test", "request_text": "Назови версию и объясни Python"})
         self.assertEqual(state, "blocked")
