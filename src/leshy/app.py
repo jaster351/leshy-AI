@@ -360,7 +360,10 @@ class LeshyApp:
             factual = weather_answer(message)
             sources = (
                 [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
-                if factual is not None and "Источник: Open-Meteo" in factual else []
+                if factual is not None and "Источник: Open-Meteo" in factual else (
+                    [{"title": "wttr.in", "url": "https://wttr.in/"}]
+                    if factual is not None and "Источник: wttr.in" in factual else []
+                )
             )
         if factual is not None:
             event("chat_factual_tool_answered", kind="weather" if sources else "clock_or_unavailable_weather",
