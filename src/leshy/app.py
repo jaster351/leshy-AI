@@ -26,6 +26,7 @@ from .research_policy import research_reason
 from .self_learning import SelfLearningWorker
 from .storage import Storage, utcnow
 from .version import VERSION
+from .verified_clock import current_clock_context
 
 
 def _inference_timeout(default: int) -> float:
@@ -401,6 +402,7 @@ class LeshyApp:
                 "и нельзя понять, о каком человеке или объекте речь, задай одно короткое уточнение вместо выдумывания фактов.",
             )
         ]
+        context.append(ChatMessage("system", current_clock_context()))
         memory_context = self._memory_context(owner_id)
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
