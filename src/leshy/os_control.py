@@ -10,12 +10,14 @@ import shutil
 import socket
 import subprocess
 import time
+import threading
 from types import MethodType
 from typing import Any
 
 from .diagnostics import event, problem
 from .llm import ChatMessage
 from .storage import utcnow
+from .os_control_guard import OSControlGate, DISABLED
 
 
 @dataclass(slots=True)
@@ -52,6 +54,17 @@ class OperatingSystemController:
         self.brain_dir = Path(app.settings.brain_dir)
         self.home = Path.home()
         self._last_action: dict[str, Any] | None = None
+        self._gate = OSControlGate(self.storage)
+        self._local = threading.local()
+
+    def enabled(self):
+        return self._gate.enabled()
+
+    def sync_enabled(self):
+        return self._gate.sync()
+
+    def assert_allowed(self):
+        self._gate.check()
 
     def is_request(self, message: str) -> bool:
         return bool(self._INTENT_RE.search(str(message or "")))
@@ -101,30 +114,44 @@ class OperatingSystemController:
         if not command:
             raise ValueError("PowerShell-команда пустая")
         if self._DANGEROUS_RE.search(command):
-            raise PermissionError(
-                "Команда затрагивает критические системные/дисковые настройки. "
-                "Леший не выполняет такие команды автоматически из чата."
-            )
+            raise PermissionError("Критические системные команды запрещены")
         exe = shutil.which("powershell.exe") or shutil.which("pwsh.exe") or shutil.which("powershell") or shutil.which("pwsh")
         if not exe:
             raise RuntimeError("PowerShell не найден")
-        proc = subprocess.run(
-            [exe, "-NoProfile", "-NonInteractive", "-Command", command],
-            capture_output=True,
-            text=True,
-            timeout=max(1, min(int(timeout), 180)),
-            creationflags=(0x08000000 if os.name == "nt" else 0),
-        )
-        output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
-        if proc.returncode != 0:
-            raise RuntimeError(f"PowerShell exit {proc.returncode}: {self._clip(output, 4000)}")
-        return self._clip(output.strip())
+        generation = getattr(self._local, "generation", None)
+        self._gate.check(generation)
+        proc = self._gate.launch([exe, "-NoProfile", "-NonInteractive", "-Command", command], capture=True)
+        deadline = time.monotonic() + max(1, min(int(timeout), 180))
+        try:
+            while True:
+                self._gate.check(generation)
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError("Истекло время PowerShell-команды")
+                try:
+                    out, err = proc.communicate(timeout=min(0.25, left))
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+            self._gate.check(generation)
+            output = (out or b"").decode("utf-8", errors="replace")
+            errors = (err or b"").decode("utf-8", errors="replace")
+            if proc.returncode != 0:
+                raise RuntimeError(f"PowerShell exit {proc.returncode}: {self._clip(output+errors,4000)}")
+            return self._clip(output + (chr(10)+errors if errors else ""))
+        finally:
+            if proc.poll() is None:
+                self._gate.terminate(proc)
+            self._gate.unregister(proc)
 
     def execute(self, action: str, args: dict[str, Any] | None = None, *, owner_id: str = "web:local") -> OSActionResult:
         action = str(action or "").strip().lower()
         args = dict(args or {})
         started = time.monotonic()
+        generation = None
         try:
+            generation = self._gate.begin()
+            self._local.generation = generation
             if action == "system_status":
                 root = Path(os.getenv("SystemDrive", "C:")) / "\\" if os.name == "nt" else Path("/")
                 usage = shutil.disk_usage(root)
@@ -208,7 +235,7 @@ class OperatingSystemController:
                 if not program: raise ValueError("Не указана программа")
                 proc_args = args.get("args") or []
                 if isinstance(proc_args, str): proc_args = [proc_args]
-                proc = subprocess.Popen([program, *[str(x) for x in proc_args]], cwd=str(args.get("cwd") or self.home))
+                proc = self._gate.launch([program, *[str(x) for x in proc_args]], cwd=str(args.get("cwd") or self.home))
                 result = OSActionResult(action, True, f"Программа запущена: {program} · PID {proc.pid}", {"pid": proc.pid})
 
             elif action == "stop_process":
@@ -223,9 +250,7 @@ class OperatingSystemController:
             elif action == "open_path":
                 value = str(args.get("path") or args.get("target") or "").strip()
                 if not value: raise ValueError("Не указан путь/адрес")
-                if os.name == "nt": os.startfile(value)  # type: ignore[attr-defined]
-                else: subprocess.Popen(["xdg-open", value])
-                result = OSActionResult(action, True, f"Открыто: {value}")
+                raise PermissionError("Нельзя открывать внешние обработчики файлов: их процессы не отслеживаются для остановки.")
 
             elif action == "powershell":
                 output = self._powershell(str(args.get("command") or ""), timeout=int(args.get("timeout") or 60))
@@ -233,10 +258,14 @@ class OperatingSystemController:
 
             else:
                 raise ValueError(f"Неизвестное действие ОС: {action}")
+            self._gate.check(generation)
         except Exception as exc:
             result = OSActionResult(action, False, str(exc), None)
             problem("os_action_failed", str(exc), action=action, owner_id=str(owner_id)[:200])
-
+        finally:
+            self._local.generation = None
+            if generation is not None:
+                self._gate.finish()
         self._audit(action, args, result, owner_id=owner_id)
         event("os_action_finished", action=action, ok=result.ok, latency_ms=int((time.monotonic() - started) * 1000))
         return result
@@ -262,6 +291,7 @@ class OperatingSystemController:
         return mapping.get(cmd)
 
     def _plan_natural(self, message: str) -> tuple[str, dict[str, Any]]:
+        self.assert_allowed()
         prompt = [
             ChatMessage("system", "/no_think\nТы планировщик локального Windows-инструмента Лешего. Верни ТОЛЬКО JSON без markdown. "
                         "Схема: {\"action\":\"...\",\"args\":{...}}. Разрешённые action: system_status,list_dir,read_text,write_text,make_dir,copy,move,delete,process_list,start_process,stop_process,open_path,powershell. "
@@ -280,6 +310,8 @@ class OperatingSystemController:
     def handle_user_request(self, message: str, *, owner_id: str = "web:local", planned: tuple[str, dict[str, Any]] | None = None) -> str | None:
         if not self.is_request(message):
             return None
+        if not self.enabled():
+            return DISABLED
         action, args = planned if planned is not None else (self._direct_command(message) or self._plan_natural(message))
 
         if action == "help":
@@ -301,7 +333,7 @@ class OperatingSystemController:
 
     def status(self) -> dict[str, Any]:
         return {
-            "enabled": True,
+            **self._gate.status(),
             "platform": platform.system(),
             "runs_with_process_privileges": True,
             "uac_bypass": False,
@@ -322,6 +354,9 @@ def install_os_control(app) -> OperatingSystemController:
     def chat_with_os(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None):
         text = str(message or "").strip()
         if controller.is_request(text):
+            if not controller.enabled():
+                sid = self._ensure_session(owner_id, session_id)
+                return {"session_id": sid, "answer": DISABLED, "created_at": self._save_assistant(sid, DISABLED), "sources": [], "os_action": True}
             # OS intent matching is intentionally broad (e.g. "открой"). The LLM
             # may correctly select a web or browser action. Never send such an
             # action to OperatingSystemController.execute: route it back through

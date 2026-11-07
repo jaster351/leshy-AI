@@ -82,6 +82,7 @@
       render(data.items||[]);
       if(name==='distributed-cluster')await loadClusterStats();
       if(status)status.textContent=data.message||'Настройка сохранена.';
+      if(name==='os-control'&&current)window.alert(data.message||'Управление ОС выключено; процессы Лешего остановлены.');
     }catch(error){
       if(status)status.textContent='Ошибка: '+error.message;
     }finally{

@@ -34,9 +34,15 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         description="Локальный разбор PDF, DOCX, XLSX, PPTX и текстовых документов в Markdown для анализа, памяти и RAG через MarkItDown с резервным PDF-парсером.",
     ),
     ModuleSettingDefinition(
+        name="os-control", title="Управление операционной системой",
+        description="Аварийный выключатель прав ОС. Выключен по умолчанию; останавливает процессы, запущенные Лешим.",
+        default_enabled=False,
+    ),
+    ModuleSettingDefinition(
         name="computer-use",
         title="Computer Use",
         description="Локальное управление desktop UI по циклу увидеть → выполнить → повторно увидеть → проверить. Опасные действия требуют подтверждения пользователя.",
+        dependencies=("os-control",),
     ),
     ModuleSettingDefinition(
         name="tools-marketplace",

@@ -113,13 +113,19 @@ main{{max-width:820px;margin:0 auto;padding:34px 18px 70px}}h1{{font-size:20px;m
     return page.encode("utf-8")
 
 
-def _sync_runtime_after_module_change(app, module_name: str) -> None:
+def _sync_runtime_after_module_change(app, module_name: str):
     """Применить переключатель сразу, без перезапуска Лешего."""
+    outcome = None
+    if module_name == "os-control":
+        controller = getattr(app, "os_control", None)
+        if controller is not None:
+            outcome = controller.sync_enabled()
     if module_name in {"parcel-tracking", "human-browser"}:
         sync_parcel_runtime_state(app)
     if module_name == "superagent":
         sync_superagent_runtime_state(app)
     sync_advanced_module_state(app, module_name)
+    return outcome
 
 
 def make_handler(app, telegram, settings, model_catalog):
@@ -224,9 +230,15 @@ def make_handler(app, telegram, settings, model_catalog):
                     if not name or not isinstance(enabled, bool):
                         raise ValueError("Нужны name и enabled=true/false")
                     state = set_module_enabled(app.storage, name, enabled)
-                    _sync_runtime_after_module_change(app, name)
+                    outcome = _sync_runtime_after_module_change(app, name)
                     items = list_module_states(app.storage)
                     message = f"Модуль «{state['title']}» {'включён' if enabled else 'выключен'}."
+                    if name == "os-control" and not enabled:
+                        outcome = outcome or {}
+                        message = ("Управление ОС ВЫКЛЮЧЕНО. Новые операции запрещены. "
+                                   f"Остановлено процессов Лешего: {outcome.get('processes_stopped',0)}; "
+                                   f"остались без подтверждения остановки: {outcome.get('processes_remaining',0)}; "
+                                   f"отменено подтверждений: {outcome.get('approvals_cancelled',0)}.")
                     if enabled and not state.get("enabled"):
                         disabled = [dep.get("name") for dep in state.get("dependencies", []) if not dep.get("enabled")]
                         if disabled:

@@ -8,6 +8,7 @@ from typing import Any
 
 from .os_control import OperatingSystemController, OSActionResult
 from .storage import utcnow
+from .os_control_guard import DISABLED
 
 
 class ApprovalOperatingSystemController(OperatingSystemController):
@@ -31,12 +32,26 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                 "ON os_action_approvals(owner_id,status,created_at)"
             )
 
+    def sync_enabled(self):
+        status = super().sync_enabled()
+        if not self.enabled():
+            with self.storage.connection() as conn:
+                result = conn.execute(
+                    "UPDATE os_action_approvals SET status='cancelled',resolved_at=? WHERE status='pending'",
+                    (utcnow(),),
+                )
+                status["approvals_cancelled"] = result.rowcount
+            self.storage.audit("os.control.disabled", status)
+        return status
+
     def is_request(self, message: str) -> bool:
         text = str(message or "")
         return bool(super().is_request(text) or re.match(r"(?i)^\s*/os\s+(?:delete|rm)\b", text))
 
     def execute(self, action: str, args: dict[str, Any] | None = None, *, owner_id: str = "web:local", approved_delete: bool = False) -> OSActionResult:
         normalized = str(action or "").strip().lower()
+        if not self.enabled():
+            return OSActionResult(normalized, False, DISABLED)
         values = dict(args or {})
         if normalized == "delete" and not approved_delete:
             return OSActionResult("delete", False, "Удаление возможно только после отдельного подтверждения владельца")
@@ -49,6 +64,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         return super().execute(action, values, owner_id=owner_id)
 
     def request_delete(self, args: dict[str, Any], *, owner_id: str, session_id: str = "") -> dict[str, Any]:
+        self.assert_allowed()
         path = self._path(args.get("path"))
         if self._is_root_or_system(path):
             raise PermissionError("Корень диска и системные каталоги нельзя удалить через чат")
@@ -86,6 +102,8 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         }
 
     def pending(self, *, owner_id: str, session_id: str = "") -> list[dict[str, Any]]:
+        if not self.enabled():
+            return []
         owner = str(owner_id or "").strip()[:200]
         sid = str(session_id or "").strip()[:200]
         with self.storage.connection() as conn:
@@ -123,6 +141,8 @@ class ApprovalOperatingSystemController(OperatingSystemController):
     def resolve(self, approval_id: str, *, owner_id: str, allow: bool) -> dict[str, Any]:
         approval_id = str(approval_id or "").strip()
         owner = str(owner_id or "").strip()[:200]
+        if not self.enabled():
+            return {"id": approval_id, "status": "cancelled", "message": DISABLED}
         with self.storage.connection() as conn:
             row = conn.execute("SELECT * FROM os_action_approvals WHERE id=?", (approval_id,)).fetchone()
         if row is None:
@@ -147,6 +167,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             self.storage.audit("os.approval_cancelled", {"id": approval_id, "owner_id": owner})
             return {"id": approval_id, "status": "cancelled", "message": message}
 
+        self.assert_allowed()
         args = json.loads(str(row["arguments_json"]) or "{}")
         result = OperatingSystemController.execute(self, "delete", args, owner_id=owner)
         final_status = "executed" if result.ok else "failed"
@@ -169,6 +190,8 @@ class ApprovalOperatingSystemController(OperatingSystemController):
     def handle_user_request(self, message: str, *, owner_id: str = "web:local", session_id: str = "") -> str | dict[str, Any] | None:
         if not self.is_request(message):
             return None
+        if not self.enabled():
+            return DISABLED
         direct = self._direct_with_delete(message)
         if direct is not None:
             action, args = direct
