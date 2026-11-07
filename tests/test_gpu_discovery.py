@@ -98,7 +98,7 @@ class GPUDiscoveryTests(unittest.TestCase):
         self.assertTrue(caps.gpu)
         self.assertEqual(caps.gpu_names, ("Generic GPU",))
         self.assertEqual(caps.gpu_devices, devices)
-        self.assertFalse(caps.gpu_backend_verified)
+        self.assertFalse(caps.gpu_offload_compiled)
         self.assertTrue(caps.gpu_offload_runtime)  # кандидат, требуется запуск/health-check
         self.assertEqual(resolve_execution_plan(HardwareConfig(), caps).chat_backend, "vulkan")
 
@@ -111,7 +111,7 @@ class GPUDiscoveryTests(unittest.TestCase):
         ):
             caps = detect_hardware()
         self.assertFalse(caps.gpu)
-        self.assertFalse(caps.gpu_backend_verified)
+        self.assertFalse(caps.gpu_offload_compiled)
         self.assertEqual(resolve_execution_plan(HardwareConfig(), caps).chat_device, "cpu")
 
 
