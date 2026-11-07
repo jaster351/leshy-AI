@@ -162,6 +162,10 @@ def linux_gpu_devices(sysfs_root: Path | None = None, *, lspci_output: str | Non
             bus = device_path.resolve().name.lower()
         except OSError:
             bus = card.name
+        # В тестовых/виртуальных sysfs путь может быть обычной папкой
+        # device, а не ссылкой на PCI BDF. Тогда используем имя card.
+        if not re.fullmatch(r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\\.[0-7]", bus):
+            bus = card.name
         if bus in seen:
             continue
         seen.add(bus)
