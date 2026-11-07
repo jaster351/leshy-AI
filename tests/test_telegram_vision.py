@@ -95,9 +95,12 @@ class TelegramVisionTests(unittest.TestCase):
         bridge = Mock()
         bridge._api.return_value = {"file_size": 4, "file_path": "photos/file.jpg"}
         bridge._token.return_value = "secret"
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b"\\xff\\xd8\\xffDATA"
         opener = Mock()
-        opener.open.return_value.__enter__ = Mock(return_value=Mock(read=Mock(return_value=b"\\xff\\xd8\\xffDATA")))
-        opener.open.return_value.__exit__ = Mock(return_value=False)
+        opener.open.return_value = Response()
         with patch("leshy.telegram_vision.request.build_opener", return_value=opener) as build:
             self.assertTrue(LocalTelegramVision(bridge)._download({"file_id": "file"}).startswith(b"\\xff\\xd8\\xff"))
         handlers = build.call_args.args
