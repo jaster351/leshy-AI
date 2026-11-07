@@ -164,13 +164,26 @@ class SuperAgentService:
         try:
             self._recover_interrupted()
             self._artifact_recovery = self._artifacts.reconcile()
-            if any(self._artifact_recovery.get(key, 0) for key in ("applied", "failed", "expired")):
+            if any(self._artifact_recovery.get(k, 0) for k in ("applied", "failed", "expired", "pending")):
                 event(
                     "cognitive_artifact_recovered",
                     applied=self._artifact_recovery["applied"],
                     failed=self._artifact_recovery["failed"],
                     expired=self._artifact_recovery["expired"],
+                    pending=self._artifact_recovery["pending"],
                 )
+            # Повторно доставляем неотправленный отчёт после SQLite commit.
+            # Новый вызов LLM или изменяющего инструмента не требуется.
+            with self.storage.connection() as conn:
+                undelivered = conn.execute(
+                    "SELECT id FROM superagent_tickets WHERE delivered=0 "
+                    "AND state IN ('ready','waiting','blocked','failed') "
+                    "ORDER BY updated_at LIMIT 100"
+                ).fetchall()
+            ids = self._artifact_recovery.get("ticket_ids", [])
+            self._artifact_recovery["ticket_ids"] = list(dict.fromkeys(
+                ids + [str(row["id"]) for row in undelivered]
+            ))
             event("superagent_process_leadership_acquired")
             return True
         except BaseException:
@@ -310,6 +323,13 @@ class SuperAgentService:
         if ticket["state"] not in {"failed", "blocked", "waiting"}:
             raise ValueError("Повтор доступен только для ожидающего, заблокированного или неудачного задания")
         with self.storage.connection() as conn:
+            pending = conn.execute(
+                "SELECT id FROM superagent_artifacts WHERE ticket_id=? AND state='pending'",
+                (ticket_id,),
+            ).fetchone()
+            if pending:
+                raise ValueError("Документ уже подготовлен: используйте /agent preview, "
+                                 "/agent approve или /agent reject.")
             conn.execute(
                 "UPDATE superagent_tickets SET state='queued',attention='',next_run_epoch=0,delivered=0,updated_at=? WHERE id=?",
                 (utcnow(), ticket_id),
@@ -324,6 +344,13 @@ class SuperAgentService:
             raise ValueError("Ответ пуст")
         now = utcnow()
         with self.storage.connection() as conn:
+            pending = conn.execute(
+                "SELECT id FROM superagent_artifacts WHERE ticket_id=? AND state='pending'",
+                (ticket_id,),
+            ).fetchone()
+            if pending:
+                raise ValueError("Ответ в чате не подтверждает документ. "
+                                 "Используйте /agent preview, /agent approve или /agent reject.")
             conn.execute(
                 "INSERT INTO superagent_inputs(ticket_id,kind,content,created_at) VALUES(?,?,?,?)",
                 (ticket_id, "human", value[:12000], now),

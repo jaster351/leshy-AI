@@ -61,6 +61,49 @@ class ArtifactApprovalTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.approve_artifact(proposal["id"], "web:owner-a")
 
+    def test_pending_proposal_after_crash_restores_waiting_without_llm(self):
+        ticket_id, proposal = self._proposal()
+        with self.storage.connection() as conn:
+            conn.execute("UPDATE superagent_tickets SET state='working' WHERE id=?", (ticket_id,))
+        restored = self._restart()
+        ticket = restored.get(ticket_id, owner_id="web:owner-a")
+        self.assertEqual(ticket["state"], "waiting")
+        self.assertIn(proposal["id"], ticket["attention"])
+        restored.app.llm.chat.assert_not_called()
+        self.assertFalse((self.root / "workspace").exists())
+
+    def test_pending_proposal_blocks_retry_and_chat_answer(self):
+        ticket_id, proposal = self._proposal()
+        with self.assertRaises(ValueError):
+            self.service.retry(ticket_id, "web:owner-a")
+        with self.assertRaises(ValueError):
+            self.service.answer(ticket_id, "web:owner-a", "Да, сохрани")
+        self.assertEqual(self.service.preview_artifact(proposal["id"], "web:owner-a")["state"], "pending")
+        self.assertEqual(self.service.get(ticket_id, owner_id="web:owner-a")["state"], "waiting")
+
+    def test_applied_file_and_queued_ticket_reconciles_without_rewrite(self):
+        ticket_id, proposal = self._proposal()
+        row = self.service._artifacts._row(proposal["id"], "web:owner-a")
+        target = self.service._artifacts._target(row)
+        target.write_text("# Готово", encoding="utf-8")
+        with self.storage.connection() as conn:
+            conn.execute("UPDATE superagent_artifacts SET state='applying' WHERE id=?", (proposal["id"],))
+            conn.execute("UPDATE superagent_tickets SET state='queued' WHERE id=?", (ticket_id,))
+        restored = self._restart()
+        self.assertEqual(restored.get(ticket_id, owner_id="web:owner-a")["state"], "ready")
+        self.assertEqual(target.read_text(encoding="utf-8"), "# Готово")
+
+    def test_failed_receipt_with_valid_file_is_verified_without_rewrite(self):
+        ticket_id, proposal = self._proposal()
+        row = self.service._artifacts._row(proposal["id"], "web:owner-a")
+        target = self.service._artifacts._target(row)
+        target.write_text("# Готово", encoding="utf-8")
+        with self.storage.connection() as conn:
+            conn.execute("UPDATE superagent_artifacts SET state='failed' WHERE id=?", (proposal["id"],))
+        restored = self._restart()
+        self.assertEqual(restored.get(ticket_id, owner_id="web:owner-a")["state"], "ready")
+        self.assertEqual(target.read_text(encoding="utf-8"), "# Готово")
+
     def test_rejection_does_not_write(self):
         ticket_id, p = self._proposal()
         self.service.reject_artifact(p["id"], "web:owner-a")

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 import tempfile
 import unittest
@@ -73,6 +75,39 @@ class SuperAgentLeaseTests(unittest.TestCase):
         leader.stop()
         self.assertTrue(follower._activate())
         self.assertEqual(follower.get(ticket["id"], owner_id="web:owner")["state"], "queued")
+
+    def test_os_releases_lock_after_forced_process_exit(self):
+        """Фактический kill дочернего процесса должен освобождать файловый lock."""
+        root = Path(__file__).resolve().parents[1]
+        code = """\
+import sys
+import time
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd() / 'src'))
+from leshy.cognitive_lease import SuperAgentProcessLease
+lease = SuperAgentProcessLease(sys.argv[1])
+assert lease.try_acquire()
+print('LOCKED', flush=True)
+time.sleep(300)
+"""
+        child = subprocess.Popen(
+            [sys.executable, "-u", "-c", code, str(self.db)],
+            cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "LOCKED")
+            follower = SuperAgentProcessLease(self.db)
+            self.addCleanup(follower.release)
+            self.assertFalse(follower.try_acquire())
+            child.kill()
+            child.wait(timeout=10)
+            self.assertTrue(follower.try_acquire())
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=10)
+            child.stdout.close()
+            child.stderr.close()
 
     def test_lease_release_does_not_delete_lock_file(self):
         first = SuperAgentProcessLease(self.db)

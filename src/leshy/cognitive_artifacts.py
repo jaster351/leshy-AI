@@ -209,39 +209,50 @@ class CognitiveArtifactGate:
             return None
 
     def reconcile(self) -> dict[str, Any]:
-        """При старте разрешить неопределённые записи без повторного создания файла.
+        """Восстановление без повторного создания файла или вызова LLM.
 
-        applying + совпадающий файл => applied; иначе failed.
-        applied + задание waiting => восстановить ready лишь при наличии файла.
-        pending + истёк TTL => expired. Никакие файлы не создаются/удаляются.
+        pending + queued -> waiting; applying/applied/failed сверяются по SHA-256.
+        Действия над внешним состоянием и запись файлов здесь запрещены.
         """
         with self.storage.connection() as conn:
             rows = conn.execute(
-                "SELECT a.* FROM superagent_artifacts a "
+                "SELECT a.*,t.state AS ticket_state FROM superagent_artifacts a "
                 "JOIN superagent_tickets t ON t.id=a.ticket_id "
                 "WHERE a.state='applying' "
-                "OR (a.state='applied' AND t.state='waiting') "
-                "OR (a.state='pending' AND a.expires_epoch<=?) "
+                "OR (a.state IN ('applied','failed') AND t.state IN ('waiting','queued')) "
+                "OR (a.state='pending' AND (a.expires_epoch<=? OR t.state='queued')) "
                 "ORDER BY a.created_at",
                 (time.time(),),
             ).fetchall()
-        counts = {"applied": 0, "failed": 0, "expired": 0}
+        counts = {"applied": 0, "failed": 0, "expired": 0, "pending": 0}
         changed_tickets: list[str] = []
         for fetched in rows:
             row = dict(fetched)
-            state_before = str(row["state"])
-            target = None
-            if state_before == "pending":
-                state_after = "expired"
-                report = "Срок подтверждения документа истёк. Новый файл не создан."
+            before = str(row["state"])
+            if before == "pending":
+                if time.time() >= float(row["expires_epoch"]):
+                    after, ticket_state = "expired", "blocked"
+                    attention = ""
+                    report = "Срок подтверждения документа истёк. Новый файл не создан."
+                else:
+                    after, ticket_state = "pending", "waiting"
+                    attention = f"Подтвердите создание файла: /agent approve {row['id']}"
+                    report = (
+                        f"Восстановлено ранее подготовленное предложение «{row['title']}». "
+                        f"Просмотр: /agent preview {row['id']}; "
+                        f"подтверждение: /agent approve {row['id']}; "
+                        f"отказ: /agent reject {row['id']}."
+                    )
             else:
                 target = self._verified_existing(row)
-                state_after = "applied" if target is not None else "failed"
+                after = "applied" if target is not None else "failed"
+                ticket_state = "ready" if target is not None else "blocked"
+                attention = ""
                 report = (
-                    f"Созданный документ восстановлен и проверен: {target}"
+                    f"Документ восстановлен и проверен: {target}"
                     if target is not None else
-                    "Запись документа была прервана либо файл отсутствует/изменён. "
-                    "Автоматический повтор запрещён; проверьте каталог артефактов."
+                    "Документ не подтверждён: файл отсутствует, повреждён "
+                    "либо недоступен. Повторное создание запрещено."
                 )
             now = utcnow()
             with self.storage.connection() as conn:
@@ -249,26 +260,26 @@ class CognitiveArtifactGate:
                     "SELECT state FROM superagent_artifacts WHERE id=?",
                     (row["id"],),
                 ).fetchone()
-                if current is None or str(current["state"]) != state_before:
+                if current is None or str(current["state"]) != before:
                     continue
-                if state_after != state_before:
-                    changed = conn.execute(
+                if after != before:
+                    updated = conn.execute(
                         "UPDATE superagent_artifacts SET state=?,finished_at=? "
                         "WHERE id=? AND state=?",
-                        (state_after, now, row["id"], state_before),
+                        (after, now, row["id"], before),
                     )
-                    if changed.rowcount != 1:
+                    if updated.rowcount != 1:
                         continue
-                ticket_state = "ready" if state_after == "applied" else "blocked"
-                ticket_changed = conn.execute(
-                    "UPDATE superagent_tickets SET state=?,latest_report=?,attention='',"
-                    "delivered=0,updated_at=? "
-                    "WHERE id=? AND owner_id=? AND state='waiting'",
-                    (ticket_state, report, now, row["ticket_id"], row["owner_id"]),
+                ticket_updated = conn.execute(
+                    "UPDATE superagent_tickets SET state=?,latest_report=?,attention=?,"
+                    "delivered=0,updated_at=? WHERE id=? AND owner_id=? "
+                    "AND state IN ('waiting','queued')",
+                    (ticket_state, report, attention, now,
+                     row["ticket_id"], row["owner_id"]),
                 )
-            if state_after != state_before or ticket_changed.rowcount:
-                counts[state_after] += 1
-            if ticket_changed.rowcount:
+            if after != before or ticket_updated.rowcount:
+                counts[after] += 1
+            if ticket_updated.rowcount:
                 changed_tickets.append(str(row["ticket_id"]))
         return {**counts, "ticket_ids": changed_tickets}
 
