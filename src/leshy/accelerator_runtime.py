@@ -347,6 +347,11 @@ class LlamaServerLLM:
         }
 
     def chat(self, messages: list[ChatMessage]) -> str:
+        from .context_budget import _normalize_system_messages
+
+        # Qwen3.5 chat templates accept a system message only at position zero.
+        # Direct calls to this backend may bypass AdaptiveLLM context preparation.
+        messages = _normalize_system_messages(list(messages))
         with self._chat_lock:
             try:
                 base = self._ensure_server()

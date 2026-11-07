@@ -273,6 +273,27 @@ class BrowserUseAdapter:
             except Exception:
                 pass
 
+    def _fallback_read(self, action: BrowserAction, cause: str) -> BrowserActionResult:
+        """Read-only fallback when Browser Use or Edge/CDP cannot start.
+
+        Never retry MUTATE/COMMIT/FINANCIAL with another profile: that would
+        silently lose the user's authenticated session and approval context.
+        """
+        from .playwright_browser_adapter import PlaywrightBrowserAdapter
+
+        fallback = PlaywrightBrowserAdapter(headless=self.headless)
+        result = fallback.execute(BrowserAction(
+            "read", action.url, BrowserRisk.READ, dict(action.arguments), action.description
+        ))
+        if result.status == "ok":
+            event("browser_agent_read_fallback_ok", action=action.name, cause=cause[:180])
+            return BrowserActionResult("ok", "Страница прочитана через Playwright (резервный режим).", {
+                "result": str(result.data.get("visible_text") or ""),
+                "url": str(result.data.get("url") or action.url),
+                "fallback": "playwright",
+            })
+        return result
+
     def execute(self, action: BrowserAction) -> BrowserActionResult:
         supported = {"research", "agent_read", "agent_mutate", "agent_commit", "agent_financial"}
         if action.name not in supported:
@@ -296,9 +317,14 @@ class BrowserUseAdapter:
         if not self.available():
             return BrowserActionResult("unavailable", "Browser Use или совместимая LLM недоступны")
         try:
-            return self._run_sync(self._run(action))
+            result = self._run_sync(self._run(action))
+            if result.status == "failed" and action.risk is BrowserRisk.READ:
+                return self._fallback_read(action, result.message)
+            return result
         except Exception as exc:
             problem("browser_agent_browser_use_failed", str(exc), risk=action.risk.value, action=action.name)
+            if action.risk is BrowserRisk.READ:
+                return self._fallback_read(action, str(exc))
             message = str(exc)
             if os.name == "nt" and action.arguments.get("profile_namespace") == "lenta" and (
                 "CDP became available" in message or "Browser process" in message
