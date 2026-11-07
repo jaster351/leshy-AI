@@ -52,6 +52,8 @@ def is_explicit_web_request(query: str) -> bool:
 def ttl_for_context(query: str) -> int:
     """Базовая актуальность 180 дней; для быстрых фактов существенно меньше."""
     q = _text(query)
+    if any(x in q for x in _STABLE):
+        return 2 * 365 * 24 * 60 * 60
     if any(x in q for x in _WEATHER):
         return 30 * 60
     if any(x in q for x in _REALTIME):
@@ -66,8 +68,6 @@ def ttl_for_context(query: str) -> int:
         return 24 * 60 * 60
     if any(x in q for x in _RULES):
         return 7 * 24 * 60 * 60
-    if any(x in q for x in _STABLE):
-        return 2 * 365 * 24 * 60 * 60
     return SIX_MONTHS_SECONDS
 
 
@@ -117,6 +117,8 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
         return basic
     if _EXACT_IDENT.search(query):
         return "свежая проверка бюллетеня безопасности"
+    if any(x in q for x in _STABLE) and not trusted and not candidates:
+        return None
     if any(marker in q for marker in _SECURITY):
         return "свежие данные по безопасности"
     if any(marker in q for marker in _EXPLICIT_FRESH):
