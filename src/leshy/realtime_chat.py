@@ -256,6 +256,60 @@ class RealtimeChatManager:
             )
             return
 
+        # Мгновенный проверяемый ответ на дату/время; погода через API.
+        # Обычные беседы и их быстрый streaming не затрагиваются.
+        from .verified_clock import clock_answer, checked_clock_answer
+        from .weather_runtime import is_weather_request, weather_answer
+        clock = clock_answer(message)
+        if clock is not None or is_weather_request(message):
+            rid, cancel = self._register(request_id)
+            sid = ""
+            try:
+                sid, _rows = self._save_user_and_history(message, owner_id, session_id)
+                yield StreamEvent("start", {"request_id": rid, "session_id": sid})
+                if cancel.is_set():
+                    yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
+                    return
+                if clock is None:
+                    yield StreamEvent("activity", {
+                        "kind": "weather", "phase": "fetching",
+                        "text": "Получаю прогноз из погодного сервиса…",
+                    })
+                    answer = str(weather_answer(message) or "Не удалось получить прогноз.")
+                    sources = (
+                        [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
+                        if "Источник: Open-Meteo" in answer else []
+                    )
+                else:
+                    from .research_policy import research_reason
+                    if research_reason(message) == "явный запрос интернет-поиска":
+                        yield StreamEvent("activity", {
+                            "kind": "web_search", "phase": "searching",
+                            "text": "Проверяю дату в интернете дополнительно к часам компьютера…",
+                        })
+                        answer, sources = checked_clock_answer(message, self.app.live_search)
+                        answer = str(answer or clock)
+                    else:
+                        answer, sources = clock, []
+                if cancel.is_set():
+                    yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
+                    return
+                answered_at = self.app._save_assistant(sid, answer)
+                event("chat_factual_tool_answered", kind="clock" if clock is not None else "weather",
+                      session_id=sid, request_id=rid, source_count=len(sources))
+                yield StreamEvent("delta", {"text": answer})
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid, "answer": answer,
+                    "created_at": answered_at, "sources": sources, "stopped": False,
+                })
+            except Exception as exc:
+                problem("chat_factual_tool_failed", type(exc).__name__, request_id=rid)
+                yield StreamEvent("error", {"request_id": rid, "session_id": sid,
+                                            "error": "Не удалось проверить актуальные данные"})
+            finally:
+                self._unregister(rid)
+            return
+
         special = message.lower().startswith(("/remember ", "/memories")) or self.app._image_prompt(message) is not None
         if special:
             rid, cancel = self._register(request_id)
@@ -336,6 +390,38 @@ class RealtimeChatManager:
 
             yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": sources})
             event("chat_stream_started", request_id=rid, session_id=sid, owner_id=owner_id)
+
+            # Если live-search не нашёл подтверждённых источников или упал,
+            # НЕ передаём текущие данные LLM: иначе она выдумает дату/цену.
+            # Такой отказ быстрый и прозрачный, обычные чаты не затронуты.
+            if search_attempted and not sources:
+                marker = "Текущий веб-поиск временно не выполнен:"
+                failure = next(
+                    (
+                        str(item.content).split(marker, 1)[-1].strip()
+                        for item in messages
+                        if item.role == "system" and marker in str(item.content)
+                    ),
+                    "",
+                )
+                answer = (
+                    "Не удалось проверить информацию через интернет: " + failure[:320]
+                    if failure else
+                    "Интернет-поиск выполнен, но надёжных источников для ответа не найдено. "
+                    "Я не буду выдавать догадки за проверенные факты."
+                )
+                event("chat_web_search_without_sources", request_id=rid, failed=bool(failure))
+                if not cancel.is_set():
+                    answered_at = self.app._save_assistant(sid, answer)
+                    yield StreamEvent("delta", {"text": answer})
+                else:
+                    answered_at = utcnow()
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid, "answer": answer if not cancel.is_set() else "",
+                    "created_at": answered_at, "sources": [], "stopped": bool(cancel.is_set()),
+                    "latency_ms": int((time.monotonic() - started) * 1000),
+                })
+                return
 
             # Актуальные сведения (погода, новости и т.п.) проверяем до публикации
             # текста: локальная модель иногда ошибочно заявляет, что интернет

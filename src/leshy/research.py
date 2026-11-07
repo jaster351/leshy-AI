@@ -362,19 +362,23 @@ class ResearchEngine:
     def _retry_before(self) -> str:
         return (datetime.now(timezone.utc) - timedelta(seconds=self.SEARCH_RETRY_SECONDS)).isoformat()
 
-    def _claim(self, task_id: int | None = None):
+    def _claim(self, task_id: int | None = None, *, manual_only: bool = False):
         retry_before = self._retry_before()
         with self.storage.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if task_id is None:
+                # Автономное обучение может быть выключено. Явные задания
+                # пользователя при этом разрешены, но фоновую очередь НЕ трогаем.
                 task = conn.execute(
                     """
                     SELECT * FROM research_tasks
                     WHERE status='queued' AND (attempts=0 OR updated_at<=?)
+                      AND (?=0 OR reason='тема пользователя'
+                           OR reason LIKE 'явная команда пользователя:%')
                     ORDER BY id
                     LIMIT 1
                     """,
-                    (retry_before,),
+                    (retry_before, int(bool(manual_only))),
                 ).fetchone()
             else:
                 task = conn.execute(
@@ -398,8 +402,8 @@ class ResearchEngine:
         claimed = self._claim(task_id)
         return self._execute(claimed["id"], claimed["query"]) if claimed else {"task_id": task_id, "query": query, "status": "not_claimed"}
 
-    def run_next(self) -> dict | None:
-        claimed = self._claim()
+    def run_next(self, *, manual_only: bool = False) -> dict | None:
+        claimed = self._claim(manual_only=manual_only)
         return self._execute(claimed["id"], claimed["query"]) if claimed else None
 
     def _execute(self, task_id: int, query: str) -> dict:
