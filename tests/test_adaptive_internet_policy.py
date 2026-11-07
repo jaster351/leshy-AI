@@ -18,7 +18,7 @@ from leshy.storage import Storage
 
 class AdaptiveInternetPolicyTests(unittest.TestCase):
     def setUp(self):
-        self.now = datetime(2026, 11, 8, 1, 0, tzinfo=timezone.utc)
+        self.now = datetime.now(timezone.utc)
 
     def _record(self, *, days=0, status="trusted", dynamic=False, ttl=None):
         stamp = (self.now - timedelta(days=days)).isoformat()
