@@ -287,6 +287,10 @@ class DistributedClusterRuntime:
         )
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Отдельный малонагруженный поток: не влияет на LLM и не выполняет
+        # ничего, пока пользователь не разрешит автоматическое обновление.
+        from .cluster_auto_update import ClusterAutoUpdate
+        self.auto_update = ClusterAutoUpdate(self)
 
     def _models(self) -> tuple[str, ...]:
         values: list[str] = []
@@ -348,6 +352,7 @@ class DistributedClusterRuntime:
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="leshy-cluster-runtime", daemon=True)
         self._thread.start()
+        self.auto_update.start()
         event(
             "distributed_cluster_started",
             node_id=self.identity.node_id,
@@ -357,6 +362,7 @@ class DistributedClusterRuntime:
 
     def stop(self) -> None:
         self._stop.set()
+        self.auto_update.stop()
         self.discovery.stop()
         thread = self._thread
         if thread and thread.is_alive():
@@ -497,6 +503,7 @@ class DistributedClusterRuntime:
             "monetization": False,
             "proof_of_work": False,
             "purpose": "полезные вычисления Лешего",
+            "auto_update": self.auto_update.status(),
         })
         return value
 
