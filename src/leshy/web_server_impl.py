@@ -382,8 +382,12 @@ def _console_live_status(app: LeshyApp, stop: threading.Event) -> None:
                 telegram_text = "ошибка подключения"
             else:
                 telegram_text = "подключён" if tg_status.get("bot_username") else "ожидание API"
+            route = getattr(app, "_last_internet_route", None) or {}
+            route_mode = str(route.get("mode") or "ожидание")[:30]
+            route_reason = str(route.get("reason") or "")[:70]
+            route_text = route_mode + (f" ({route_reason})" if route_reason else "")
             signature = (model_text, active, waiting, peers, inflight,
-                         sync_state, sync_received, sync_sent, sync_last, telegram_text)
+                         sync_state, sync_received, sync_sent, sync_last, telegram_text, route_text)
             now = time.monotonic()
             if signature != last_signature or now - last_printed >= 30.0:
                 print(
@@ -393,7 +397,8 @@ def _console_live_status(app: LeshyApp, stop: threading.Event) -> None:
                     f"генерация: {'идёт' if active else 'ожидание'} | "
                     f"очередь {waiting} | кластер {peers} узл. | задачи {inflight} | "
                     f"знания: {sync_state}, получено {sync_received}, отдано {sync_sent}, "
-                    f"последний обмен {sync_last or '—'} | Telegram: {telegram_text}",
+                    f"последний обмен {sync_last or '—'} | Telegram: {telegram_text} | "
+                    f"последний маршрут: {route_text}",
                     flush=True,
                 )
                 last_signature = signature
