@@ -40,6 +40,10 @@ def read_supplied_source(app, message: str) -> tuple[str, list[dict[str, str]]]:
         text = " ".join(text.split()).strip()
         if len(text) < 80:
             raise ValueError("страница не содержит достаточно доступного текста")
+        # JS-заглушка, CAPTCHA или блокировка не равны прочитанной CVE-статье.
+        cves = re.findall(r"CVE-\\d{4}-\\d{4,}", url, re.IGNORECASE)
+        if cves and not all(cve.lower() in text.lower() for cve in cves):
+            raise ValueError("текст страницы не содержит запрошенную CVE; возможно, сайт отдаёт заглушку")
     except Exception as exc:
         problem("user_source_read_failed", type(exc).__name__, url=url[:400])
         return (
