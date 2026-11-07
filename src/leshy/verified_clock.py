@@ -26,13 +26,46 @@ _ASK = re.compile(
 )
 # Вопросы о погоде, ценах, годе выпуска и событиях не перехватываем.
 _NON_CLOCK = re.compile(r"\b(?:год[а-я]*\s+выпуска|погод[а-я]*|сколько\s+лет|какой\s+год\s+был)\b", re.IGNORECASE)
+_TIME_QUESTION = re.compile(
+    r"\b(?:который\s+(?:сейчас\s+)?час|сколько\s+(?:сейчас\s+)?времени|"
+    r"сколько\s+время|какое\s+(?:сейчас\s+)?время|"
+    r"сколько\s+на\s+часах|время\s+сейчас)\b",
+    re.IGNORECASE,
+)
+_TODAY_QUESTION = re.compile(
+    r"\b(?:какой\s+сегодня\s+(?:день|год|месяц)|"
+    r"какое\s+сегодня\s+число|какая\s+сегодня\s+дата|"
+    r"сегодня\s+(?:какой\s+)?(?:день\s+недели|месяц|число|дата))\b",
+    re.IGNORECASE,
+)
+
+
+def current_clock_context() -> str:
+    """Актуальная дата для КАЖДОЙ LLM-генерации, без запроса в интернет."""
+    now = datetime.now().astimezone()
+    zone = now.strftime("%z")
+    if len(zone) == 5:
+        zone = zone[:3] + ":" + zone[3:]
+    return (
+        f"Фактическая дата по системным часам этого компьютера: "
+        f"{now.day} {_MONTHS[now.month-1]} {now.year} года "
+        f"({_WEEKDAYS[now.weekday()]}), время {now.strftime('%H:%M:%S')}, UTC{zone}. "
+        "Для вопросов о текущем дне/месяце/годе/времени используй эту дату, "
+        "а не дату обучения модели. Не считай события из этого года невозможными "
+        "лишь из-за своей устаревшей памяти. При этом дата компьютера НЕ "
+        "подтверждает истинность новостей, существование CVE или других "
+        "актуальных событий; для этого нужны проверенные внешние источники. "
+        "Не объявляй информацию с веб-страницы выдумкой только потому, что "
+        "её год новее границы знаний модели."
+    )
+
 
 
 def is_clock_request(message: str) -> bool:
     value = " ".join(str(message or "").strip().lower().split())
     if not value or _NON_CLOCK.search(value):
         return False
-    return bool(_ASK.search(value))
+    return bool(_ASK.search(value) or _TIME_QUESTION.search(value) or _TODAY_QUESTION.search(value))
 
 
 def clock_answer(message: str) -> str | None:
@@ -90,4 +123,4 @@ def checked_clock_answer(message: str, live_search=None) -> tuple[str | None, li
         return answer, []
 
 
-__all__ = ["clock_answer", "checked_clock_answer", "is_clock_request"]
+__all__ = ["clock_answer", "checked_clock_answer", "is_clock_request", "current_clock_context"]
