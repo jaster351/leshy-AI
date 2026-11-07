@@ -352,6 +352,8 @@ class SuperAgentService:
 
     def answer(self, ticket_id: str, owner_id: str, text: str) -> dict[str, Any]:
         ticket = self.get(ticket_id, owner_id=owner_id)
+        if ticket["state"] != "waiting":
+            raise ValueError("Ответ принимается только для задания, ожидающего вопроса")
         value = str(text or "").strip()
         if not value:
             raise ValueError("Ответ пуст")

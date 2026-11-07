@@ -137,6 +137,29 @@ class CognitiveRollbackTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.answer(tid, "web:user", "repeat")
 
+    def test_answer_to_completed_text_task_does_not_requeue(self):
+        task = self.service.create("web:user", "", "Объясни назначение журнала")
+        with self.storage.connection() as conn:
+            conn.execute(
+                "UPDATE superagent_tickets SET state='ready' WHERE id=?", (task["id"],),
+            )
+        with self.assertRaises(ValueError):
+            self.service.answer(task["id"], "web:user", "Выполни ещё раз")
+        self.assertEqual(self.service.get(task["id"], owner_id="web:user")["state"], "ready")
+
+    def test_hardlink_compatibility_without_follow_symlinks_support(self):
+        # На системах, где os.supports_follow_symlinks не содержит os.link,
+        # создаём реальный откат с fallback без именованного аргумента.
+        from unittest.mock import patch
+        import os
+        _, proposal, source = self.make_applied()
+        supported = set(os.supports_follow_symlinks)
+        supported.discard(os.link)
+        with patch.object(os, "supports_follow_symlinks", supported):
+            result = self.service.rollback_artifact(proposal["id"], "web:user")
+        self.assertEqual(result["state"], "rolled_back")
+        self.assertFalse(source.exists())
+
     def test_explicit_commands(self):
         name = "ART-" + "a" * 32
         self.assertEqual(parse_superagent_intent("/agent verify " + name).action, "artifact_verify")

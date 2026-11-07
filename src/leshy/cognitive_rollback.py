@@ -134,7 +134,15 @@ class CognitiveArtifactRollback:
             archive = self._archive_target(row, create_parent=True)
             # os.link создаёт имя только если его ещё нет, без перезаписи.
             # Архив находится на том же диске, что и исходный документ.
-            os.link(active, archive, follow_symlinks=False)
+            if os.link in os.supports_follow_symlinks:
+                os.link(active, archive, follow_symlinks=False)
+            else:
+                # На Windows часть версий Python не поддерживает данный флаг.
+                # Путь предварительно проверен как обычный файл; проверка
+                # inode/SHA-256 после link всё равно обязательна.
+                if active.is_symlink():
+                    raise PermissionError("Символические ссылки запрещены")
+                os.link(active, archive)
             if self._verified_archive(row) is None:
                 raise OSError("Архивный файл не прошёл проверку SHA-256")
             # Проверяем inode: не удаляем подменённый между проверками файл.
