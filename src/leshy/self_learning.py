@@ -168,9 +168,14 @@ class SelfLearningWorker:
     def pending_social_notifications(self, owner_id: str, *, limit: int = 20) -> list[dict]:
         return self.human_learning.pending_notifications(owner_id, limit=limit)
 
-    def _has_queued(self) -> bool:
+    def _has_queued(self, *, manual_only: bool = False) -> bool:
         with self.storage.connection() as conn:
-            row = conn.execute("SELECT 1 FROM research_tasks WHERE status='queued' LIMIT 1").fetchone()
+            row = conn.execute(
+                "SELECT 1 FROM research_tasks WHERE status='queued' "
+                "AND (?=0 OR reason='тема пользователя' "
+                "OR reason LIKE 'явная команда пользователя:%') LIMIT 1",
+                (int(bool(manual_only)),),
+            ).fetchone()
         return row is not None
 
     def _news_due(self, now_epoch: float) -> bool:
@@ -207,7 +212,8 @@ class SelfLearningWorker:
     def _run(self) -> None:
         self._state = "idle"
         while not self._stop.is_set():
-            if not self.learning_control.is_enabled():
+            autonomous = self.learning_control.is_enabled()
+            if not autonomous and not self._has_queued(manual_only=True):
                 self._state = "disabled"
                 self._next_autonomous_at = 0.0
                 self._stop.wait(2.0)
@@ -215,7 +221,7 @@ class SelfLearningWorker:
 
             try:
                 now = time.time()
-                if not self._has_queued():
+                if autonomous and not self._has_queued():
                     if self._next_autonomous_at > now:
                         self._state = "waiting_rate_limit"
                         self._stop.wait(min(2.0, max(0.1, self._next_autonomous_at - now)))
@@ -223,15 +229,17 @@ class SelfLearningWorker:
                     self._queue_autonomous_work(now)
 
                 self._state = "learning"
-                result = self.research.run_next()
+                result = self.research.run_next(manual_only=not autonomous)
                 self._last_result = result
                 self._last_error = ""
                 if result and result.get("error"):
-                    self._next_autonomous_at = time.time() + self.ERROR_BACKOFF_SECONDS
+                    if autonomous:
+                        self._next_autonomous_at = time.time() + self.ERROR_BACKOFF_SECONDS
                     self._state = "backoff"
                 else:
-                    self._next_autonomous_at = time.time() + self.AUTONOMOUS_INTERVAL_SECONDS
-                    self._state = "idle"
+                    if autonomous:
+                        self._next_autonomous_at = time.time() + self.AUTONOMOUS_INTERVAL_SECONDS
+                    self._state = "idle" if autonomous else "manual_only"
                 self._stop.wait(2.0)
             except Exception as exc:
                 self._last_error = str(exc)[:1000]
