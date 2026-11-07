@@ -77,7 +77,10 @@ def _install_runtime_contracts(app=None) -> None:
 
 def _runtime_html(settings) -> bytes:
     """Эталонный chat transport + изолированные UI-модули вокруг него."""
-    html_text = shell._runtime_html(settings).decode("utf-8")
+    reference_html = shell._runtime_html(settings)
+    html_text = reference_html.decode("utf-8")
+    if 'class="sidebar"' not in html_text and 'id="pane-chat"' not in html_text:
+        return reference_html
     for marker in (
         '<script src="/sidebar-session-actions.js"></script>',
         '<script src="/chat-layout-status.js"></script>',

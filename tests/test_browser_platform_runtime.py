@@ -240,6 +240,12 @@ class BrowserOwnerProfileIsolationTests(unittest.TestCase):
             with patch.dict(os.environ, {"LESHY_BRAIN_DIR": str(root / "brain")}, clear=False):
                 app = _FakeApp(root)
                 platform = BrowserPlatform(app)
+                with app.storage.connection() as conn:
+                    for sid, owner in (("s1", "telegram:123"), ("s2", "telegram:456")):
+                        conn.execute(
+                            "INSERT INTO sessions(id,owner_id,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+                            (sid, owner, "Тест", "2026-11-05", "2026-11-05"),
+                        )
                 capture = _CaptureAdapter()
                 platform.agent = BrowserAgent([capture])
                 app.live_search = lambda *_args, **_kwargs: {
@@ -249,7 +255,7 @@ class BrowserOwnerProfileIsolationTests(unittest.TestCase):
                 research_profile = capture.last.arguments["profile_key"]
                 intent = parse_browser_conversation_intent("Купи первый вариант")
                 pending = platform.request_external_action(intent, owner_id="telegram:123", session_id="s1")
-                platform.resolve_approval("telegram:123", pending["approval_id"], approved=True)
+                platform.resolve_approval("telegram:123", pending["approval_id"], session_id="s1", approved=True)
                 self.assertEqual(capture.last.arguments["profile_key"], research_profile)
                 self.assertTrue(capture.last.arguments["_approval_verified"])
                 platform.research("найди товар", owner_id="telegram:456", session_id="s2")

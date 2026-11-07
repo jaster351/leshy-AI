@@ -2,10 +2,47 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
+import ipaddress
+import re
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
 from .diagnostics import event
+
+
+def _browser_ip_literal(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """Распознать IP, включая числовые IPv4-формы, понимаемые браузерами."""
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    # Браузеры принимают 127.1, 0177.0.0.1, 0x7f000001 и 2130706433.
+    # Не интерпретировать обычные DNS-имена как адреса.
+    parts = host.split(".")
+    if not 1 <= len(parts) <= 4 or any(not part for part in parts):
+        return None
+    numbers = []
+    for part in parts:
+        if re.fullmatch(r"0[xX][0-9a-fA-F]+", part):
+            base = 16
+        elif re.fullmatch(r"0[0-7]*", part):
+            base = 8
+        elif re.fullmatch(r"[1-9][0-9]*", part):
+            base = 10
+        else:
+            return None
+        numbers.append(int(part, base))
+    if any(number >= (1 << (8 if index < len(numbers) - 1 else 8 * (5 - len(numbers))))
+           for index, number in enumerate(numbers)):
+        return None
+    value = 0
+    for number in numbers[:-1]:
+        value = (value << 8) | number
+    value = (value << (8 * (5 - len(numbers)))) | numbers[-1]
+    try:
+        return ipaddress.IPv4Address(value)
+    except ipaddress.AddressValueError:
+        return None
 
 
 class BrowserRisk(str, Enum):
@@ -69,6 +106,13 @@ class BrowserAgent:
                 return False
             port = parsed.port
             host = parsed.hostname.lower().strip(".")
+            # .localhost зарезервирован для loopback: проверка только IP недостаточна.
+            # Исключение разрешается исключительно для точного имени хоста.
+            if (host == "localhost" or host.endswith(".localhost")) and host not in self.allowed_hosts:
+                return False
+            ip = _browser_ip_literal(host)
+            if ip is not None and not ip.is_global and host not in self.allowed_hosts:
+                return False
             # Только явно разрешённый loopback может использовать случайный
             # порт локального тестового HTTP-сервера; внешние порты запрещены.
             loopback_allowed = host in {"127.0.0.1", "::1", "localhost"} and host in self.allowed_hosts
@@ -92,13 +136,10 @@ class BrowserAgent:
             return BrowserActionResult("blocked", "Домен не разрешён политикой Browser Agent.")
 
         if action.risk is not BrowserRisk.READ:
-            if not approved:
-                event("browser_agent_approval_required", action=action.name, risk=action.risk.value, url=action.url)
-                raise ApprovalRequired(action)
-            arguments = dict(action.arguments)
-            arguments["_approval_verified"] = True
-            action = replace(action, arguments=arguments)
-            event("browser_agent_approval_verified", action=action.name, risk=action.risk.value, url=action.url)
+            # Без серверного одноразового grant legacy approved=True нельзя считать согласием.
+            event("browser_agent_approval_required", action=action.name, risk=action.risk.value,
+                  url=action.url, legacy_approved_ignored=bool(approved))
+            raise ApprovalRequired(action)
 
         for adapter in self.adapters:
             try:
