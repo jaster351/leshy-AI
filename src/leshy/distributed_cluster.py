@@ -473,6 +473,16 @@ class DistributedClusterRuntime:
                 f"| задач в работе {sum(self.orchestrator.status()['inflight_by_node'].values())}",
                 flush=True,
             )
+            for peer in peers:
+                if peer.node_id == self.identity.node_id:
+                    continue
+                print(
+                    f"[Леший {VERSION}] LAN-узел {peer.node_id[:12]} | "
+                    f"{peer.endpoint} | CPU {peer.cpu_threads} | "
+                    f"GPU {len(peer.gpu_names)} | NPU {len(peer.npu_names)} "
+                    f"| очередь {peer.queue_depth}",
+                    flush=True,
+                )
         counters = self.discovery.diagnostics()["counts"]
         issue = (
             "обнаружены объявления ДРУГОГО кластера — проверьте cluster-secret"
