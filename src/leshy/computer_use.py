@@ -84,6 +84,7 @@ class ComputerUseController:
         approval_required: Callable[[ComputerAction], bool] | None = None,
         approval: Callable[[ComputerAction], bool] | None = None,
         activity: Callable[[str, dict[str, Any]], None] | None = None,
+        permission_check: Callable[[], bool] | None = None,
     ):
         self.observer = observer
         self.analyzer = analyzer
@@ -91,9 +92,17 @@ class ComputerUseController:
         self.approval_required = approval_required or (lambda action: action.risk in {"high", "critical"})
         self.approval = approval or (lambda action: False)
         self.activity = activity or (lambda name, payload: None)
+        self.permission_check = permission_check or (lambda: True)
         self.enabled = False
 
+    def _require_enabled(self) -> None:
+        if not self.enabled or not self.permission_check():
+            self.enabled = False
+            raise RuntimeError("Computer Use выключен или разрешение ОС отозвано")
+
     def start(self) -> None:
+        if not self.permission_check():
+            raise PermissionError("Управление ОС выключено")
         self.enabled = True
         self.activity("computer.started", {})
 
@@ -102,8 +111,7 @@ class ComputerUseController:
         self.activity("computer.stopped", {})
 
     def observe(self) -> tuple[ScreenFrame, ScreenUnderstanding]:
-        if not self.enabled:
-            raise RuntimeError("Computer Use выключен")
+        self._require_enabled()
         self.activity("computer.observing", {"status": "Смотрю экран"})
         frame = self.observer.capture()
         understanding = self.analyzer.analyze(frame)
@@ -124,8 +132,7 @@ class ComputerUseController:
         *,
         verify: Callable[[ScreenUnderstanding, ScreenUnderstanding, ComputerAction], tuple[bool, str]] | None = None,
     ) -> ActionResult:
-        if not self.enabled:
-            raise RuntimeError("Computer Use выключен")
+        self._require_enabled()
 
         if self.approval_required(action):
             self.activity(
@@ -145,8 +152,10 @@ class ComputerUseController:
             },
         )
 
+        self._require_enabled()
         started = monotonic()
         self.executor.execute(action)
+        self._require_enabled()
         after_frame, after = self.observe()
         elapsed_ms = int((monotonic() - started) * 1000)
         changed = before_frame.fingerprint != after_frame.fingerprint

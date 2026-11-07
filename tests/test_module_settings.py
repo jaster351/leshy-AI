@@ -23,6 +23,7 @@ class ModuleSettingsTests(unittest.TestCase):
                 "browser-agent",
                 "document-intelligence",
                 "computer-use",
+                "os-control",
                 "tools-marketplace",
                 "intelligent-memory",
                 "knowledge-graph",
@@ -36,7 +37,20 @@ class ModuleSettingsTests(unittest.TestCase):
                 "superagent",
             },
         )
-        self.assertTrue(all(item["enabled"] for item in states.values()))
+        self.assertFalse(states["os-control"]["enabled"])
+        self.assertFalse(states["computer-use"]["enabled"])
+        self.assertTrue(all(item["enabled"] for name, item in states.items() if name not in {"os-control", "computer-use"}))
+
+    def test_os_control_is_opt_in_and_computer_use_depends_on_it(self) -> None:
+        self.assertFalse(module_enabled(self.storage, "os-control"))
+        self.assertFalse(module_enabled(self.storage, "computer-use"))
+        set_module_enabled(self.storage, "os-control", True)
+        self.assertTrue(module_enabled(self.storage, "os-control"))
+        self.assertTrue(module_enabled(self.storage, "computer-use"))
+        reopened = Storage(self.storage.path)
+        self.assertTrue(module_enabled(reopened, "os-control"))
+        set_module_enabled(reopened, "os-control", False)
+        self.assertFalse(module_enabled(self.storage, "computer-use"))
 
     def test_browser_modules_depend_on_human_browser(self) -> None:
         set_module_enabled(self.storage, "human-browser", False)

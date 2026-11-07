@@ -94,6 +94,19 @@ class ComputerUseTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             controller.observe()
 
+    def test_permission_revocation_blocks_next_desktop_action(self):
+        allowed = {"value": True}
+        executor = FakeExecutor()
+        controller = ComputerUseController(
+            FakeObserver(), FakeAnalyzer(), executor,
+            permission_check=lambda: allowed["value"],
+        )
+        controller.start()
+        allowed["value"] = False
+        with self.assertRaises(RuntimeError):
+            controller.act(ComputerAction(kind="click", arguments={}, description="click"))
+        self.assertEqual(executor.actions, [])
+
     def test_custom_verifier_can_reject_wrong_visual_result(self):
         controller = ComputerUseController(FakeObserver(), FakeAnalyzer(), FakeExecutor())
         controller.start()

@@ -181,7 +181,10 @@ class OperatingSystemController:
             elif action == "read_text":
                 path = self._path(args.get("path"))
                 max_bytes = max(1024, min(int(args.get("max_bytes") or 1024 * 1024), 4 * 1024 * 1024))
-                raw = path.read_bytes()[:max_bytes]
+                self._gate.check(generation)
+                with path.open("rb") as source:
+                    raw = source.read(max_bytes)
+                self._gate.check(generation)
                 text = raw.decode(str(args.get("encoding") or "utf-8"), errors="replace")
                 result = OSActionResult(action, True, f"Файл прочитан: {path}", self._clip(text))
 
@@ -193,7 +196,11 @@ class OperatingSystemController:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 mode = "a" if bool(args.get("append")) else "w"
                 with path.open(mode, encoding=str(args.get("encoding") or "utf-8")) as handle:
-                    handle.write(content)
+                    for pos in range(0, len(content), 32768):
+                        self._gate.check(generation)
+                        handle.write(content[pos:pos+32768])
+                        handle.flush()
+                        self._gate.check(generation)
                 result = OSActionResult(action, True, f"Файл {'дополнен' if mode == 'a' else 'записан'}: {path}")
 
             elif action == "make_dir":
@@ -201,14 +208,32 @@ class OperatingSystemController:
                 result = OSActionResult(action, True, f"Папка готова: {path}")
 
             elif action in {"copy", "move"}:
-                src = self._path(args.get("source")); dst = self._path(args.get("destination"))
+                src = self._path(args.get("source"))
+                dst = self._path(args.get("destination"))
+                self._gate.check(generation)
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 if action == "copy":
-                    if src.is_dir(): shutil.copytree(src, dst, dirs_exist_ok=True)
-                    else: shutil.copy2(src, dst)
+                    if src.is_dir():
+                        raise PermissionError("Копирование каталогов пока запрещено: безопасное прерывание не реализовано")
+                    # Порционный перенос данных: при выключении прекращаем запись.
+                    with src.open("rb") as source, dst.open("xb") as target:
+                        while True:
+                            self._gate.check(generation)
+                            block = source.read(65536)
+                            if not block:
+                                break
+                            target.write(block)
+                            self._gate.check(generation)
                     verb = "Скопировано"
                 else:
-                    shutil.move(str(src), str(dst)); verb = "Перемещено"
+                    # os.replace не переходит к неконтролируемому shutil.copytree
+                    # между томами; ошибки EXDEV оставляются без побочных копий.
+                    if dst.exists() or dst.is_symlink():
+                        raise FileExistsError("Назначение уже существует; перезапись запрещена")
+                    self._gate.check(generation)
+                    src.rename(dst)
+                    verb = "Перемещено"
+                self._gate.check(generation)
                 result = OSActionResult(action, True, f"{verb}: {src} → {dst}")
 
             elif action == "delete":
@@ -217,10 +242,11 @@ class OperatingSystemController:
                     raise PermissionError("Корень диска и системные каталоги нельзя удалить через чат")
                 if path.is_dir():
                     if bool(args.get("recursive")):
-                        shutil.rmtree(path)
-                    else:
-                        path.rmdir()
+                        raise PermissionError("Рекурсивное удаление отключено до реализации контролируемого поэтапного удаления")
+                    self._gate.check(generation)
+                    path.rmdir()
                 else:
+                    self._gate.check(generation)
                     path.unlink()
                 result = OSActionResult(action, True, f"Удалено: {path}")
 
@@ -242,8 +268,23 @@ class OperatingSystemController:
                 pid = int(args.get("pid") or 0)
                 if pid <= 0: raise ValueError("Нужен PID процесса")
                 if os.name == "nt":
-                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check=True, capture_output=True, text=True, creationflags=0x08000000)
+                    task = self._gate.launch(["taskkill", "/PID", str(pid), "/T", "/F"], capture=True)
+                    try:
+                        while True:
+                            self._gate.check(generation)
+                            try:
+                                task.communicate(timeout=0.25)
+                                break
+                            except subprocess.TimeoutExpired:
+                                continue
+                        if task.returncode != 0:
+                            raise RuntimeError("Не удалось остановить указанный процесс")
+                    finally:
+                        if task.poll() is None:
+                            self._gate.terminate(task)
+                        self._gate.unregister(task)
                 else:
+                    self._gate.check(generation)
                     os.kill(pid, 15)
                 result = OSActionResult(action, True, f"Процесс остановлен: PID {pid}")
 

@@ -64,7 +64,14 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         return super().execute(action, values, owner_id=owner_id)
 
     def request_delete(self, args: dict[str, Any], *, owner_id: str, session_id: str = "") -> dict[str, Any]:
-        self.assert_allowed()
+        generation = self._gate.begin()
+        try:
+            return self._request_delete_guarded(args, owner_id=owner_id, session_id=session_id, generation=generation)
+        finally:
+            self._gate.finish()
+
+    def _request_delete_guarded(self, args: dict[str, Any], *, owner_id: str, session_id: str, generation: int) -> dict[str, Any]:
+        self._gate.check(generation)
         path = self._path(args.get("path"))
         if self._is_root_or_system(path):
             raise PermissionError("Корень диска и системные каталоги нельзя удалить через чат")
@@ -91,6 +98,15 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                     "",
                 ),
             )
+        try:
+            self._gate.check(generation)
+        except PermissionError:
+            with self.storage.connection() as conn:
+                conn.execute(
+                    "UPDATE os_action_approvals SET status='cancelled',resolved_at=? WHERE id=? AND status='pending'",
+                    (utcnow(), approval_id),
+                )
+            raise
         self.storage.audit("os.approval_requested", {"id": approval_id, "owner_id": str(owner_id)[:200], "description": description})
         return {
             "id": approval_id,
