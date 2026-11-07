@@ -14,7 +14,7 @@ from leshy.gpu_detection import (
     GPUDevice, detect_gpu_devices, gpu_vendor, linux_gpu_devices,
     macos_gpu_devices, windows_gpu_devices,
 )
-from leshy.hardware import detect_hardware, HardwareConfig, resolve_execution_plan
+from leshy.hardware import detect_hardware, HardwareConfig, resolve_execution_plan, hardware_status
 
 
 class GPUDiscoveryTests(unittest.TestCase):
@@ -101,6 +101,23 @@ class GPUDiscoveryTests(unittest.TestCase):
         self.assertFalse(caps.gpu_offload_compiled)
         self.assertTrue(caps.gpu_offload_runtime)  # кандидат, требуется запуск/health-check
         self.assertEqual(resolve_execution_plan(HardwareConfig(), caps).chat_backend, "vulkan")
+
+    def test_hardware_status_serializes_gpu_inventory_for_real_web_route(self):
+        devices = (GPUDevice(name="New GPU model", vendor="Unknown", vendor_id="abcd"),)
+        with tempfile.TemporaryDirectory() as tmp, (
+            patch("leshy.hardware.detect_hardware") as detect,
+            patch("leshy.hardware.memory_status", return_value={}),
+        ):
+            from leshy.hardware import HardwareCapabilities
+            detect.return_value = HardwareCapabilities(
+                cpu=True, cpu_name="CPU", gpu=True,
+                gpu_names=("New GPU model",), gpu_offload_runtime=False,
+                npu=False, npu_names=(), openvino_npu=False, notes=(),
+                gpu_devices=devices,
+            )
+            status = hardware_status(Path(tmp))
+        self.assertEqual(status["capabilities"]["gpu_devices"][0]["vendor_id"], "abcd")
+        self.assertEqual(status["capabilities"]["gpu_names"], ("New GPU model",))
 
     def test_gpu_missing_never_becomes_verified_by_driver_name(self):
         with (
