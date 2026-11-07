@@ -22,7 +22,7 @@ from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
-from .research_policy import research_reason
+from .adaptive_internet_policy import adaptive_research_reason
 from .self_learning import SelfLearningWorker
 from .storage import Storage, utcnow
 from .version import VERSION
@@ -453,8 +453,8 @@ class LeshyApp:
                     )
                     context.append(ChatMessage(
                         "system",
-                        "Результаты текущего веб-поиска. Они уже сохранены в локальную базу как candidate-знания и "
-                        "поставлены на верификацию. Отвечай по этим данным, не утверждая непроверенное как бесспорный факт:\n"
+                        "Результаты текущего веб-поиска. Они не являются автоматически проверенными фактами. "
+                        "Используй их с указанием источника; сохраняй в базу знаний только если обучение разрешено:\n"
                         + snippets,
                     ))
                 elif search_result.get("error"):
@@ -465,7 +465,7 @@ class LeshyApp:
                 problem("live_search_failed", search_error, query=message[:500])
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
-        reason = research_reason(message, trusted_count=len(trusted), candidate_count=len(candidates))
+        reason = adaptive_research_reason(message, trusted, candidates)
         if cinema_plan is not None or reason or self._needs_live_search(message):
             append_live_search(reason or "требуются актуальные данные")
 
