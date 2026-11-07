@@ -49,6 +49,28 @@ def is_explicit_web_request(query: str) -> bool:
     )
 
 
+def is_offline_creative_request(query: str) -> bool:
+    """Творческая генерация — локально, даже при слове «новый».
+
+    Прямая просьба проверить интернет и задания о внешних изменяющихся
+    фактах имеют приоритет. Не запускает модель и не использует сеть.
+    """
+    q = _text(query)
+    if not any(q.startswith(prefix) for prefix in _OFFLINE_TASKS):
+        return False
+    if is_explicit_web_request(query):
+        return False
+    explicit_dynamic = _REALTIME + _WEATHER + _NEWS + _VERSION + _SCHEDULE + _RULES + _SECURITY
+    if any(marker in q for marker in explicit_dynamic):
+        return False
+    if any(marker in q for marker in (
+        "сегодня", "сейчас", "вчера", "завтра", "today", "right now",
+        "последние события", "последние изменения",
+    )):
+        return False
+    return True
+
+
 def ttl_for_context(query: str) -> int:
     """Базовая актуальность 180 дней; для быстрых фактов существенно меньше."""
     q = _text(query)
@@ -96,6 +118,8 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     candidates = list(candidates or [])
     q = _text(query)
     # Явное требование проверить интернет нельзя подавить даже свежим кэшем.
+    if is_offline_creative_request(query):
+        return None
     basic = research_reason(query, trusted_count=len(trusted), candidate_count=len(candidates))
     if is_explicit_web_request(query):
         return "явный запрос интернет-поиска"
@@ -148,5 +172,5 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
 
 __all__ = [
     "SIX_MONTHS_SECONDS", "ttl_for_context", "knowledge_is_current",
-    "adaptive_research_reason", "is_explicit_web_request",
+    "adaptive_research_reason", "is_explicit_web_request", "is_offline_creative_request",
 ]
