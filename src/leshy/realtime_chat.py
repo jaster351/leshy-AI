@@ -256,6 +256,49 @@ class RealtimeChatManager:
             )
             return
 
+        # Мгновенный проверяемый ответ на дату/время; погода через API.
+        # Обычные беседы и их быстрый streaming не затрагиваются.
+        from .verified_clock import clock_answer
+        from .weather_runtime import is_weather_request, weather_answer
+        clock = clock_answer(message)
+        if clock is not None or is_weather_request(message):
+            rid, cancel = self._register(request_id)
+            sid = ""
+            try:
+                sid, _rows = self._save_user_and_history(message, owner_id, session_id)
+                yield StreamEvent("start", {"request_id": rid, "session_id": sid})
+                if cancel.is_set():
+                    yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
+                    return
+                if clock is None:
+                    yield StreamEvent("activity", {
+                        "kind": "weather", "phase": "fetching",
+                        "text": "Получаю прогноз из погодного сервиса…",
+                    })
+                answer = str(clock if clock is not None else weather_answer(message) or "Не удалось получить прогноз.")
+                if cancel.is_set():
+                    yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
+                    return
+                sources = (
+                    [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
+                    if "Источник: Open-Meteo" in answer else []
+                )
+                answered_at = self.app._save_assistant(sid, answer)
+                event("chat_factual_tool_answered", kind="clock" if clock is not None else "weather",
+                      session_id=sid, request_id=rid, source_count=len(sources))
+                yield StreamEvent("delta", {"text": answer})
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid, "answer": answer,
+                    "created_at": answered_at, "sources": sources, "stopped": False,
+                })
+            except Exception as exc:
+                problem("chat_factual_tool_failed", type(exc).__name__, request_id=rid)
+                yield StreamEvent("error", {"request_id": rid, "session_id": sid,
+                                            "error": "Не удалось проверить актуальные данные"})
+            finally:
+                self._unregister(rid)
+            return
+
         special = message.lower().startswith(("/remember ", "/memories")) or self.app._image_prompt(message) is not None
         if special:
             rid, cancel = self._register(request_id)
