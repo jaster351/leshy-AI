@@ -1,6 +1,6 @@
 # Временная блокировка опасных действий Browser Agent
 
-Статус: **защитный fail-closed патч в черновом PR; не в main; без E2E-проверки**.
+Статус: **защитный fail-closed патч; без E2E-проверки**.
 
 В `main` вызов `BrowserAgent.execute(action, approved=True)` обходил Human Approval Gate: вызывающий код сам мог выставить булев флаг, после чего адаптер получал `_approval_verified=True`.
 

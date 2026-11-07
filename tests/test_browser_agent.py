@@ -140,6 +140,7 @@ def test_legacy_approved_true_cannot_convert_forged_marker_into_grant():
     assert action.arguments["_approval_verified"] == "forged"
 
 
+
 @pytest.mark.parametrize("risk", [BrowserRisk.MUTATE, BrowserRisk.COMMIT, BrowserRisk.FINANCIAL])
 def test_legacy_approval_flag_never_reaches_adapter(risk):
     adapter = FakeAdapter()
@@ -148,3 +149,66 @@ def test_legacy_approval_flag_never_reaches_adapter(risk):
     with pytest.raises(ApprovalRequired):
         agent.execute(action, approved=True)
     assert adapter.calls == []
+
+
+@pytest.mark.parametrize("host", [
+    "127.0.0.1", "127.1", "2130706433", "0x7f000001",
+    "0177.0.0.1", "0x7f.0.0.1", "10.0.0.1",
+    "192.168.1.1", "169.254.169.254", "[::1]",
+    "[::ffff:127.0.0.1]", "[::ffff:10.0.0.1]",
+    "0", "0x0", "0177.1", "127.0.1", "0x7f.1",
+])
+def test_browser_ip_alias_and_private_targets_fail_closed(host):
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    result = agent.execute(BrowserAction("read", f"http://{host}/", BrowserRisk.READ))
+    assert result.status == "blocked"
+    assert adapter.calls == []
+
+
+def test_browser_alias_is_not_authorized_by_canonical_loopback_allowlist():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter], allowed_hosts=("127.0.0.1",))
+    assert agent.execute(BrowserAction("read", "http://127.1/", BrowserRisk.READ)).status == "blocked"
+    assert adapter.calls == []
+
+
+def test_browser_numeric_public_ip_is_not_rejected_as_private():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    assert agent.execute(BrowserAction("read", "https://8.8.8.8/", BrowserRisk.READ)).status == "ok"
+
+
+@pytest.mark.parametrize("host", ["localhost", "foo.localhost", "a.b.localhost"])
+def test_implicit_localhost_dns_names_are_blocked(host):
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    result = agent.execute(BrowserAction("read", f"http://{host}/", BrowserRisk.READ))
+    assert result.status == "blocked"
+    assert adapter.calls == []
+
+
+def test_explicit_localhost_allowlist_still_permits_local_service():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter], allowed_hosts=("localhost",))
+    assert agent.execute(BrowserAction("read", "http://localhost:39123/", BrowserRisk.READ)).status == "ok"
+    assert len(adapter.calls) == 1
+
+
+def test_localhost_allowlist_does_not_implicitly_authorize_subdomains():
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter], allowed_hosts=("localhost",))
+    assert agent.execute(BrowserAction("read", "http://foo.localhost/", BrowserRisk.READ)).status == "blocked"
+    assert adapter.calls == []
+
+
+@pytest.mark.parametrize("host", [
+    "0x08080808", "134744072", "010.010.010.010", "8.8.2056",
+])
+def test_public_numeric_ipv4_aliases_remain_accessible(host):
+    """Нормализация числовых IPv4 не должна запрещать публичные адреса."""
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    result = agent.execute(BrowserAction("read", f"https://{host}/", BrowserRisk.READ))
+    assert result.status == "ok"
+    assert len(adapter.calls) == 1
