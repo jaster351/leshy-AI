@@ -130,8 +130,8 @@ class CognitiveArtifactGate:
         row = self._row(artifact_id, owner_id)
         if row["state"] == "applied":
             # Идемпотентный ответ возможен только при сохранённом эффекте.
-            target = self._target(row, create_parent=False)
-            if not target.is_file() or _sha(target.read_bytes()) != row["sha256"]:
+            target = self._verified_existing(row)
+            if target is None:
                 raise ValueError("Подтверждение есть, но файл утрачен или изменён; требуется проверка")
             return {"id": row["id"], "state": "applied",
                     "path": str(target), "sha256": row["sha256"]}
@@ -167,7 +167,7 @@ class CognitiveArtifactGate:
                     os.fsync(stream.fileno())
             except BaseException:
                 raise
-            if _sha(target.read_bytes()) != row["sha256"]:
+            if self._verified_existing(row) is None:
                 raise OSError("Проверка SHA-256 созданного файла не пройдена")
             with self.storage.connection() as conn:
                 conn.execute(
@@ -200,9 +200,11 @@ class CognitiveArtifactGate:
         """Только чтение: не создаёт каталог и не следует за файловыми symlink."""
         try:
             path = self._target(row, create_parent=False)
-            if path.is_symlink() or not path.is_file():
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 16000:
                 return None
-            if _sha(path.read_bytes()) != row["sha256"]:
+            with path.open("rb") as stream:
+                data = stream.read(16001)
+            if len(data) > 16000 or _sha(data) != row["sha256"]:
                 return None
             return path
         except (OSError, ValueError, PermissionError):

@@ -104,6 +104,31 @@ class CognitiveRollbackTests(unittest.TestCase):
         self.assertEqual(new._rollback._row(proposal["id"])["state"], "failed")
         self.assertEqual(new.get(tid, owner_id="web:user")["state"], "blocked")
 
+    def test_archived_file_with_changed_source_is_not_successful_rollback(self):
+        _, proposal, original = self.make_applied()
+        row = self.service._artifacts._row(proposal["id"], "web:user")
+        archived = self.service._rollback._archive_target(row, create_parent=True)
+        archived.write_text("# Тест", encoding="utf-8")
+        original.write_text("TAMPERED", encoding="utf-8")
+        with self.storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO superagent_artifact_rollbacks"
+                "(artifact_id,state,created_at) VALUES(?,'archived','test')",
+                (proposal["id"],),
+            )
+        result = self.service.verify_artifact(proposal["id"], "web:user")
+        self.assertFalse(result["verified"])
+        self.assertEqual(original.read_text(encoding="utf-8"), "TAMPERED")
+        self.assertEqual(archived.read_text(encoding="utf-8"), "# Тест")
+
+    def test_huge_tampered_file_is_rejected_without_full_read(self):
+        _, proposal, original = self.make_applied()
+        original.write_bytes(b"x" * 16001)
+        result = self.service.verify_artifact(proposal["id"], "web:user")
+        self.assertFalse(result["verified"])
+        with self.assertRaises(ValueError):
+            self.service.rollback_artifact(proposal["id"], "web:user")
+
     def test_artifact_task_cannot_retry_after_terminal_change(self):
         tid, proposal, _ = self.make_applied()
         self.service.rollback_artifact(proposal["id"], "web:user")

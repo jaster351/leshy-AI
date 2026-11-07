@@ -59,11 +59,25 @@ class CognitiveArtifactRollback:
     def _verified_archive(self, row: dict[str, Any]) -> Path | None:
         try:
             target = self._archive_target(row)
-            if target.is_symlink() or not target.is_file():
+            if target.is_symlink() or not target.is_file() or target.stat().st_size > 16000:
                 return None
-            return target if _sha(target.read_bytes()) == row["sha256"] else None
+            with target.open("rb") as stream:
+                data = stream.read(16001)
+            return target if len(data) <= 16000 and _sha(data) == row["sha256"] else None
         except (OSError, ValueError, PermissionError):
             return None
+
+    def _source_absent(self, row: dict[str, Any]) -> bool:
+        """Не считать архив успешным, если по старому пути есть ЛЮБОЙ файл.
+
+        Даже повреждённый или заменённый файл в активном каталоге означает,
+        что откат не завершён. Сверка сама не удаляет и не перезаписывает его.
+        """
+        try:
+            source = self.gate._target(row, create_parent=False)
+            return not source.exists() and not source.is_symlink()
+        except (OSError, ValueError, PermissionError):
+            return False
 
     def verify(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
         """Только чтение: нельзя объявить успех без совпадения SHA-256."""
@@ -71,10 +85,9 @@ class CognitiveArtifactRollback:
         rollback = self._row(row["id"])
         if rollback:
             archive = self._verified_archive(row)
-            original = self.gate._verified_existing(row)
             verified = bool(
                 rollback["state"] == "archived" and archive is not None
-                and original is None
+                and self._source_absent(row)
             )
             return {
                 "id": row["id"], "state": "rolled_back" if verified else rollback["state"],
@@ -134,9 +147,8 @@ class CognitiveArtifactRollback:
             ):
                 raise OSError("Исходный файл изменился во время отката")
             active.unlink()
-            result = self.verify(artifact_id, owner_id)
-            # В этот момент запись ещё applying, поэтому сверяем архив отдельно.
-            if self._verified_archive(row) is None or active.exists():
+            # В этот момент запись ещё applying, поэтому проверяем оба пути.
+            if self._verified_archive(row) is None or not self._source_absent(row):
                 raise OSError("Не удалось подтвердить перемещение в архив")
             with self.storage.connection() as conn:
                 now = utcnow()
@@ -149,7 +161,7 @@ class CognitiveArtifactRollback:
                     "UPDATE superagent_tickets SET state='blocked',attention='',"
                     "latest_report=?,delivered=0,updated_at=? "
                     "WHERE id=? AND owner_id=? AND state='ready'",
-                    ("Документ откачен в архив без удаления данных: " + str(archive),
+                    ("Документ перемещён в архив без удаления данных: " + str(archive),
                      now, row["ticket_id"], row["owner_id"]),
                 )
             return self.verify(artifact_id, owner_id)
@@ -180,8 +192,7 @@ class CognitiveArtifactRollback:
             row = dict(fetched)
             state = str(row["rollback_state"])
             archive = self._verified_archive(row)
-            original = self.gate._verified_existing(row)
-            target_state = "archived" if archive is not None and original is None else "failed"
+            target_state = "archived" if archive is not None and self._source_absent(row) else "failed"
             with self.storage.connection() as conn:
                 now = utcnow()
                 if state != target_state:

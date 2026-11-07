@@ -97,12 +97,12 @@ def _execute(service: SuperAgentService, intent: SuperAgentIntent, owner_id: str
         result = service.verify_artifact(intent.ticket_id, owner_id)
         status = "подтверждён" if result["verified"] else "НЕ подтверждён"
         return (f"Проверка документа {result['id']}: {status}, состояние {result['state']}."
-                f"\\nSHA-256: {result['sha256']}"
-                + (f"\\nПуть: {result['path']}" if result.get("path") else ""))
+                f"\nSHA-256: {result['sha256']}"
+                + (f"\nПуть: {result['path']}" if result.get("path") else ""))
     if intent.action == "artifact_rollback":
         result = service.rollback_artifact(intent.ticket_id, owner_id)
         return (f"Обратимый откат подтверждён: документ {result['id']} помещён в архив."
-                f"\\n{result['path']}\\nSHA-256: {result['sha256']}")
+                f"\n{result['path']}\nSHA-256: {result['sha256']}")
     if intent.action == "artifact_approve":
         result = service.approve_artifact(intent.ticket_id, owner_id)
         return f"Документ записан и проверен: {result['path']} (SHA-256: {result['sha256']})."
