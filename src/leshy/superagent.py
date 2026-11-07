@@ -12,6 +12,7 @@ from typing import Any
 
 from .cognitive_core import assess_completion
 from .cognitive_artifacts import CognitiveArtifactGate
+from .cognitive_rollback import CognitiveArtifactRollback
 from .cognitive_tools import CognitiveReadExecutor, parse_tool_request
 from .cognitive_journal import CognitiveStepJournal
 from .cognitive_lease import SuperAgentProcessLease
@@ -98,7 +99,7 @@ def parse_superagent_intent(text: str) -> SuperAgentIntent | None:
     if lower_body in {"list", "список", "задачи", "status", "статус"}:
         return SuperAgentIntent("list")
     artifact_match = re.fullmatch(
-        r"(preview|просмотр|approve|одобри|reject|отклони)\s+(ART-[a-f0-9]{32})",
+        r"(preview|просмотр|approve|одобри|reject|отклони|verify|проверь|rollback|откати)\s+(ART-[a-f0-9]{32})",
         body, re.IGNORECASE,
     )
     if artifact_match:
@@ -106,6 +107,8 @@ def parse_superagent_intent(text: str) -> SuperAgentIntent | None:
             "preview": "artifact_preview", "просмотр": "artifact_preview",
             "approve": "artifact_approve", "одобри": "artifact_approve",
             "reject": "artifact_reject", "отклони": "artifact_reject",
+            "verify": "artifact_verify", "проверь": "artifact_verify",
+            "rollback": "artifact_rollback", "откати": "artifact_rollback",
         }[artifact_match.group(1).lower()]
         return SuperAgentIntent(action, ticket_id=artifact_match.group(2))
 
@@ -150,6 +153,7 @@ class SuperAgentService:
         if workspace_root is None:
             workspace_root = Path(self.storage.path).parent / "workspace"
         self._artifacts = CognitiveArtifactGate(self.storage, workspace_root)
+        self._rollback = CognitiveArtifactRollback(self._artifacts)
         self._lease = SuperAgentProcessLease(self.storage.path)
         self._artifact_recovery: dict[str, Any] = {"ticket_ids": []}
         # Восстановление разрешено ТОЛЬКО владельцу межпроцессного lock:
@@ -164,6 +168,15 @@ class SuperAgentService:
         try:
             self._recover_interrupted()
             self._artifact_recovery = self._artifacts.reconcile()
+            rollback_recovery = self._rollback.reconcile()
+            self._artifact_recovery["ticket_ids"] = list(dict.fromkeys(
+                self._artifact_recovery.get("ticket_ids", [])
+                + rollback_recovery.get("ticket_ids", [])
+            ))
+            if rollback_recovery["archived"] or rollback_recovery["failed"]:
+                event("cognitive_rollback_recovered",
+                      archived=rollback_recovery["archived"],
+                      failed=rollback_recovery["failed"])
             if any(self._artifact_recovery.get(k, 0) for k in ("applied", "failed", "expired", "pending")):
                 event(
                     "cognitive_artifact_recovered",
@@ -324,11 +337,11 @@ class SuperAgentService:
             raise ValueError("Повтор доступен только для ожидающего, заблокированного или неудачного задания")
         with self.storage.connection() as conn:
             pending = conn.execute(
-                "SELECT id FROM superagent_artifacts WHERE ticket_id=? AND state='pending'",
+                "SELECT id FROM superagent_artifacts WHERE ticket_id=?",
                 (ticket_id,),
             ).fetchone()
             if pending:
-                raise ValueError("Документ уже подготовлен: используйте /agent preview, "
+                raise ValueError("Для задания уже есть документ: используйте /agent preview, "
                                  "/agent approve или /agent reject.")
             conn.execute(
                 "UPDATE superagent_tickets SET state='queued',attention='',next_run_epoch=0,delivered=0,updated_at=? WHERE id=?",
@@ -345,11 +358,11 @@ class SuperAgentService:
         now = utcnow()
         with self.storage.connection() as conn:
             pending = conn.execute(
-                "SELECT id FROM superagent_artifacts WHERE ticket_id=? AND state='pending'",
+                "SELECT id FROM superagent_artifacts WHERE ticket_id=?",
                 (ticket_id,),
             ).fetchone()
             if pending:
-                raise ValueError("Ответ в чате не подтверждает документ. "
+                raise ValueError("Для задания уже есть документ; ответ в чате не разрешает новое действие. "
                                  "Используйте /agent preview, /agent approve или /agent reject.")
             conn.execute(
                 "INSERT INTO superagent_inputs(ticket_id,kind,content,created_at) VALUES(?,?,?,?)",
@@ -362,12 +375,26 @@ class SuperAgentService:
         self._wake.set()
         return self.get(ticket_id, owner_id=owner_id)
 
+    def verify_artifact(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
+        return self._rollback.verify(artifact_id, owner_id)
+
+    def rollback_artifact(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
+        if not self._lease.held or self._stop.is_set():
+            raise RuntimeError("Откат разрешён только активному экземпляру Лешего")
+        result = self._rollback.rollback(artifact_id, owner_id)
+        self.storage.audit("superagent.artifact.rollback", {
+            "artifact_id": artifact_id, "sha256": result["sha256"],
+        })
+        return result
+
     def preview_artifact(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
         return self._artifacts.get(artifact_id, owner_id)
 
     def approve_artifact(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
         if not self._lease.held or self._stop.is_set():
             raise RuntimeError("Создание документа выполняется только активным экземпляром Лешего")
+        if self._rollback._row(artifact_id) is not None:
+            raise ValueError("Этот документ уже проходил откат; повторное одобрение запрещено")
         proposal = self._artifacts.get(artifact_id, owner_id)
         applied = self._artifacts.approve(artifact_id, owner_id)
         with self.storage.connection() as conn:
