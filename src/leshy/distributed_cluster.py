@@ -638,6 +638,9 @@ class DistributedClusterRuntime:
         value = self.orchestrator.status()
         value.update({
             "enabled": True,
+            "version": VERSION,
+            "autodiscovery_enabled": self._autodiscovery_configured,
+            "udp": self.discovery.diagnostics(),
             "cluster_id": self.identity.cluster_id,
             "node_id": self.identity.node_id,
             "advertise_endpoint": self.local_node.endpoint,
