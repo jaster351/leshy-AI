@@ -245,7 +245,11 @@ class FastTelegramBridge(RichTelegramBridge):
         user_id = str(sender.get("id") or "")
         message_id = message.get("message_id")
         media = image_attachment(message)
-        if (not text and message.get("voice") is None and media is None) or chat_id is None or not user_id:
+        # Telegram Reply на ранее присланное фото: текущее текстовое сообщение
+        # должно использовать вложение из reply_to_message, а не text-only LLM.
+        reply = message.get("reply_to_message")
+        reply_photo = image_attachment(reply) if isinstance(reply, dict) and text else None
+        if (not text and message.get("voice") is None and media is None and reply_photo is None) or chat_id is None or not user_id:
             return
 
         addressed, address_reason = self._social.addressed_to_leshy(message, bot_id=self._bot_id, bot_username=self._bot_username)
@@ -260,8 +264,14 @@ class FastTelegramBridge(RichTelegramBridge):
 
         # Изображение не должно уходить в text-only LLM по полю caption.
         # Сначала проверены адресация группы и Telegram allow-list.
-        if media is not None:
-            self._handle_vision_message(message, chat_id=chat_id, user_id=user_id, message_id=message_id)
+        if media is not None or reply_photo is not None:
+            vision_message = message
+            if media is None and isinstance(reply, dict):
+                vision_message = dict(reply)
+                vision_message["caption"] = text
+            self._handle_vision_message(
+                vision_message, chat_id=chat_id, user_id=user_id, message_id=message_id,
+            )
             return
         text = self._resolve_message_text(message, chat_id=chat_id, user_id=user_id)
         if not text:

@@ -148,8 +148,23 @@ class LocalTelegramVision:
                 timeout=45,
             ) as response:
                 body = response.read(MAX_RESPONSE_BYTES + 1)
+        except error.HTTPError as exc:
+            if exc.code in {400, 422}:
+                raise VisionUnavailable(
+                    "Vision backend отклонил мультимодальный запрос (HTTP 400/422). "
+                    "Проверьте, что модель поддерживает изображения и формат image_url."
+                ) from None
+            if exc.code == 404:
+                raise VisionUnavailable(
+                    "Vision endpoint или указанная модель не найдены (HTTP 404)."
+                ) from None
+            raise VisionUnavailable(
+                f"Локальный vision backend вернул HTTP {exc.code}."
+            ) from None
         except (error.URLError, OSError, TimeoutError):
-            raise VisionUnavailable("Локальный vision backend недоступен или превысил лимит 45 секунд") from None
+            raise VisionUnavailable(
+                "Локальный vision backend недоступен или превысил лимит 45 секунд"
+            ) from None
         if len(body) > MAX_RESPONSE_BYTES:
             raise VisionUnavailable("Vision backend вернул слишком большой ответ")
         try:

@@ -79,6 +79,66 @@ class TelegramVisionTests(unittest.TestCase):
         self.assertTrue(payloads[0]["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
         bridge._api.assert_called_once_with("getFile", {"file_id": "photo-big"}, timeout=12)
 
+    def test_reply_to_photo_uses_quoted_image_and_current_question(self):
+        bridge = FastTelegramBridge.__new__(FastTelegramBridge)
+        bridge._bot_id = 123
+        bridge._bot_username = "leshy_bot"
+        bridge._social = Mock()
+        bridge._social.addressed_to_leshy.return_value = (True, "private")
+        bridge._social.is_group.return_value = False
+        bridge._can_chat = Mock(return_value=True)
+        bridge._resolve_message_text = Mock(
+            side_effect=AssertionError("Reply photo must not go to text LLM")
+        )
+        bridge._send_answer = Mock()
+        bridge.app = SimpleNamespace(
+            _ensure_session=Mock(return_value="telegram:555:987"),
+            _save_assistant=Mock(),
+            storage=Mock(),
+        )
+        quoted_photo = self.message()
+        current = {
+            "chat": {"id": 555, "type": "private"},
+            "from": {"id": 987},
+            "message_id": 101,
+            "text": "Опиши фотографию, на которую я отвечаю",
+            "reply_to_message": quoted_photo,
+        }
+        captured = []
+        def describe(vision, payload):
+            captured.append(payload)
+            return "На фотографии дерево"
+        with patch("leshy.telegram_fast.LocalTelegramVision.describe", autospec=True,
+                   side_effect=describe):
+            bridge._handle_message(current)
+        bridge._resolve_message_text.assert_not_called()
+        self.assertEqual(captured[0]["caption"], current["text"])
+        self.assertEqual(image_attachment(captured[0])["file_id"], "photo-big")
+        bridge._send_answer.assert_called_once_with(
+            555, "На фотографии дерево", reply_to_message_id=101,
+        )
+
+    def test_http_400_reports_multimodal_format_instead_of_timeout(self):
+        from urllib import error
+        bridge = Mock()
+        bridge._api.return_value = {"file_path": "photos/file.jpg", "file_size": 4}
+        bridge._token.return_value = "no-log-secret"
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, *_): return b"\xff\xd8\xffDATA"
+        class Opener:
+            def open(self, req, timeout):
+                raise error.HTTPError(req.full_url, 400, "Bad Request", {}, None)
+        with patch.dict(os.environ, {
+            "LESHY_VISION_ENDPOINT": "http://127.0.0.1:8080/v1/chat/completions",
+            "LESHY_VISION_MODEL": "local-vision",
+        }), patch("leshy.telegram_vision.request.urlopen", return_value=Response()), patch(
+            "leshy.telegram_vision.request.build_opener", return_value=Opener()
+        ):
+            with self.assertRaisesRegex(VisionUnavailable, "мультимодальный запрос"):
+                LocalTelegramVision(bridge).describe(self.message())
+
     def test_caption_does_not_enter_text_llm_route(self):
         bridge = FastTelegramBridge.__new__(FastTelegramBridge)
         bridge._bot_id = 123
