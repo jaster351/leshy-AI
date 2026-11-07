@@ -312,7 +312,14 @@
       if(!input || input.dataset.recoveryEnter==='1') return;
       input.dataset.recoveryEnter='1';
       input.addEventListener('keydown',event=>{
-        if(event.key==='Enter'&&!event.shiftKey){ event.preventDefault(); sendSafe(input); }
+        // Главный обработчик Enter в index.html уже вызвал preventDefault().
+        // Иначе повторный вызов sendFrom немедленно останавливал поток
+        // в chat-multitask.js вместо ожидания ответа Лешего.
+        if(event.defaultPrevented || event.isComposing) return;
+        if(event.key==='Enter'&&!event.shiftKey){
+          event.preventDefault();
+          sendSafe(input);
+        }
       });
     });
 
