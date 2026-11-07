@@ -112,16 +112,21 @@ def main() -> None:
     parser.add_argument("--host", default=os.getenv("LESHY_HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(os.getenv("LESHY_PORT", "8765")))
     parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--check-native-runtime", action="store_true", help="Проверить импорт встроенного CPU GGUF runtime и завершить работу")
+    parser.add_argument(
+        "--check-native-runtime",
+        action="store_true",
+        help="Проверить встроенный llama-cpp-python без запуска веб-сервера",
+    )
     args = parser.parse_args()
-
     if args.check_native_runtime:
         try:
-            from llama_cpp import Llama  # noqa: F401: проверка исполняемого пакета
+            from llama_cpp import Llama  # noqa: F401
+            import diskcache  # noqa: F401
+            import jinja2  # noqa: F401
         except Exception as exc:
-            print(f"Ошибка импорта llama-cpp-python в собранном приложении: {type(exc).__name__}: {exc}", file=sys.stderr)
+            print(f"Ошибка CPU LLM runtime: {type(exc).__name__}: {exc}", file=sys.stderr)
             raise SystemExit(2) from exc
-        print("llama-cpp-python: OK (frozen runtime)")
+        print("CPU LLM runtime: OK")
         return
 
     install_root = _install_root()

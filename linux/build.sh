@@ -1,67 +1,39 @@
 #!/usr/bin/env bash
-# Ubuntu / CentOS Stream: локальная Linux-сборка Лешего (PyInstaller onedir).
+# Linux one-dir сборка. Данные LeshyBrain не перезаписываются PyInstaller.
 set -Eeuo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 if [[ ! -x .venv/bin/python ]]; then
-  echo "Не найден .venv/bin/python. Сначала выполните команды установки из README." >&2
-  exit 2
+  python3 -m venv .venv
 fi
 PY="$ROOT/.venv/bin/python"
-# Устанавливаем все зависимости CPU-LLM перед созданием frozen package.
-# Ранее llama-cpp-python ставили с --no-deps; diskcache мог отсутствовать.
-"$PY" -m pip install -e '.[native,test,build]'
+"$PY" -m pip install -e '.[native,test,build]' 'diskcache>=5.6,<6' 'jinja2>=3.1,<4'
 "$PY" -m pip check
-"$PY" -c 'from llama_cpp import Llama; import diskcache; import jinja2; print("CPU GGUF runtime: import OK")'
-# Поставить системные библиотеки Chromium на Ubuntu/Debian и загрузить браузер
-# в Playwright cache. Работает и на сервере без X11/Wayland.
-if [[ "${LESHY_SKIP_BROWSER_INSTALL:-0}" != "1" ]]; then
-  if [[ -r /etc/os-release ]] && grep -Eq '^ID="?((ubuntu)|(debian))"?
-"$PY" -m pytest -q
-"$PY" -m PyInstaller --noconfirm --clean --onedir --console \
-  --name Leshy \
-  --paths src \
-  --collect-all llama_cpp \
-  --collect-all ddgs \
-  --collect-all tzdata \
-  --collect-all faster_whisper \
-  --collect-all ctranslate2 \
-  --collect-all av \
-  --collect-all tokenizers \
-  --collect-all huggingface_hub \
-  --collect-all hf_xet \
-  --collect-all playwright \
-  --collect-all browser_use \
-  --exclude-module browser_use.llm.oci_raw \
-  --exclude-module oci \
-  --collect-all markitdown \
-  --collect-all mcp \
-  --collect-all mss \
-  --collect-all pyautogui \
-  --collect-all pypdf \
-  --add-data "web:web" \
-  --add-data "VERSION:." \
-  windows/launcher.py
-BIN="$ROOT/dist/Leshy/Leshy"
-if [[ ! -x "$BIN" ]]; then
-  echo "PyInstaller не создал исполняемый файл $BIN" >&2
-  exit 1
-fi
-"$BIN" --help >/dev/null
-# Импорт из .venv недостаточен: проверяем само собранное приложение.
-"$BIN" --check-native-runtime
-echo "Linux-сборка готова: $BIN"
-echo "Запуск: $BIN --no-browser"
-echo "Проверка на Linux не подтверждена до выполнения скрипта на целевой машине."
- /etc/os-release; then
-    "$PY" -m playwright install --with-deps chromium
-  else
-    "$PY" -m playwright install chromium
-  fi
-  "$PY" -c 'from leshy.system_browser import ensure_system_browser; print("Browser:", ensure_system_browser(auto_install=False).executable)'
-fi
+"$PY" -c 'from llama_cpp import Llama; import diskcache, jinja2; print("CPU LLM runtime OK")'
 "$PY" -m compileall -q src
 "$PY" -m pytest -q
+
+# Критически важно: PyInstaller --clean удаляет dist/Leshy.
+# Переносим память, модели и профили в безопасный временный каталог.
+BRAIN="$ROOT/dist/Leshy/LeshyBrain"
+SAFE_ROOT=""
+restore_brain() {
+  if [[ -n "$SAFE_ROOT" && -d "$SAFE_ROOT/LeshyBrain" ]]; then
+    mkdir -p "$(dirname "$BRAIN")"
+    if [[ -e "$BRAIN" ]]; then
+      echo "Ошибка: папка LeshyBrain уже существует. Резервные данные: $SAFE_ROOT/LeshyBrain" >&2
+      return 1
+    fi
+    mv "$SAFE_ROOT/LeshyBrain" "$BRAIN"
+    rmdir "$SAFE_ROOT" || true
+  fi
+}
+if [[ -d "$BRAIN" ]]; then
+  SAFE_ROOT="$(mktemp -d "$ROOT/.leshy-preserved-brain.XXXXXXXX")"
+  mv "$BRAIN" "$SAFE_ROOT/LeshyBrain"
+fi
+trap restore_brain EXIT
+
 "$PY" -m PyInstaller --noconfirm --clean --onedir --console \
   --name Leshy \
   --paths src \
@@ -83,17 +55,15 @@ fi
   --collect-all mss \
   --collect-all pyautogui \
   --collect-all pypdf \
-  --add-data "web:web" \
-  --add-data "VERSION:." \
+  --hidden-import diskcache \
+  --hidden-import jinja2 \
+  --add-data 'web:web' \
+  --add-data 'VERSION:.' \
   windows/launcher.py
 BIN="$ROOT/dist/Leshy/Leshy"
-if [[ ! -x "$BIN" ]]; then
-  echo "PyInstaller не создал исполняемый файл $BIN" >&2
-  exit 1
-fi
+test -x "$BIN"
 "$BIN" --help >/dev/null
-# Импорт из .venv недостаточен: проверяем само собранное приложение.
 "$BIN" --check-native-runtime
-echo "Linux-сборка готова: $BIN"
-echo "Запуск: $BIN --no-browser"
-echo "Проверка на Linux не подтверждена до выполнения скрипта на целевой машине."
+restore_brain
+trap - EXIT
+printf '\nСборка готова: %s\nЗапуск: %s --no-browser\n' "$BIN" "$BIN"

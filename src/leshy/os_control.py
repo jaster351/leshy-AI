@@ -36,7 +36,7 @@ class OperatingSystemController:
 
     _INTENT_RE = re.compile(
         r"(?i)(?:^\s*/os\b|\b(?:windows|виндовс|операционн\w*\s+систем\w*|на\s+компьютер\w*|на\s+пк)\b|"
-        r"\b(?:открой|запусти|выполни|создай\s+папк|прочитай\s+файл|покажи\s+(?:файлы|папки|процессы)|"
+        r"\b(?:открой\s+(?:файл|папку|программ)|запусти\s+(?:программ|приложени|процесс|скрипт)|выполни\s+(?:команду|скрипт|powershell)|создай\s+папк|прочитай\s+файл|покажи\s+(?:файлы|папки|процессы)|"
         r"останови\s+процесс|закрой\s+программ|скопируй\s+файл|перемести\s+файл|удали\s+файл)\b)"
     )
     _DANGEROUS_RE = re.compile(
@@ -277,14 +277,10 @@ class OperatingSystemController:
         args = plan.get("args") if isinstance(plan.get("args"), dict) else {}
         return action, args
 
-    def handle_user_request(self, message: str, *, owner_id: str = "web:local") -> str | None:
+    def handle_user_request(self, message: str, *, owner_id: str = "web:local", planned: tuple[str, dict[str, Any]] | None = None) -> str | None:
         if not self.is_request(message):
             return None
-        direct = self._direct_command(message)
-        if direct is not None:
-            action, args = direct
-        else:
-            action, args = self._plan_natural(message)
+        action, args = planned if planned is not None else (self._direct_command(message) or self._plan_natural(message))
 
         if action == "help":
             return (
@@ -326,6 +322,23 @@ def install_os_control(app) -> OperatingSystemController:
     def chat_with_os(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None):
         text = str(message or "").strip()
         if controller.is_request(text):
+            # OS intent matching is intentionally broad (e.g. "открой"). The LLM
+            # may correctly select a web or browser action. Never send such an
+            # action to OperatingSystemController.execute: route it back through
+            # the ordinary chat/search pipeline instead.
+            try:
+                planned = controller._direct_command(text) or controller._plan_natural(text)
+            except (ValueError, TypeError, json.JSONDecodeError):
+                return original_chat(message, owner_id=owner_id, session_id=session_id)
+            supported = {
+                "help", "need_clarification", "system_status", "list_dir",
+                "read_text", "write_text", "make_dir", "copy", "move",
+                "delete", "process_list", "start_process", "stop_process",
+                "open_path", "powershell",
+            }
+            if planned[0] not in supported:
+                event("os_action_delegated_to_chat", action=str(planned[0])[:80], owner_id=owner_id)
+                return original_chat(message, owner_id=owner_id, session_id=session_id)
             sid = self._ensure_session(owner_id, session_id)
             now = utcnow()
             with self.storage.connection() as conn:
@@ -333,7 +346,7 @@ def install_os_control(app) -> OperatingSystemController:
                 count = int(conn.execute("SELECT COUNT(*) AS c FROM messages WHERE session_id=?", (sid,)).fetchone()["c"])
                 if count == 1:
                     conn.execute("UPDATE sessions SET title=?,title_source=?,updated_at=? WHERE id=?", (" ".join(text.split())[:80], "auto", now, sid))
-            answer = controller.handle_user_request(text, owner_id=owner_id) or "Системное действие не распознано."
+            answer = controller.handle_user_request(text, owner_id=owner_id, planned=planned) or "Системное действие не распознано."
             return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": [], "os_action": True}
         return original_chat(message, owner_id=owner_id, session_id=session_id)
 

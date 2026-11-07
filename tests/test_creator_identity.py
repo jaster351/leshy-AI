@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from leshy.config import Settings
-from leshy.identity_runtime import CREATOR_FULL_NAME, creator_identity_answer
+from leshy.identity_runtime import CREATOR_FULL_NAME, creator_identity_answer, is_owner_identity_question
 from leshy.realtime_chat import RealtimeChatManager
 from leshy.runtime import Runtime
 
@@ -76,3 +76,11 @@ class CreatorIdentityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_owner_identity_recognizes_natural_telegram_question():
+    assert is_owner_identity_question("А я по-твоему кто?")
+    assert is_owner_identity_question("Ты меня узнаёшь?")
+    assert is_owner_identity_question("Ты меня узнал?")
+    assert not is_owner_identity_question("Добавь мороженое в корзину")
+    assert not is_owner_identity_question("Я хозяин Лешего")

@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from .browser_agent import BrowserAction, BrowserActionResult, BrowserRisk
 from .diagnostics import event, problem
+from .browser_profile_cdp import profile_cdp_url, profile_may_be_in_use, profile_busy_message
 from .browser_launch_policy import chromium_launch_policy
 from .system_browser import ensure_system_browser
 
@@ -51,8 +52,10 @@ class BrowserUseAdapter:
     def __init__(self, llm: Any | None = None, *, max_steps: int = 40, headless: bool | None = None):
         self.llm = llm
         self.max_steps = max(3, min(int(max_steps), 100))
-        policy = chromium_launch_policy()
-        self.headless = policy.headless if headless is None else (bool(headless) if policy.can_open_window else True)
+        launch_policy = chromium_launch_policy()
+        self.headless = launch_policy.headless if headless is None else (
+            bool(headless) if launch_policy.can_open_window else True
+        )
         self.root = Path(os.getenv("LESHY_BRAIN_DIR", "LeshyBrain")).expanduser()
         self.profile_dir = self.root / "browser" / "browser-use-profile"
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -192,26 +195,46 @@ class BrowserUseAdapter:
 
         browser_info = ensure_system_browser(auto_install=True)
         profile_dir = self._profile_for_action(action)
+        # «Лента» использует отдельное постоянно открытое окно авторизации.
+        # Подключение к живому CDP сохраняет cookies и не конфликтует с lock
+        # user-data-dir. К чужим профилям не подключаемся.
+        is_lenta = str(action.arguments.get("profile_namespace") or "") == "lenta"
+        cdp_url = profile_cdp_url(profile_dir) if is_lenta else None
+        if is_lenta and not cdp_url and profile_may_be_in_use(profile_dir):
+            return BrowserActionResult("failed", profile_busy_message())
         event(
             "browser_agent_browser_launch_config",
             browser=browser_info.name,
             executable_name=Path(browser_info.executable).name,
             headless=self.headless,
-            root_linux=chromium_launch_policy().root_linux,
             isolated_profile=profile_dir != self.profile_dir,
-            profile_has_lock=any((profile_dir / name).exists() for name in ("SingletonLock", "lockfile")),
+            profile_has_lock=profile_may_be_in_use(profile_dir),
+            attached_to_existing_window=bool(cdp_url),
             action=action.name,
+            root_linux=chromium_launch_policy().root_linux,
         )
-        policy = chromium_launch_policy()
-        browser = Browser(
-            executable_path=browser_info.executable,
-            user_data_dir=str(profile_dir),
-            headless=self.headless,
-            chromium_sandbox=policy.chromium_sandbox,
-            args=list(policy.args),
-            allowed_domains=self._domain_patterns(hosts),
-            keep_alive=False,
-        )
+        if cdp_url:
+            browser = Browser(
+                cdp_url=cdp_url,
+                allowed_domains=self._domain_patterns(hosts),
+                keep_alive=True,
+            )
+        else:
+            policy = chromium_launch_policy()
+            launch_options = {}
+            if policy.args or not policy.chromium_sandbox:
+                launch_options = {
+                    "chromium_sandbox": policy.chromium_sandbox,
+                    "args": list(policy.args),
+                }
+            browser = Browser(
+                executable_path=browser_info.executable,
+                user_data_dir=str(profile_dir),
+                headless=self.headless,
+                allowed_domains=self._domain_patterns(hosts),
+                keep_alive=False,
+                **launch_options,
+            )
         user_task = str(action.arguments.get("task") or action.description or "").strip()
         if not user_task:
             user_task = f"Изучи страницу {action.url} и верни полезную информацию."
@@ -260,6 +283,27 @@ class BrowserUseAdapter:
             except Exception:
                 pass
 
+    def _fallback_read(self, action: BrowserAction, cause: str) -> BrowserActionResult:
+        """Read-only fallback when Browser Use or Edge/CDP cannot start.
+
+        Never retry MUTATE/COMMIT/FINANCIAL with another profile: that would
+        silently lose the user's authenticated session and approval context.
+        """
+        from .playwright_browser_adapter import PlaywrightBrowserAdapter
+
+        fallback = PlaywrightBrowserAdapter(headless=self.headless)
+        result = fallback.execute(BrowserAction(
+            "read", action.url, BrowserRisk.READ, dict(action.arguments), action.description
+        ))
+        if result.status == "ok":
+            event("browser_agent_read_fallback_ok", action=action.name, cause=cause[:180])
+            return BrowserActionResult("ok", "Страница прочитана через Playwright (резервный режим).", {
+                "result": str(result.data.get("visible_text") or ""),
+                "url": str(result.data.get("url") or action.url),
+                "fallback": "playwright",
+            })
+        return result
+
     def execute(self, action: BrowserAction) -> BrowserActionResult:
         supported = {"research", "agent_read", "agent_mutate", "agent_commit", "agent_financial"}
         if action.name not in supported:
@@ -283,10 +327,25 @@ class BrowserUseAdapter:
         if not self.available():
             return BrowserActionResult("unavailable", "Browser Use или совместимая LLM недоступны")
         try:
-            return self._run_sync(self._run(action))
+            result = self._run_sync(self._run(action))
+            if result.status == "failed" and action.risk is BrowserRisk.READ:
+                return self._fallback_read(action, result.message)
+            return result
         except Exception as exc:
             problem("browser_agent_browser_use_failed", str(exc), risk=action.risk.value, action=action.name)
-            return BrowserActionResult("failed", str(exc))
+            if action.risk is BrowserRisk.READ:
+                return self._fallback_read(action, str(exc))
+            message = str(exc)
+            if os.name == "nt" and action.arguments.get("profile_namespace") == "lenta" and (
+                "CDP became available" in message or "Browser process" in message
+            ):
+                message = (
+                    "Edge/Chrome не смог открыть профиль «Ленты» для Browser Agent. "
+                    "Если окно входа уже открыто, закройте только его, затем отправьте "
+                    "«войти в Ленту» и повторите действие. "
+                    "Данные авторизации не удаляются. Подробности: " + message[:240]
+                )
+            return BrowserActionResult("failed", message)
 
 
 __all__ = ["BrowserUseAdapter"]

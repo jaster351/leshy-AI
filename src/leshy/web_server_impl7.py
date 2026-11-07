@@ -79,9 +79,6 @@ def _runtime_html(settings) -> bytes:
     """Эталонный chat transport + изолированные UI-модули вокруг него."""
     reference_html = shell._runtime_html(settings)
     html_text = reference_html.decode("utf-8")
-    # Не модифицируем эталонный chat transport, если внешняя оболочка
-    # не содержит полноценной боковой панели: скрипты модулей там не нужны.
-    # Это также сохраняет точный результат HTML для минимальных/встраиваемых UI.
     if 'class="sidebar"' not in html_text and 'id="pane-chat"' not in html_text:
         return reference_html
     for marker in (
