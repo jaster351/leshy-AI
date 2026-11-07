@@ -92,12 +92,37 @@ class StreamingAutoContinueTests(unittest.TestCase):
                     yield b'data: {"choices":[{"delta":{"content":"x"},"finish_reason":null}]}\n'
 
         response = SlowResponse()
-        with patch("leshy.streaming_backends.request.urlopen", return_value=response):
-            started = time.monotonic()
-            chunks = list(_llama_stream(provider, [ChatMessage("user", "Длинный запрос")]))
+        with patch("leshy.streaming_backends._stream_hard_limit_seconds", return_value=0.18):
+            with patch("leshy.streaming_backends.request.urlopen", return_value=response):
+                started = time.monotonic()
+                chunks = list(_llama_stream(provider, [ChatMessage("user", "Длинный запрос")]))
         self.assertIn("Ответ остановлен по лимиту времени", "".join(chunks))
         self.assertLess(time.monotonic() - started, 2.0)
         self.assertTrue(response.was_closed.is_set())
+
+    def test_active_generation_longer_than_socket_timeout_is_not_killed(self):
+        provider = _Provider()
+        provider.request_timeout = 0.09
+
+        class ProgressResponse:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def close(self): pass
+            def __iter__(self):
+                for token in ("Часть ", "длинного ", "ответа ", "готова."):
+                    time.sleep(0.06)
+                    yield ('data: '+json.dumps({
+                        "choices":[{"delta":{"content":token},"finish_reason":None}]
+                    })+'\n').encode("utf-8")
+                yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n'
+                yield b'data: [DONE]\n'
+
+        with patch("leshy.streaming_backends.request.urlopen", return_value=ProgressResponse()):
+            with patch("leshy.streaming_backends._stream_hard_limit_seconds", return_value=1.0):
+                started = time.monotonic()
+                answer = "".join(_llama_stream(provider, [ChatMessage("user","Подробно")]))
+        self.assertEqual(answer, "Часть длинного ответа готова.")
+        self.assertGreater(time.monotonic()-started, 0.18)
 
     def test_qwen_default_uses_visible_non_thinking_mode(self):
         import os

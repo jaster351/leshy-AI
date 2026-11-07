@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import threading
@@ -12,11 +13,14 @@ from .diagnostics import event, exception
 from .accelerator_runtime import _visible_answer_options
 from .context_budget import _normalize_system_messages, apply_context_budget, estimate_tokens
 from .llm import ChatMessage, LLMUnavailable
+from .adaptive_backend import _hardware_kind
 from .persona import with_leshy_identity
 
 _CONTEXT_ERROR_RE = re.compile(r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)", re.IGNORECASE)
 _MAX_AUTO_CONTINUATIONS = 1
 _SLOW_STREAM_FAILURE_SECONDS = 30.0
+_STREAM_IDLE_SECONDS = 90.0
+_STREAM_MAX_SECONDS = 360.0
 _AUTO_CONTINUATION_FIRST_ROUND_BUDGET_SECONDS = 25.0
 _CONTINUATION_TAIL_CHARS = 2200
 _TRAILING_CONNECTORS = {
@@ -96,24 +100,48 @@ def _abort_stream_response(response) -> None:
         pass
 
 
-def _arm_stream_watchdog(response, cancel_event: threading.Event, deadline: float):
-    """Вернуть (stop, timeout_fired), чтобы отключать watchdog в finally."""
+def _stream_hard_limit_seconds() -> float:
+    """User-configurable hard bound; unlike the idle bound, permits slow progress."""
+    raw = str(os.getenv("LESHY_STREAM_MAX_SECONDS") or "").strip()
+    try:
+        return min(900.0, max(60.0, float(raw))) if raw else _STREAM_MAX_SECONDS
+    except (ValueError, OverflowError):
+        return _STREAM_MAX_SECONDS
+
+
+def _arm_stream_watchdog(
+    response, cancel_event: threading.Event, *,
+    started_at: float, progress_at: list[float], idle_seconds: float,
+    max_seconds: float,
+):
+    """End stalled streams; never kill a healthy stream at its socket timeout.
+
+    progress_at is refreshed only for actual SSE model tokens (including
+    reasoning). Keep-alive frames do not count as model progress.
+    """
     stop = threading.Event()
     timed_out = threading.Event()
+    reason = [""]
+    hard_deadline = started_at + max_seconds
 
     def watch() -> None:
         while not stop.wait(0.10):
             if cancel_event.is_set():
                 _abort_stream_response(response)
                 return
-            if time.monotonic() >= deadline:
-                timed_out.set()
-                _abort_stream_response(response)
-                return
+            now = time.monotonic()
+            if now >= hard_deadline:
+                reason[0] = "max_total_duration"
+            elif now - progress_at[0] >= idle_seconds:
+                reason[0] = "no_model_progress"
+            else:
+                continue
+            timed_out.set()
+            _abort_stream_response(response)
+            return
 
-    thread = threading.Thread(target=watch, name="leshy-sse-watchdog", daemon=True)
-    thread.start()
-    return stop, timed_out
+    threading.Thread(target=watch, name="leshy-sse-watchdog", daemon=True).start()
+    return stop, timed_out, reason
 
 
 def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None):
@@ -147,19 +175,25 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                         headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
                         method="POST",
                     )
-                    # timeout= у urllib ограничивает отдельное ожидание recv,
-                    # а НЕ длительность всей SSE-генерации. Отдельный сторож
-                    # закрывает сокет по общему deadline и при user cancel.
-                    deadline = round_started + max(0.05, float(self.request_timeout))
-                    with request.urlopen(req, timeout=self.request_timeout) as response:
-                        watchdog_stop, watchdog_timeout = _arm_stream_watchdog(
-                            response, cancel_event, deadline,
+                    # Socket timeout only guards individual I/O waits.
+                    # A healthy Qwen generation can take 2–5 minutes on CPU
+                    # while producing tokens every few seconds. Reset the idle
+                    # timer on *real* tokens; keep an independent hard ceiling.
+                    io_timeout = max(0.05, min(float(self.request_timeout), _STREAM_IDLE_SECONDS))
+                    with request.urlopen(req, timeout=io_timeout) as response:
+                        stream_started = time.monotonic()
+                        last_progress = [stream_started]
+                        watchdog_stop, watchdog_timeout, timeout_reason = _arm_stream_watchdog(
+                            response, cancel_event,
+                            started_at=stream_started, progress_at=last_progress,
+                            idle_seconds=io_timeout,
+                            max_seconds=max(io_timeout, _stream_hard_limit_seconds()),
                         )
                         try:
                             for raw_line in response:
                                 if cancel_event.is_set():
                                     break
-                                if watchdog_timeout.is_set() or time.monotonic() >= deadline:
+                                if watchdog_timeout.is_set():
                                     break
                                 line = raw_line.decode("utf-8", errors="replace").strip()
                                 if not line or line.startswith(":"):
@@ -176,7 +210,13 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                                 if not choices:
                                     continue
                                 choice = choices[0]
-                                delta = (choice.get("delta") or {}).get("content")
+                                change = choice.get("delta") or {}
+                                delta = change.get("content")
+                                # Progress is activity from the model, not
+                                # HTTP keepalives. Count reasoning tokens too;
+                                # a separate hard cap prevents endless thinking.
+                                if delta or change.get("reasoning_content") or change.get("reasoning"):
+                                    last_progress[0] = time.monotonic()
                                 if delta:
                                     chunk = str(delta)
                                     round_chunks.append(chunk)
@@ -192,9 +232,10 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                                 raise
                         finally:
                             watchdog_stop.set()
-                        if watchdog_timeout.is_set() or time.monotonic() >= deadline:
+                        if watchdog_timeout.is_set():
                             event("accelerator_stream_deadline_exceeded", backend=self.backend,
                                   elapsed_ms=int((time.monotonic() - round_started) * 1000),
+                                  reason=timeout_reason[0] or "unknown",
                                   output_chars=sum(map(len, round_chunks)))
                             if round_chunks:
                                 # Пользователь уже получил часть видимого текста.
@@ -205,13 +246,14 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                                     )
                                     if remaining:
                                         yield remaining
-                                yield "\n\n[Ответ остановлен по лимиту времени. Можно продолжить сообщением «продолжай».]"
+                                yield "\n\n[Ответ сохранён частично: превышен защитный предел длительности или модель перестала генерировать. Можно продолжить запрос.]"
                                 event("accelerator_stream_partial_preserved", backend=self.backend,
                                       output_chars=sum(map(len, round_chunks)))
                                 return
                             raise LLMUnavailable(
-                                "Модель не сформировала видимый ответ за отведённое время; "
-                                "проверьте режим рассуждений Qwen"
+                                "Модель не сформировала видимый ответ: "
+                                + ("нет новых токенов" if timeout_reason[0] == "no_model_progress"
+                                   else "достигнут максимальный срок генерации")
                             )
                     if cancel_event.is_set():
                         return
@@ -323,9 +365,13 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
     prepared = with_leshy_identity(messages)
     errors: list[str] = []
     routing = self._routing_priority()
-    for state in self._ordered():
+    ordered = self._ordered()
+    cpu_recovery_only = False
+    for index, state in enumerate(ordered):
         if cancel_event.is_set():
             return
+        if cpu_recovery_only and _hardware_kind(state.name) != "cpu":
+            continue
         started = time.monotonic()
         yielded = False
         # Отказ оценки контекста не означает, что backend недоступен.
@@ -363,8 +409,21 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
                 # Уже отдали часть ответа пользователю: не мешать другой backend.
                 raise
             if latency_ms >= int(_SLOW_STREAM_FAILURE_SECONDS * 1000):
+                # On November 7 a healthy CPU fallback never ran because
+                # a slow GPU/NPU error aborted the entire request. Give
+                # *one* available CPU backend a chance, never a costly
+                # GPU -> NPU -> CPU cascade. No partial answer is mixed.
+                cpu_pending = any(
+                    _hardware_kind(other.name) == "cpu"
+                    for other in ordered[index + 1:]
+                )
+                if not cpu_recovery_only and cpu_pending:
+                    cpu_recovery_only = True
+                    event("adaptive_llm_stream_slow_cpu_recovery", backend=state.name,
+                          latency_ms=latency_ms, reason="no_visible_output")
+                    continue
                 event("adaptive_llm_stream_slow_fallback_skipped", backend=state.name,
-                      latency_ms=latency_ms, reason="avoid_cascaded_slow_retries")
+                      latency_ms=latency_ms, reason="cpu_recovery_unavailable_or_exhausted")
                 break
             continue
         latency_ms = int((time.monotonic() - started) * 1000)

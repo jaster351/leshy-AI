@@ -31,17 +31,18 @@ class AdaptiveStreamTests(unittest.TestCase):
         self.assertEqual("".join(_adaptive_stream(router, [ChatMessage("user", "Привет")])), "ответ")
         self.assertEqual((gpu.calls, cpu.calls), (1, 1))
 
-    def test_late_failure_does_not_start_second_slow_backend(self):
+    def test_late_gpu_failure_recovers_via_single_cpu_without_npu_cascade(self):
         gpu = FakeStream(exception=RuntimeError("timeout"))
+        npu = FakeStream(exception=RuntimeError("slow startup"))
         cpu = FakeStream(parts=["cpu"])
-        router = AdaptiveLLM([("gpu-vulkan", gpu), ("cpu-native", cpu)])
-        # Один clock у _ordered, второй при старте GPU, затем +35s.
-        readings = iter([0.0, 0.0, 35.0, 35.0, 35.0, 35.0])
-        with patch("leshy.streaming_backends.time.monotonic", side_effect=lambda: next(readings, 35.0)):
-            with self.assertRaises(LLMUnavailable):
-                "".join(_adaptive_stream(router, [ChatMessage("user", "Привет")]))
-        self.assertEqual(gpu.calls, 1)
-        self.assertEqual(cpu.calls, 0)
+        router = AdaptiveLLM([
+            ("gpu-vulkan", gpu), ("npu-openvino", npu), ("cpu-native", cpu),
+        ])
+        # Контролируем часы без запуска дорогих моделей.
+        ticks = iter([0.0, 0.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0])
+        with patch("leshy.streaming_backends.time.monotonic", side_effect=lambda: next(ticks, 35.0)):
+            self.assertEqual("".join(_adaptive_stream(router,[ChatMessage("user","Привет")])), "cpu")
+        self.assertEqual((gpu.calls,npu.calls,cpu.calls),(1,0,1))
 
     def test_partial_answer_never_merges_with_new_model(self):
         class Partial(FakeStream):
