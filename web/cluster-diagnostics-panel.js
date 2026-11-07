@@ -73,6 +73,17 @@
     polling=true;
     try{
       draw(await api('/v1/cluster/diagnostics'));
+      try{
+        const sync=await api('/v1/cluster/knowledge-sync/status');
+        const state=({waiting:'ожидание соседних ПК',synchronized:'подключено',disabled:'выключено',error:'ошибка'}[sync.state]||sync.state||'неизвестно');
+        txt('leshyClusterKnowledgeSync',
+          'Состояние: '+state+' · Получено записей: '+(sync.received_total||0)+
+          ' · Отдано: '+(sync.sent_total||0)+
+          ' · Последний обмен: '+(sync.last_sync||'ещё не было')+
+          (sync.last_error?' · Ошибка: '+sync.last_error:''));
+      }catch(error){
+        txt('leshyClusterKnowledgeSync','Нет данных синхронизации: '+error.message);
+      }
       txt('leshyClusterDiagUpdated','Обновлено '+new Date().toLocaleTimeString('ru-RU'));
     }catch(error){
       txt('leshyClusterDiagUpdated','Ошибка диагностики: '+error.message);
@@ -124,6 +135,9 @@
       '<div class="item-meta">Последнее обнаружение: <b id="leshyClusterDiagLast">—</b></div>',
       '<div class="item-meta" id="leshyClusterDiagPackets">—</div>',
       '</div>',
+      '<div class="item"><div class="item-title">Синхронизация общих знаний</div>',
+      '<div class="item-meta">Данные передаются между доверенными узлами зашифрованно каждые 5 секунд. Личная переписка, пароли и токены не копируются.</div>',
+      '<div class="item-meta" id="leshyClusterKnowledgeSync">Ожидание статуса…</div></div>',
       '<div class="item"><div class="item-title">Другие компьютеры</div><div class="list" id="leshyClusterDiagPeerList" style="margin-top:8px"></div></div>',
       '</div>',
       '<div class="hint" id="leshyClusterDiagHints" role="status" style="margin-top:10px"></div>',

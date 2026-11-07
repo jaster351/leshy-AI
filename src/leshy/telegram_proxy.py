@@ -9,6 +9,7 @@ import base64
 import http.client
 import ipaddress
 import json
+import os
 from pathlib import Path
 import re
 import ssl
@@ -18,6 +19,18 @@ from urllib import error, parse, request
 from .secret_store import load_secret, save_secret
 
 _HOST_RE = re.compile(r"^[A-Za-z0-9.\-]+$")
+
+
+def _telegram_tls_context() -> ssl.SSLContext:
+    """Дополнительный доверенный CA для Telegram. Проверка TLS обязательна."""
+    ctx = ssl.create_default_context()
+    path = os.getenv("LESHY_TELEGRAM_CA_BUNDLE", "").strip()
+    if path:
+        source = Path(path).expanduser()
+        if not source.is_file():
+            raise FileNotFoundError("Не найден PEM-файл доверенного CA Telegram")
+        ctx.load_verify_locations(cafile=str(source))
+    return ctx
 
 
 def _valid_host(raw: object) -> str:
@@ -63,7 +76,8 @@ def _normalize(raw: dict) -> dict:
 def _public(cfg: dict) -> dict:
     return {"enabled": cfg["enabled"], "scheme": cfg["scheme"],
             "host": cfg["host"], "port": cfg["port"], "auth": cfg["auth"],
-            "username": cfg["username"], "has_password": bool(cfg["password"])}
+            "username": cfg["username"], "has_password": bool(cfg["password"]),
+            "custom_ca_configured": bool(os.getenv("LESHY_TELEGRAM_CA_BUNDLE", "").strip())}
 
 
 class _NoRedirects(request.HTTPRedirectHandler):
@@ -112,8 +126,8 @@ class _SocksHTTPSConnection(http.client.HTTPSConnection):
 
 
 class _SocksHTTPSHandler(request.HTTPSHandler):
-    def __init__(self, cfg: dict):
-        super().__init__(context=ssl.create_default_context())
+    def __init__(self, cfg: dict, *, context: ssl.SSLContext | None = None):
+        super().__init__(context=context or _telegram_tls_context())
         self._cfg = cfg
 
     def https_open(self, req):
@@ -191,9 +205,13 @@ class TelegramProxyTransport:
                 address = f"http://{username}:{password}@{host}"
             else:
                 address = f"http://{host}"
-            return request.build_opener(_ForceHTTPProxy({"https": address}), _NoRedirects())
+            return request.build_opener(
+                _ForceHTTPProxy({"https": address}),
+                request.HTTPSHandler(context=_telegram_tls_context()),
+                _NoRedirects(),
+            )
         return request.build_opener(
-            request.ProxyHandler({}), _SocksHTTPSHandler(cfg), _NoRedirects(),
+            request.ProxyHandler({}), _SocksHTTPSHandler(cfg, context=_telegram_tls_context()), _NoRedirects(),
         )
 
     def open(self, req, *, timeout: float):
@@ -201,6 +219,12 @@ class TelegramProxyTransport:
             cfg = self._read()
         if not cfg["enabled"]:
             # Backwards compatible: use existing OS/environment proxy policy.
+            # Сохраняем политику системных прокси, добавляя только явно
+            # выбранный доверенный CA. Никаких CERT_NONE или check_hostname=False.
+            if os.getenv("LESHY_TELEGRAM_CA_BUNDLE", "").strip():
+                return request.build_opener(
+                    request.HTTPSHandler(context=_telegram_tls_context()), _NoRedirects(),
+                ).open(req, timeout=timeout)
             return request.urlopen(req, timeout=timeout)
         url = req.full_url if isinstance(req, request.Request) else str(req)
         target = parse.urlsplit(url)
@@ -211,8 +235,15 @@ class TelegramProxyTransport:
         except error.HTTPError:
             raise
         except Exception as exc:
-            # Requests / underlying libraries can include bot token or
-            # credentials in exception strings. Never expose their details.
+            # SSL-ошибка может приходить внутри URLError.reason. Не маскируем
+            # её как "прокси недоступен"; сертификаты проверяем обязательно.
+            reason = exc.reason if isinstance(exc, error.URLError) else exc
+            if isinstance(reason, ssl.SSLCertVerificationError):
+                raise ConnectionError(
+                    "Telegram TLS: сертификат не доверен (CERTIFICATE_VERIFY_FAILED); "
+                    "проверьте корневой CA прокси/антивируса"
+                ) from None
+            # Никогда не печатаем URL (он может содержать bot token) и пароль.
             raise ConnectionError(f"Прокси Telegram недоступен ({type(exc).__name__})") from None
 
 

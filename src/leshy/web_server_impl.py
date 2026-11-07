@@ -363,7 +363,27 @@ def _console_live_status(app: LeshyApp, stop: threading.Event) -> None:
             peers = max(0, int(cluster_status.get("peer_count") or 0))
             inflight = sum(int(v) for v in (cluster_status.get("inflight_by_node") or {}).values())
 
-            signature = (model_text, active, waiting, peers, inflight)
+            sync_service = getattr(app, "cluster_knowledge_sync", None)
+            sync = sync_service.status() if sync_service is not None else {}
+            sync_state = str(sync.get("state") or "не настроена")
+            sync_received = int(sync.get("received_total") or 0)
+            sync_sent = int(sync.get("sent_total") or 0)
+            sync_last = str(sync.get("last_sync") or "")
+            tg = getattr(app, "telegram", None)
+            tg_status = tg.status() if tg is not None else {}
+            tg_error = str(tg_status.get("last_error") or "").lower()
+            if not tg_status.get("configured"):
+                telegram_text = "не настроен"
+            elif "certificate_verify_failed" in tg_error or "self-signed certificate" in tg_error:
+                telegram_text = "ошибка TLS-сертификата"
+            elif "прокси" in tg_error or "proxy" in tg_error:
+                telegram_text = "ошибка прокси"
+            elif tg_error:
+                telegram_text = "ошибка подключения"
+            else:
+                telegram_text = "подключён" if tg_status.get("bot_username") else "ожидание API"
+            signature = (model_text, active, waiting, peers, inflight,
+                         sync_state, sync_received, sync_sent, sync_last, telegram_text)
             now = time.monotonic()
             if signature != last_signature or now - last_printed >= 30.0:
                 print(
@@ -371,7 +391,9 @@ def _console_live_status(app: LeshyApp, stop: threading.Event) -> None:
                     f"в работе {int((now-started)//60)} мин | "
                     f"модель: {model_text} | "
                     f"генерация: {'идёт' if active else 'ожидание'} | "
-                    f"очередь {waiting} | кластер {peers} узл. | задачи {inflight}",
+                    f"очередь {waiting} | кластер {peers} узл. | задачи {inflight} | "
+                    f"знания: {sync_state}, получено {sync_received}, отдано {sync_sent}, "
+                    f"последний обмен {sync_last or '—'} | Telegram: {telegram_text}",
                     flush=True,
                 )
                 last_signature = signature
