@@ -170,8 +170,8 @@ class KnowledgeSyncService:
 
     def handle_pull(self, body: dict, headers) -> dict:
         self.cluster.verify_request(body, headers)
-        if not module_enabled(self.app.storage, "distributed-cluster"):
-            raise PermissionError("Кластер отключён")
+        if not module_enabled(self.app.storage, "distributed-cluster") or not self.cluster._autodiscovery_configured:
+            raise PermissionError("Кластер или автообнаружение отключены")
         encrypted = str(body.get("payload") or "")
         if len(encrypted) > 20_000:
             raise ValueError("Слишком большой запрос синхронизации")
@@ -271,7 +271,7 @@ class KnowledgeSyncService:
         while not self._stop.wait(_INTERVAL_SECONDS):
             try:
                 cluster = self.cluster
-                if not module_enabled(self.app.storage, "distributed-cluster"):
+                if not module_enabled(self.app.storage, "distributed-cluster") or not cluster._autodiscovery_configured:
                     self._patch(state="disabled", peer_count=0)
                     continue
                 peers = [
