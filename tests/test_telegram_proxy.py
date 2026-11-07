@@ -59,6 +59,59 @@ class TelegramProxyTests(unittest.TestCase):
             self.proxy.configure({"enabled":True,"scheme":"http","host":"two.example","port":80,
                                   "auth":True,"username":"me","password":""})
 
+
+    def test_bot_api_uses_proxy_transport(self):
+        import io
+        from types import SimpleNamespace
+        from leshy.telegram import TelegramBridge
+        with tempfile.TemporaryDirectory() as temp:
+            bridge=TelegramBridge(SimpleNamespace(),Path(temp))
+            bridge._token=lambda:"dummy-token"
+            class Response:
+                def __enter__(self): return self
+                def __exit__(self,*args): return False
+                def read(self): return b'{"ok":true,"result":{"id":123}}'
+            bridge.proxy.open=Mock(return_value=Response())
+            result=bridge._api("getMe",timeout=7)
+            self.assertEqual(result["id"],123)
+            args=bridge.proxy.open.call_args
+            self.assertEqual(args.kwargs["timeout"],7)
+            self.assertTrue(args.args[0].full_url.startswith("https://api.telegram.org/bot"))
+
+    def test_voice_download_uses_same_proxy(self):
+        from types import SimpleNamespace
+        from leshy.telegram import TelegramBridge
+        with tempfile.TemporaryDirectory() as temp:
+            bridge=TelegramBridge(SimpleNamespace(),Path(temp))
+            bridge._token=lambda:"dummy-token"
+            bridge._api=Mock(return_value={"file_path":"voice/record.ogg","file_size":8})
+            class Response:
+                headers={}
+                def __enter__(self): return self
+                def __exit__(self,*args): return False
+                def read(self,n): return b"OggSdata"
+            bridge.proxy.open=Mock(return_value=Response())
+            audio=bridge._download_telegram_voice({"file_id":"VOICE","file_size":8,"duration":2})
+            self.assertEqual(audio,b"OggSdata")
+            req=bridge.proxy.open.call_args.args[0]
+            self.assertIn("/file/botdummy-token/voice/record.ogg",req.full_url)
+
+    def test_telegram_image_download_uses_same_proxy(self):
+        from types import SimpleNamespace
+        from leshy.telegram_vision import LocalTelegramVision
+        with tempfile.TemporaryDirectory() as temp:
+            bridge=SimpleNamespace()
+            bridge._api=Mock(return_value={"file_path":"photos/p.jpg","file_size":5})
+            bridge._token=lambda:"dummy-token"
+            class Response:
+                def __enter__(self): return self
+                def __exit__(self,*args): return False
+                def read(self,n): return b"\xff\xd8\xffDATA"
+            bridge.proxy=SimpleNamespace(open=Mock(return_value=Response()))
+            data=LocalTelegramVision(bridge)._download({"file_id":"photo","file_size":5})
+            self.assertTrue(data.startswith(b"\xff\xd8\xff"))
+            self.assertIn("/file/botdummy-token/photos/p.jpg",bridge.proxy.open.call_args.args[0].full_url)
+
     def test_invalid_values_rejected(self):
         for values in ({"enabled":True,"scheme":"ftp","host":"x","port":80},
                        {"enabled":True,"scheme":"http","host":"user@host","port":80},
@@ -66,6 +119,16 @@ class TelegramProxyTests(unittest.TestCase):
                        {"enabled":True,"scheme":"socks5","host":"x","port":1080,"auth":True}):
             with self.subTest(values=values),self.assertRaises(ValueError):
                 self.proxy.configure(values)
+
+    def test_corrupt_config_does_not_block_settings_repair(self):
+        self.proxy.path.parent.mkdir(parents=True,exist_ok=True)
+        self.proxy.path.write_bytes(b"plain:not-json")
+        self.assertIn("error",self.proxy.status())
+        saved=self.proxy.configure({
+            "enabled":True,"scheme":"http","host":"proxy.local","port":3128
+        })
+        self.assertTrue(saved["enabled"])
+        self.assertNotIn("error",self.proxy.status())
 
     def test_proxy_only_ever_requests_telegram_https(self):
         self.proxy.configure({"enabled":True,"scheme":"http","host":"proxy.local","port":3128})

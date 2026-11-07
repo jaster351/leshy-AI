@@ -144,13 +144,22 @@ class TelegramProxyTransport:
 
     def status(self) -> dict:
         with self._lock:
-            return _public(self._read())
+            try:
+                return _public(self._read())
+            except (ValueError, OSError, RuntimeError):
+                # Do not crash /v1/status when an old DPAPI secret is invalid.
+                return {**_public(_normalize({})), "error": "Настройки прокси повреждены"}
 
     def configure(self, values: dict) -> dict:
         if not isinstance(values, dict):
             raise ValueError("Ожидается JSON с настройками прокси")
         with self._lock:
-            previous = self._read()
+            try:
+                previous = self._read()
+            except (ValueError, OSError, RuntimeError):
+                # Owner can replace damaged settings; never silently
+                # bypass an active configured proxy during network requests.
+                previous = _normalize({})
             data = dict(values)
             if data.get("auth") and not data.get("password") and not data.get("clear_password"):
                 # Empty password means "keep", but only for the identical host

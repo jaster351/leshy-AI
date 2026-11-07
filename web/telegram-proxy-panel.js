@@ -62,6 +62,7 @@
       ?'Пароль сохранён. Пустое поле означает «не менять».'
       :'Укажите пароль прокси.';
     state();
+    if(info.error)notify(info.error,true);
   }
   async function save(){
     const button=byId('tgProxySave');button.disabled=true;notify('Сохраняю настройки…');
