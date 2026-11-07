@@ -3,7 +3,9 @@ param(
     [string]$Mode = 'status',
     [string]$RepositoryPath = '',
     [string]$Remote = 'origin',
-    [string]$Branch = 'main'
+    [string]$Branch = 'main',
+    [switch]$AutoFromCluster,
+    [string]$MinimumVersion = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -342,11 +344,596 @@ function Deploy-Package {
 }
 
 function Invoke-FullUpdate {
+    if ($AutoFromCluster) {
+        # Узел кластера может только предложить версию. Загрузка кода разрешена
+        # исключительно из канонического GitHub/main (не из LAN HTTP).
+        if ($Remote -ne 'origin' -or $Branch -ne 'main') {
+            throw 'Cluster auto update requires origin/main.'
+        }
+        if ($MinimumVersion -notmatch '^\d+\.\d+\.\d+
+function Invoke-Startup {
     $sha = Invoke-RepoUpdate
+    $state = Read-LiveState
+    $deployedSha = if ($state) { [string]$state.sha } else { '' }
+    $needsBuild = (-not (Test-Path -LiteralPath $LiveExe)) -or ($deployedSha -ne $sha)
+    if ($needsBuild) {
+        Write-CoreLog ('Startup detected a pending live build. Deployed=' + $deployedSha + '; repo=' + $sha)
+        Stop-Leshy
+        try {
+            $version = Invoke-Build -Sha $sha
+            Deploy-Package -Sha $sha -Version $version
+        } catch {
+            Write-CoreLog $_.Exception.Message 'ERROR'
+            if (Test-Path -LiteralPath $LiveExe) {
+                try { Start-Leshy } catch { }
+            }
+            throw
+        }
+    }
+    Start-Leshy
+    $state = Read-LiveState
+    $versionText = if ($state) { [string]$state.version } else { '' }
+    Write-UiStatus -State 'ready' -Message 'Startup update check completed; Leshy started' -Sha $sha -Version $versionText
+}
+
+function Get-CoreStatus {
+    $git = $null
+    $head = ''
+    $remoteSha = ''
+    $currentBranch = ''
+    $originUrl = ''
+    $errorText = ''
+    try {
+        $git = Get-Git
+        $head = Get-HeadSha -Git $git -AllowMissing
+        $currentBranch = Get-CurrentBranch -Git $git
+        $origin = Invoke-GitCapture -Git $git -Arguments @('remote','get-url','origin') -AllowFailure
+        if ($origin.ExitCode -eq 0) { $originUrl = $origin.Text }
+        $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch',$Remote,$Branch,'--quiet') -AllowFailure
+        if ($fetch.ExitCode -eq 0) { $remoteSha = Get-HeadSha -Git $git -Ref 'FETCH_HEAD' -AllowMissing }
+        elseif ($fetch.Text) { $errorText = $fetch.Text }
+    } catch {
+        $errorText = $_.Exception.Message
+    }
+    $state = Read-LiveState
+    [ordered]@{
+        repository_path = $RepoRoot
+        remote = $Remote
+        origin_url = $originUrl
+        configured_branch = $Branch
+        current_branch = $currentBranch
+        repo_sha = $head
+        remote_sha = $remoteSha
+        git_error = $errorText
+        deployed_sha = if ($state) { [string]$state.sha } else { '' }
+        deployed_version = if ($state) { [string]$state.version } else { '' }
+        live_exists = (Test-Path -LiteralPath $LiveExe)
+        leshy_running = (@(Get-LeshyProcesses).Count -gt 0)
+        live_root = $LiveRoot
+        brain_root = $BrainRoot
+    } | ConvertTo-Json -Depth 4
+}
+
+$mutexName = 'Local\LeshyAutoBuilderCore-' + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
+if ($mutexName.Length -gt 240) { $mutexName = $mutexName.Substring(0,240) }
+$mutex = New-Object System.Threading.Mutex($false, $mutexName)
+$hasMutex = $false
+try {
+    if ($Mode -ne 'status') {
+        $hasMutex = $mutex.WaitOne(0)
+        if (-not $hasMutex) { throw 'Another AutoBuilder operation is already running for this repository.' }
+    }
+    switch ($Mode) {
+        'repo-update' { [void](Invoke-RepoUpdate) }
+        'full-update' { Invoke-FullUpdate }
+        'startup' { Invoke-Startup }
+        'launch' { Start-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy started' }
+        'stop' { Stop-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy stopped' }
+        'status' { Get-CoreStatus }
+    }
+    exit 0
+} catch {
+    Write-CoreLog $_.Exception.Message 'ERROR'
+    Write-UiStatus -State 'error' -Message $_.Exception.Message
+    Write-Error $_.Exception.Message
+    exit 1
+} finally {
+    if ($hasMutex) { try { $mutex.ReleaseMutex() } catch { } }
+    $mutex.Dispose()
+}
+) {
+            throw 'Cluster auto update: invalid minimum version.'
+        }
+        $git = Get-Git
+        $remoteUrl = (Invoke-GitCapture -Git $git -Arguments @('remote','get-url','origin')).Text.Trim()
+        $validOrigin = (
+            $remoteUrl -match '^https://github\.com/jaster351/leshy-AI(\.git)?/?
+function Invoke-Startup {
+    $sha = Invoke-RepoUpdate
+    $state = Read-LiveState
+    $deployedSha = if ($state) { [string]$state.sha } else { '' }
+    $needsBuild = (-not (Test-Path -LiteralPath $LiveExe)) -or ($deployedSha -ne $sha)
+    if ($needsBuild) {
+        Write-CoreLog ('Startup detected a pending live build. Deployed=' + $deployedSha + '; repo=' + $sha)
+        Stop-Leshy
+        try {
+            $version = Invoke-Build -Sha $sha
+            Deploy-Package -Sha $sha -Version $version
+        } catch {
+            Write-CoreLog $_.Exception.Message 'ERROR'
+            if (Test-Path -LiteralPath $LiveExe) {
+                try { Start-Leshy } catch { }
+            }
+            throw
+        }
+    }
+    Start-Leshy
+    $state = Read-LiveState
+    $versionText = if ($state) { [string]$state.version } else { '' }
+    Write-UiStatus -State 'ready' -Message 'Startup update check completed; Leshy started' -Sha $sha -Version $versionText
+}
+
+function Get-CoreStatus {
+    $git = $null
+    $head = ''
+    $remoteSha = ''
+    $currentBranch = ''
+    $originUrl = ''
+    $errorText = ''
+    try {
+        $git = Get-Git
+        $head = Get-HeadSha -Git $git -AllowMissing
+        $currentBranch = Get-CurrentBranch -Git $git
+        $origin = Invoke-GitCapture -Git $git -Arguments @('remote','get-url','origin') -AllowFailure
+        if ($origin.ExitCode -eq 0) { $originUrl = $origin.Text }
+        $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch',$Remote,$Branch,'--quiet') -AllowFailure
+        if ($fetch.ExitCode -eq 0) { $remoteSha = Get-HeadSha -Git $git -Ref 'FETCH_HEAD' -AllowMissing }
+        elseif ($fetch.Text) { $errorText = $fetch.Text }
+    } catch {
+        $errorText = $_.Exception.Message
+    }
+    $state = Read-LiveState
+    [ordered]@{
+        repository_path = $RepoRoot
+        remote = $Remote
+        origin_url = $originUrl
+        configured_branch = $Branch
+        current_branch = $currentBranch
+        repo_sha = $head
+        remote_sha = $remoteSha
+        git_error = $errorText
+        deployed_sha = if ($state) { [string]$state.sha } else { '' }
+        deployed_version = if ($state) { [string]$state.version } else { '' }
+        live_exists = (Test-Path -LiteralPath $LiveExe)
+        leshy_running = (@(Get-LeshyProcesses).Count -gt 0)
+        live_root = $LiveRoot
+        brain_root = $BrainRoot
+    } | ConvertTo-Json -Depth 4
+}
+
+$mutexName = 'Local\LeshyAutoBuilderCore-' + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
+if ($mutexName.Length -gt 240) { $mutexName = $mutexName.Substring(0,240) }
+$mutex = New-Object System.Threading.Mutex($false, $mutexName)
+$hasMutex = $false
+try {
+    if ($Mode -ne 'status') {
+        $hasMutex = $mutex.WaitOne(0)
+        if (-not $hasMutex) { throw 'Another AutoBuilder operation is already running for this repository.' }
+    }
+    switch ($Mode) {
+        'repo-update' { [void](Invoke-RepoUpdate) }
+        'full-update' { Invoke-FullUpdate }
+        'startup' { Invoke-Startup }
+        'launch' { Start-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy started' }
+        'stop' { Stop-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy stopped' }
+        'status' { Get-CoreStatus }
+    }
+    exit 0
+} catch {
+    Write-CoreLog $_.Exception.Message 'ERROR'
+    Write-UiStatus -State 'error' -Message $_.Exception.Message
+    Write-Error $_.Exception.Message
+    exit 1
+} finally {
+    if ($hasMutex) { try { $mutex.ReleaseMutex() } catch { } }
+    $mutex.Dispose()
+}
+ -or
+            $remoteUrl -match '^git@github\.com:jaster351/leshy-AI(\.git)?
+function Invoke-Startup {
+    $sha = Invoke-RepoUpdate
+    $state = Read-LiveState
+    $deployedSha = if ($state) { [string]$state.sha } else { '' }
+    $needsBuild = (-not (Test-Path -LiteralPath $LiveExe)) -or ($deployedSha -ne $sha)
+    if ($needsBuild) {
+        Write-CoreLog ('Startup detected a pending live build. Deployed=' + $deployedSha + '; repo=' + $sha)
+        Stop-Leshy
+        try {
+            $version = Invoke-Build -Sha $sha
+            Deploy-Package -Sha $sha -Version $version
+        } catch {
+            Write-CoreLog $_.Exception.Message 'ERROR'
+            if (Test-Path -LiteralPath $LiveExe) {
+                try { Start-Leshy } catch { }
+            }
+            throw
+        }
+    }
+    Start-Leshy
+    $state = Read-LiveState
+    $versionText = if ($state) { [string]$state.version } else { '' }
+    Write-UiStatus -State 'ready' -Message 'Startup update check completed; Leshy started' -Sha $sha -Version $versionText
+}
+
+function Get-CoreStatus {
+    $git = $null
+    $head = ''
+    $remoteSha = ''
+    $currentBranch = ''
+    $originUrl = ''
+    $errorText = ''
+    try {
+        $git = Get-Git
+        $head = Get-HeadSha -Git $git -AllowMissing
+        $currentBranch = Get-CurrentBranch -Git $git
+        $origin = Invoke-GitCapture -Git $git -Arguments @('remote','get-url','origin') -AllowFailure
+        if ($origin.ExitCode -eq 0) { $originUrl = $origin.Text }
+        $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch',$Remote,$Branch,'--quiet') -AllowFailure
+        if ($fetch.ExitCode -eq 0) { $remoteSha = Get-HeadSha -Git $git -Ref 'FETCH_HEAD' -AllowMissing }
+        elseif ($fetch.Text) { $errorText = $fetch.Text }
+    } catch {
+        $errorText = $_.Exception.Message
+    }
+    $state = Read-LiveState
+    [ordered]@{
+        repository_path = $RepoRoot
+        remote = $Remote
+        origin_url = $originUrl
+        configured_branch = $Branch
+        current_branch = $currentBranch
+        repo_sha = $head
+        remote_sha = $remoteSha
+        git_error = $errorText
+        deployed_sha = if ($state) { [string]$state.sha } else { '' }
+        deployed_version = if ($state) { [string]$state.version } else { '' }
+        live_exists = (Test-Path -LiteralPath $LiveExe)
+        leshy_running = (@(Get-LeshyProcesses).Count -gt 0)
+        live_root = $LiveRoot
+        brain_root = $BrainRoot
+    } | ConvertTo-Json -Depth 4
+}
+
+$mutexName = 'Local\LeshyAutoBuilderCore-' + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
+if ($mutexName.Length -gt 240) { $mutexName = $mutexName.Substring(0,240) }
+$mutex = New-Object System.Threading.Mutex($false, $mutexName)
+$hasMutex = $false
+try {
+    if ($Mode -ne 'status') {
+        $hasMutex = $mutex.WaitOne(0)
+        if (-not $hasMutex) { throw 'Another AutoBuilder operation is already running for this repository.' }
+    }
+    switch ($Mode) {
+        'repo-update' { [void](Invoke-RepoUpdate) }
+        'full-update' { Invoke-FullUpdate }
+        'startup' { Invoke-Startup }
+        'launch' { Start-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy started' }
+        'stop' { Stop-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy stopped' }
+        'status' { Get-CoreStatus }
+    }
+    exit 0
+} catch {
+    Write-CoreLog $_.Exception.Message 'ERROR'
+    Write-UiStatus -State 'error' -Message $_.Exception.Message
+    Write-Error $_.Exception.Message
+    exit 1
+} finally {
+    if ($hasMutex) { try { $mutex.ReleaseMutex() } catch { } }
+    $mutex.Dispose()
+}
+ -or
+            $remoteUrl -match '^ssh://git@github\.com/jaster351/leshy-AI(\.git)?
+function Invoke-Startup {
+    $sha = Invoke-RepoUpdate
+    $state = Read-LiveState
+    $deployedSha = if ($state) { [string]$state.sha } else { '' }
+    $needsBuild = (-not (Test-Path -LiteralPath $LiveExe)) -or ($deployedSha -ne $sha)
+    if ($needsBuild) {
+        Write-CoreLog ('Startup detected a pending live build. Deployed=' + $deployedSha + '; repo=' + $sha)
+        Stop-Leshy
+        try {
+            $version = Invoke-Build -Sha $sha
+            Deploy-Package -Sha $sha -Version $version
+        } catch {
+            Write-CoreLog $_.Exception.Message 'ERROR'
+            if (Test-Path -LiteralPath $LiveExe) {
+                try { Start-Leshy } catch { }
+            }
+            throw
+        }
+    }
+    Start-Leshy
+    $state = Read-LiveState
+    $versionText = if ($state) { [string]$state.version } else { '' }
+    Write-UiStatus -State 'ready' -Message 'Startup update check completed; Leshy started' -Sha $sha -Version $versionText
+}
+
+function Get-CoreStatus {
+    $git = $null
+    $head = ''
+    $remoteSha = ''
+    $currentBranch = ''
+    $originUrl = ''
+    $errorText = ''
+    try {
+        $git = Get-Git
+        $head = Get-HeadSha -Git $git -AllowMissing
+        $currentBranch = Get-CurrentBranch -Git $git
+        $origin = Invoke-GitCapture -Git $git -Arguments @('remote','get-url','origin') -AllowFailure
+        if ($origin.ExitCode -eq 0) { $originUrl = $origin.Text }
+        $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch',$Remote,$Branch,'--quiet') -AllowFailure
+        if ($fetch.ExitCode -eq 0) { $remoteSha = Get-HeadSha -Git $git -Ref 'FETCH_HEAD' -AllowMissing }
+        elseif ($fetch.Text) { $errorText = $fetch.Text }
+    } catch {
+        $errorText = $_.Exception.Message
+    }
+    $state = Read-LiveState
+    [ordered]@{
+        repository_path = $RepoRoot
+        remote = $Remote
+        origin_url = $originUrl
+        configured_branch = $Branch
+        current_branch = $currentBranch
+        repo_sha = $head
+        remote_sha = $remoteSha
+        git_error = $errorText
+        deployed_sha = if ($state) { [string]$state.sha } else { '' }
+        deployed_version = if ($state) { [string]$state.version } else { '' }
+        live_exists = (Test-Path -LiteralPath $LiveExe)
+        leshy_running = (@(Get-LeshyProcesses).Count -gt 0)
+        live_root = $LiveRoot
+        brain_root = $BrainRoot
+    } | ConvertTo-Json -Depth 4
+}
+
+$mutexName = 'Local\LeshyAutoBuilderCore-' + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
+if ($mutexName.Length -gt 240) { $mutexName = $mutexName.Substring(0,240) }
+$mutex = New-Object System.Threading.Mutex($false, $mutexName)
+$hasMutex = $false
+try {
+    if ($Mode -ne 'status') {
+        $hasMutex = $mutex.WaitOne(0)
+        if (-not $hasMutex) { throw 'Another AutoBuilder operation is already running for this repository.' }
+    }
+    switch ($Mode) {
+        'repo-update' { [void](Invoke-RepoUpdate) }
+        'full-update' { Invoke-FullUpdate }
+        'startup' { Invoke-Startup }
+        'launch' { Start-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy started' }
+        'stop' { Stop-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy stopped' }
+        'status' { Get-CoreStatus }
+    }
+    exit 0
+} catch {
+    Write-CoreLog $_.Exception.Message 'ERROR'
+    Write-UiStatus -State 'error' -Message $_.Exception.Message
+    Write-Error $_.Exception.Message
+    exit 1
+} finally {
+    if ($hasMutex) { try { $mutex.ReleaseMutex() } catch { } }
+    $mutex.Dispose()
+}
+
+        )
+        if (-not $validOrigin) { throw ('Cluster auto update refused untrusted origin: ' + $remoteUrl) }
+    }
+    $sha = Invoke-RepoUpdate
+    if ($AutoFromCluster) {
+        $sourceVersionPath = Join-Path $RepoRoot 'VERSION'
+        $sourceVersion = (Get-Content -LiteralPath $sourceVersionPath -Raw -Encoding UTF8).Trim()
+        if ($sourceVersion -notmatch '^\d+\.\d+\.\d+
+function Invoke-Startup {
+    $sha = Invoke-RepoUpdate
+    $state = Read-LiveState
+    $deployedSha = if ($state) { [string]$state.sha } else { '' }
+    $needsBuild = (-not (Test-Path -LiteralPath $LiveExe)) -or ($deployedSha -ne $sha)
+    if ($needsBuild) {
+        Write-CoreLog ('Startup detected a pending live build. Deployed=' + $deployedSha + '; repo=' + $sha)
+        Stop-Leshy
+        try {
+            $version = Invoke-Build -Sha $sha
+            Deploy-Package -Sha $sha -Version $version
+        } catch {
+            Write-CoreLog $_.Exception.Message 'ERROR'
+            if (Test-Path -LiteralPath $LiveExe) {
+                try { Start-Leshy } catch { }
+            }
+            throw
+        }
+    }
+    Start-Leshy
+    $state = Read-LiveState
+    $versionText = if ($state) { [string]$state.version } else { '' }
+    Write-UiStatus -State 'ready' -Message 'Startup update check completed; Leshy started' -Sha $sha -Version $versionText
+}
+
+function Get-CoreStatus {
+    $git = $null
+    $head = ''
+    $remoteSha = ''
+    $currentBranch = ''
+    $originUrl = ''
+    $errorText = ''
+    try {
+        $git = Get-Git
+        $head = Get-HeadSha -Git $git -AllowMissing
+        $currentBranch = Get-CurrentBranch -Git $git
+        $origin = Invoke-GitCapture -Git $git -Arguments @('remote','get-url','origin') -AllowFailure
+        if ($origin.ExitCode -eq 0) { $originUrl = $origin.Text }
+        $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch',$Remote,$Branch,'--quiet') -AllowFailure
+        if ($fetch.ExitCode -eq 0) { $remoteSha = Get-HeadSha -Git $git -Ref 'FETCH_HEAD' -AllowMissing }
+        elseif ($fetch.Text) { $errorText = $fetch.Text }
+    } catch {
+        $errorText = $_.Exception.Message
+    }
+    $state = Read-LiveState
+    [ordered]@{
+        repository_path = $RepoRoot
+        remote = $Remote
+        origin_url = $originUrl
+        configured_branch = $Branch
+        current_branch = $currentBranch
+        repo_sha = $head
+        remote_sha = $remoteSha
+        git_error = $errorText
+        deployed_sha = if ($state) { [string]$state.sha } else { '' }
+        deployed_version = if ($state) { [string]$state.version } else { '' }
+        live_exists = (Test-Path -LiteralPath $LiveExe)
+        leshy_running = (@(Get-LeshyProcesses).Count -gt 0)
+        live_root = $LiveRoot
+        brain_root = $BrainRoot
+    } | ConvertTo-Json -Depth 4
+}
+
+$mutexName = 'Local\LeshyAutoBuilderCore-' + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
+if ($mutexName.Length -gt 240) { $mutexName = $mutexName.Substring(0,240) }
+$mutex = New-Object System.Threading.Mutex($false, $mutexName)
+$hasMutex = $false
+try {
+    if ($Mode -ne 'status') {
+        $hasMutex = $mutex.WaitOne(0)
+        if (-not $hasMutex) { throw 'Another AutoBuilder operation is already running for this repository.' }
+    }
+    switch ($Mode) {
+        'repo-update' { [void](Invoke-RepoUpdate) }
+        'full-update' { Invoke-FullUpdate }
+        'startup' { Invoke-Startup }
+        'launch' { Start-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy started' }
+        'stop' { Stop-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy stopped' }
+        'status' { Get-CoreStatus }
+    }
+    exit 0
+} catch {
+    Write-CoreLog $_.Exception.Message 'ERROR'
+    Write-UiStatus -State 'error' -Message $_.Exception.Message
+    Write-Error $_.Exception.Message
+    exit 1
+} finally {
+    if ($hasMutex) { try { $mutex.ReleaseMutex() } catch { } }
+    $mutex.Dispose()
+}
+ -or
+            ([version]$sourceVersion) -lt ([version]$MinimumVersion)) {
+            Write-CoreLog ('Cluster update skipped: canonical main not yet at ' + $MinimumVersion + '; source=' + $sourceVersion)
+            Write-UiStatus -State 'ready' -Message 'Peer ahead of canonical main; update deferred' -Sha $sha -Version $sourceVersion
+            return
+        }
+        $installedVersionPath = Join-Path $LiveRoot 'VERSION'
+        if (Test-Path -LiteralPath $installedVersionPath) {
+            $installedVersion = (Get-Content -LiteralPath $installedVersionPath -Raw -Encoding UTF8).Trim()
+            if ($installedVersion -match '^\d+\.\d+\.\d+
+function Invoke-Startup {
+    $sha = Invoke-RepoUpdate
+    $state = Read-LiveState
+    $deployedSha = if ($state) { [string]$state.sha } else { '' }
+    $needsBuild = (-not (Test-Path -LiteralPath $LiveExe)) -or ($deployedSha -ne $sha)
+    if ($needsBuild) {
+        Write-CoreLog ('Startup detected a pending live build. Deployed=' + $deployedSha + '; repo=' + $sha)
+        Stop-Leshy
+        try {
+            $version = Invoke-Build -Sha $sha
+            Deploy-Package -Sha $sha -Version $version
+        } catch {
+            Write-CoreLog $_.Exception.Message 'ERROR'
+            if (Test-Path -LiteralPath $LiveExe) {
+                try { Start-Leshy } catch { }
+            }
+            throw
+        }
+    }
+    Start-Leshy
+    $state = Read-LiveState
+    $versionText = if ($state) { [string]$state.version } else { '' }
+    Write-UiStatus -State 'ready' -Message 'Startup update check completed; Leshy started' -Sha $sha -Version $versionText
+}
+
+function Get-CoreStatus {
+    $git = $null
+    $head = ''
+    $remoteSha = ''
+    $currentBranch = ''
+    $originUrl = ''
+    $errorText = ''
+    try {
+        $git = Get-Git
+        $head = Get-HeadSha -Git $git -AllowMissing
+        $currentBranch = Get-CurrentBranch -Git $git
+        $origin = Invoke-GitCapture -Git $git -Arguments @('remote','get-url','origin') -AllowFailure
+        if ($origin.ExitCode -eq 0) { $originUrl = $origin.Text }
+        $fetch = Invoke-GitCapture -Git $git -Arguments @('fetch',$Remote,$Branch,'--quiet') -AllowFailure
+        if ($fetch.ExitCode -eq 0) { $remoteSha = Get-HeadSha -Git $git -Ref 'FETCH_HEAD' -AllowMissing }
+        elseif ($fetch.Text) { $errorText = $fetch.Text }
+    } catch {
+        $errorText = $_.Exception.Message
+    }
+    $state = Read-LiveState
+    [ordered]@{
+        repository_path = $RepoRoot
+        remote = $Remote
+        origin_url = $originUrl
+        configured_branch = $Branch
+        current_branch = $currentBranch
+        repo_sha = $head
+        remote_sha = $remoteSha
+        git_error = $errorText
+        deployed_sha = if ($state) { [string]$state.sha } else { '' }
+        deployed_version = if ($state) { [string]$state.version } else { '' }
+        live_exists = (Test-Path -LiteralPath $LiveExe)
+        leshy_running = (@(Get-LeshyProcesses).Count -gt 0)
+        live_root = $LiveRoot
+        brain_root = $BrainRoot
+    } | ConvertTo-Json -Depth 4
+}
+
+$mutexName = 'Local\LeshyAutoBuilderCore-' + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
+if ($mutexName.Length -gt 240) { $mutexName = $mutexName.Substring(0,240) }
+$mutex = New-Object System.Threading.Mutex($false, $mutexName)
+$hasMutex = $false
+try {
+    if ($Mode -ne 'status') {
+        $hasMutex = $mutex.WaitOne(0)
+        if (-not $hasMutex) { throw 'Another AutoBuilder operation is already running for this repository.' }
+    }
+    switch ($Mode) {
+        'repo-update' { [void](Invoke-RepoUpdate) }
+        'full-update' { Invoke-FullUpdate }
+        'startup' { Invoke-Startup }
+        'launch' { Start-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy started' }
+        'stop' { Stop-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy stopped' }
+        'status' { Get-CoreStatus }
+    }
+    exit 0
+} catch {
+    Write-CoreLog $_.Exception.Message 'ERROR'
+    Write-UiStatus -State 'error' -Message $_.Exception.Message
+    Write-Error $_.Exception.Message
+    exit 1
+} finally {
+    if ($hasMutex) { try { $mutex.ReleaseMutex() } catch { } }
+    $mutex.Dispose()
+}
+ -and
+                ([version]$installedVersion) -ge ([version]$sourceVersion)) {
+                Write-CoreLog ('Cluster update skipped: running package already version ' + $installedVersion)
+                return
+            }
+        }
+    }
+    # Сначала собираем во временном каталоге, не останавливая работающие чаты.
+    # Только готовая сборка может привести к кратковременному перезапуску.
+    $version = Invoke-Build -Sha $sha
     $wasRunning = (@(Get-LeshyProcesses).Count -gt 0)
     Stop-Leshy
     try {
-        $version = Invoke-Build -Sha $sha
         Deploy-Package -Sha $sha -Version $version
         Start-Leshy
         Write-UiStatus -State 'ready' -Message 'Live update completed' -Sha $sha -Version $version
