@@ -55,7 +55,7 @@ class HardwareCapabilities:
     # Дополнительные сведения: интерфейс старых потребителей не меняется.
     gpu_devices: tuple[GPUDevice, ...] = ()
     # True означает поддержку offload в загруженном llama_cpp, НЕ успешный inference.
-    gpu_backend_verified: bool = False
+    gpu_offload_compiled: bool = False
 
 
 @dataclass(frozen=True)
@@ -191,7 +191,7 @@ def detect_hardware() -> HardwareCapabilities:
         openvino_npu=openvino_npu,
         notes=tuple(notes),
         gpu_devices=gpu_devices,
-        gpu_backend_verified=python_gpu,
+        gpu_offload_compiled=python_gpu,
     )
 
 
