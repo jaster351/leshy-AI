@@ -50,6 +50,7 @@ class ComputerUseTests(unittest.TestCase):
             FakeAnalyzer(),
             executor,
             activity=lambda name, payload: activity.append((name, payload)),
+            permission_check=lambda: True,
         )
         controller.start()
         result = controller.act(
@@ -75,6 +76,7 @@ class ComputerUseTests(unittest.TestCase):
             FakeAnalyzer(),
             executor,
             approval=lambda action: False,
+            permission_check=lambda: True,
         )
         controller.start()
         with self.assertRaises(PermissionError):
@@ -88,6 +90,11 @@ class ComputerUseTests(unittest.TestCase):
             )
         self.assertEqual(observer.calls, 0)
         self.assertEqual(executor.actions, [])
+
+    def test_computer_use_must_receive_explicit_permission_checker(self):
+        controller = ComputerUseController(FakeObserver(), FakeAnalyzer(), FakeExecutor())
+        with self.assertRaises(PermissionError):
+            controller.start()
 
     def test_disabled_computer_use_cannot_observe_screen(self):
         controller = ComputerUseController(FakeObserver(), FakeAnalyzer(), FakeExecutor())
@@ -108,7 +115,10 @@ class ComputerUseTests(unittest.TestCase):
         self.assertEqual(executor.actions, [])
 
     def test_custom_verifier_can_reject_wrong_visual_result(self):
-        controller = ComputerUseController(FakeObserver(), FakeAnalyzer(), FakeExecutor())
+        controller = ComputerUseController(
+            FakeObserver(), FakeAnalyzer(), FakeExecutor(),
+            permission_check=lambda: True,
+        )
         controller.start()
         result = controller.act(
             ComputerAction(

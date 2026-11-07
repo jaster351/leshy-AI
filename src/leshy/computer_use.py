@@ -92,7 +92,8 @@ class ComputerUseController:
         self.approval_required = approval_required or (lambda action: action.risk in {"high", "critical"})
         self.approval = approval or (lambda action: False)
         self.activity = activity or (lambda name, payload: None)
-        self.permission_check = permission_check or (lambda: True)
+        # Fail closed: без явного разрешения нельзя управлять рабочим столом.
+        self.permission_check = permission_check or (lambda: False)
         self.enabled = False
 
     def _require_enabled(self) -> None:
