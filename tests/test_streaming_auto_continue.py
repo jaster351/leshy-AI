@@ -124,6 +124,23 @@ class StreamingAutoContinueTests(unittest.TestCase):
         self.assertEqual(answer, "Часть длинного ответа готова.")
         self.assertGreater(time.monotonic()-started, 0.18)
 
+    def test_socket_timeout_keeps_visible_response_part(self):
+        provider = _Provider()
+        response = _StreamResponse(
+            'data: {"choices":[{"delta":{"content":"Важная часть ответа"},"finish_reason":null}]}\n',
+        )
+        class TimedOut:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def __iter__(self):
+                yield from response
+                raise TimeoutError("simulated read timeout")
+            def close(self): pass
+        with patch("leshy.streaming_backends.request.urlopen", return_value=TimedOut()):
+            result = "".join(_llama_stream(provider, [ChatMessage("user", "Привет")]))
+        self.assertIn("Важная часть ответа", result)
+        self.assertIn("Сохранена", result)
+
     def test_qwen_default_uses_visible_non_thinking_mode(self):
         import os
         from leshy.accelerator_runtime import _visible_answer_options

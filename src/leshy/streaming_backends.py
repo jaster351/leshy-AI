@@ -225,6 +225,12 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                                 reason = choice.get("finish_reason")
                                 if reason is not None:
                                     finish_reason = str(reason)
+                        except TimeoutError:
+                            # socket timeout can win the race with watchdog;
+                            # preserve already streamed text instead of losing
+                            # the whole answer as an HTTP/Windows socket error.
+                            timeout_reason[0] = "no_model_progress"
+                            watchdog_timeout.set()
                         except Exception:
                             # watchdog закрыл socket, чтобы прервать recv;
                             # системная ошибка от закрытого сокета здесь ожидаема.
@@ -399,6 +405,9 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
             if not cancel_event.is_set() and not yielded:
                 raise LLMUnavailable("Потоковый backend не вернул видимого текста")
         except Exception as exc:
+            if cancel_event.is_set():
+                # User aborted: not a broken backend, no cooldown.
+                return
             latency_ms = int((time.monotonic() - started) * 1000)
             fatal = self._mark_failure(state, exc, latency_ms)
             exception("adaptive_llm_stream_backend_failed", exc, backend=state.name,
@@ -406,8 +415,14 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
                       quarantined=fatal, hardware_mode=self._hardware_mode(), routing=list(routing))
             errors.append(f"{state.name}: {type(exc).__name__}: {str(exc)[:240]}")
             if yielded:
-                # Уже отдали часть ответа пользователю: не мешать другой backend.
-                raise
+                # Already streamed meaningful text. An exception here used
+                # to discard the entire response in RealtimeChatManager,
+                # including Telegram. Keep its partial body and end normally,
+                # while recording backend failure for diagnostics.
+                event("adaptive_llm_stream_partial_saved", backend=state.name,
+                      latency_ms=latency_ms, reason=type(exc).__name__)
+                yield "\n\n[Ответ прервался из-за ошибки модели. Сохранена полученная часть; можно продолжить ответ.]"
+                return
             if latency_ms >= int(_SLOW_STREAM_FAILURE_SECONDS * 1000):
                 # On November 7 a healthy CPU fallback never ran because
                 # a slow GPU/NPU error aborted the entire request. Give

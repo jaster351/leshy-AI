@@ -53,9 +53,28 @@ class AdaptiveStreamTests(unittest.TestCase):
         gpu = Partial()
         cpu = FakeStream(parts=["другой ответ"])
         router = AdaptiveLLM([("gpu-vulkan", gpu), ("cpu-native", cpu)])
-        with self.assertRaises(RuntimeError):
-            "".join(_adaptive_stream(router, [ChatMessage("user", "Hello")]))
+        result = "".join(_adaptive_stream(router, [ChatMessage("user", "Hello")]))
+        self.assertIn("первые токены", result)
+        self.assertIn("Сохранена полученная часть", result)
         self.assertEqual(cpu.calls, 0)
+
+    def test_cancellation_never_marks_backend_unhealthy(self):
+        cancel = threading.Event()
+
+        class UserStops(FakeStream):
+            def stream_chat(self, messages, *, cancel_event=None):
+                self.calls += 1
+                cancel_event.set()
+                raise ConnectionAbortedError("client disconnected")
+                yield "never"
+
+        gpu = UserStops()
+        router = AdaptiveLLM([("gpu-vulkan", gpu)])
+        self.assertEqual(
+            list(_adaptive_stream(router, [ChatMessage("user", "Стоп")], cancel_event=cancel)),
+            [],
+        )
+        self.assertEqual(router.status()["backends"][0]["failures"], 0)
 
     def test_stream_context_error_does_not_quarantine_gpu(self):
         gpu = FakeStream(parts=["ok"])
