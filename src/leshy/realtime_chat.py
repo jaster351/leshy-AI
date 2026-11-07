@@ -292,7 +292,10 @@ class RealtimeChatManager:
                     answer = str(weather_answer(message) or "Не удалось получить прогноз.")
                     sources = (
                         [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
-                        if "Источник: Open-Meteo" in answer else []
+                        if "Источник: Open-Meteo" in answer else (
+                            [{"title": "wttr.in", "url": "https://wttr.in/"}]
+                            if "Источник: wttr.in" in answer else []
+                        )
                     )
                 else:
                     from .research_policy import research_reason
