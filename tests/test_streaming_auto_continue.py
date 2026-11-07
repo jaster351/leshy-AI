@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from leshy.llm import ChatMessage
 from leshy.streaming_backends import _llama_stream, _looks_truncated_text, _strip_continuation_overlap
@@ -41,6 +41,33 @@ class StreamingAutoContinueTests(unittest.TestCase):
         payload = json.loads(urlopen.call_args_list[1].args[0].data.decode("utf-8"))
         self.assertIn("Продолжи предыдущий ответ ровно с места обрыва", payload["messages"][-1]["content"])
         self.assertEqual(payload["messages"][-2]["role"], "assistant")
+
+    def test_empty_reasoning_stream_does_not_auto_continue_six_times(self):
+        provider = _Provider()
+        empty = _StreamResponse(
+            'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\\n',
+            'data: [DONE]\\n',
+        )
+        from leshy.llm import LLMUnavailable
+        with patch("leshy.streaming_backends.request.urlopen", return_value=empty) as urlopen:
+            with self.assertRaises(LLMUnavailable):
+                list(_llama_stream(provider, [ChatMessage("user", "Привет")]))
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_long_first_round_does_not_start_second_generation(self):
+        provider = _Provider()
+        response = _StreamResponse(
+            'data: {"choices":[{"delta":{"content":"Ответ получен"},"finish_reason":null}]}\\n',
+            'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\\n',
+            'data: [DONE]\\n',
+        )
+        clock = iter([0.0, 30.0, 30.0, 30.0])
+        with patch("leshy.streaming_backends.time.monotonic", side_effect=lambda: next(clock, 30.0)):
+            with patch("leshy.streaming_backends.request.urlopen", return_value=response) as urlopen:
+                answer = "".join(_llama_stream(provider, [ChatMessage("user", "Задача")]))
+        self.assertIn("Ответ получен", answer)
+        self.assertIn("лимиту времени", answer)
+        self.assertEqual(urlopen.call_count, 1)
 
     def test_normal_stop_does_not_force_extra_generation(self):
         provider = _Provider()

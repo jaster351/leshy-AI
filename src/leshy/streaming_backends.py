@@ -13,7 +13,9 @@ from .llm import ChatMessage, LLMUnavailable
 from .persona import with_leshy_identity
 
 _CONTEXT_ERROR_RE = re.compile(r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)", re.IGNORECASE)
-_MAX_AUTO_CONTINUATIONS = 6
+_MAX_AUTO_CONTINUATIONS = 1
+_SLOW_STREAM_FAILURE_SECONDS = 30.0
+_AUTO_CONTINUATION_FIRST_ROUND_BUDGET_SECONDS = 25.0
 _CONTINUATION_TAIL_CHARS = 2200
 _TRAILING_CONNECTORS = {
     "а", "без", "в", "для", "до", "за", "и", "из", "или", "как", "к", "на",
@@ -91,6 +93,7 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
         continuation_count = 0
 
         while True:
+            round_started = time.monotonic()
             context_retry = False
             finish_reason: str | None = None
             round_chunks: list[str] = []
@@ -170,6 +173,13 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                 return
             round_text = "".join(round_chunks)
             if continuation_count == 0:
+                if not round_text.strip():
+                    event("accelerator_stream_empty_completion", backend=self.backend,
+                          finish_reason=finish_reason or "missing",
+                          continuation=continuation_count)
+                    raise LLMUnavailable(
+                        "Ускоренный backend завершил поток без видимого ответа"
+                    )
                 generated_text += round_text
                 base_messages = list(active_messages)
             else:
@@ -183,6 +193,13 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
 
             needs_more = finish_reason == "length" or _looks_truncated_text(generated_text)
             if not needs_more:
+                return
+            round_seconds = time.monotonic() - round_started
+            if round_seconds >= _AUTO_CONTINUATION_FIRST_ROUND_BUDGET_SECONDS:
+                event("accelerator_stream_auto_continue_skipped", backend=self.backend,
+                      reason="first_round_slow", elapsed_ms=int(round_seconds * 1000),
+                      finish_reason=finish_reason or "heuristic")
+                yield "\n\n[Ответ прерван по лимиту времени генерации. Напишите «продолжай» для продолжения.]"
                 return
             if continuation_count >= _MAX_AUTO_CONTINUATIONS:
                 event("accelerator_stream_auto_continue_limit", backend=self.backend,
@@ -234,18 +251,24 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
         started = time.monotonic()
         yielded = False
         try:
+            # По данным Windows логов 7 ноября prompt 8k/4096 context:
+            # compact per backend до отправки SSE-запроса.
+            budgeted = self._budget_for(state, prepared)
             provider_stream = getattr(state.provider, "stream_chat", None)
             if callable(provider_stream):
-                for delta in provider_stream(prepared, cancel_event=cancel_event):
-                    yielded = True
-                    yield delta
+                for delta in provider_stream(budgeted, cancel_event=cancel_event):
                     if cancel_event.is_set():
                         break
+                    if delta:
+                        yielded = True
+                        yield delta
             else:
-                text = state.provider.chat(prepared)
-                yielded = bool(text)
+                text = state.provider.chat(budgeted)
                 if text:
+                    yielded = True
                     yield text
+            if not cancel_event.is_set() and not yielded:
+                raise LLMUnavailable("Потоковый backend не вернул видимого текста")
         except Exception as exc:
             latency_ms = int((time.monotonic() - started) * 1000)
             fatal = self._mark_failure(state, exc, latency_ms)
@@ -254,7 +277,12 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
                       quarantined=fatal, hardware_mode=self._hardware_mode(), routing=list(routing))
             errors.append(f"{state.name}: {type(exc).__name__}: {str(exc)[:240]}")
             if yielded:
+                # Уже отдали часть ответа пользователю: не мешать другой backend.
                 raise
+            if latency_ms >= int(_SLOW_STREAM_FAILURE_SECONDS * 1000):
+                event("adaptive_llm_stream_slow_fallback_skipped", backend=state.name,
+                      latency_ms=latency_ms, reason="avoid_cascaded_slow_retries")
+                break
             continue
         latency_ms = int((time.monotonic() - started) * 1000)
         switched = self._mark_success(state, latency_ms)
@@ -263,6 +291,7 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
               stopped=bool(cancel_event.is_set()))
         return
     raise LLMUnavailable("Все выбранные локальные LLM backend недоступны: " + "; ".join(errors[-3:]))
+
 
 
 def install_streaming_backends(llm) -> None:
