@@ -65,7 +65,7 @@ class TelegramVisionTests(unittest.TestCase):
                 return Response(b'{"choices":[{"message":{"content":"На фото тест"}}]}')
         def download(req, timeout):
             self.assertEqual(req.full_url.split("/file/bot")[0], "https://api.telegram.org")
-            return Response(b"\\xff\\xd8\\xffDATA")
+            return Response(b"\xff\xd8\xffDATA")
         with patch.dict(os.environ, {
             "LESHY_VISION_ENDPOINT": "http://127.0.0.1:8080/v1/chat/completions",
             "LESHY_VISION_MODEL": "local-vision",

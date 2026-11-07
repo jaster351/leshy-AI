@@ -17,9 +17,18 @@ class ContextBudgetResult:
 
 
 def estimate_tokens(messages: list[ChatMessage]) -> int:
+    """Консервативная оценка для русского/многоязычного Qwen в 4096 context.
+
+    Старый len/2 недооценивал токены кириллицы, после чего llama-server
+    получал контекст длиннее собственного n_ctx. Без внешнего tokenizer
+    считаем не-ASCII символ как минимум одним токеном, ASCII — 1/3.
+    """
     total = 0
     for message in messages:
-        total += 8 + max(1, (len(str(message.content)) + 1) // 2)
+        value = str(message.content)
+        ascii_count = sum(1 for char in value if ord(char) < 128)
+        other_count = len(value) - ascii_count
+        total += 16 + max(1, (ascii_count + 2) // 3 + other_count)
     return total
 
 

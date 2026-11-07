@@ -57,3 +57,24 @@ def test_latest_user_keeps_instruction_and_quote_tail_after_shrinking():
     assert result.messages[-1].role == "user"
     assert "КРИТИЧЕСКАЯ ЦЕЛЬ" in result.messages[-1].content
     assert "КОНЕЦ ЦИТАТЫ" in result.messages[-1].content
+
+def test_non_ascii_context_estimate_is_conservative_for_4096():
+    messages = [ChatMessage("system", "инструкции " * 700)]
+    messages += [ChatMessage("user", "русский текст " * 700)]
+    result = apply_context_budget(messages, context_size=4096, reserve_tokens=1024)
+    assert result.tokens_before > result.budget
+    assert result.tokens_after <= result.budget
+    assert result.messages[-1].role == "user"
+    assert "русский" in result.messages[-1].content
+
+
+def test_current_telegram_reply_remains_after_multilingual_compaction():
+    messages = [
+        ChatMessage("system", "правила " * 1000),
+        ChatMessage("assistant", "old context " * 800),
+        ChatMessage("user", "Ответь именно на это Telegram Reply: ВОПРОС " + "цитата " * 2000 + "КОНЕЦ ЦИТАТЫ"),
+    ]
+    result = apply_context_budget(messages, context_size=4096, reserve_tokens=1024)
+    assert result.tokens_after <= result.budget
+    assert "Ответь именно на это" in result.messages[-1].content
+    assert "КОНЕЦ ЦИТАТЫ" in result.messages[-1].content

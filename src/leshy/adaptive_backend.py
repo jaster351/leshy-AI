@@ -8,7 +8,7 @@ from typing import Any
 from .context_budget import apply_context_budget
 from .diagnostics import event, exception
 from .hardware import HardwareConfigStore
-from .llm import ChatMessage, LLMUnavailable
+from .llm import ChatMessage, LLMUnavailable, finalize_model_output
 from .persona import with_leshy_identity
 
 
@@ -102,21 +102,47 @@ class AdaptiveLLM:
         if result.tokens_before>result.budget:
             event("llm_context_compacted",backend=state.name,context_size=context_size,reserve_tokens=max_tokens,tokens_before=result.tokens_before,tokens_after=result.tokens_after,budget=result.budget,dropped_messages=result.dropped_messages,truncated_messages=result.truncated_messages)
         return result.messages
-    def chat(self,messages):
-        prepared_messages=with_leshy_identity(messages); errors=[]; routing=self._routing_priority(); ordered=self._ordered()
+    def chat(self, messages):
+        prepared_messages = with_leshy_identity(messages)
+        errors = []
+        routing = self._routing_priority()
+        ordered = self._ordered()
         if not ordered:
-            status=self.status(); cooling=[b for b in status["backends"] if b["selected"] and (b["cooldown_remaining_seconds"] or 0)>0]
-            event("adaptive_llm_circuit_open",hardware_mode=self._hardware_mode(),routing=list(routing),cooling_backends=[b["name"] for b in cooling])
+            status = self.status()
+            cooling = [b for b in status["backends"] if b["selected"] and (b["cooldown_remaining_seconds"] or 0) > 0]
+            event("adaptive_llm_circuit_open", hardware_mode=self._hardware_mode(),
+                  routing=list(routing), cooling_backends=[b["name"] for b in cooling])
             raise LLMUnavailable("Все выбранные локальные LLM backend временно недоступны (circuit breaker/cooldown)")
+
+        # Если backend уже долго генерировал и вернул пустоту/timeout,
+        # последовательный NPU+CPU retry удваивает ожидание без пользы.
+        # Быстрые ошибки (например, HTTP 503) сохраняют failover.
+        slow_failure_seconds = 30.0
         for state in ordered:
-            started=time.monotonic()
-            try: text=state.provider.chat(self._budget_for(state,prepared_messages))
+            started = time.monotonic()
+            try:
+                text = state.provider.chat(self._budget_for(state, prepared_messages))
+                if not str(text or "").strip() or not finalize_model_output(str(text)).strip():
+                    raise LLMUnavailable("Backend не вернул видимого ответа (пустое содержимое или только reasoning)")
             except Exception as exc:
-                latency_ms=int((time.monotonic()-started)*1000); fatal=self._mark_failure(state,exc,latency_ms)
-                exception("adaptive_llm_backend_failed",exc,backend=state.name,latency_ms=latency_ms,cooldown_seconds=self.cooldown_seconds,quarantined=fatal,hardware_mode=self._hardware_mode(),routing=list(routing)); errors.append(f"{state.name}: {type(exc).__name__}: {str(exc)[:240]}"); continue
-            latency_ms=int((time.monotonic()-started)*1000); switched=self._mark_success(state,latency_ms)
-            event("adaptive_llm_backend_ok",backend=state.name,latency_ms=latency_ms,switched=switched,hardware_mode=self._hardware_mode(),routing=list(routing)); return text
-        raise LLMUnavailable("Все выбранные локальные LLM backend недоступны: "+"; ".join(errors[-3:]))
+                latency_ms = int((time.monotonic() - started) * 1000)
+                fatal = self._mark_failure(state, exc, latency_ms)
+                exception("adaptive_llm_backend_failed", exc, backend=state.name,
+                          latency_ms=latency_ms, cooldown_seconds=self.cooldown_seconds,
+                          quarantined=fatal, hardware_mode=self._hardware_mode(), routing=list(routing))
+                errors.append(f"{state.name}: {type(exc).__name__}: {str(exc)[:240]}")
+                if latency_ms >= int(slow_failure_seconds * 1000):
+                    event("adaptive_llm_slow_fallback_skipped", backend=state.name,
+                          latency_ms=latency_ms, reason="avoid_cascaded_slow_retries")
+                    break
+                continue
+            latency_ms = int((time.monotonic() - started) * 1000)
+            switched = self._mark_success(state, latency_ms)
+            event("adaptive_llm_backend_ok", backend=state.name, latency_ms=latency_ms,
+                  switched=switched, hardware_mode=self._hardware_mode(), routing=list(routing))
+            return text
+        raise LLMUnavailable("Все выбранные локальные LLM backend недоступны: " + "; ".join(errors[-3:]))
+
     def status(self):
         now=time.monotonic(); mode=self._hardware_mode(); routing=self._routing_priority()
         with self._lock:
