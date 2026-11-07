@@ -38,6 +38,8 @@
       ' · подпись неверна: '+(counts.invalid_signature||0)+
       ' · одинаковый node_id: '+(counts.same_node_id||0)+
       ' · повреждены: '+(counts.invalid_packet||0));
+    const pairHelp=$('leshyClusterPairingHelp');
+    if(pairHelp)pairHelp.hidden=!(Number(counts.other_cluster||0)>0 && Number(data.peer_count||0)<2);
     const hints=$('leshyClusterDiagHints');
     if(hints)hints.textContent=Array.isArray(data.hints)&&data.hints.length?data.hints.join(' '):
       'Ошибок автообнаружения не зарегистрировано. Наличие узлов не гарантирует распределение каждой задачи.';
@@ -125,6 +127,10 @@
       '<div class="item"><div class="item-title">Другие компьютеры</div><div class="list" id="leshyClusterDiagPeerList" style="margin-top:8px"></div></div>',
       '</div>',
       '<div class="hint" id="leshyClusterDiagHints" role="status" style="margin-top:10px"></div>',
+      '<div class="item" id="leshyClusterPairingHelp" hidden style="margin-top:9px">',
+      '<div class="item-title">Найден другой кластер — требуется первичное сопряжение</div>',
+      '<div class="item-meta">Автопоиск уже работает. На каждом новом ПК Леший создаёт отдельный секрет. Однократно перенесите cluster-secret.txt с доверенного компьютера на этот узел (например, через USB), затем запустите windows\\Join-LeshyCluster.ps1 -SecretFile E:\\cluster-secret.txt и перезапустите Лешего. После этого обнаружение и повторное подключение автоматические. Уникальный node-id не меняйте. Секрет не пересылайте в чат.</div>',
+      '</div>',
       '<div class="row" style="margin-top:10px;gap:10px">',
       '<button type="button" id="leshyClusterDiagRefresh">Проверить сейчас</button>',
       '<span class="item-meta" id="leshyClusterDiagUpdated">Загрузка диагностики…</span>',
