@@ -110,6 +110,10 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     if offline_task and not time_sensitive:
         return None
     if basic == "требуются актуальные данные":
+        # Проверенная запись ещё внутри TTL: используем её без задержки
+        # сетевого round-trip. Явный запрос интернета обработан выше.
+        if trusted and any(knowledge_is_current(row, query) for row in trusted):
+            return None
         return basic
     if _EXACT_IDENT.search(query):
         return "свежая проверка бюллетеня безопасности"
