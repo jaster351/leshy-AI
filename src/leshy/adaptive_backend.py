@@ -119,11 +119,13 @@ class AdaptiveLLM:
                   routing=list(routing), cooling_backends=[b["name"] for b in cooling])
             raise LLMUnavailable("Все выбранные локальные LLM backend временно недоступны (circuit breaker/cooldown)")
 
-        # Если backend уже долго генерировал и вернул пустоту/timeout,
-        # последовательный NPU+CPU retry удваивает ожидание без пользы.
-        # Быстрые ошибки (например, HTTP 503) сохраняют failover.
+        # Do not cascade slowly across GPU and NPU on a failed response.
+        # Recover once via CPU when the slow backend yielded no answer.
         slow_failure_seconds = 30.0
-        for state in ordered:
+        cpu_recovery_only = False
+        for index, state in enumerate(ordered):
+            if cpu_recovery_only and _hardware_kind(state.name) != "cpu":
+                continue
             started = time.monotonic()
             try:
                 budgeted = self._budget_for(state, prepared_messages)
@@ -145,8 +147,17 @@ class AdaptiveLLM:
                           quarantined=fatal, hardware_mode=self._hardware_mode(), routing=list(routing))
                 errors.append(f"{state.name}: {type(exc).__name__}: {str(exc)[:240]}")
                 if latency_ms >= int(slow_failure_seconds * 1000):
+                    cpu_remaining = any(
+                        _hardware_kind(other.name) == "cpu"
+                        for other in ordered[index + 1:]
+                    )
+                    if not cpu_recovery_only and cpu_remaining:
+                        cpu_recovery_only = True
+                        event("adaptive_llm_slow_cpu_recovery", backend=state.name,
+                              latency_ms=latency_ms, reason="no_visible_answer")
+                        continue
                     event("adaptive_llm_slow_fallback_skipped", backend=state.name,
-                          latency_ms=latency_ms, reason="avoid_cascaded_slow_retries")
+                          latency_ms=latency_ms, reason="cpu_recovery_unavailable_or_exhausted")
                     break
                 continue
             latency_ms = int((time.monotonic() - started) * 1000)

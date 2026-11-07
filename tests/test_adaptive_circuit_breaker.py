@@ -66,19 +66,20 @@ class AdaptiveCircuitBreakerTests(unittest.TestCase):
         self.assertEqual(router.chat([ChatMessage("user", "Скажи что-нибудь")]), "Содержательный ответ")
         self.assertEqual((reasoning_only.calls, healthy.calls), (1, 1))
 
-    def test_slow_backend_error_does_not_cascade_into_other_hardware(self):
+    def test_slow_backend_error_recovers_once_via_cpu_without_npu_retry(self):
         gpu = FakeLLM(error="timeout")
-        cpu = FakeLLM(answer="cpu")
-        router = AdaptiveLLM([("gpu-vulkan", gpu), ("cpu-native", cpu)])
-        real_clock = time.monotonic
-        # Контролируем только часы адаптивного маршрутизатора, без sleep(30).
+        npu = FakeLLM(error="OpenVINO startup")
+        cpu = FakeLLM(answer="cpu works")
+        router = AdaptiveLLM([
+            ("gpu-vulkan", gpu), ("npu-openvino", npu), ("cpu-native", cpu),
+        ])
+        # Clock simulates 35-second GPU failure without a real sleep.
         from unittest.mock import patch
-        readings = iter([0.0, 0.0, 35.0, 35.0, 35.0, 35.0])
-        with patch("leshy.adaptive_backend.time.monotonic", side_effect=lambda: next(readings, 35.0)):
-            with self.assertRaises(LLMUnavailable):
-                router.chat([ChatMessage("user", "Hello")])
-        self.assertEqual(gpu.calls, 1)
-        self.assertEqual(cpu.calls, 0)
+        ticks = iter([0.0, 0.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0])
+        with patch("leshy.adaptive_backend.time.monotonic", side_effect=lambda: next(ticks, 35.0)):
+            self.assertEqual(router.chat([ChatMessage("user", "Hello")]), "cpu works")
+        self.assertEqual((gpu.calls,npu.calls,cpu.calls), (1,0,1))
+
 
     def test_invalid_context_never_quarantines_healthy_backend(self):
         from unittest.mock import patch
