@@ -136,13 +136,10 @@ class BrowserAgent:
             return BrowserActionResult("blocked", "Домен не разрешён политикой Browser Agent.")
 
         if action.risk is not BrowserRisk.READ:
-            if not approved:
-                event("browser_agent_approval_required", action=action.name, risk=action.risk.value, url=action.url)
-                raise ApprovalRequired(action)
-            arguments = dict(action.arguments)
-            arguments["_approval_verified"] = True
-            action = replace(action, arguments=arguments)
-            event("browser_agent_approval_verified", action=action.name, risk=action.risk.value, url=action.url)
+            # Без серверного одноразового grant legacy approved=True нельзя считать согласием.
+            event("browser_agent_approval_required", action=action.name, risk=action.risk.value,
+                  url=action.url, legacy_approved_ignored=bool(approved))
+            raise ApprovalRequired(action)
 
         for adapter in self.adapters:
             try:
