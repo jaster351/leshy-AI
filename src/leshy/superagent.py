@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import json
 import os
 import re
@@ -141,8 +142,22 @@ class SuperAgentService:
         self.max_attempts = max(1, min(int(os.getenv("LESHY_SUPERAGENT_MAX_ATTEMPTS", "3")), 8))
         self._ensure_schema()
         self._journal = CognitiveStepJournal(self.storage)
-        self._artifacts = CognitiveArtifactGate(self.storage, app.settings.workspace_root)
+        # Тестовый/встроенный Runtime может не иметь settings: сохраняем
+        # безопасный каталог рядом с БД, не создавая его без подтверждения.
+        settings = getattr(app, "settings", None)
+        workspace_root = getattr(settings, "workspace_root", None)
+        if workspace_root is None:
+            workspace_root = Path(self.storage.path).parent / "workspace"
+        self._artifacts = CognitiveArtifactGate(self.storage, workspace_root)
         self._recover_interrupted()
+        self._artifact_recovery = self._artifacts.reconcile()
+        if any(self._artifact_recovery[key] for key in ("applied", "failed", "expired")):
+            event(
+                "cognitive_artifact_recovered",
+                applied=self._artifact_recovery["applied"],
+                failed=self._artifact_recovery["failed"],
+                expired=self._artifact_recovery["expired"],
+            )
 
     def _ensure_schema(self) -> None:
         with self.storage.connection() as conn:
@@ -179,6 +194,11 @@ class SuperAgentService:
             return
         self._stop.clear()
         self._wake.clear()
+        # Доставляем результаты восстановления лишь единожды при старте,
+        # после создания класса и проверок владельца в get().
+        for ticket_id in self._artifact_recovery.get("ticket_ids", []):
+            self._deliver(ticket_id)
+        self._artifact_recovery["ticket_ids"] = []
         self._thread = threading.Thread(target=self._run, name="leshy-superagent", daemon=True)
         self._thread.start()
         event("superagent_started")

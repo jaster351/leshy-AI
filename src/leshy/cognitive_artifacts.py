@@ -79,6 +79,8 @@ class CognitiveArtifactGate:
             if existing:
                 if existing["sha256"] != digest:
                     raise ValueError("Для задания уже создано другое предложение")
+                if existing["state"] != "pending":
+                    raise ValueError("Предыдущее предложение уже обработано; создайте новую задачу")
                 return self.get(str(existing["id"]), owner)
             identity = "ART-" + uuid.uuid4().hex
             conn.execute(
@@ -109,12 +111,13 @@ class CognitiveArtifactGate:
             "expires_epoch": row["expires_epoch"],
         }
 
-    def _target(self, row: dict[str, Any]) -> Path:
+    def _target(self, row: dict[str, Any], *, create_parent: bool = True) -> Path:
         # Имя файла определяет сервер, а не модель; нет traversal и overwrite.
         base = self.workspace_root.expanduser().resolve()
         owner_key = _sha(row["owner_id"].encode("utf-8"))[:20]
         directory = base / "cognitive-artifacts" / owner_key
-        directory.mkdir(parents=True, exist_ok=True)
+        if create_parent:
+            directory.mkdir(parents=True, exist_ok=True)
         real = directory.resolve()
         if not real.is_relative_to(base):
             raise PermissionError("Путь артефакта вне рабочего пространства")
@@ -127,7 +130,7 @@ class CognitiveArtifactGate:
         row = self._row(artifact_id, owner_id)
         if row["state"] == "applied":
             # Идемпотентный ответ возможен только при сохранённом эффекте.
-            target = self._target(row)
+            target = self._target(row, create_parent=False)
             if not target.is_file() or _sha(target.read_bytes()) != row["sha256"]:
                 raise ValueError("Подтверждение есть, но файл утрачен или изменён; требуется проверка")
             return {"id": row["id"], "state": "applied",
@@ -177,12 +180,97 @@ class CognitiveArtifactGate:
         except Exception:
             # Не удаляем и не перезаписываем возможный частичный файл.
             with self.storage.connection() as conn:
+                now = utcnow()
                 conn.execute(
                     "UPDATE superagent_artifacts SET state='failed',finished_at=? "
                     "WHERE id=? AND state='applying'",
-                    (utcnow(), row["id"]),
+                    (now, row["id"]),
+                )
+                conn.execute(
+                    "UPDATE superagent_tickets SET state='blocked',attention='',"
+                    "latest_report=?,delivered=0,updated_at=? "
+                    "WHERE id=? AND owner_id=? AND state='waiting'",
+                    ("Документ не записан или не прошёл проверку. "
+                     "Файл не удалялся и не перезаписывался; требуется проверка.",
+                     now, row["ticket_id"], row["owner_id"]),
                 )
             raise
+
+    def _verified_existing(self, row: dict[str, Any]) -> Path | None:
+        """Только чтение: не создаёт каталог и не следует за файловыми symlink."""
+        try:
+            path = self._target(row, create_parent=False)
+            if path.is_symlink() or not path.is_file():
+                return None
+            if _sha(path.read_bytes()) != row["sha256"]:
+                return None
+            return path
+        except (OSError, ValueError, PermissionError):
+            return None
+
+    def reconcile(self) -> dict[str, Any]:
+        """При старте разрешить неопределённые записи без повторного создания файла.
+
+        applying + совпадающий файл => applied; иначе failed.
+        applied + задание waiting => восстановить ready лишь при наличии файла.
+        pending + истёк TTL => expired. Никакие файлы не создаются/удаляются.
+        """
+        with self.storage.connection() as conn:
+            rows = conn.execute(
+                "SELECT a.* FROM superagent_artifacts a "
+                "JOIN superagent_tickets t ON t.id=a.ticket_id "
+                "WHERE a.state='applying' "
+                "OR (a.state='applied' AND t.state='waiting') "
+                "OR (a.state='pending' AND a.expires_epoch<=?) "
+                "ORDER BY a.created_at",
+                (time.time(),),
+            ).fetchall()
+        counts = {"applied": 0, "failed": 0, "expired": 0}
+        changed_tickets: list[str] = []
+        for fetched in rows:
+            row = dict(fetched)
+            state_before = str(row["state"])
+            target = None
+            if state_before == "pending":
+                state_after = "expired"
+                report = "Срок подтверждения документа истёк. Новый файл не создан."
+            else:
+                target = self._verified_existing(row)
+                state_after = "applied" if target is not None else "failed"
+                report = (
+                    f"Созданный документ восстановлен и проверен: {target}"
+                    if target is not None else
+                    "Запись документа была прервана либо файл отсутствует/изменён. "
+                    "Автоматический повтор запрещён; проверьте каталог артефактов."
+                )
+            now = utcnow()
+            with self.storage.connection() as conn:
+                current = conn.execute(
+                    "SELECT state FROM superagent_artifacts WHERE id=?",
+                    (row["id"],),
+                ).fetchone()
+                if current is None or str(current["state"]) != state_before:
+                    continue
+                if state_after != state_before:
+                    changed = conn.execute(
+                        "UPDATE superagent_artifacts SET state=?,finished_at=? "
+                        "WHERE id=? AND state=?",
+                        (state_after, now, row["id"], state_before),
+                    )
+                    if changed.rowcount != 1:
+                        continue
+                ticket_state = "ready" if state_after == "applied" else "blocked"
+                ticket_changed = conn.execute(
+                    "UPDATE superagent_tickets SET state=?,latest_report=?,attention='',"
+                    "delivered=0,updated_at=? "
+                    "WHERE id=? AND owner_id=? AND state='waiting'",
+                    (ticket_state, report, now, row["ticket_id"], row["owner_id"]),
+                )
+            if state_after != state_before or ticket_changed.rowcount:
+                counts[state_after] += 1
+            if ticket_changed.rowcount:
+                changed_tickets.append(str(row["ticket_id"]))
+        return {**counts, "ticket_ids": changed_tickets}
 
     def reject(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
         row = self._row(artifact_id, owner_id)

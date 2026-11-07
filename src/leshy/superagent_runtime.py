@@ -174,7 +174,7 @@ def install_superagent_routing(app_class, app=None) -> None:
                 "superagent": True,
                 "latency_ms": latency_ms,
             })
-        except (KeyError, ValueError, PermissionError, RuntimeError) as exc:
+        except (KeyError, ValueError, PermissionError, RuntimeError, OSError) as exc:
             answer = str(exc).strip("'")
             if sid:
                 self.app._save_assistant(sid, answer)

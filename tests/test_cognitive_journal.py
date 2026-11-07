@@ -24,6 +24,12 @@ class CognitiveStepJournalTests(unittest.TestCase):
         self.ticket = self.service.create("web:owner-a", "session-a", "Объясни назначение версии")
         self.journal = self.service._journal
 
+    def test_service_without_settings_keeps_safe_workspace_fallback(self):
+        self.assertEqual(
+            self.service._artifacts.workspace_root,
+            Path(self.temp.name) / "workspace",
+        )
+
     def test_log_stores_hashes_not_raw_arguments_or_responses(self):
         ticket_id = self.ticket["id"]
         self.journal.begin(ticket_id, 1, 1, "knowledge.search", {"query": "PRIVATE-QUERY"})
