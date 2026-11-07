@@ -246,6 +246,50 @@ class RealtimeChatManager:
         if len(message) > 32000:
             raise ValueError("Сообщение слишком длинное")
 
+        # Погодные данные получает приложение, а не локальная модель.
+        # Это одинаково работает для Web SSE, Telegram и голосовых запросов.
+        from .weather_runtime import is_weather_request, weather_answer
+        if is_weather_request(message):
+            rid, cancel = self._register(request_id)
+            sid = ""
+            try:
+                sid, _rows = self._save_user_and_history(message, owner_id, session_id)
+                yield StreamEvent("start", {"request_id": rid, "session_id": sid})
+                if cancel.is_set():
+                    yield StreamEvent("done", {
+                        "request_id": rid, "session_id": sid, "answer": "", "stopped": True,
+                    })
+                    return
+                yield StreamEvent("activity", {
+                    "kind": "weather", "phase": "fetching",
+                    "text": "Проверяю погоду по метеоданным Open-Meteo…",
+                })
+                answer = str(weather_answer(message) or "Не удалось получить прогноз.")
+                if cancel.is_set():
+                    yield StreamEvent("done", {
+                        "request_id": rid, "session_id": sid, "answer": "", "stopped": True,
+                    })
+                    return
+                answered_at = self.app._save_assistant(sid, answer)
+                sources = (
+                    [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
+                    if "Источник: Open-Meteo" in answer else []
+                )
+                yield StreamEvent("delta", {"text": answer})
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid, "answer": answer,
+                    "created_at": answered_at, "sources": sources, "stopped": False,
+                })
+            except Exception as exc:
+                problem("weather_chat_failed", type(exc).__name__, request_id=rid)
+                yield StreamEvent("error", {
+                    "request_id": rid, "session_id": sid,
+                    "error": "Не удалось обработать запрос о погоде",
+                })
+            finally:
+                self._unregister(rid)
+            return
+
         controller = getattr(self.app, "os_control", None)
         if controller is not None and controller.is_request(message):
             yield from self._stream_os_action(
