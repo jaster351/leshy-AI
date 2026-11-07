@@ -114,10 +114,13 @@ class LocalTelegramVision:
         if not token:
             raise TelegramImageError("Telegram token не настроен")
         url = f"https://api.telegram.org/file/bot{token}/{parse.quote(path, safe='/')}"
+        # URL contains the bot token: ignore environment proxies and reject redirects.
+        # Keep this opener separate from the bridge's general Telegram API transport.
+        downloader = request.build_opener(request.ProxyHandler({}), _RejectRedirects())
         try:
-            with self.bridge.proxy.open(request.Request(url, method="GET"), timeout=20) as response:
+            with downloader.open(request.Request(url, method="GET"), timeout=20) as response:
                 image = response.read(MAX_IMAGE_BYTES + 1)
-        except (error.URLError, OSError, TimeoutError):
+        except (error.URLError, OSError, TimeoutError, VisionUnavailable):
             # URL содержит секрет bot token: не писать текст исключения в логи.
             raise TelegramImageError("Не удалось скачать фотографию из Telegram") from None
         if not image or len(image) > MAX_IMAGE_BYTES:
