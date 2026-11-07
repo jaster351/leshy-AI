@@ -94,7 +94,19 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     q = _text(query)
     # Явное требование проверить интернет нельзя подавить даже свежим кэшем.
     basic = research_reason(query, trusted_count=len(trusted), candidate_count=len(candidates))
-    if basic in {"явный запрос интернет-поиска", "требуются актуальные данные"}:
+    if basic == "явный запрос интернет-поиска":
+        return basic
+    # Задания на генерацию текста и объяснение общих принципов не должны
+    # обращаться к интернету только из-за слов «новый» или «последний».
+    # Исключение: явно актуальные внешние факты (новости, цены, CVE, законы).
+    offline_task = any(q.startswith(prefix) for prefix in _OFFLINE_TASKS)
+    time_sensitive = any(
+        marker in q for marker in
+        _REALTIME + _WEATHER + _NEWS + _VERSION + _SCHEDULE + _RULES + _SECURITY
+    ) or any(marker in q for marker in ("сегодня", "сейчас", "вчера", "завтра", "today", "right now"))
+    if offline_task and not time_sensitive:
+        return None
+    if basic == "требуются актуальные данные":
         return basic
     if _EXACT_IDENT.search(query):
         return "свежая проверка бюллетеня безопасности"
@@ -117,8 +129,10 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     if candidates:
         return "есть только непроверенные сведения"
 
-    # Обычный разговор и креативные задачи не требуют сетевого round-trip.
-    if any(q.startswith(prefix) for prefix in _OFFLINE_TASKS):
+    # Общеизвестные определения можно объяснить локально. Если вопрос
+    # содержит современный год/версию/CVE, предыдущие проверки уже заставили
+    # использовать интернет.
+    if q.startswith(("что такое ", "what is ")) and not re.search(r"\b20\d{2}\b", q):
         return None
     return basic
 
