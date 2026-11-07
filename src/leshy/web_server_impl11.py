@@ -27,9 +27,10 @@ def _runtime_html(settings, owner_id: str = "") -> bytes:
             html_text = html_text[:first_script] + bootstrap + "\n" + html_text[first_script:]
         else:
             html_text = html_text.replace("</body>", bootstrap + "\n</body>")
-    marker = '<script src="/owner-identity-panel.js"></script>'
-    if marker not in html_text:
-        html_text = html_text.replace("</body>", marker + "\n</body>")
+    for marker in ('<script src="/owner-identity-panel.js"></script>',
+                   '<script src="/telegram-proxy-panel.js"></script>'):
+        if marker not in html_text:
+            html_text = html_text.replace("</body>", marker + "\n</body>")
     return html_text.encode("utf-8")
 
 
@@ -161,6 +162,22 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.wfile.write(data)
                 return
 
+            if parsed.path == "/telegram-proxy-panel.js":
+                try:
+                    return self._send_asset("telegram-proxy-panel.js", "application/javascript; charset=utf-8")
+                except FileNotFoundError:
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Не найден интерфейс прокси Telegram"})
+
+            if parsed.path == "/v1/telegram/proxy":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                try:
+                    return self._json(HTTPStatus.OK, telegram.proxy.status())
+                except Exception:
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось прочитать настройки Telegram-прокси",
+                    })
+
             if parsed.path == "/owner-identity-panel.js":
                 try:
                     return self._send_asset("owner-identity-panel.js", "application/javascript; charset=utf-8")
@@ -186,6 +203,39 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             parsed = parse.urlparse(self.path)
+
+            if parsed.path == "/v1/telegram/proxy":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                try:
+                    return self._json(HTTPStatus.OK, telegram.proxy.configure(self._body()))
+                except (ValueError, PermissionError):
+                    return self._json(HTTPStatus.BAD_REQUEST, {
+                        "error": "Проверьте протокол, адрес, порт и авторизацию прокси",
+                    })
+                except Exception:
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось сохранить настройки Telegram-прокси",
+                    })
+
+            if parsed.path == "/v1/telegram/proxy/test":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                try:
+                    if not telegram.status().get("configured"):
+                        return self._json(HTTPStatus.BAD_REQUEST, {
+                            "ok": False, "error": "Сначала настройте Telegram bot token",
+                        })
+                    me = telegram._api("getMe", timeout=10)
+                    ok = isinstance(me, dict) and bool(me.get("id"))
+                    return self._json(HTTPStatus.OK if ok else HTTPStatus.BAD_GATEWAY, {
+                        "ok": ok,
+                        "message": "Соединение с Telegram работает" if ok else "Bot API вернул некорректный ответ",
+                    })
+                except Exception:
+                    return self._json(HTTPStatus.BAD_GATEWAY, {
+                        "ok": False, "error": "Не удалось подключиться к Telegram через выбранное соединение",
+                    })
 
             if parsed.path == "/v1/identity/telegram/link":
                 if not self._authorized():

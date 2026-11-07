@@ -13,6 +13,7 @@ from urllib import parse, request, error
 from .diagnostics import event, problem
 from .secret_store import load_secret, save_secret
 from .telegram_social import TelegramSocialPolicy
+from .telegram_proxy import TelegramProxyTransport
 
 
 _THINK_RE = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
@@ -139,6 +140,7 @@ class TelegramBridge:
         self._social = TelegramSocialPolicy()
         self._bot_id: int | None = None
         self._bot_username = ""
+        self.proxy = TelegramProxyTransport(self.brain_dir)
 
     def _token(self) -> str:
         try:
@@ -228,6 +230,7 @@ class TelegramBridge:
         access = self._access()
         return {
             "configured": bool(self._token()),
+            "proxy": self.proxy.status(),
             "allowed_users": len(self._allowed()),
             "allow_all": bool(access["allow_all"]),
             "owner_id": str(access["owner_id"]),
@@ -282,7 +285,7 @@ class TelegramBridge:
             headers=headers,
             method="POST" if data else "GET",
         )
-        with request.urlopen(req, timeout=timeout) as response:
+        with self.proxy.open(req, timeout=timeout) as response:
             body = json.loads(response.read().decode("utf-8"))
         if not body.get("ok"):
             raise RuntimeError(str(body.get("description") or "Telegram API error"))
@@ -332,7 +335,7 @@ class TelegramBridge:
             raise RuntimeError("Telegram token не настроен")
         url = f"https://api.telegram.org/file/bot{token}/{parse.quote(file_path, safe='/')}"
         try:
-            with request.urlopen(request.Request(url, method="GET"), timeout=30) as response:
+            with self.proxy.open(request.Request(url, method="GET"), timeout=30) as response:
                 length = response.headers.get("Content-Length") if response.headers else None
                 if length and str(length).isdigit() and int(length) > _MAX_TELEGRAM_VOICE_BYTES:
                     raise ValueError("Голосовое сообщение превышает 20 МБ")

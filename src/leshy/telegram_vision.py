@@ -115,7 +115,7 @@ class LocalTelegramVision:
             raise TelegramImageError("Telegram token не настроен")
         url = f"https://api.telegram.org/file/bot{token}/{parse.quote(path, safe='/')}"
         try:
-            with request.urlopen(request.Request(url, method="GET"), timeout=20) as response:
+            with self.bridge.proxy.open(request.Request(url, method="GET"), timeout=20) as response:
                 image = response.read(MAX_IMAGE_BYTES + 1)
         except (error.URLError, OSError, TimeoutError):
             # URL содержит секрет bot token: не писать текст исключения в логи.
