@@ -52,6 +52,14 @@ class ArtifactApprovalTests(unittest.TestCase):
         self.assertEqual(self.service.get(ticket_id, owner_id="web:owner-a")["state"], "ready")
         self.assertEqual(self.service.approve_artifact(p["id"], "web:owner-a")["path"], str(output))
 
+    def test_applied_artifact_must_still_exist_and_match_hash(self):
+        _, proposal = self._proposal()
+        done = self.service.approve_artifact(proposal["id"], "web:owner-a")
+        file = Path(done["path"])
+        file.write_text("changed by another process", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            self.service.approve_artifact(proposal["id"], "web:owner-a")
+
     def test_rejection_does_not_write(self):
         ticket_id, p = self._proposal()
         self.service.reject_artifact(p["id"], "web:owner-a")

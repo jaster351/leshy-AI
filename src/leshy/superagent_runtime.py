@@ -88,9 +88,9 @@ def _execute(service: SuperAgentService, intent: SuperAgentIntent, owner_id: str
         item = service.preview_artifact(intent.ticket_id, owner_id)
         return (
             f"Документ {item['id']}: «{item['title']}», состояние: {item['state']}."
-            f"\\nSHA-256: {item['sha256']}\\n"
-            f"----- Начало содержимого -----\\n{item['content']}"
-            f"\\n----- Конец содержимого -----\\n"
+            f"\nSHA-256: {item['sha256']}\n"
+            f"----- Начало содержимого -----\n{item['content']}"
+            f"\n----- Конец содержимого -----\n"
             f"Подтвердить запись: /agent approve {item['id']}"
         )
     if intent.action == "artifact_approve":

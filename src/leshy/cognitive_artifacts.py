@@ -126,8 +126,12 @@ class CognitiveArtifactGate:
     def approve(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
         row = self._row(artifact_id, owner_id)
         if row["state"] == "applied":
+            # Идемпотентный ответ возможен только при сохранённом эффекте.
+            target = self._target(row)
+            if not target.is_file() or _sha(target.read_bytes()) != row["sha256"]:
+                raise ValueError("Подтверждение есть, но файл утрачен или изменён; требуется проверка")
             return {"id": row["id"], "state": "applied",
-                    "path": str(self._target(row)), "sha256": row["sha256"]}
+                    "path": str(target), "sha256": row["sha256"]}
         if row["state"] != "pending":
             raise ValueError("Артефакт уже обработан; повторное выполнение запрещено")
         if time.time() >= float(row["expires_epoch"]):

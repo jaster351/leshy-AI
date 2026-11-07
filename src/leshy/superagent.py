@@ -96,7 +96,7 @@ def parse_superagent_intent(text: str) -> SuperAgentIntent | None:
     if lower_body in {"list", "список", "задачи", "status", "статус"}:
         return SuperAgentIntent("list")
     artifact_match = re.fullmatch(
-        r"(preview|просмотр|approve|одобри|reject|отклони)\\s+(ART-[a-f0-9]{32})",
+        r"(preview|просмотр|approve|одобри|reject|отклони)\s+(ART-[a-f0-9]{32})",
         body, re.IGNORECASE,
     )
     if artifact_match:
@@ -397,8 +397,7 @@ class SuperAgentService:
             "{\"action\":\"tool\",\"tool\":\"knowledge.search\",\"arguments\":{\"query\":\"... \"}} "
             "или {\"action\":\"tool\",\"tool\":\"runtime.version\",\"arguments\":{}}. "
             "Можно также подготовить Markdown-документ по явно заданной пользователем просьбе: "
-            "{\\"action\\":\\"tool\\",\\"tool\\":\\"artifact.propose\\","
-            "\\"arguments\\":{\\"title\\":\\"название\\",\\"content\\":\\"текст\\"}}. "
+            '{"action":"tool","tool":"artifact.propose","arguments":{"title":"название","content":"текст"}}. '
             "Предложение НЕ создаёт файл. Запись возможна только после отдельной "
             "команды владельца /agent approve ID. Никогда не вызывай одобрение сам. "
             "Другие инструменты недоступны, изменять произвольные файлы или запускать команды нельзя. "
