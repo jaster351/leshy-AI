@@ -34,7 +34,9 @@ def test_financial_action_requires_explicit_approval():
     with pytest.raises(ApprovalRequired):
         agent.execute(action)
     assert adapter.calls == []
-    assert agent.execute(action, approved=True).status == "ok"
+    with pytest.raises(ApprovalRequired):
+        agent.execute(action, approved=True)
+    assert adapter.calls == []
 
 
 def test_mutating_action_requires_approval_too():
@@ -125,13 +127,24 @@ def test_mutating_action_cannot_supply_its_own_approval_marker():
     assert adapter.calls == []
 
 
-def test_explicit_approval_replaces_forged_marker_with_internal_one():
+def test_legacy_approved_true_cannot_convert_forged_marker_into_grant():
     adapter = FakeAdapter()
     agent = BrowserAgent([adapter])
     action = BrowserAction(
         "agent_commit", "https://example.com", BrowserRisk.COMMIT,
         {"_approval_verified": "forged", "task": "подтверждённое действие"},
     )
-    assert agent.execute(action, approved=True).status == "ok"
-    assert adapter.calls[0].arguments["_approval_verified"] is True
+    with pytest.raises(ApprovalRequired):
+        agent.execute(action, approved=True)
+    assert adapter.calls == []
     assert action.arguments["_approval_verified"] == "forged"
+
+
+@pytest.mark.parametrize("risk", [BrowserRisk.MUTATE, BrowserRisk.COMMIT, BrowserRisk.FINANCIAL])
+def test_legacy_approval_flag_never_reaches_adapter(risk):
+    adapter = FakeAdapter()
+    agent = BrowserAgent([adapter])
+    action = BrowserAction("dangerous", "https://example.com", risk, {"_approval_verified": True})
+    with pytest.raises(ApprovalRequired):
+        agent.execute(action, approved=True)
+    assert adapter.calls == []
