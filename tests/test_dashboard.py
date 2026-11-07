@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 from leshy.app import LeshyApp
 from leshy.config import Settings
@@ -23,6 +24,55 @@ class DashboardTests(unittest.TestCase):
             embeddings_enabled=False,
         )
         return LeshyApp(settings)
+
+    def test_idle_session_listing_never_calls_llm_or_changes_old_title(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = self.make_app(Path(temp))
+            dashboard = DashboardService(app)
+            app.llm.chat = Mock(side_effect=AssertionError("LLM должен оставаться свободным"))
+            with app.storage.connection() as conn:
+                now = "2026-11-07T10:00:00+00:00"
+                conn.execute(
+                    "INSERT INTO sessions(id,owner_id,title,title_source,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?)",
+                    ("old-chat", "web:local", "Важный старый заголовок", "auto", now, now),
+                )
+                conn.execute(
+                    "INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)",
+                    ("old-chat", "user", "Про старый проект", now),
+                )
+            for _ in range(3):
+                listed = dashboard.sessions(owner_id="web:local")
+                self.assertEqual(listed[0]["title"], "Важный старый заголовок")
+            app.llm.chat.assert_not_called()
+            with app.storage.connection() as conn:
+                row = conn.execute(
+                    "SELECT title,title_source FROM sessions WHERE id='old-chat'"
+                ).fetchone()
+                self.assertEqual(row["title_source"], "auto")
+
+    def test_manual_title_generation_is_deterministic_without_backend(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = self.make_app(Path(temp))
+            dashboard = DashboardService(app)
+            app.llm.chat = Mock(side_effect=AssertionError("LLM не требуется"))
+            now = "2026-11-07T10:00:00+00:00"
+            with app.storage.connection() as conn:
+                conn.execute(
+                    "INSERT INTO sessions(id,owner_id,title,title_source,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?)",
+                    ("new-chat", "web:local", "Новый диалог", "auto", now, now),
+                )
+                conn.execute(
+                    "INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)",
+                    ("new-chat", "user", "Настройка мониторинга на Linux", now),
+                )
+            dashboard._auto_title_one("web:local", "new-chat")
+            with app.storage.connection() as conn:
+                title = conn.execute("SELECT title,title_source FROM sessions WHERE id='new-chat'").fetchone()
+            self.assertIn("Настройка мониторинга", title["title"])
+            self.assertEqual(title["title_source"], "auto-local")
+            app.llm.chat.assert_not_called()
 
     def test_task_lifecycle_and_overview(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -5,7 +5,7 @@ import re
 import threading
 from typing import Any
 
-from .diagnostics import recent_problems
+from .diagnostics import recent_problems, event
 from .llm import ChatMessage
 from .storage import utcnow
 
@@ -18,6 +18,7 @@ class DashboardService:
         self.storage = app.storage
         self._title_lock = threading.Lock()
         self._title_thread: threading.Thread | None = None
+        self._auto_title_notice_sent = False
 
     @staticmethod
     def _owner(value: str | None) -> str:
@@ -62,6 +63,15 @@ class DashboardService:
         return text or "Новый диалог"
 
     def _auto_title_one(self, owner: str, session_id: str) -> None:
+        """Только детерминированный заголовок. Никаких фоновых LLM-вызовов.
+
+        Ручной вызов допускается лишь для сессии с заголовком 'auto', которая
+        действительно содержит пользовательское сообщение. Старые auto-llm
+        названия не перезаписываются.
+        """
+        from time import monotonic
+
+        started = monotonic()
         try:
             with self.storage.connection() as conn:
                 session = conn.execute(
@@ -69,49 +79,38 @@ class DashboardService:
                     (session_id, owner),
                 ).fetchone()
                 if session is None or str(session["title_source"] or "") != "auto":
+                    event("auto_title_skipped", reason="not_auto", session_id=session_id)
                     return
-                messages = conn.execute(
-                    "SELECT role,content FROM messages WHERE session_id=? ORDER BY id ASC LIMIT 4",
+                first = conn.execute(
+                    "SELECT content FROM messages WHERE session_id=? AND role='user' "
+                    "ORDER BY id ASC LIMIT 1",
                     (session_id,),
-                ).fetchall()
-            if not messages:
+                ).fetchone()
+            if first is None:
+                event("auto_title_skipped", reason="no_new_user_message", session_id=session_id)
                 return
-            first_user = next((str(row["content"]) for row in messages if str(row["role"]) == "user"), str(session["title"] or ""))
-            excerpt = "\n".join(f"{row['role']}: {str(row['content'])[:1200]}" for row in messages)[:4000]
-            prompt = [
-                ChatMessage(
-                    "system",
-                    "/no_think\nПридумай короткое название этого диалога на языке пользователя. "
-                    "2–6 слов, без кавычек, без точки в конце, без пояснений. "
-                    "Название должно отражать главную тему, а не копировать весь вопрос.",
-                ),
-                ChatMessage("user", excerpt),
-            ]
-            raw = self.app.llm.chat(prompt)
-            title = self._clean_generated_title(raw, first_user[:64])
+            title = self._clean_generated_title(str(first["content"])[:160], "Новый диалог")
             with self.storage.connection() as conn:
                 conn.execute(
-                    "UPDATE sessions SET title=?,title_source=?,updated_at=updated_at WHERE id=? AND owner_id=? AND title_source='auto'",
-                    (title, "auto-llm", session_id, owner),
+                    "UPDATE sessions SET title=?,title_source='auto-local' "
+                    "WHERE id=? AND owner_id=? AND title_source='auto'",
+                    (title, session_id, owner),
                 )
-            self.storage.audit("session.auto_titled", {"session_id": session_id, "owner_id": owner, "title": title})
+            event("auto_title_finished", method="deterministic", latency_ms=int((monotonic()-started)*1000))
         except Exception:
-            return
+            event("auto_title_skipped", reason="local_title_failed")
 
     def _schedule_auto_title(self, owner: str, rows: list[Any]) -> None:
-        candidate = next((row for row in rows if str(row["title_source"] or "") == "auto"), None)
-        if candidate is None:
+        """Список диалогов — операция чтения, не сигнал для LLM или ретрая.
+
+        После рестарта список старых сессий часто загружается автоматически.
+        Даже дешёвый auto-title не должен изменять историю при этом событии.
+        """
+        if self._auto_title_notice_sent:
             return
-        with self._title_lock:
-            if self._title_thread and self._title_thread.is_alive():
-                return
-            self._title_thread = threading.Thread(
-                target=self._auto_title_one,
-                args=(owner, str(candidate["id"])),
-                name="leshy-session-auto-title",
-                daemon=True,
-            )
-            self._title_thread.start()
+        if any(str(row["title_source"] or "") == "auto" for row in rows):
+            self._auto_title_notice_sent = True
+            event("auto_title_skipped", reason="session_listing_no_new_messages")
 
     def sessions(self, owner_id: str = "web:local", limit: int = 50) -> list[dict[str, Any]]:
         owner = self._owner(owner_id)
