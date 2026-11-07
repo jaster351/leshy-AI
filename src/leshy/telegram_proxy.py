@@ -76,7 +76,8 @@ def _normalize(raw: dict) -> dict:
 def _public(cfg: dict) -> dict:
     return {"enabled": cfg["enabled"], "scheme": cfg["scheme"],
             "host": cfg["host"], "port": cfg["port"], "auth": cfg["auth"],
-            "username": cfg["username"], "has_password": bool(cfg["password"])}
+            "username": cfg["username"], "has_password": bool(cfg["password"]),
+            "custom_ca_configured": bool(os.getenv("LESHY_TELEGRAM_CA_BUNDLE", "").strip())}
 
 
 class _NoRedirects(request.HTTPRedirectHandler):
@@ -234,8 +235,15 @@ class TelegramProxyTransport:
         except error.HTTPError:
             raise
         except Exception as exc:
-            # Requests / underlying libraries can include bot token or
-            # credentials in exception strings. Never expose their details.
+            # SSL-ошибка может приходить внутри URLError.reason. Не маскируем
+            # её как "прокси недоступен"; сертификаты проверяем обязательно.
+            reason = exc.reason if isinstance(exc, error.URLError) else exc
+            if isinstance(reason, ssl.SSLCertVerificationError):
+                raise ConnectionError(
+                    "Telegram TLS: сертификат не доверен (CERTIFICATE_VERIFY_FAILED); "
+                    "проверьте корневой CA прокси/антивируса"
+                ) from None
+            # Никогда не печатаем URL (он может содержать bot token) и пароль.
             raise ConnectionError(f"Прокси Telegram недоступен ({type(exc).__name__})") from None
 
 
