@@ -179,12 +179,18 @@ class KnowledgeBase:
         if not terms:
             return []
         exact_ids = re.findall(r"\bCVE-\d{4}-\d{4,}\b|\bGHSA-[0-9a-z-]+\b", query, re.I)
+        exact_versions = re.findall(r"(?<![0-9.])v?\d+(?:\.\d+){1,3}(?![0-9.])", str(query), re.I)
         usable = [dict(row) for row in rows if is_fresh(dict(row))]
         by_id = {int(row["id"]): row for row in usable}
         scored = {}
         for row in usable:
             haystack = f"{row['topic']} {row['claim']}".lower()
             if exact_ids and any(identifier.lower() not in haystack for identifier in exact_ids):
+                continue
+            if exact_versions and any(
+                not re.search(r"(?<![0-9.])" + re.escape(version.lower()) + r"(?![0-9.])", haystack)
+                for version in exact_versions
+            ):
                 continue
             matches = sum(1 for term in terms if term in haystack)
             if matches == 0:
@@ -198,6 +204,12 @@ class KnowledgeBase:
                     continue
                 if exact_ids and any(identifier.lower() not in
                                      f"{item['topic']} {item['claim']}".lower() for identifier in exact_ids):
+                    continue
+                text = f"{item['topic']} {item['claim']}".lower()
+                if exact_versions and any(
+                    not re.search(r"(?<![0-9.])" + re.escape(version.lower()) + r"(?![0-9.])", text)
+                    for version in exact_versions
+                ):
                     continue
                 if hit.score >= .62:
                     scored[hit.object_id] = (scored.get(hit.object_id, (0, item))[0] + max(0, hit.score) * 2, item)
