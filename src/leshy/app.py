@@ -348,6 +348,25 @@ class LeshyApp:
                 (sid,),
             ).fetchall()
 
+        # Дата/время и погода — проверяемые инструменты, а не прогноз LLM.
+        # Ничего не меняем в обычном диалоге и его скорости.
+        from .verified_clock import clock_answer
+        from .weather_runtime import weather_answer
+        factual = clock_answer(message)
+        if factual is None:
+            factual = weather_answer(message)
+        if factual is not None:
+            sources = (
+                [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
+                if "Источник: Open-Meteo" in factual else []
+            )
+            event("chat_factual_tool_answered", kind="weather" if sources else "clock_or_unavailable_weather",
+                  session_id=sid, source_count=len(sources))
+            return {
+                "session_id": sid, "answer": factual,
+                "created_at": self._save_assistant(sid, factual), "sources": sources,
+            }
+
         if message.lower().startswith("/remember "):
             content = message[len("/remember "):].strip()
             memory_id = self.remember(owner_id, content)
