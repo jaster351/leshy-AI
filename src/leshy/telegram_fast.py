@@ -83,6 +83,19 @@ class FastTelegramBridge(RichTelegramBridge):
         text = str(exc or "").lower()
         return "429" in text or "too many requests" in text or "retry after" in text or "flood" in text
 
+    @staticmethod
+    def _retry_after_seconds(exc: Exception) -> float:
+        """Telegram 429: retry after N — обязательный серверный cooldown."""
+        match = re.search(r"retry[_ ]after\s*[:=]?\s*(\d+)", str(exc or ""), re.IGNORECASE)
+        return min(float(match.group(1)), 3600.0) if match else 0.0
+
+    def _apply_flood_backoff(self, exc: Exception, *, minimum: float = 2.0) -> float:
+        delay = max(minimum, self._retry_after_seconds(exc))
+        self._telegram_backoff_until = max(
+            self._telegram_backoff_until, time.monotonic() + delay,
+        )
+        return delay
+
     def _send_stream_message(self, chat_id, text: str, reply_to_message_id: int | None, *, reply_markup: dict | None = None) -> int:
         payload = {"chat_id": chat_id, "text": _partial_text(text)}
         if reply_to_message_id:
@@ -104,7 +117,7 @@ class FastTelegramBridge(RichTelegramBridge):
     ) -> bool:
         if not telegram_message_id:
             return False
-        if not final and time.monotonic() < self._telegram_backoff_until:
+        if time.monotonic() < self._telegram_backoff_until:
             return False
         payload = {"chat_id": chat_id, "message_id": int(telegram_message_id), "text": text or "…"}
         if html_mode:
@@ -120,8 +133,9 @@ class FastTelegramBridge(RichTelegramBridge):
                 return True
             if self._is_flood_error(exc):
                 # Не продолжаем долбить Telegram промежуточными edit-запросами.
-                self._telegram_backoff_until = max(self._telegram_backoff_until, time.monotonic() + 2.0)
-                event("telegram_stream_flood_backoff", chat_id=str(chat_id), final=bool(final))
+                delay = self._apply_flood_backoff(exc)
+                event("telegram_stream_flood_backoff", chat_id=str(chat_id), final=bool(final),
+                      retry_after_seconds=delay)
             else:
                 problem("telegram_stream_edit_failed", str(exc), chat_id=str(chat_id), final=bool(final))
             return False
@@ -129,7 +143,14 @@ class FastTelegramBridge(RichTelegramBridge):
     def _send_with_retry(self, method: str, payload: dict, *, timeout: int = 10) -> dict | list | None:
         last_error: Exception | None = None
         for delay in (0.0,) + tuple(self.final_retry_delays):
-            if delay > 0 and self._stop.wait(delay):
+            # Не повторяем запросы до истечения Retry-After от Telegram.
+            # Существующие быстрые повторы остаются для кратковременных 429.
+            wait = max(delay, self._telegram_backoff_until - time.monotonic())
+            if wait > 30.0:
+                event("telegram_send_deferred_by_rate_limit", method=method,
+                      retry_after_seconds=round(wait, 1))
+                break
+            if wait > 0 and self._stop.wait(wait):
                 break
             try:
                 return self._api(method, payload, timeout=timeout)
@@ -137,8 +158,9 @@ class FastTelegramBridge(RichTelegramBridge):
                 last_error = exc
                 if not self._is_flood_error(exc):
                     raise
-                self._telegram_backoff_until = max(self._telegram_backoff_until, time.monotonic() + max(1.5, delay))
-                problem("telegram_final_send_rate_limited", str(exc), retry_delay=delay)
+                cooldown = self._apply_flood_backoff(exc, minimum=max(1.5, delay))
+                problem("telegram_final_send_rate_limited", str(exc), retry_delay=delay,
+                        retry_after_seconds=cooldown)
         if last_error is not None:
             raise last_error
         return None
