@@ -15,6 +15,8 @@ import json
 import threading
 import time
 from urllib import parse, request
+
+from .knowledge import fingerprint_claim
 from cryptography.fernet import Fernet, InvalidToken
 
 from .diagnostics import event, problem
@@ -24,7 +26,7 @@ from .storage import utcnow
 
 _ALLOWED_SOURCE_TYPES = {
     "web", "material-web", "live-search-snippet", "user-read-web",
-    "research", "scientific", "academic", "news",
+    "research", "scientific", "academic", "news", "cluster-sync",
 }
 _MAX_ITEMS = 100
 _INTERVAL_SECONDS = 5.0
@@ -50,6 +52,11 @@ def _public_source(url: str) -> bool:
             return "." in host and not host.endswith((".internal", ".lan", ".localhost"))
     except (ValueError, TypeError):
         return False
+
+
+class _NoRedirects(request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError("Кластерный узел не должен перенаправлять запросы")
 
 
 class KnowledgeSyncService:
@@ -162,6 +169,15 @@ class KnowledgeSyncService:
         signature = hmac.new(
             self.cluster.identity.secret, timestamp.encode("ascii") + b"\n" + raw, "sha256",
         ).hexdigest()
+        target = parse.urlsplit(peer.endpoint)
+        try:
+            address = ipaddress.ip_address(target.hostname or "")
+        except ValueError as exc:
+            raise ValueError("Ожидается IP-адрес узла локальной сети") from exc
+        if target.scheme not in {"http", "https"} or (
+            not address.is_private or address.is_loopback or address.is_link_local
+        ):
+            raise ValueError("Репликация разрешена только на доверенные LAN-адреса")
         req = request.Request(
             peer.endpoint.rstrip("/") + "/v1/cluster/knowledge-sync/pull",
             data=raw, method="POST",
@@ -174,7 +190,8 @@ class KnowledgeSyncService:
             },
         )
         # Интервал ограничивает задержку, синхронизация не блокирует чат.
-        with request.urlopen(req, timeout=3.0) as response:
+        opener = request.build_opener(request.ProxyHandler({}), _NoRedirects())
+        with opener.open(req, timeout=3.0) as response:
             if response.status != 200:
                 raise RuntimeError("Сосед отклонил синхронизацию")
             response_data = json.loads(response.read(300_000))
@@ -209,7 +226,7 @@ class KnowledgeSyncService:
             with self.app.storage.connection() as conn:
                 exists = conn.execute(
                     "SELECT 1 FROM knowledge WHERE fingerprint=? AND source_url=? LIMIT 1",
-                    (sha256(" ".join(claim.lower().split()).encode()).hexdigest(), source),
+                    (fingerprint_claim(claim), source),
                 ).fetchone()
             if exists:
                 continue
