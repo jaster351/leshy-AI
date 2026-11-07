@@ -52,18 +52,16 @@ class GPUDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "drm"
             root.mkdir()
-            for idx, (bus, ven, dev) in enumerate((
-                ("0000:01:00.0", "0x1002", "0xbeef"),
-                ("0000:02:00.0", "0x8086", "0xcafe"),
+            for idx, (ven, dev) in enumerate((
+                ("0x1002", "0xbeef"),
+                ("0x8086", "0xcafe"),
             )):
-                physical = Path(tmp) / "pci" / bus
+                card = root / f"card{idx}"
+                physical = card / "device"
                 physical.mkdir(parents=True)
                 (physical / "vendor").write_text(ven)
                 (physical / "device").write_text(dev)
                 (physical / "mem_info_vram_total").write_text("8589934592")
-                card = root / f"card{idx}"
-                card.mkdir()
-                (card / "device").symlink_to(physical, target_is_directory=True)
             found = linux_gpu_devices(root, lspci_output="")
             self.assertEqual(len(found), 2)
             self.assertEqual({d.vendor for d in found}, {"AMD", "Intel"})
