@@ -224,12 +224,15 @@ def install_reliable_web_runtime(app_class) -> None:
                     search_error = content.split(marker, 1)[-1].strip()
                     break
             if search_error:
-                raise RuntimeError("Интернет-поиск не выполнен: " + search_error)
-            messages.append(ChatMessage(
-                "system",
-                "Интернет-поиск выполнен, но подходящих результатов не найдено. Так и скажи пользователю. Не утверждай, "
-                "что интернет недоступен или что функция поиска отсутствует.",
-            ))
+                # Не переводим всю Telegram-генерацию в ошибку: верхний слой
+                # покажет настоящую причину недоступности поиска, без LLM.
+                event("live_search_unavailable_reported", error_type="provider_error")
+            else:
+                messages.append(ChatMessage(
+                    "system",
+                    "Интернет-поиск выполнен, но подходящих результатов не найдено. Не утверждай, "
+                    "что поиск недоступен или что источник подтверждает неизвестный факт.",
+                ))
         return messages, sources, attempted
 
     app_class.__init__ = app_init
