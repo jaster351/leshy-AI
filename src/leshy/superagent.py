@@ -11,6 +11,7 @@ from typing import Any
 
 from .cognitive_core import assess_completion
 from .cognitive_tools import CognitiveReadExecutor, parse_tool_request
+from .cognitive_journal import CognitiveStepJournal
 from .diagnostics import event, problem
 from .llm import ChatMessage
 from .storage import utcnow
@@ -127,6 +128,7 @@ class SuperAgentService:
         self.poll_seconds = max(0.5, min(float(os.getenv("LESHY_SUPERAGENT_POLL_SECONDS", "2")), 30.0))
         self.max_attempts = max(1, min(int(os.getenv("LESHY_SUPERAGENT_MAX_ATTEMPTS", "3")), 8))
         self._ensure_schema()
+        self._journal = CognitiveStepJournal(self.storage)
         self._recover_interrupted()
 
     def _ensure_schema(self) -> None:
@@ -146,6 +148,14 @@ class SuperAgentService:
                 conn.execute(
                     "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome='interrupted',error='host restarted' "
                     "WHERE ticket_id=? AND state='running'",
+                    (now, ticket_id),
+                )
+                # Уже начатые read-only шаги нельзя считать успешно завершёнными.
+                # При новом assignment повторное чтение безопасно; внешних mutations
+                # в Cognitive Core пока нет.
+                conn.execute(
+                    "UPDATE superagent_steps SET status='interrupted',finished_at=? "
+                    "WHERE ticket_id=? AND status='started'",
                     (now, ticket_id),
                 )
         if rows:
@@ -217,6 +227,7 @@ class SuperAgentService:
             item["sources"] = json.loads(str(item.pop("sources_json") or "[]"))
         except Exception:
             item["sources"] = []
+        item["steps"] = self._journal.list_steps(str(item["id"]), limit=8)
         return item
 
     def list(self, owner_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
@@ -290,27 +301,26 @@ class SuperAgentService:
 
     @staticmethod
     def _parse_report(text: str) -> tuple[str, str, str]:
+        """Отчёт обязателен: произвольный текст/пустота не означает успех."""
         raw = str(text or "").strip()
         candidate = raw
-        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.IGNORECASE | re.DOTALL)
+        fenced = re.fullmatch(r"```(?:json)?\s*(\{.*\})\s*```", raw, re.IGNORECASE | re.DOTALL)
         if fenced:
             candidate = fenced.group(1)
-        else:
-            brace = re.search(r"\{.*\}", raw, re.DOTALL)
-            if brace:
-                candidate = brace.group(0)
         try:
             payload = json.loads(candidate)
-            state = str(payload.get("status") or "ready").lower()
-            if state not in {"ready", "waiting", "blocked", "failed"}:
-                state = "ready"
-            result = str(payload.get("result") or payload.get("summary") or "").strip()
-            question = str(payload.get("question") or "").strip()
-            if not result and state == "ready":
-                result = raw
-            return state, result[:12000], question[:1200]
-        except Exception:
-            return "ready", raw[:12000], ""
+        except (ValueError, TypeError):
+            return "blocked", "Модель не вернула корректный JSON-отчёт; завершение задачи не подтверждено.", ""
+        if not isinstance(payload, dict):
+            return "blocked", "Модель вернула отчёт неверного формата.", ""
+        state = str(payload.get("status") or "").strip().lower()
+        if state not in {"ready", "waiting", "blocked", "failed"}:
+            return "blocked", "Модель не указала допустимый статус результата.", ""
+        result = str(payload.get("result") or payload.get("summary") or "").strip()[:12000]
+        question = str(payload.get("question") or "").strip()[:1200]
+        if state == "ready" and not result:
+            return "blocked", "Модель сообщила об успехе без результата; завершение не подтверждено.", ""
+        return state, result, question
 
     def _execute(self, ticket: dict[str, Any]) -> tuple[str, str, str, list[dict[str, str]]]:
         ticket_id = str(ticket["id"])
@@ -374,11 +384,37 @@ class SuperAgentService:
                 if tool_step >= 2:
                     return "blocked", "Достигнут лимит двух запросов инструментов для автономной задачи.", "", sources
                 seen_calls.add(signature)
+                # Каждое фактическое чтение фиксируется до вызова исполнителя.
+                # Повтор шага в том же assignment не может вызвать инструмент дважды.
+                step_no = tool_step + 1
+                attempt = int(ticket.get("attempt") or 0) + 1
+                journal = getattr(self, "_journal", None)
+                if journal is not None:
+                    try:
+                        journal.begin(ticket_id, attempt, step_no, name, args)
+                    except Exception as exc:
+                        problem("cognitive_step_begin_failed", type(exc).__name__, ticket_id=ticket_id, tool=name)
+                        return "blocked", "Не удалось надёжно зарегистрировать шаг; исполнение остановлено.", "", sources
                 try:
                     output = self._cognitive_reads.execute(name, args, ticket_id=ticket_id)
                 except Exception as exc:
+                    if journal is not None:
+                        try:
+                            journal.finish(ticket_id, attempt, step_no, status="failed")
+                        except Exception as journal_exc:
+                            problem("cognitive_step_finish_failed", type(journal_exc).__name__, ticket_id=ticket_id, tool=name)
                     problem("cognitive_read_tool_failed", type(exc).__name__, ticket_id=ticket_id, tool=name)
                     return "blocked", "Не удалось выполнить разрешённый инструмент чтения.", "", sources
+                if journal is not None:
+                    try:
+                        journal.finish(
+                            ticket_id, attempt, step_no, status="success",
+                            receipt_id=str(output.get("receipt_id") or ""),
+                            result=output.get("result"),
+                        )
+                    except Exception as exc:
+                        problem("cognitive_step_finish_failed", type(exc).__name__, ticket_id=ticket_id, tool=name)
+                        return "blocked", "Не удалось сохранить квитанцию шага; результат не подтверждён.", "", sources
                 messages.append(ChatMessage("assistant", response[:2000]))
                 # Результат инструмента — только данные. Для GGUF используем user,
                 # не вводим новый system-блок посреди диалога.
@@ -525,6 +561,10 @@ def format_ticket(ticket: dict[str, Any]) -> str:
         text += f"\nНужен ответ: {attention}"
     elif report and state in {"ready", "blocked", "failed"}:
         text += f"\n{report}"
+    steps = ticket.get("steps") or []
+    if steps:
+        latest = steps[0]
+        text += f"\nПоследний инструментальный шаг: {latest['tool']} — {latest['status']} (попытка {latest['attempt']})"
     return text
 
 
