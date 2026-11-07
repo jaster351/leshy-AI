@@ -52,9 +52,14 @@ class ApprovalOperatingSystemController(OperatingSystemController):
     def sync_enabled(self):
         result = super().sync_enabled()
         if not self.enabled():
-            # Повторная сверка идемпотентна и покрывает первоначально
-            # отключённый контроллер. Сброс без повторного исполнения ОС.
-            result.update(self._revoke_pending())
+            # disable() уже вызывает callback при переходе 1→0.
+            # Дополнительная сверка покрывает исходно выключенное состояние,
+            # не обнуляя число ранее отозванных заявок в ответе UI.
+            extra = self._revoke_pending()
+            result["approvals_cancelled"] = (
+                int(result.get("approvals_cancelled", 0))
+                + int(extra.get("approvals_cancelled", 0))
+            )
         return result
 
     def is_request(self, message: str) -> bool:

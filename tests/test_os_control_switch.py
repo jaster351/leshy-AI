@@ -63,6 +63,21 @@ class OperatingSystemSwitchTests(unittest.TestCase):
         self.assertEqual(status["processes_remaining"], 0)
         self.assertFalse(self.controller.execute("system_status").ok)
 
+    def test_toggle_reports_actual_number_of_revoked_approvals(self):
+        self.enable()
+        first = Path(self.tmp.name) / "first.txt"
+        second = Path(self.tmp.name) / "second.txt"
+        first.write_text("one", encoding="utf-8")
+        second.write_text("two", encoding="utf-8")
+        self.controller.request_delete({"path": str(first)}, owner_id="web:local")
+        self.controller.request_delete({"path": str(second)}, owner_id="web:local")
+        set_module_enabled(self.storage, "os-control", False)
+        report = self.controller.sync_enabled()
+        self.assertEqual(report["approvals_cancelled"], 2)
+        self.assertEqual(self.controller.pending(owner_id="web:local"), [])
+        self.assertTrue(first.exists())
+        self.assertTrue(second.exists())
+
     def test_reenable_does_not_resume_old_permission(self):
         self.enable()
         token = self.controller._gate.begin()

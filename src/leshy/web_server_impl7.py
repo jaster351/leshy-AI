@@ -239,6 +239,10 @@ def make_handler(app, telegram, settings, model_catalog):
                                    f"Остановлено процессов Лешего: {outcome.get('processes_stopped',0)}; "
                                    f"остались без подтверждения остановки: {outcome.get('processes_remaining',0)}; "
                                    f"отменено подтверждений: {outcome.get('approvals_cancelled',0)}.")
+                        if outcome.get("approvals_cancel_failed"):
+                            message += " ВНИМАНИЕ: отмену подтверждений не удалось подтвердить. Проверьте статус ОС."
+                        if outcome.get("processes_remaining"):
+                            message += " ВНИМАНИЕ: не все отслеживаемые процессы удалось завершить."
                     if enabled and not state.get("enabled"):
                         disabled = [dep.get("name") for dep in state.get("dependencies", []) if not dep.get("enabled")]
                         if disabled:
