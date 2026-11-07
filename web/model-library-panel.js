@@ -139,6 +139,27 @@
     download.onclick=()=>downloadModel(model.id,model.vision);
     actions.appendChild(download);
 
+    // Use the client's default browser when the built-in Python downloader
+    // cannot verify HTTPS certificates. Never disable TLS verification.
+    if(typeof model.url==='string' && /^https:\/\/huggingface\.co\//i.test(model.url)){
+      const browser=document.createElement('a');
+      browser.className='button secondary small';
+      browser.href=model.url;
+      browser.target='_blank';
+      browser.rel='noopener noreferrer';
+      browser.textContent='Скачать через браузер';
+      actions.appendChild(browser);
+      if(model.vision && model.mmproj_url && /^https:\/\/huggingface\.co\//i.test(model.mmproj_url)){
+        const projector=document.createElement('a');
+        projector.className='button secondary small';
+        projector.href=model.mmproj_url;
+        projector.target='_blank';
+        projector.rel='noopener noreferrer';
+        projector.textContent='Скачать mmproj через браузер';
+        actions.appendChild(projector);
+      }
+    }
+
     if(model.installed){
       const activate=document.createElement('button');
       activate.className='button small';activate.type='button';activate.textContent='Сделать активной';

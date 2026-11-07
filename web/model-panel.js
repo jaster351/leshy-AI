@@ -53,7 +53,28 @@
     if(!pane) return null;
 
     const oldDownload=byId('modelDownload');
-    if(oldDownload) oldDownload.textContent='Скачать рекомендованную Qwen3-8B Q4_K_M';
+    if(oldDownload){
+      oldDownload.textContent='Скачать рекомендованную Qwen3-8B Q4_K_M';
+      // The built-in button uses Python urllib and may fail when this PC
+      // cannot verify the download server's HTTPS certificate.
+      // A regular link opens in the user's browser instead, without
+      // weakening TLS verification or trying to launch a browser on the server.
+      if(!byId('modelBrowserDownload')){
+        const browserLink=document.createElement('a');
+        browserLink.id='modelBrowserDownload';
+        browserLink.className='button secondary';
+        browserLink.href='https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf';
+        browserLink.target='_blank';
+        browserLink.rel='noopener noreferrer';
+        browserLink.textContent='Скачать через браузер';
+        browserLink.style.cssText='display:block;text-align:center;margin-top:8px;';
+        oldDownload.insertAdjacentElement('afterend',browserLink);
+        const hint=document.createElement('div');
+        hint.className='hint';
+        hint.textContent='Если загрузили файл через браузер, нажмите «Загрузить GGUF с диска» ниже и выберите скачанную модель. Леший сохранит её в LeshyBrain\\models.';
+        browserLink.insertAdjacentElement('afterend',hint);
+      }
+    }
 
     const card=document.createElement('div');
     card.className='card';
