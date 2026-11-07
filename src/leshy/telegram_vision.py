@@ -30,7 +30,17 @@ def image_attachment(message: dict) -> dict | None:
     photos = message.get("photo")
     if isinstance(photos, list) and photos:
         candidates = [x for x in photos if isinstance(x, dict) and x.get("file_id")]
-        return max(candidates, key=lambda p: int(p.get("file_size") or 0)) if candidates else None
+        if not candidates:
+            return None
+        # Telegram даёт несколько версий фото: выбираем наибольшую
+        # разрешённую, чтобы слишком большой оригинал не ломал обработку.
+        def file_size(item):
+            try:
+                return max(0, int(item.get("file_size") or 0))
+            except (ValueError, TypeError, OverflowError):
+                return MAX_IMAGE_BYTES + 1
+        allowed = [item for item in candidates if file_size(item) <= MAX_IMAGE_BYTES]
+        return max(allowed or candidates, key=file_size)
     document = message.get("document")
     if isinstance(document, dict) and str(document.get("mime_type") or "").lower() in {
         "image/jpeg", "image/png", "image/webp",
@@ -141,7 +151,9 @@ class LocalTelegramVision:
             }],
         }
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        opener = request.build_opener(_RejectRedirects())
+        # Запрещаем HTTP_PROXY/HTTPS_PROXY для чувствительных image bytes.
+        # Endpoint разрешён только на loopback, редиректы также запрещены.
+        opener = request.build_opener(request.ProxyHandler({}), _RejectRedirects())
         try:
             with opener.open(
                 request.Request(endpoint, data=data, headers={"Content-Type": "application/json"}, method="POST"),

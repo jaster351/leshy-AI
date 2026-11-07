@@ -28,6 +28,11 @@ class TelegramVisionTests(unittest.TestCase):
         self.assertEqual(image_attachment(self.message())["file_id"], "photo-big")
         self.assertIsNone(image_attachment({"document": {"mime_type": "application/pdf"}}))
 
+    def test_largest_photo_under_limit_is_selected(self):
+        message = self.message()
+        message["photo"].append({"file_id": "oversize", "file_size": 12 * 1024 * 1024})
+        self.assertEqual(image_attachment(message)["file_id"], "photo-big")
+
     def test_missing_vision_model_returns_explicit_reason(self):
         bridge = Mock()
         with patch.dict(os.environ, {"LESHY_VISION_ENDPOINT": "", "LESHY_VISION_MODEL": ""}):
@@ -71,10 +76,15 @@ class TelegramVisionTests(unittest.TestCase):
             "LESHY_VISION_MODEL": "local-vision",
         }), patch("leshy.telegram_vision.request.urlopen", side_effect=download), patch(
             "leshy.telegram_vision.request.build_opener", return_value=Opener()
-        ):
+        ) as opener_factory:
             answer = LocalTelegramVision(bridge).describe(self.message("Что видишь?"))
         self.assertIn("На фото", answer)
         self.assertEqual(payloads[0]["model"], "local-vision")
+        from urllib.request import ProxyHandler
+        self.assertTrue(any(
+            isinstance(item, ProxyHandler) and not item.proxies
+            for item in opener_factory.call_args.args
+        ))
         self.assertEqual(payloads[0]["messages"][0]["content"][0]["text"], "Что видишь?")
         self.assertTrue(payloads[0]["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
         bridge._api.assert_called_once_with("getFile", {"file_id": "photo-big"}, timeout=12)

@@ -101,6 +101,11 @@ class AdaptiveLLM:
         result=apply_context_budget(messages,context_size=context_size,reserve_tokens=max_tokens)
         if result.tokens_before>result.budget:
             event("llm_context_compacted",backend=state.name,context_size=context_size,reserve_tokens=max_tokens,tokens_before=result.tokens_before,tokens_after=result.tokens_after,budget=result.budget,dropped_messages=result.dropped_messages,truncated_messages=result.truncated_messages)
+        if result.tokens_after > result.budget:
+            raise LLMUnavailable(
+                f"Контекст запроса превышает лимит локальной модели "
+                f"({result.tokens_after}>{result.budget}); сократите вложение"
+            )
         return result.messages
     def chat(self, messages):
         prepared_messages = with_leshy_identity(messages)

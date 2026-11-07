@@ -4,7 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 import sys
 import tempfile
+import threading
 import unittest
+from unittest.mock import patch
+from leshy.os_control import OSActionResult, OperatingSystemController
 from leshy.storage import Storage
 from leshy.module_settings import set_module_enabled
 from leshy.os_control_approval import ApprovalOperatingSystemController
@@ -69,6 +72,64 @@ class OperatingSystemSwitchTests(unittest.TestCase):
         self.enable()
         with self.assertRaises(PermissionError):
             self.controller._gate.check(token)
+
+    def test_parallel_delete_confirmation_is_claimed_once(self):
+        self.enable()
+        target = Path(self.tmp.name) / "data.txt"
+        target.write_text("keep", encoding="utf-8")
+        proposal = self.controller.request_delete({"path": str(target)}, owner_id="web:local")
+        started, done = threading.Event(), threading.Event()
+        runs = []
+        answers = {}
+
+        def simulated_delete(*args, **kwargs):
+            runs.append("called")
+            started.set()
+            self.assertTrue(done.wait(4))
+            return OSActionResult("delete", True, "Удалено")
+
+        with patch.object(OperatingSystemController, "execute", side_effect=simulated_delete):
+            first = threading.Thread(
+                target=lambda: answers.update(first=self.controller.resolve(
+                    proposal["id"], owner_id="web:local", allow=True,
+                )), daemon=True,
+            )
+            first.start()
+            self.assertTrue(started.wait(3))
+            second = self.controller.resolve(proposal["id"], owner_id="web:local", allow=True)
+            self.assertNotEqual(second["status"], "executed")
+            done.set()
+            first.join(timeout=3)
+        self.assertEqual(runs, ["called"])
+        self.assertEqual(answers["first"]["status"], "executed")
+        self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
+    def test_revocation_mid_approval_never_claims_certain_success(self):
+        self.enable()
+        target = Path(self.tmp.name) / "data.txt"
+        target.write_text("keep", encoding="utf-8")
+        proposal = self.controller.request_delete({"path": str(target)}, owner_id="web:local")
+        started, done = threading.Event(), threading.Event()
+        answer = {}
+        def simulated_delete(*args, **kwargs):
+            started.set()
+            self.assertTrue(done.wait(4))
+            return OSActionResult("delete", True, "Удалено")
+        with patch.object(OperatingSystemController, "execute", side_effect=simulated_delete):
+            thread = threading.Thread(
+                target=lambda: answer.update(result=self.controller.resolve(
+                    proposal["id"], owner_id="web:local", allow=True,
+                )), daemon=True,
+            )
+            thread.start()
+            self.assertTrue(started.wait(3))
+            set_module_enabled(self.storage, "os-control", False)
+            self.controller.sync_enabled()
+            done.set()
+            thread.join(timeout=3)
+        self.assertEqual(answer["result"]["status"], "interrupted")
+        self.assertIn("проверьте", answer["result"]["message"])
+        self.assertTrue(target.exists())
 
     def test_untracked_opening_is_refused(self):
         self.enable()

@@ -62,8 +62,8 @@ class StreamingAutoContinueTests(unittest.TestCase):
             'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n',
             'data: [DONE]\n',
         )
-        clock = iter([0.0, 30.0, 30.0, 30.0])
-        with patch("leshy.streaming_backends.time.monotonic", side_effect=lambda: next(clock, 30.0)):
+        # Не подменять monotonic: новый SSE watchdog тоже зависит от часов.
+        with patch("leshy.streaming_backends._AUTO_CONTINUATION_FIRST_ROUND_BUDGET_SECONDS", 0):
             with patch("leshy.streaming_backends.request.urlopen", return_value=response) as urlopen:
                 answer = "".join(_llama_stream(provider, [ChatMessage("user", "Задача")]))
         self.assertIn("Ответ получен", answer)
@@ -89,7 +89,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
                 # ещё есть токены: read возвращает строки без [DONE].
                 while not self.was_closed.is_set():
                     time.sleep(0.01)
-                    yield b'data: {"choices":[{"delta":{"content":"x"},"finish_reason":null}]}\\n'
+                    yield b'data: {"choices":[{"delta":{"content":"x"},"finish_reason":null}]}\n'
 
         from leshy.llm import LLMUnavailable
         response = SlowResponse()
@@ -134,6 +134,15 @@ class StreamingAutoContinueTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 2.0)
         self.assertTrue(response.ready.is_set())
         helper.join(timeout=1)
+
+    def test_context_error_single_oversized_user_is_compacted(self):
+        from leshy.context_budget import estimate_tokens
+        from leshy.streaming_backends import _shrink_messages_for_context
+        messages = [ChatMessage("user", "Очень длинный вопрос: " + "контекст " * 1100)]
+        compacted = _shrink_messages_for_context(messages, 8830, 4096)
+        self.assertIsNotNone(compacted)
+        self.assertLessEqual(estimate_tokens(compacted), 3072)
+        self.assertTrue(compacted[0].content.startswith("Очень длинный вопрос:"))
 
     def test_normal_stop_does_not_force_extra_generation(self):
         provider = _Provider()

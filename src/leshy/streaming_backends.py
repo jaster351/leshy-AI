@@ -9,7 +9,7 @@ from types import MethodType
 from urllib import request, error
 
 from .diagnostics import event, exception
-from .context_budget import _normalize_system_messages
+from .context_budget import _normalize_system_messages, apply_context_budget, estimate_tokens
 from .llm import ChatMessage, LLMUnavailable
 from .persona import with_leshy_identity
 
@@ -26,26 +26,16 @@ _TRAILING_CONNECTORS = {
 
 
 def _shrink_messages_for_context(messages, requested_tokens: int, available_tokens: int):
-    if requested_tokens <= available_tokens or len(messages) < 2:
+    """Устранять HTTP 400 8830/4096, включая случай одного длинного user msg."""
+    if requested_tokens <= available_tokens or not messages:
         return None
-    target_ratio = max(0.15, min(0.90, (available_tokens * 0.78) / requested_tokens))
-    result = []
-    last_index = len(messages) - 1
-    for index, message in enumerate(messages):
-        content = str(message.content)
-        if index == last_index:
-            result.append(message)
-            continue
-        keep = max(128, int(len(content) * target_ratio))
-        if len(content) <= keep:
-            result.append(message)
-            continue
-        clipped = content[:keep] if message.role == "system" else content[-keep:]
-        try:
-            result.append(type(message)(role=message.role, content=clipped))
-        except TypeError:
-            result.append(ChatMessage(message.role, clipped))
-    return result
+    result = apply_context_budget(
+        list(messages), context_size=max(512, int(available_tokens)),
+        reserve_tokens=max(128, min(1024, int(available_tokens)//4)),
+    )
+    if result.tokens_after > result.budget or result.tokens_after >= estimate_tokens(list(messages)):
+        return None
+    return result.messages
 
 
 def _looks_truncated_text(text: str) -> bool:

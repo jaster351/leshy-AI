@@ -155,46 +155,92 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         return items
 
     def resolve(self, approval_id: str, *, owner_id: str, allow: bool) -> dict[str, Any]:
+        """Одноразовое подтверждение: claim до исполнения, без повторных эффектов."""
         approval_id = str(approval_id or "").strip()
         owner = str(owner_id or "").strip()[:200]
         if not self.enabled():
             return {"id": approval_id, "status": "cancelled", "message": DISABLED}
         with self.storage.connection() as conn:
-            row = conn.execute("SELECT * FROM os_action_approvals WHERE id=?", (approval_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM os_action_approvals WHERE id=?", (approval_id,),
+            ).fetchone()
         if row is None:
             raise ValueError("Запрос подтверждения не найден")
         if str(row["owner_id"]) != owner:
-            raise PermissionError("Подтвердить удаление может только владелец, которому адресован запрос")
+            raise PermissionError("Подтвердить удаление может только владелец запроса")
         status = str(row["status"])
         if status != "pending":
-            return {"id": approval_id, "status": status, "message": "Этот запрос уже обработан."}
-        expires = datetime.fromisoformat(str(row["expires_at"]))
-        if datetime.now(timezone.utc) >= expires:
+            return {"id": approval_id, "status": status,
+                    "message": "Подтверждение уже обработано или требует проверки. Повтор запрещён."}
+        if datetime.now(timezone.utc) >= datetime.fromisoformat(str(row["expires_at"])):
             with self.storage.connection() as conn:
-                conn.execute("UPDATE os_action_approvals SET status='expired',resolved_at=? WHERE id=? AND status='pending'", (utcnow(), approval_id))
-            return {"id": approval_id, "status": "expired", "message": "Срок подтверждения истёк. Удаление не выполнено."}
+                conn.execute(
+                    "UPDATE os_action_approvals SET status='expired',resolved_at=? "
+                    "WHERE id=? AND status='pending'", (utcnow(), approval_id),
+                )
+            return {"id": approval_id, "status": "expired",
+                    "message": "Время подтверждения истекло. Удаление не выполнялось."}
         if not allow:
             with self.storage.connection() as conn:
-                conn.execute("UPDATE os_action_approvals SET status='cancelled',resolved_at=? WHERE id=? AND status='pending'", (utcnow(), approval_id))
+                changed = conn.execute(
+                    "UPDATE os_action_approvals SET status='cancelled',resolved_at=? "
+                    "WHERE id=? AND owner_id=? AND status='pending'",
+                    (utcnow(), approval_id, owner),
+                )
+            if changed.rowcount != 1:
+                return {"id": approval_id, "status": "already_handled",
+                        "message": "Запрос уже выполняется. Повтор запрещён."}
             message = "Удаление отменено."
-            sid = str(row["session_id"] or "")
-            if sid:
-                self.app._save_assistant(sid, message)
+            if row["session_id"]:
+                self.app._save_assistant(str(row["session_id"]), message)
             self.storage.audit("os.approval_cancelled", {"id": approval_id, "owner_id": owner})
             return {"id": approval_id, "status": "cancelled", "message": message}
 
-        self.assert_allowed()
-        args = json.loads(str(row["arguments_json"]) or "{}")
-        result = OperatingSystemController.execute(self, "delete", args, owner_id=owner)
-        final_status = "executed" if result.ok else "failed"
+        # Только один поток/процесс может перейти pending -> executing.
         with self.storage.connection() as conn:
-            conn.execute("UPDATE os_action_approvals SET status=?,resolved_at=? WHERE id=? AND status='pending'", (final_status, utcnow(), approval_id))
-        message = result.summary if result.ok else "Удаление не выполнено: " + result.summary
-        sid = str(row["session_id"] or "")
-        if sid:
-            self.app._save_assistant(sid, message)
-        self.storage.audit("os.approval_resolved", {"id": approval_id, "owner_id": owner, "allowed": True, "status": final_status})
-        return {"id": approval_id, "status": final_status, "message": message, "ok": result.ok}
+            claimed = conn.execute(
+                "UPDATE os_action_approvals SET status='executing' "
+                "WHERE id=? AND owner_id=? AND status='pending'",
+                (approval_id, owner),
+            )
+        if claimed.rowcount != 1:
+            return {"id": approval_id, "status": "already_handled",
+                    "message": "Удаление уже выполняется; повтор запрещён."}
+        result = None
+        failure = ""
+        try:
+            self.assert_allowed()
+            args = json.loads(str(row["arguments_json"]) or "{}")
+            result = OperatingSystemController.execute(self, "delete", args, owner_id=owner)
+        except Exception as exc:
+            failure = type(exc).__name__
+        if not self.enabled():
+            final_status = "interrupted"
+            message = (
+                "Управление ОС отключено во время операции. Фактический "
+                "результат удаления не подтверждён: проверьте файл вручную."
+            )
+        elif result is not None and result.ok:
+            final_status = "executed"
+            message = str(result.summary)
+        else:
+            final_status = "failed"
+            message = "Удаление не подтверждено; проверьте файл. " + (
+                str(result.summary) if result is not None else failure
+            )
+        with self.storage.connection() as conn:
+            conn.execute(
+                "UPDATE os_action_approvals SET status=?,resolved_at=? "
+                "WHERE id=? AND owner_id=? AND status='executing'",
+                (final_status, utcnow(), approval_id, owner),
+            )
+        if row["session_id"]:
+            self.app._save_assistant(str(row["session_id"]), message)
+        self.storage.audit("os.approval_resolved", {
+            "id": approval_id, "owner_id": owner, "allowed": True, "status": final_status,
+        })
+        return {"id": approval_id, "status": final_status,
+                "message": message, "ok": final_status == "executed"}
 
     def _direct_with_delete(self, message: str) -> tuple[str, dict[str, Any]] | None:
         text = str(message or "").strip()
