@@ -96,7 +96,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
             with patch("leshy.streaming_backends.request.urlopen", return_value=response):
                 started = time.monotonic()
                 chunks = list(_llama_stream(provider, [ChatMessage("user", "Длинный запрос")]))
-        self.assertIn("Ответ остановлен по лимиту времени", "".join(chunks))
+        self.assertIn("Ответ сохранён частично", "".join(chunks))
         self.assertLess(time.monotonic() - started, 2.0)
         self.assertTrue(response.was_closed.is_set())
 
@@ -139,7 +139,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
         with patch("leshy.streaming_backends.request.urlopen", return_value=TimedOut()):
             result = "".join(_llama_stream(provider, [ChatMessage("user", "Привет")]))
         self.assertIn("Важная часть ответа", result)
-        self.assertIn("Сохранена", result)
+        self.assertIn("Ответ сохранён частично", result)
 
     def test_qwen_default_uses_visible_non_thinking_mode(self):
         import os
