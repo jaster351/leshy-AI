@@ -348,6 +348,18 @@ class LeshyApp:
                 (sid,),
             ).fetchall()
 
+        # Погода — фактический инструмент, а не ответ LLM из памяти.
+        # Сохраняем обычный диалог; не выдумываем температуру при ошибке API.
+        from .weather_runtime import weather_answer
+        forecast = weather_answer(message)
+        if forecast is not None:
+            return {
+                "session_id": sid, "answer": forecast,
+                "created_at": self._save_assistant(sid, forecast),
+                "sources": [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
+                if "Источник: Open-Meteo" in forecast else [],
+            }
+
         if message.lower().startswith("/remember "):
             content = message[len("/remember "):].strip()
             memory_id = self.remember(owner_id, content)
