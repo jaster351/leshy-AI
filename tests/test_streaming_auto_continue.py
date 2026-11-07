@@ -45,8 +45,8 @@ class StreamingAutoContinueTests(unittest.TestCase):
     def test_empty_reasoning_stream_does_not_auto_continue_six_times(self):
         provider = _Provider()
         empty = _StreamResponse(
-            'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\\n',
-            'data: [DONE]\\n',
+            'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n',
+            'data: [DONE]\n',
         )
         from leshy.llm import LLMUnavailable
         with patch("leshy.streaming_backends.request.urlopen", return_value=empty) as urlopen:
@@ -57,9 +57,9 @@ class StreamingAutoContinueTests(unittest.TestCase):
     def test_long_first_round_does_not_start_second_generation(self):
         provider = _Provider()
         response = _StreamResponse(
-            'data: {"choices":[{"delta":{"content":"Ответ получен"},"finish_reason":null}]}\\n',
-            'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\\n',
-            'data: [DONE]\\n',
+            'data: {"choices":[{"delta":{"content":"Ответ получен"},"finish_reason":null}]}\n',
+            'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n',
+            'data: [DONE]\n',
         )
         clock = iter([0.0, 30.0, 30.0, 30.0])
         with patch("leshy.streaming_backends.time.monotonic", side_effect=lambda: next(clock, 30.0)):
