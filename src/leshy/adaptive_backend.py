@@ -113,7 +113,7 @@ class AdaptiveLLM:
             try: text=state.provider.chat(self._budget_for(state,prepared_messages))
             except Exception as exc:
                 latency_ms=int((time.monotonic()-started)*1000); fatal=self._mark_failure(state,exc,latency_ms)
-                exception("adaptive_llm_backend_failed",exc,backend=state.name,latency_ms=latency_ms,cooldown_seconds=self.cooldown_seconds,quarantined=fatal,hardware_mode=self._hardware_mode(),routing=list(routing)); errors.append(f"{state.name}: {exc}"); continue
+                exception("adaptive_llm_backend_failed",exc,backend=state.name,latency_ms=latency_ms,cooldown_seconds=self.cooldown_seconds,quarantined=fatal,hardware_mode=self._hardware_mode(),routing=list(routing)); errors.append(f"{state.name}: {type(exc).__name__}: {str(exc)[:240]}"); continue
             latency_ms=int((time.monotonic()-started)*1000); switched=self._mark_success(state,latency_ms)
             event("adaptive_llm_backend_ok",backend=state.name,latency_ms=latency_ms,switched=switched,hardware_mode=self._hardware_mode(),routing=list(routing)); return text
         raise LLMUnavailable("Все выбранные локальные LLM backend недоступны: "+"; ".join(errors[-3:]))
@@ -166,7 +166,7 @@ class AdaptiveEmbeddings:
                     state.failures+=1; state.last_latency_ms=latency_ms
                     if fatal: state.quarantined=True; state.quarantine_reason=str(exc); state.failed_until=float("inf")
                     else: state.failed_until=time.monotonic()+self.cooldown_seconds
-                exception("adaptive_embedding_backend_failed",exc,backend=state.name,latency_ms=latency_ms,cooldown_seconds=self.cooldown_seconds,quarantined=fatal); errors.append(f"{state.name}: {exc}"); continue
+                exception("adaptive_embedding_backend_failed",exc,backend=state.name,latency_ms=latency_ms,cooldown_seconds=self.cooldown_seconds,quarantined=fatal); errors.append(f"{state.name}: {type(exc).__name__}: {str(exc)[:240]}"); continue
             latency_ms=int((time.monotonic()-started)*1000)
             with self._lock: switched=self._preferred!=state.name; self._preferred=state.name; state.failures=0; state.failed_until=0.0; state.last_latency_ms=latency_ms
             event("adaptive_embedding_backend_ok",backend=state.name,latency_ms=latency_ms,switched=switched); return vector

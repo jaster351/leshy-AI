@@ -84,6 +84,42 @@ class ApprovalBrokerTests(unittest.TestCase):
             "Оформить заказ",
         )
 
+    def test_missing_owner_cannot_request_or_access_approvals(self) -> None:
+        for owner in ("", "   ", None):
+            with self.subTest(owner=owner):
+                with self.assertRaises(ValueError):
+                    self.broker.request(owner, self.action)
+                with self.assertRaises(ValueError):
+                    self.broker.list(owner)
+                with self.assertRaises(ValueError):
+                    self.broker.deny(owner, "nonexistent")
+                with self.assertRaises(ValueError):
+                    self.broker.consume(owner, "nonexistent")
+
+    def test_long_owner_ids_do_not_collide_or_consume_approvals(self) -> None:
+        first_owner = "x" * 200 + "a"
+        second_owner = "x" * 200 + "b"
+        for owner in (first_owner, second_owner):
+            with self.subTest(owner_suffix=owner[-1]):
+                with self.assertRaises(ValueError):
+                    self.broker.request(owner, self.action)
+                with self.assertRaises(ValueError):
+                    self.broker.list(owner)
+                with self.assertRaises(ValueError):
+                    self.broker.deny(owner, "nonexistent")
+                with self.assertRaises(ValueError):
+                    self.broker.consume(owner, "nonexistent")
+        pending = self.broker.request("x" * 200, self.action)
+        with self.assertRaises(ValueError):
+            self.broker.consume(first_owner, pending.approval_id)
+        self.assertEqual(self.broker.consume("x" * 200, pending.approval_id).url, self.action.url)
+
+    def test_missing_owner_cannot_consume_another_owners_approval(self) -> None:
+        pending = self.broker.request("owner-a", self.action)
+        with self.assertRaises(ValueError):
+            self.broker.consume(None, pending.approval_id)
+        self.assertEqual(self.broker.consume("owner-a", pending.approval_id).url, self.action.url)
+
     def test_read_action_never_gets_approval_token(self) -> None:
         with self.assertRaises(ValueError):
             self.broker.request("owner", BrowserAction("research", "https://example.com", BrowserRisk.READ))
@@ -222,6 +258,12 @@ class BrowserOwnerProfileIsolationTests(unittest.TestCase):
             with patch.dict(os.environ, {"LESHY_BRAIN_DIR": str(root / "brain")}, clear=False):
                 app = _FakeApp(root)
                 platform = BrowserPlatform(app)
+                with app.storage.connection() as conn:
+                    for sid, owner in (("s1", "telegram:123"), ("s2", "telegram:456")):
+                        conn.execute(
+                            "INSERT INTO sessions(id,owner_id,title,created_at,updated_at) VALUES(?,?,?,?,?)",
+                            (sid, owner, "Тест", "2026-11-05", "2026-11-05"),
+                        )
                 capture = _CaptureAdapter()
                 platform.agent = BrowserAgent([capture])
                 app.live_search = lambda *_args, **_kwargs: {
@@ -231,7 +273,7 @@ class BrowserOwnerProfileIsolationTests(unittest.TestCase):
                 research_profile = capture.last.arguments["profile_key"]
                 intent = parse_browser_conversation_intent("Купи первый вариант")
                 pending = platform.request_external_action(intent, owner_id="telegram:123", session_id="s1")
-                platform.resolve_approval("telegram:123", pending["approval_id"], approved=True)
+                platform.resolve_approval("telegram:123", pending["approval_id"], session_id="s1", approved=True)
                 self.assertEqual(capture.last.arguments["profile_key"], research_profile)
                 self.assertTrue(capture.last.arguments["_approval_verified"])
                 platform.research("найди товар", owner_id="telegram:456", session_id="s2")

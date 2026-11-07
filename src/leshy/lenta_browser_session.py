@@ -9,6 +9,7 @@ import subprocess
 import time
 from typing import Any
 
+from .browser_profile_cdp import profile_cdp_url, profile_may_be_in_use, profile_busy_message
 from .system_browser import ensure_system_browser
 
 
@@ -150,34 +151,64 @@ class LentaBrowserSession:
         return state
 
     def open_login_window(self, url: str = "https://lenta.com/") -> dict[str, Any]:
-        """Открыть видимое окно системного браузера с персональным профилем.
+        """Открыть профиль так, чтобы Browser Use мог повторно использовать окно.
 
-        Окно остаётся открытым после возврата функции, поэтому пользователь может
-        самостоятельно ввести телефон, SMS/2FA и закрыть браузер после входа.
-        Секреты не проходят через чат и не записываются Лешим отдельно.
+        Авторизацию и SMS/2FA выполняет человек в видимом Edge/Chrome.
+        Не закрываем его окно и не запускаем второй процесс с занятым профилем.
         """
         browser = ensure_system_browser(auto_install=True)
+        existing = profile_cdp_url(self.profile_dir)
+        if existing:
+            self.mark_login_required("Окно авторизации доступно для подключения через CDP")
+            return {
+                "browser": browser.name,
+                "profile_dir": str(self.profile_dir),
+                "owner_key": self.owner_key,
+                "url": str(url or "https://lenta.com/"),
+                "reused": True,
+            }
+        if profile_may_be_in_use(self.profile_dir):
+            raise RuntimeError(profile_busy_message())
         args = [
             browser.executable,
             f"--user-data-dir={self.profile_dir}",
+            "--remote-debugging-port=0",
+            "--remote-debugging-address=127.0.0.1",
             "--no-first-run",
             "--no-default-browser-check",
             str(url or "https://lenta.com/"),
         ]
         creationflags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-        subprocess.Popen(  # noqa: S603
+        process = subprocess.Popen(  # noqa: S603
             args,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=creationflags,
         )
-        self.mark_login_required("Открыто окно авторизации; ожидается вход пользователя")
+        # DevToolsActivePort создаётся асинхронно после старта Chrome/Edge.
+        # Подтверждаем, что запущенное окно действительно подключаемо.
+        connected = False
+        for _ in range(40):
+            if profile_cdp_url(self.profile_dir, timeout=0.2):
+                connected = True
+                break
+            if process.poll() is not None:
+                break
+            time.sleep(0.15)
+        if not connected:
+            raise RuntimeError(
+                "Окно Edge/Chrome запустилось без доступного CDP. "
+                "Закройте окно отдельного профиля «Ленты» и повторите вход; "
+                "при повторении проверьте защитные политики браузера и запуск от имени пользователя."
+            )
+        self.mark_login_required("Открыто окно авторизации с локальным CDP")
         return {
             "browser": browser.name,
             "profile_dir": str(self.profile_dir),
             "owner_key": self.owner_key,
             "url": str(url or "https://lenta.com/"),
+            "reused": False,
         }
 
     def clear(self) -> dict[str, Any]:
