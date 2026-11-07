@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from hashlib import sha256
 from pathlib import Path
+import os
 import re
 import uuid
 from typing import Any
@@ -25,6 +26,17 @@ from .research_policy import research_reason
 from .self_learning import SelfLearningWorker
 from .storage import Storage, utcnow
 from .version import VERSION
+
+
+def _inference_timeout(default: int) -> float:
+    """Bound local llama-server HTTP wait; optional 20..180s override."""
+    raw = str(os.getenv("LESHY_LLM_REQUEST_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(max(20, min(180, int(raw))))
+    except (ValueError, TypeError):
+        return float(default)
 
 
 class LeshyApp:
@@ -91,7 +103,7 @@ class LeshyApp:
             n_ctx=min(self.settings.native_context_size, 4096),
             n_gpu_layers=0,
             startup_timeout=45,
-            request_timeout=180,
+            request_timeout=_inference_timeout(90),
         )
         candidates: list[tuple[str, Any]] = []
         caps = self.hardware
@@ -109,7 +121,7 @@ class LeshyApp:
                     n_gpu_layers=-1,
                     gpu_count=max(1, len(getattr(caps, "gpu_names", ()) or ())),
                     startup_timeout=45,
-                    request_timeout=120,
+                    request_timeout=_inference_timeout(70),
                 ),
             ))
 
@@ -125,7 +137,7 @@ class LeshyApp:
                     n_gpu_layers=0,
                     device="NPU",
                     startup_timeout=30,
-                    request_timeout=120,
+                    request_timeout=_inference_timeout(45),
                 ),
             ))
 

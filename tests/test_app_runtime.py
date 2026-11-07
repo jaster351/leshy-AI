@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+import os
+from unittest.mock import patch
 
 from leshy.app import LeshyApp
 from leshy.config import Settings
@@ -21,6 +23,17 @@ class AppRuntimeTests(unittest.TestCase):
             llm_backend="echo",
             embeddings_enabled=False,
         )
+
+    def test_local_inference_timeout_defaults_and_override(self):
+        from leshy.app import _inference_timeout
+        with patch.dict(os.environ, {"LESHY_LLM_REQUEST_TIMEOUT_SECONDS": ""}):
+            self.assertEqual(_inference_timeout(70), 70.0)
+        with patch.dict(os.environ, {"LESHY_LLM_REQUEST_TIMEOUT_SECONDS": "110"}):
+            self.assertEqual(_inference_timeout(70), 110.0)
+        with patch.dict(os.environ, {"LESHY_LLM_REQUEST_TIMEOUT_SECONDS": "999"}):
+            self.assertEqual(_inference_timeout(70), 180.0)
+        with patch.dict(os.environ, {"LESHY_LLM_REQUEST_TIMEOUT_SECONDS": "bad"}):
+            self.assertEqual(_inference_timeout(45), 45.0)
 
     def test_chat_persists_history(self):
         with tempfile.TemporaryDirectory() as temp:
