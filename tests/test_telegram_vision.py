@@ -157,11 +157,13 @@ class TelegramVisionTests(unittest.TestCase):
             def read(self, *_): return b"\xff\xd8\xffDATA"
         class Opener:
             def open(self, req, timeout):
+                if req.full_url.startswith("https://api.telegram.org/file/bot"):
+                    return Response()
                 raise error.HTTPError(req.full_url, 400, "Bad Request", {}, None)
         with patch.dict(os.environ, {
             "LESHY_VISION_ENDPOINT": "http://127.0.0.1:8080/v1/chat/completions",
             "LESHY_VISION_MODEL": "local-vision",
-        }), patch("leshy.telegram_vision.request.urlopen", return_value=Response()), patch(
+        }), patch(
             "leshy.telegram_vision.request.build_opener", return_value=Opener()
         ):
             with self.assertRaisesRegex(VisionUnavailable, "мультимодальный запрос"):
