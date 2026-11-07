@@ -22,7 +22,7 @@ from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
-from .adaptive_internet_policy import adaptive_research_reason
+from .adaptive_internet_policy import adaptive_research_reason, is_explicit_web_request
 from .self_learning import SelfLearningWorker
 from .storage import Storage, utcnow
 from .version import VERSION
@@ -276,13 +276,11 @@ class LeshyApp:
 
     @staticmethod
     def _needs_live_search(text: str) -> bool:
-        value = text.lower()
-        markers = (
-            "/search ", "найди в интернете", "поищи в интернете", "проверь в интернете",
-            "актуальн", "сегодня", "сейчас", "последн", "новый", "новая", "новое", "новые",
-            "вышел", "вышла", "вышло", "последняя версия", "текущая цена", "курс валют", "погода",
-        )
-        return any(marker in value for marker in markers)
+        # Только явная команда поиска. Динамическую актуальность, возраст
+        # фактов и контекст оценивает adaptive_research_reason; старый список
+        # подстрок ошибочно отправлял «напиши новый текст» в Интернет.
+        value = str(text or "").strip()
+        return value.lower().startswith("/search ") or is_explicit_web_request(value)
 
     @staticmethod
     def _answer_needs_research(answer: str) -> bool:
