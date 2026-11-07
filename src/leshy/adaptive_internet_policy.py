@@ -43,7 +43,7 @@ def _text(value: str) -> str:
 
 
 def is_explicit_web_request(query: str) -> bool:
-    q = str(query or "").strip()
+    q = _current_user_text(query).strip()
     return q.lower().startswith("/search ") or (
         research_reason(q, trusted_count=1, candidate_count=1) == "явный запрос интернет-поиска"
     )
