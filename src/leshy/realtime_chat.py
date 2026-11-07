@@ -44,24 +44,32 @@ class RealtimeChatManager:
 
     def stop(self, request_id: str) -> bool:
         rid = str(request_id or "").strip()
+        if not rid:
+            return False
         with self._lock:
             cancel = self._cancellations.get(rid)
-        if cancel is None:
-            # При первом POST /stream соединение может ещё не войти в
-            # генератор: stop запоминается ненадолго и применяется при _register.
-            if rid.startswith("web:") and len(rid)<=120:
-                with self._lock:
-                    now=time.monotonic()
-                    self._pending_stop={k:until for k,until in self._pending_stop.items() if until>now}
-                    if len(self._pending_stop)>=128:
-                        oldest=next(iter(self._pending_stop))
-                        self._pending_stop.pop(oldest,None)
-                    self._pending_stop[rid]=now+30.0
-                event("chat_stream_early_stop_requested", request_id=rid)
-                return True
-            return False
-        cancel.set()
-        event("chat_stream_stop_requested", request_id=rid)
+            if cancel is None:
+                if not rid.startswith("web:") or len(rid)>120:
+                    return False
+                # ВАЖНО: проверка активного запроса и ранний stop находятся
+                # под одним lock. Иначе _register мог исполниться между ними,
+                # и реальный поток оставался без cancel.
+                now = time.monotonic()
+                self._pending_stop = {
+                    key:until for key,until in self._pending_stop.items()
+                    if until>now
+                }
+                if len(self._pending_stop)>=128:
+                    self._pending_stop.pop(next(iter(self._pending_stop)), None)
+                self._pending_stop[rid] = now+30.0
+                pending = True
+            else:
+                cancel.set()
+                pending = False
+        event(
+            "chat_stream_early_stop_requested" if pending else "chat_stream_stop_requested",
+            request_id=rid,
+        )
         return True
 
     def _unregister(self, request_id: str) -> None:
@@ -252,6 +260,12 @@ class RealtimeChatManager:
         if special:
             rid, cancel = self._register(request_id)
             try:
+                if cancel.is_set():
+                    yield StreamEvent("done", {
+                        "request_id": rid, "session_id": session_id or "",
+                        "answer": "", "stopped": True,
+                    })
+                    return
                 result = self.app.chat(message, owner_id=owner_id, session_id=session_id)
                 yield StreamEvent("start", {"request_id": rid, "session_id": result["session_id"]})
                 answer = str(result.get("answer") or "")

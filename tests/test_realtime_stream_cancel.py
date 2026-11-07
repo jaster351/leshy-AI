@@ -40,3 +40,35 @@ def test_current_registered_cancel_always_wins():
     _,cancel=manager._register(rid)
     assert manager.stop(rid)
     assert cancel.is_set()
+
+
+def test_special_command_cancelled_before_execution_does_not_call_chat():
+    from unittest.mock import Mock
+    app=SimpleNamespace(_image_prompt=Mock(return_value=None),chat=Mock())
+    manager=RealtimeChatManager(app)
+    rid="web:20261107155644000:001:123abcde"
+    assert manager.stop(rid)
+    events=list(manager.stream("/memories",request_id=rid))
+    assert events[-1].type=="done"
+    assert events[-1].data["stopped"] is True
+    app.chat.assert_not_called()
+
+
+def test_stop_registration_competes_under_same_lock():
+    import threading
+    manager=RealtimeChatManager(SimpleNamespace())
+    rid="web:20261107155644000:002:123abcde"
+    barrier=threading.Barrier(3)
+    output=[]
+    def register():
+        barrier.wait()
+        _id,cancel=manager._register(rid)
+        output.append(cancel)
+    def stop():
+        barrier.wait()
+        assert manager.stop(rid)
+    a=threading.Thread(target=register)
+    b=threading.Thread(target=stop)
+    a.start();b.start();barrier.wait()
+    a.join(timeout=2);b.join(timeout=2)
+    assert output and output[0].is_set()
