@@ -104,18 +104,18 @@ class GPUDiscoveryTests(unittest.TestCase):
 
     def test_hardware_status_serializes_gpu_inventory_for_real_web_route(self):
         devices = (GPUDevice(name="New GPU model", vendor="Unknown", vendor_id="abcd"),)
-        with tempfile.TemporaryDirectory() as tmp, (
-            patch("leshy.hardware.detect_hardware") as detect,
-            patch("leshy.hardware.memory_status", return_value={}),
-        ):
+        with tempfile.TemporaryDirectory() as tmp:
             from leshy.hardware import HardwareCapabilities
-            detect.return_value = HardwareCapabilities(
-                cpu=True, cpu_name="CPU", gpu=True,
-                gpu_names=("New GPU model",), gpu_offload_runtime=False,
-                npu=False, npu_names=(), openvino_npu=False, notes=(),
-                gpu_devices=devices,
-            )
-            status = hardware_status(Path(tmp))
+            with patch("leshy.hardware.detect_hardware") as detect, patch(
+                "leshy.hardware.memory_status", return_value={}
+            ):
+                detect.return_value = HardwareCapabilities(
+                    cpu=True, cpu_name="CPU", gpu=True,
+                    gpu_names=("New GPU model",), gpu_offload_runtime=False,
+                    npu=False, npu_names=(), openvino_npu=False, notes=(),
+                    gpu_devices=devices,
+                )
+                status = hardware_status(Path(tmp))
         self.assertEqual(status["capabilities"]["gpu_devices"][0]["vendor_id"], "abcd")
         self.assertEqual(status["capabilities"]["gpu_names"], ("New GPU model",))
 
