@@ -21,6 +21,7 @@ class CognitiveStepJournalTests(unittest.TestCase):
         self.service = SuperAgentService(
             SimpleNamespace(storage=self.storage, knowledge=Mock(), llm=Mock())
         )
+        self.addCleanup(self.service.stop)
         self.ticket = self.service.create("web:owner-a", "session-a", "Объясни назначение версии")
         self.journal = self.service._journal
 
@@ -64,9 +65,11 @@ class CognitiveStepJournalTests(unittest.TestCase):
         self.journal.begin(ticket_id, 1, 1, "runtime.version", {})
         with self.storage.connection() as conn:
             conn.execute("UPDATE superagent_tickets SET state='working' WHERE id=?", (ticket_id,))
+        self.service.stop()
         recovered = SuperAgentService(
             SimpleNamespace(storage=self.storage, knowledge=Mock(), llm=Mock())
         )
+        self.addCleanup(recovered.stop)
         result = recovered.get(ticket_id, owner_id="web:owner-a")
         self.assertEqual(result["state"], "queued")
         self.assertEqual(result["steps"][0]["status"], "interrupted")

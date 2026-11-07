@@ -23,6 +23,7 @@ class ArtifactApprovalTests(unittest.TestCase):
             knowledge=Mock(), llm=Mock(),
         )
         self.service = SuperAgentService(app)
+        self.addCleanup(self.service.stop)
 
     def _proposal(self):
         ticket = self.service.create("web:owner-a", "", "Создай файл с кратким отчётом")
@@ -87,7 +88,10 @@ class ArtifactApprovalTests(unittest.TestCase):
             self.service._artifacts.propose(ticket["id"], "web:owner-a", "x", "text")
 
     def _restart(self):
-        return SuperAgentService(self.service.app)
+        self.service.stop()
+        restored = SuperAgentService(self.service.app)
+        self.addCleanup(restored.stop)
+        return restored
 
     def test_restart_reconciles_completed_file_without_writing(self):
         ticket_id, p = self._proposal()

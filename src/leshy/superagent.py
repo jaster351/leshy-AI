@@ -14,6 +14,7 @@ from .cognitive_core import assess_completion
 from .cognitive_artifacts import CognitiveArtifactGate
 from .cognitive_tools import CognitiveReadExecutor, parse_tool_request
 from .cognitive_journal import CognitiveStepJournal
+from .cognitive_lease import SuperAgentProcessLease
 from .diagnostics import event, problem
 from .llm import ChatMessage
 from .storage import utcnow
@@ -149,15 +150,32 @@ class SuperAgentService:
         if workspace_root is None:
             workspace_root = Path(self.storage.path).parent / "workspace"
         self._artifacts = CognitiveArtifactGate(self.storage, workspace_root)
-        self._recover_interrupted()
-        self._artifact_recovery = self._artifacts.reconcile()
-        if any(self._artifact_recovery[key] for key in ("applied", "failed", "expired")):
-            event(
-                "cognitive_artifact_recovered",
-                applied=self._artifact_recovery["applied"],
-                failed=self._artifact_recovery["failed"],
-                expired=self._artifact_recovery["expired"],
-            )
+        self._lease = SuperAgentProcessLease(self.storage.path)
+        self._artifact_recovery: dict[str, Any] = {"ticket_ids": []}
+        # Восстановление разрешено ТОЛЬКО владельцу межпроцессного lock:
+        # второй процесс не переводит чужие активные задания в очередь.
+        self._activate()
+
+    def _activate(self) -> bool:
+        if self._lease.held:
+            return True
+        if not self._lease.try_acquire():
+            return False
+        try:
+            self._recover_interrupted()
+            self._artifact_recovery = self._artifacts.reconcile()
+            if any(self._artifact_recovery.get(key, 0) for key in ("applied", "failed", "expired")):
+                event(
+                    "cognitive_artifact_recovered",
+                    applied=self._artifact_recovery["applied"],
+                    failed=self._artifact_recovery["failed"],
+                    expired=self._artifact_recovery["expired"],
+                )
+            event("superagent_process_leadership_acquired")
+            return True
+        except BaseException:
+            self._lease.release()
+            raise
 
     def _ensure_schema(self) -> None:
         with self.storage.connection() as conn:
@@ -194,11 +212,8 @@ class SuperAgentService:
             return
         self._stop.clear()
         self._wake.clear()
-        # Доставляем результаты восстановления лишь единожды при старте,
-        # после создания класса и проверок владельца в get().
-        for ticket_id in self._artifact_recovery.get("ticket_ids", []):
-            self._deliver(ticket_id)
-        self._artifact_recovery["ticket_ids"] = []
+        # Даже если этот процесс не лидер, он может наблюдать освобождение
+        # lock и стать новым исполнителем после штатного или аварийного выхода.
         self._thread = threading.Thread(target=self._run, name="leshy-superagent", daemon=True)
         self._thread.start()
         event("superagent_started")
@@ -207,9 +222,13 @@ class SuperAgentService:
         self._stop.set()
         self._wake.set()
         thread = self._thread
-        if thread and thread.is_alive():
+        if thread and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=5.0)
-        event("superagent_stopped")
+        # Нельзя отдавать lock, пока worker ещё работает в LLM.
+        # В этом случае lock освободится в finally рабочего потока.
+        if thread is None or not thread.is_alive():
+            self._lease.release()
+        event("superagent_stopped", worker_alive=bool(thread and thread.is_alive()))
 
     def create(self, owner_id: str, session_id: str, request_text: str) -> dict[str, Any]:
         request = " ".join(str(request_text or "").split()).strip()
@@ -320,6 +339,8 @@ class SuperAgentService:
         return self._artifacts.get(artifact_id, owner_id)
 
     def approve_artifact(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
+        if not self._lease.held or self._stop.is_set():
+            raise RuntimeError("Создание документа выполняется только активным экземпляром Лешего")
         proposal = self._artifacts.get(artifact_id, owner_id)
         applied = self._artifacts.approve(artifact_id, owner_id)
         with self.storage.connection() as conn:
@@ -336,6 +357,8 @@ class SuperAgentService:
         return applied
 
     def reject_artifact(self, artifact_id: str, owner_id: str) -> dict[str, Any]:
+        if not self._lease.held or self._stop.is_set():
+            raise RuntimeError("Отклонение документа выполняется только активным экземпляром Лешего")
         proposal = self._artifacts.get(artifact_id, owner_id)
         rejected = self._artifacts.reject(artifact_id, owner_id)
         with self.storage.connection() as conn:
@@ -530,6 +553,8 @@ class SuperAgentService:
         ))
 
     def _run_ticket(self, ticket: dict[str, Any]) -> None:
+        if not self._lease.held or self._stop.is_set():
+            return
         ticket_id = str(ticket["id"])
         attempt = int(ticket.get("attempt") or 0) + 1
         assignment_id = f"{ticket_id}-A{attempt}"
@@ -620,17 +645,33 @@ class SuperAgentService:
             problem("superagent_delivery_failed", str(exc), ticket_id=ticket_id)
 
     def _run(self) -> None:
-        while not self._stop.is_set():
-            ticket = None
-            try:
-                ticket = self._next_due()
-                if ticket is not None:
-                    self._run_ticket(ticket)
-                    continue
-            except Exception as exc:
-                problem("superagent_loop_failed", str(exc), ticket_id=str((ticket or {}).get("id") or ""))
-            self._wake.wait(self.poll_seconds)
-            self._wake.clear()
+        try:
+            while not self._stop.is_set():
+                ticket = None
+                try:
+                    if not self._activate():
+                        # Пассивный процесс не трогает working-assignments.
+                        self._wake.wait(self.poll_seconds)
+                        self._wake.clear()
+                        continue
+                    # После захвата lock выполняем отложенную доставку
+                    # результатов восстановленных файлов.
+                    for ticket_id in self._artifact_recovery.get("ticket_ids", []):
+                        if self._stop.is_set():
+                            break
+                        self._deliver(ticket_id)
+                    self._artifact_recovery["ticket_ids"] = []
+                    ticket = self._next_due()
+                    if ticket is not None and not self._stop.is_set():
+                        self._run_ticket(ticket)
+                        continue
+                except Exception as exc:
+                    problem("superagent_loop_failed", str(exc), ticket_id=str((ticket or {}).get("id") or ""))
+                self._wake.wait(self.poll_seconds)
+                self._wake.clear()
+        finally:
+            self._lease.release()
+            event("superagent_process_leadership_released")
 
 
 def format_ticket(ticket: dict[str, Any]) -> str:
