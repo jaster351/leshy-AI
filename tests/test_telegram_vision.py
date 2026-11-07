@@ -66,15 +66,15 @@ class TelegramVisionTests(unittest.TestCase):
                 return False
         class Opener:
             def open(self, req, timeout):
+                if req.full_url.startswith("https://api.telegram.org/file/bot"):
+                    self.assert_no_proxy = True
+                    return Response(b"\xff\xd8\xffDATA")
                 payloads.append(json.loads(req.data))
                 return Response(b'{"choices":[{"message":{"content":"На фото тест"}}]}')
-        def download(req, timeout):
-            self.assertEqual(req.full_url.split("/file/bot")[0], "https://api.telegram.org")
-            return Response(b"\xff\xd8\xffDATA")
         with patch.dict(os.environ, {
             "LESHY_VISION_ENDPOINT": "http://127.0.0.1:8080/v1/chat/completions",
             "LESHY_VISION_MODEL": "local-vision",
-        }), patch("leshy.telegram_vision.request.urlopen", side_effect=download), patch(
+        }), patch(
             "leshy.telegram_vision.request.build_opener", return_value=Opener()
         ) as opener_factory:
             answer = LocalTelegramVision(bridge).describe(self.message("Что видишь?"))
@@ -88,6 +88,21 @@ class TelegramVisionTests(unittest.TestCase):
         self.assertEqual(payloads[0]["messages"][0]["content"][0]["text"], "Что видишь?")
         self.assertTrue(payloads[0]["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
         bridge._api.assert_called_once_with("getFile", {"file_id": "photo-big"}, timeout=12)
+
+    def test_download_opener_rejects_proxy_and_redirects(self):
+        from urllib.request import ProxyHandler
+        from leshy.telegram_vision import _RejectRedirects
+        bridge = Mock()
+        bridge._api.return_value = {"file_size": 4, "file_path": "photos/file.jpg"}
+        bridge._token.return_value = "secret"
+        opener = Mock()
+        opener.open.return_value.__enter__ = Mock(return_value=Mock(read=Mock(return_value=b"\\xff\\xd8\\xffDATA")))
+        opener.open.return_value.__exit__ = Mock(return_value=False)
+        with patch("leshy.telegram_vision.request.build_opener", return_value=opener) as build:
+            self.assertTrue(LocalTelegramVision(bridge)._download({"file_id": "file"}).startswith(b"\\xff\\xd8\\xff"))
+        handlers = build.call_args.args
+        self.assertTrue(any(isinstance(h, ProxyHandler) and not h.proxies for h in handlers))
+        self.assertTrue(any(isinstance(h, _RejectRedirects) for h in handlers))
 
     def test_reply_to_photo_uses_quoted_image_and_current_question(self):
         bridge = FastTelegramBridge.__new__(FastTelegramBridge)
