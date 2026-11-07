@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import unittest
 from unittest.mock import patch, Mock
 
@@ -68,6 +69,71 @@ class StreamingAutoContinueTests(unittest.TestCase):
         self.assertIn("Ответ получен", answer)
         self.assertIn("лимиту времени", answer)
         self.assertEqual(urlopen.call_count, 1)
+
+    def test_deadline_stops_sse_even_if_server_sends_trickle(self):
+        provider = _Provider()
+        provider.request_timeout = 0.10
+
+        class SlowResponse:
+            def __init__(self):
+                self.was_closed = threading.Event()
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.close()
+                return False
+            def close(self):
+                self.was_closed.set()
+            def __iter__(self):
+                # Имитация SSE, который держит соединение открытым, пока
+                # ещё есть токены: read возвращает строки без [DONE].
+                while not self.was_closed.is_set():
+                    time.sleep(0.01)
+                    yield b'data: {"choices":[{"delta":{"content":"x"},"finish_reason":null}]}\\n'
+
+        from leshy.llm import LLMUnavailable
+        response = SlowResponse()
+        with patch("leshy.streaming_backends.request.urlopen", return_value=response):
+            started = time.monotonic()
+            with self.assertRaises(LLMUnavailable):
+                list(_llama_stream(provider, [ChatMessage("user", "Длинный запрос")]))
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertTrue(response.was_closed.is_set())
+
+    def test_cancel_closes_active_stream_without_waiting_socket_timeout(self):
+        provider = _Provider()
+        provider.request_timeout = 10
+        cancel = threading.Event()
+
+        class WaitingResponse:
+            def __init__(self):
+                self.ready = threading.Event()
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.close()
+                return False
+            def close(self):
+                self.ready.set()
+            def __iter__(self):
+                self.ready.wait(5)
+                return iter(())
+
+        response = WaitingResponse()
+        def cancel_soon():
+            time.sleep(0.05)
+            cancel.set()
+        helper = threading.Thread(target=cancel_soon, daemon=True)
+        helper.start()
+        with patch("leshy.streaming_backends.request.urlopen", return_value=response):
+            started = time.monotonic()
+            self.assertEqual(
+                list(_llama_stream(provider, [ChatMessage("user", "Отмена")], cancel_event=cancel)),
+                [],
+            )
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertTrue(response.ready.is_set())
+        helper.join(timeout=1)
 
     def test_normal_stop_does_not_force_extra_generation(self):
         provider = _Provider()

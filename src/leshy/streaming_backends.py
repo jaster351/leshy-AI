@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import socket
 import threading
 import time
 from types import MethodType
@@ -83,6 +84,47 @@ def _continuation_messages(messages, generated_text: str) -> list[ChatMessage]:
     return prepared
 
 
+def _abort_stream_response(response) -> None:
+    """Разбудить блокирующий SSE read после отзыва запроса/истечения срока.
+
+    HTTPResponse.close() сама по себе не всегда прерывает recv на Windows.
+    Сначала shutdown сокета, затем close. Внутренний атрибут CPython может
+    отсутствовать: тогда закрытие выполняется best-effort.
+    """
+    try:
+        fp = getattr(response, "fp", None)
+        raw = getattr(fp, "raw", None)
+        sock = getattr(raw, "_sock", None)
+        if sock is not None:
+            sock.shutdown(socket.SHUT_RDWR)
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        response.close()
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def _arm_stream_watchdog(response, cancel_event: threading.Event, deadline: float):
+    """Вернуть (stop, timeout_fired), чтобы отключать watchdog в finally."""
+    stop = threading.Event()
+    timed_out = threading.Event()
+
+    def watch() -> None:
+        while not stop.wait(0.10):
+            if cancel_event.is_set():
+                _abort_stream_response(response)
+                return
+            if time.monotonic() >= deadline:
+                timed_out.set()
+                _abort_stream_response(response)
+                return
+
+    thread = threading.Thread(target=watch, name="leshy-sse-watchdog", daemon=True)
+    thread.start()
+    return stop, timed_out
+
+
 def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None):
     cancel_event = cancel_event or threading.Event()
     with self._chat_lock:
@@ -113,34 +155,57 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                         headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
                         method="POST",
                     )
+                    # timeout= у urllib ограничивает отдельное ожидание recv,
+                    # а НЕ длительность всей SSE-генерации. Отдельный сторож
+                    # закрывает сокет по общему deadline и при user cancel.
+                    deadline = round_started + max(0.05, float(self.request_timeout))
                     with request.urlopen(req, timeout=self.request_timeout) as response:
-                        for raw_line in response:
-                            if cancel_event.is_set():
-                                break
-                            line = raw_line.decode("utf-8", errors="replace").strip()
-                            if not line or line.startswith(":"):
-                                continue
-                            if line.startswith("data:"):
-                                line = line[5:].strip()
-                            if line == "[DONE]":
-                                break
-                            try:
-                                body = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-                            choices = body.get("choices") or []
-                            if not choices:
-                                continue
-                            choice = choices[0]
-                            delta = (choice.get("delta") or {}).get("content")
-                            if delta:
-                                chunk = str(delta)
-                                round_chunks.append(chunk)
-                                if continuation_count == 0:
-                                    yield chunk
-                            reason = choice.get("finish_reason")
-                            if reason is not None:
-                                finish_reason = str(reason)
+                        watchdog_stop, watchdog_timeout = _arm_stream_watchdog(
+                            response, cancel_event, deadline,
+                        )
+                        try:
+                            for raw_line in response:
+                                if cancel_event.is_set():
+                                    break
+                                if watchdog_timeout.is_set() or time.monotonic() >= deadline:
+                                    raise LLMUnavailable(
+                                        "Потоковая генерация превысила общий лимит времени"
+                                    )
+                                line = raw_line.decode("utf-8", errors="replace").strip()
+                                if not line or line.startswith(":"):
+                                    continue
+                                if line.startswith("data:"):
+                                    line = line[5:].strip()
+                                if line == "[DONE]":
+                                    break
+                                try:
+                                    body = json.loads(line)
+                                except json.JSONDecodeError:
+                                    continue
+                                choices = body.get("choices") or []
+                                if not choices:
+                                    continue
+                                choice = choices[0]
+                                delta = (choice.get("delta") or {}).get("content")
+                                if delta:
+                                    chunk = str(delta)
+                                    round_chunks.append(chunk)
+                                    if continuation_count == 0:
+                                        yield chunk
+                                reason = choice.get("finish_reason")
+                                if reason is not None:
+                                    finish_reason = str(reason)
+                        finally:
+                            watchdog_stop.set()
+                        if watchdog_timeout.is_set() or time.monotonic() >= deadline:
+                            event("accelerator_stream_deadline_exceeded", backend=self.backend,
+                                  elapsed_ms=int((time.monotonic() - round_started) * 1000),
+                                  output_chars=sum(map(len, round_chunks)))
+                            raise LLMUnavailable(
+                                "Потоковая генерация превысила общий лимит времени"
+                            )
+                    if cancel_event.is_set():
+                        return
                     break
                 except error.HTTPError as exc:
                     detail = ""
@@ -164,8 +229,12 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                     exception("accelerator_stream_http_failed", exc, backend=self.backend, status=exc.code)
                     raise LLMUnavailable(f"Ускоренный backend {self.backend} вернул HTTP {exc.code}") from exc
                 except LLMUnavailable:
+                    if cancel_event.is_set():
+                        return
                     raise
                 except Exception as exc:
+                    if cancel_event.is_set():
+                        return
                     exception("accelerator_stream_failed", exc, backend=self.backend)
                     raise LLMUnavailable(f"Ускоренный backend {self.backend} не смог выполнить потоковый запрос: {exc}") from exc
 
