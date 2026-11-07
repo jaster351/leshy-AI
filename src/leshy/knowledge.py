@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import re
 from urllib.parse import urlparse
 
 from .storage import Storage, utcnow
@@ -161,18 +162,44 @@ class KnowledgeBase:
         return {"trusted": int(trusted), "candidate": int(candidates), "conflict": 0}
 
     def _search_rows(self, query: str, rows, limit: int) -> list[dict]:
-        terms = [term.lower() for term in query.split() if len(term) >= 3][:8]
+        # Раньше confidence=.90 сам по себе давал score>.5 даже при НУЛЕ
+        # совпадений. Любой unrelated trusted-факт подавлял интернет-поиск.
+        stop = {
+            "какая", "какой", "какие", "какого", "что", "такое", "кто",
+            "где", "когда", "почему", "сколько", "расскажи", "объясни",
+            "скажи", "пожалуйста", "информация", "данные", "сегодня",
+            "сейчас", "текущая", "актуальная", "найди", "проверь",
+            "what", "which", "who", "where", "when", "please", "about",
+            "today", "current", "latest",
+        }
+        terms = [
+            term for term in re.findall(r"[0-9a-zа-яё]{3,}", str(query).lower())
+            if term not in stop
+        ][:12]
+        if not terms:
+            return []
+        exact_ids = re.findall(r"\bCVE-\d{4}-\d{4,}\b|\bGHSA-[0-9a-z-]+\b", query, re.I)
         usable = [dict(row) for row in rows if is_fresh(dict(row))]
         by_id = {int(row["id"]): row for row in usable}
         scored = {}
         for row in usable:
-            score = sum(1 for term in terms if term in f"{row['topic']} {row['claim']}".lower()) + float(row["confidence"])
-            if score > .5:
-                scored[int(row["id"])] = (score, row)
+            haystack = f"{row['topic']} {row['claim']}".lower()
+            if exact_ids and any(identifier.lower() not in haystack for identifier in exact_ids):
+                continue
+            matches = sum(1 for term in terms if term in haystack)
+            if matches == 0:
+                continue
+            score = matches + float(row["confidence"])
+            scored[int(row["id"])] = (score, row)
         if self.vector_index:
             for hit in self.vector_index.search("knowledge", query, limit=limit * 3):
                 item = by_id.get(hit.object_id)
-                if item and hit.score >= .45:
+                if not item:
+                    continue
+                if exact_ids and any(identifier.lower() not in
+                                     f"{item['topic']} {item['claim']}".lower() for identifier in exact_ids):
+                    continue
+                if hit.score >= .62:
                     scored[hit.object_id] = (scored.get(hit.object_id, (0, item))[0] + max(0, hit.score) * 2, item)
         return [row for _, row in sorted(scored.values(), key=lambda item: item[0], reverse=True)[:limit]]
 
