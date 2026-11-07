@@ -26,6 +26,7 @@ dependencies = [
   "huggingface_hub>=0.36,<2",
   "hf_xet>=1.1,<2",
   "phonenumbers>=8.13,<10",
+  "PySocks>=1.7.1,<2",
   "cryptography>=43,<47",
 ]
 
