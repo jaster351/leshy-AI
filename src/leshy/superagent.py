@@ -9,6 +9,7 @@ import time
 import uuid
 from typing import Any
 
+from .cognitive_core import assess_completion
 from .diagnostics import event, problem
 from .llm import ChatMessage
 from .storage import utcnow
@@ -347,6 +348,10 @@ class SuperAgentService:
         with self._llm_lock:
             response = self.app.llm.chat([ChatMessage("system", system), ChatMessage("user", user)])
         state, result, question = self._parse_report(response)
+        assessment = assess_completion(request, state, result)
+        if assessment.reason == "missing_mutation_receipt":
+            event("cognitive_core_completion_blocked", ticket_id=ticket_id, reason=assessment.reason)
+        state, result = assessment.state, assessment.report
         if state == "waiting" and not question:
             state = "blocked"
             result = result or "Исполнитель остановился без конкретного вопроса."

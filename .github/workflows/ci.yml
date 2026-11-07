@@ -1,9 +1,7 @@
+# Временно только ручной запуск до 2026-12-01 (лимиты GitHub Actions).
 name: Leshy AI CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 concurrency:

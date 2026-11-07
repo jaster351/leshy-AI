@@ -1,8 +1,7 @@
+# Временно только ручной запуск до 2026-12-01 (лимиты GitHub Actions).
 name: Leshy Windows Build
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
