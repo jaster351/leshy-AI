@@ -102,10 +102,26 @@ class TelegramVisionTests(unittest.TestCase):
         opener = Mock()
         opener.open.return_value = Response()
         with patch("leshy.telegram_vision.request.build_opener", return_value=opener) as build:
-            self.assertTrue(LocalTelegramVision(bridge)._download({"file_id": "file"}).startswith(b"\\xff\\xd8\\xff"))
+            self.assertTrue(LocalTelegramVision(bridge)._download({"file_id": "file"}).startswith(b"\xff\xd8\xff"))
         handlers = build.call_args.args
         self.assertTrue(any(isinstance(h, ProxyHandler) and not h.proxies for h in handlers))
         self.assertTrue(any(isinstance(h, _RejectRedirects) for h in handlers))
+
+    def test_download_redirect_fails_without_exposing_bot_token(self):
+        from leshy.telegram_vision import TelegramImageError, _RejectRedirects
+        bridge = Mock()
+        bridge._api.return_value = {"file_size": 4, "file_path": "photos/file.jpg"}
+        bridge._token.return_value = "secret-token"
+        class RedirectOpener:
+            def open(self, req, timeout):
+                _RejectRedirects().redirect_request(
+                    req, None, 302, "Found", {},
+                    "https://other.example/secret-token",
+                )
+        with patch("leshy.telegram_vision.request.build_opener", return_value=RedirectOpener()):
+            with self.assertRaises(TelegramImageError) as caught:
+                LocalTelegramVision(bridge)._download({"file_id": "file"})
+        self.assertNotIn("secret-token", str(caught.exception))
 
     def test_reply_to_photo_uses_quoted_image_and_current_question(self):
         bridge = FastTelegramBridge.__new__(FastTelegramBridge)
