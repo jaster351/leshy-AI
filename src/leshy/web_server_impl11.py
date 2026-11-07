@@ -124,10 +124,20 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def _body(self):
             body = super()._body()
-            if isinstance(body, dict) and "owner_id" in body:
-                owner_id = self._existing_web_owner()
-                if owner_id:
-                    body["owner_id"] = owner_id
+            if not isinstance(body, dict):
+                return body
+            owner_id = self._existing_web_owner()
+            path = parse.urlparse(self.path).path
+            # Для Web-чата серверная cookie имеет приоритет над owner_id из JSON.
+            if owner_id and (path in {"/v1/chat", "/v1/chat/stream"} or "owner_id" in body):
+                body["owner_id"] = owner_id
+            elif not owner_id and path in {"/v1/chat", "/v1/chat/stream"}:
+                # Без cookie обычный чат остаётся совместимым, но нельзя
+                # подменить владельца при создании опасного Browser Approval.
+                from .browser_platform_runtime import parse_browser_conversation_intent
+                intent = parse_browser_conversation_intent(str(body.get("message") or ""))
+                if intent is not None and intent.kind in {"commit", "financial"}:
+                    body["owner_id"] = "web:local"
             return body
 
         def do_GET(self):

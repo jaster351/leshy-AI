@@ -259,7 +259,21 @@ class BrowserPlatform:
             return rows[0]["url"]
         raise ValueError("Укажите номер варианта, например «забронируй первый».")
 
+    def _require_owned_approval_session(self, owner_id: str, session_id: str) -> None:
+        """Проверять существующую сессию в БД, не создавать её из approval-запроса."""
+        owner = str(owner_id or "").strip()
+        sid = str(session_id or "").strip()
+        if not owner or owner == "web:local" or len(owner) > 200 or not sid or len(sid) > 200:
+            raise PermissionError("Требуется действующая сессия пользователя")
+        with self.app.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM sessions WHERE id=? AND owner_id=?", (sid, owner)
+            ).fetchone()
+        if row is None:
+            raise PermissionError("Подтверждение не найдено")
+
     def request_external_action(self, intent: BrowserConversationIntent, *, owner_id: str, session_id: str) -> dict[str, Any]:
+        self._require_owned_approval_session(owner_id, session_id)
         url = self._selected_url(intent, session_id)
         host = self._host(url)
         if not host:
@@ -289,14 +303,16 @@ class BrowserPlatform:
             owner_id,
             BrowserAction(action_name, url, risk, arguments, description=intent.text),
             summary=summary,
+            session_id=session_id,
         )
         return pending.public()
 
-    def resolve_approval(self, owner_id: str, approval_id: str, *, approved: bool) -> BrowserActionResult:
+    def resolve_approval(self, owner_id: str, approval_id: str, *, session_id: str, approved: bool) -> BrowserActionResult:
+        self._require_owned_approval_session(owner_id, session_id)
         if not approved:
-            self.approvals.deny(owner_id, approval_id)
+            self.approvals.deny(owner_id, approval_id, session_id=session_id)
             return BrowserActionResult("cancelled", "Действие отменено пользователем.")
-        action = self.approvals.consume(owner_id, approval_id)
+        action = self.approvals.consume(owner_id, approval_id, session_id=session_id)
         result = self.agent.execute(action, approved=True)
         event(
             "browser_platform_approved_action_finished",

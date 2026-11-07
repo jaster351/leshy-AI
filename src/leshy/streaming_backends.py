@@ -8,6 +8,7 @@ from types import MethodType
 from urllib import request, error
 
 from .diagnostics import event, exception
+from .context_budget import _normalize_system_messages
 from .llm import ChatMessage, LLMUnavailable
 from .persona import with_leshy_identity
 
@@ -83,7 +84,8 @@ def _continuation_messages(messages, generated_text: str) -> list[ChatMessage]:
 def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None):
     cancel_event = cancel_event or threading.Event()
     with self._chat_lock:
-        base_messages = list(messages)
+        # llama-server rejects system messages after user/assistant for Qwen3.5.
+        base_messages = _normalize_system_messages(list(messages))
         active_messages = list(base_messages)
         generated_text = ""
         continuation_count = 0
@@ -250,7 +252,7 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
             exception("adaptive_llm_stream_backend_failed", exc, backend=state.name,
                       latency_ms=latency_ms, cooldown_seconds=self.cooldown_seconds,
                       quarantined=fatal, hardware_mode=self._hardware_mode(), routing=list(routing))
-            errors.append(f"{state.name}: {exc}")
+            errors.append(f"{state.name}: {type(exc).__name__}: {str(exc)[:240]}")
             if yielded:
                 raise
             continue
