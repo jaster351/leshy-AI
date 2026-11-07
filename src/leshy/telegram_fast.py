@@ -208,7 +208,7 @@ class FastTelegramBridge(RichTelegramBridge):
         chat_id = chat.get("id")
         user_id = str(sender.get("id") or "")
         message_id = message.get("message_id")
-        if not text or chat_id is None or not user_id:
+        if (not text and message.get("voice") is None) or chat_id is None or not user_id:
             return
 
         addressed, address_reason = self._social.addressed_to_leshy(message, bot_id=self._bot_id, bot_username=self._bot_username)
@@ -221,15 +221,32 @@ class FastTelegramBridge(RichTelegramBridge):
                 self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
             return
 
+        text = self._resolve_message_text(message, chat_id=chat_id, user_id=user_id)
+        if not text:
+            return
+
         owner = self._is_owner(user_id)
+        # Распознаём владельца по проверенному Telegram ID, не по имени,
+        # аватарке, пересланному сообщению или тексту «я хозяин».
+        from .identity_runtime import CREATOR_FULL_NAME, is_owner_identity_question
+        if is_owner_identity_question(text):
+            if owner:
+                self._send(chat_id, f"Вы — {CREATOR_FULL_NAME}, создатель и хозяин Лешего.")
+            else:
+                self._send(chat_id, "Я вижу ваш Telegram ID, но он не назначен хозяином Лешего. Проверить настройку можно через /status.")
+            return
         command = text.split(maxsplit=1)[0].lower()
         if command in _ADMIN_COMMANDS and not owner:
             self._send(chat_id, "Эта команда доступна только хозяину Лешего.")
             return
         os_control = getattr(self.app, "os_control", None)
         if os_control is not None and os_control.is_request(text) and not owner:
-            self._send(chat_id, "Управление операционной системой доступно только хозяину Лешего.")
-            return
+            # Специализированная «Лента» — не локальная ОС. Не блокируем
+            # команду корзины только из-за слов «открой» или «выполни».
+            from .lenta_runtime import _explicit_lenta
+            if not _explicit_lenta(text):
+                self._send(chat_id, "Управление операционной системой доступно только хозяину Лешего.")
+                return
 
         if text == "/status":
             status = self.app.status()

@@ -44,6 +44,26 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         description="Безопасный реестр MCP/Skills, просмотр разрешений, изолированная установка расширений, health-check, отключение и удаление.",
     ),
     ModuleSettingDefinition(
+        name="intelligent-memory",
+        title="Интеллектуальная память",
+        description="Mem0-подобный локальный слой долговременной памяти: релевантное извлечение, важность и свежесть, автоматическое запоминание явно сформулированных предпочтений без сохранения секретов.",
+    ),
+    ModuleSettingDefinition(
+        name="knowledge-graph",
+        title="Knowledge Graph / GraphRAG",
+        description="Локальный граф связанных знаний и памяти. Строит связи между концептами, проверенными фактами и пользовательскими воспоминаниями и добавляет релевантные соседние факты в контекст ответа.",
+    ),
+    ModuleSettingDefinition(
+        name="agent-orchestrator",
+        title="Оркестратор подагентов",
+        description="LangGraph/Deep Agents-подобный контур: исследователь, архитектор, критик и оптимизатор работают как отдельные роли, после чего координатор собирает единый ответ. При наличии кластера роли распределяются по компьютерам.",
+    ),
+    ModuleSettingDefinition(
+        name="distributed-cluster",
+        title="Распределённый кластер Лешего",
+        description="Объединяет CPU, GPU, NPU, ОЗУ и модели нескольких доверенных компьютеров в общий пул полезных вычислений без майнинга и монетизации. LAN discovery, подписанный transport и автоматический выбор свободного узла.",
+    ),
+    ModuleSettingDefinition(
         name="parcel-tracking",
         title="Отслеживание посылок",
         description="Проверка трек-номеров через бесплатный веб-сервис без регистрации и фоновое уведомление об изменениях.",
@@ -53,6 +73,11 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         name="network-blocking",
         title="Проверка IP и блокировок ТСПУ",
         description="TCP 22/3389 из сети Лешего + Cheburcheck + географические TCP-проверки Check-Host с оценкой вероятности блокировки.",
+    ),
+    ModuleSettingDefinition(
+        name="phone-osint",
+        title="Антифрод OSINT по телефону",
+        description="Глубокая пассивная проверка входящего номера по открытым источникам: нормализация, регион/оператор/тип линии, независимые публичные жалобы, бизнес-совпадения, антифрод risk score и confidence. Утечки, закрытые базы, адреса, паспорта и родственники не используются.",
     ),
     ModuleSettingDefinition(
         name="support-consultant",

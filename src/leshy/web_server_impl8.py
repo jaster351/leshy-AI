@@ -57,13 +57,28 @@ def make_handler(app, telegram, settings, model_catalog):
             if parsed.path == "/v1/browser/approvals":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                # API token сам по себе не устанавливает личность владельца.
+                # Только серверная HttpOnly Web-сессия разрешает подтверждения.
+                resolve_web_owner = getattr(self, "_existing_web_owner", None)
+                owner_id = resolve_web_owner() if callable(resolve_web_owner) else ""
+                if not owner_id or owner_id == "web:local":
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется Web-сессия"})
                 args = parse.parse_qs(parsed.query)
-                owner_id = self._arg(args, "owner_id", "web:local")
+                session_id = self._arg(args, "session_id")
+                if not session_id:
+                    return self._json(HTTPStatus.OK, {"items": []})
                 try:
-                    return self._json(HTTPStatus.OK, {"items": _platform(app).approvals.list(owner_id)})
+                    platform = _platform(app)
+                    platform._require_owned_approval_session(owner_id, session_id)
+                    return self._json(
+                        HTTPStatus.OK,
+                        {"items": platform.approvals.list(owner_id, session_id=session_id)},
+                    )
+                except (ValueError, PermissionError):
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Подтверждение не найдено"})
                 except Exception as exc:
                     problem("browser_approval_list_failed", str(exc))
-                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Ошибка подтверждения"})
             if parsed.path == "/v1/tools/extensions":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
@@ -82,23 +97,29 @@ def make_handler(app, telegram, settings, model_catalog):
             if parsed.path == "/v1/browser/approvals/resolve":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                resolve_web_owner = getattr(self, "_existing_web_owner", None)
+                owner_id = resolve_web_owner() if callable(resolve_web_owner) else ""
+                if not owner_id or owner_id == "web:local":
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется Web-сессия"})
                 try:
                     body = self._body()
-                    owner_id = str(body.get("owner_id") or "web:local").strip()[:200]
+                    session_id = str(body.get("session_id") or "").strip()
                     approval_id = str(body.get("approval_id") or "").strip()
                     approved = body.get("approved")
-                    if not approval_id or not isinstance(approved, bool):
-                        raise ValueError("Нужны approval_id и approved=true/false")
-                    result = _platform(app).resolve_approval(owner_id, approval_id, approved=approved)
+                    if not session_id or not approval_id or not isinstance(approved, bool):
+                        raise ValueError("Нужны session_id, approval_id и approved=true/false")
+                    result = _platform(app).resolve_approval(
+                        owner_id, approval_id, session_id=session_id, approved=approved
+                    )
                     return self._json(
                         HTTPStatus.OK,
                         {"status": result.status, "message": result.message, "data": result.data},
                     )
-                except (KeyError, ValueError, PermissionError) as exc:
-                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                except (KeyError, ValueError, PermissionError):
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Подтверждение не найдено"})
                 except Exception as exc:
                     problem("browser_approval_resolve_failed", str(exc))
-                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Ошибка подтверждения"})
 
             if parsed.path == "/v1/documents/convert":
                 if not self._authorized():

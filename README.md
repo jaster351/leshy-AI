@@ -1,387 +1,375 @@
 # Леший AI
 
-**Леший** — самостоятельный локальный AI-ассистент с LLM, долговременной памятью, Web UI, Telegram, интернет-поиском, Browser Agent, расширениями и управляемым самообучением.
+**Леший** — самостоятельный локальный AI-ассистент с LLM, долговременной памятью, Web UI, Telegram, интернет-поиском и управляемым самообучением.
 
-Автор: **Тихонов Михаил Викторович**.
+Проект развивается независимо от CineMax и «Гуслей». Будущая интеграция с другими продуктами допускается только через стабильный публичный API/SDK.
 
-Проект развивается независимо от CineMax и «Гуслей». Интеграция с другими системами должна выполняться через стабильный публичный API/SDK или отдельные модули.
+## Справочник внутри Лешего
+
+Команды `help`, `/help`, `помощь`, `справка`, `что ты умеешь` открывают справочник в чате без дополнительного вызова LLM.
+
+[Полный справочник и инструкция по установке Windows/Linux/macOS](docs/HELP_AND_INSTALLATION.md).
+
+## Что нового
+
+[История обновлений и исправлений — понятные патч-ноуты](CHANGELOG.md). Здесь описано, что добавлено, зачем это нужно, что улучшено и какие проблемы пока остаются. Планируемые функции не выдаются за выпущенные.
 
 ## Версия
 
-Канонический номер версии хранится только в корневом файле [`VERSION`](VERSION). README не является источником номера версии.
+Каноническая и единственная версия хранится в корневом файле [`VERSION`](VERSION). Runtime, UI, API, Windows-сборка и установщик обязаны получать номер версии из этого файла. README не дублирует текущий номер, чтобы не показывать устаревшее значение.
 
----
 
-# Справочник внутри Лешего
+### Главное правило выпуска: версия всегда повышается при изменении кода
 
-Чтобы узнать возможности и правила работы, напишите в чате:
+Если изменяются исполняемый код Лешего, Web UI, зависимости или сценарии сборки,
+перед объединением изменений в `main` **обязательно повысить версию в `VERSION`**.
+Без изменения `VERSION` проверка CI должна блокировать выпуск. Правило владельца
+закреплено в `LESHY_POLICY.md` как `POLICY-RELEASE-0001`.
 
-```text
-help
-/help
-помощь
-справка
-что ты умеешь
-что ты можешь
-как с тобой работать
-как тобой пользоваться
+Проверить новый номер и выполнить локальную проверку относительно базового коммита:
+
+```bash
+python -m leshy.version
+python scripts/check_release_version.py <SHA_базового_коммита>
 ```
 
-Леший выдаст встроенный справочник без обращения к LLM.
+Для Windows штатная полная сборка с установкой Python-зависимостей и
+проверкой установщика запускается из корня уже клонированного репозитория:
 
-Полная инструкция по работе, установке, развёртыванию и сборке:
-
-**[`docs/HELP_AND_INSTALLATION.md`](docs/HELP_AND_INSTALLATION.md)**
-
----
-
-# Что Леший умеет сейчас
-
-## Локальный чат
-
-- локальная LLM;
-- история диалогов;
-- отдельные пользовательские сессии;
-- изоляция данных пользователей;
-- Web UI;
-- доступ по LAN при соответствующей настройке host/firewall/token.
-
-## Долговременная память
-
-```text
-/remember текст
-/memories
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\autobuilder.ps1 -Mode once
 ```
 
-Память хранится локально и подмешивается только в контекст соответствующего пользователя.
-
-## Интернет и актуальная информация
-
-Явный поиск:
-
-```text
-/search запрос
-```
-
-Для новых знаний используется путь:
-
-```text
-research -> candidate -> verification -> trusted
-```
-
-Содержимое страницы или поискового сниппета не становится доверенным знанием автоматически.
-
-## Управляемое самообучение
-
-В Web UI есть постоянный переключатель **Самообучение ВКЛ/ВЫКЛ**.
-
-- `ВЫКЛ` — автономное фоновое исследование запрещено;
-- `ВКЛ` — фоновый worker может обрабатывать очередь исследований и учебный план;
-- прямой пользовательский поиск разрешён независимо от фонового режима.
-
-## Telegram
-
-Telegram работает через long polling и подходит для установки за NAT.
-
-Поддерживаются:
-
-- Bot Token;
-- разрешённые Telegram ID;
-- отдельные пользовательские пространства;
-- `/status`;
-- `/learning_on`;
-- `/learning_off`.
+Для этой команды на Windows должны быть доступны Python 3.11+, Git и Inno Setup 6;
+требуемые Python-пакеты устанавливаются в процессе сборки автоматически.
+Защищённое обновление через AutoBuilder сохраняет `dist\Leshy\LeshyBrain`.
+Для Linux и macOS запуск из исходников описан ниже; Windows-установщик
+не является кроссплатформенным исполняемым файлом.
 
 ## Browser Platform
 
-Browser Platform объединяет Browser Use и Playwright под единым Browser Agent и политикой безопасности.
+Browser Platform объединяет Browser Use и Playwright под единым `BrowserAgent` и общей политикой безопасности.
 
-- Browser Use выполняет интеллектуальное исследование динамических сайтов;
-- Playwright выполняет детерминированные browser-workflow;
-- запросы на покупку или бронирование сначала исследуют и сравнивают варианты;
-- `mutate`, `commit` и `financial` проходят Human Approval Gate;
-- оплата требует отдельного подтверждения суммы и валюты;
-- browser state/cookies сохраняются отдельно;
-- CAPTCHA, challenge и 2FA не обходятся.
+- Browser Use выполняет интеллектуальное исследование и работу с динамическими сайтами через родную локальную LLM Лешего;
+- Playwright выполняет детерминированные browser-workflow и существующие browser-skills;
+- запрос «купи…» или «забронируй…» сначала ищет и сравнивает варианты, а не создаёт заказ немедленно;
+- `mutate`, `commit` и `financial` проходят Human Approval Gate; оплата требует отдельного подтверждения суммы и валюты;
+- найденные варианты сохраняются в SQLite и восстанавливаются после перезапуска;
+- browser state/cookies сохраняются в отдельном профиле; CAPTCHA/challenge/2FA не обходятся;
+- MCP v2 Tools Gateway подключает стандартные инструменты;
+- Extension Marketplace ставит MCP/Skills в отдельные venv с проверкой разрешений, лицензии, версии и health-check;
+- Document Intelligence использует MarkItDown для PDF/DOCX/XLSX/PPTX и других поддерживаемых форматов;
+- существующий Computer Use остаётся отдельным desktop-модулем.
 
-Подробности: [`docs/BROWSER_AGENT.md`](docs/BROWSER_AGENT.md).
+Подробности: `docs/BROWSER_AGENT.md`.
 
-## Computer Use
+## Первый рабочий контур 1.10.3
 
-Есть отдельный desktop-модуль управления компьютером. Он развивается и пока не считается полностью завершённым для всех приложений и сценариев.
+В `main` реализован минимальный контур, необходимый для рабочего инструмента:
 
-## Документы
+- локальный чат через GGUF/llama.cpp;
+- Web UI со сценарием **вариант 4 → вариант 3** без перезагрузки;
+- история диалогов и изоляция сессий пользователей;
+- долговременная локальная память (`/remember ...`, `/memories`);
+- полноценный Telegram long polling через тот же runtime;
+- live-search для запросов, требующих актуальной информации;
+- знания `research → candidate → verification → trusted`;
+- постоянный переключатель самообучения ВКЛ/ВЫКЛ;
+- фоновые исследования только при включённом самообучении;
+- загрузка основной модели из официального репозитория с проверкой SHA-256;
+- runtime-логи в `LeshyBrain/logs` с очисткой секретов;
+- Windows launcher, PyInstaller build и Inno Setup installer pipeline.
 
-Document Intelligence использует MarkItDown и работает с поддерживаемыми форматами, включая:
+Голос, vision и Computer Use продолжают развиваться, но не блокируют первую рабочую сборку.
 
-- PDF;
-- DOCX;
-- XLSX;
-- PPTX.
-
-## Marketplace, MCP и Skills
-
-В проекте есть:
-
-- Extension Marketplace;
-- MCP v2 Tools Gateway;
-- система модулей/Skills;
-- отдельные venv для расширений;
-- проверка разрешений;
-- проверка лицензии и версии;
-- health-check и rollback.
-
-## Голос
-
-В проекте присутствуют ASR, TTS, голосовые настройки и голосовой UI. Голосовые функции продолжают развиваться и могут отличаться по готовности между сборками.
-
-## Изображения
-
-Есть локальный модуль генерации изображений. Модель генерации может загружаться отдельно при первом использовании.
-
-## Аппаратное ускорение
-
-Интерактивный runtime использует порядок:
-
-```text
-GPU/Vulkan -> NPU/OpenVINO -> CPU
-```
-
-При ошибке ускорителя работает автоматический fallback.
-
-## Диагностика
-
-Есть:
-
-- централизованные runtime-логи;
-- отдельный журнал проблем;
-- redaction токенов, паролей, Bearer-заголовков и других секретов;
-- smoke-test сборок;
-- диагностика hardware/runtime.
-
-## Экспериментально: Аквариум Лешего
-
-Отдельно разрабатывается «Аквариум Лешего» — виртуальный питомец и симулятор пресноводной/морской экосистемы. До слияния соответствующей ветки/PR эта функция может отсутствовать в стабильной `main`.
-
----
-
-# Как с Лешим работать
-
-Пишите обычным человеческим языком. Специальный синтаксис нужен только для отдельных команд.
-
-Примеры:
-
-```text
-Найди актуальную информацию о новой версии программы.
-```
-
-```text
-Сравни три варианта и объясни, какой подходит лучше.
-```
-
-```text
-Открой сайт, найди подходящие варианты, но ничего не покупай без моего подтверждения.
-```
-
-```text
-Запомни, что этот сервер используется только для тестов.
-```
-
-Для опасных, финансовых или необратимых действий Леший должен запросить подтверждение.
-
----
-
-# Основная модель
+## Основная модель
 
 Основная модель первой рабочей сборки:
 
 - репозиторий: `Qwen/Qwen3-8B-GGUF`;
 - файл: `Qwen3-8B-Q4_K_M.gguf`;
-- лицензия: Apache-2.0.
+- лицензия модели: Apache-2.0.
 
-Модель не включается в Git. В Web UI предусмотрена её отдельная загрузка с проверкой SHA-256.
+Модель не включается в Git. В Web UI есть кнопка её загрузки. Файл скачивается в `LeshyBrain/models`, проверяется по SHA-256 и только после этого становится доступен runtime.
 
----
+## Вычислительные backend
 
-# Быстрый запуск из исходников
+Интерактивный чат использует порядок:
 
-Требуется Python **3.11+**.
+`GPU/Vulkan → NPU/OpenVINO → CPU`
 
-Linux/macOS:
+На Windows при обнаружении GPU Леший использует официальный `llama.cpp` Vulkan runtime, который хранится локально в `LeshyBrain/runtime/llama.cpp`. Runtime загружается из официальных GitHub Releases и проверяется по опубликованному SHA-256. При ошибке ускорителя работает автоматический fallback.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -e .
-python -m pip install "llama-cpp-python>=0.3.27,<0.4"
-python -m leshy.web_server
-```
+CPU fallback обеспечивается `llama-cpp-python`.
 
-Windows PowerShell:
+## Быстрый запуск из исходников
+
+Требуется Python 3.11+.
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip setuptools wheel
+python -m pip install --upgrade pip
 python -m pip install -e .
 python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 python -m leshy.web_server
 ```
 
-После запуска Web UI обычно доступен по адресу:
+После запуска Web UI доступен на порту `8765`. По умолчанию сервер может быть доступен по LAN; доступ следует ограничивать системным firewall и/или `LESHY_API_TOKEN`, если сеть не является доверенной.
 
-```text
-http://127.0.0.1:8765
-```
-
-Подробные команды для Debian/Ubuntu, Fedora/RHEL, Arch, openSUSE, Alpine, macOS Intel/Apple Silicon и Windows находятся в [`docs/HELP_AND_INSTALLATION.md`](docs/HELP_AND_INSTALLATION.md).
-
----
-
-# Тестовый запуск без модели
-
-Linux/macOS:
-
-```bash
-LESHY_LLM_BACKEND=echo python -m leshy.web_server
-```
-
-Windows:
+Для тестового запуска без модели:
 
 ```powershell
 $env:LESHY_LLM_BACKEND="echo"
 python -m leshy.web_server
 ```
 
----
+## Установка и локальная сборка на Ubuntu и CentOS
 
-# Доступ по локальной сети
+Инструкция предназначена для **Ubuntu 24.04/26.04** и **CentOS Stream 9/10** на x86_64. Старые CentOS Linux 7/8 (EOL) не поддерживаются. Это сборка Linux-приложения из исходников, а не Windows EXE или Inno Setup. Требуется Python **3.11+**; перед установкой проверьте доступную версию. Для CentOS Stream при отсутствии подходящего Python в штатных репозиториях сначала установите его из доверенного репозитория вашей организации или соберите отдельно.
 
-Леший может слушать LAN-интерфейс:
+### 1. Системные зависимости — Ubuntu
 
-```text
-LESHY_HOST=0.0.0.0
-LESHY_PORT=8765
+```bash
+sudo apt update
+sudo apt install -y git curl ca-certificates build-essential cmake ninja-build pkg-config \
+  python3 python3-dev python3-venv python3-pip \
+  libopenblas-dev libssl-dev libffi-dev libgl1 libglib2.0-0 \
+  libx11-6 libxext6 libxrender1 libxtst6 libxi6
+python3 --version
+cmake --version
+git --version
 ```
 
-Если сеть не полностью доверенная, используйте firewall и `LESHY_API_TOKEN`. Для внешнего доступа предпочтительны reverse proxy + TLS и/или VPN/Zero Trust.
+Если `python3 --version` показывает версию ниже 3.11, установите поддерживаемую версию и используйте её явный бинарный файл при создании окружения.
 
----
+### 2. Системные зависимости — CentOS Stream 9/10
 
-# Сборка Windows
+```bash
+sudo dnf install -y git curl ca-certificates gcc gcc-c++ make cmake ninja-build \
+  pkgconf-pkg-config openssl-devel libffi-devel openblas-devel \
+  mesa-libGL glib2 libX11 libXext libXrender libXtst libXi
+sudo dnf install -y python3.11 python3.11-devel python3.11-pip
+python3.11 --version
+cmake --version
+git --version
+```
 
-Официальный Windows build pipeline:
+Если `python3.11` недоступен в репозиториях конкретного выпуска, не подменяйте системный Python: установите Python 3.11+ отдельно и замените `python3.11` в командах ниже на путь к нему.
+
+### 3. Скачать исходники (обе системы)
+
+```bash
+git clone https://github.com/jaster351/leshy-AI.git
+cd leshy-AI
+git switch main
+```
+
+### 4. Создать окружение и установить зависимости
+
+Ubuntu:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e '.[test]'
+```
+
+CentOS Stream:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e '.[test]'
+```
+
+Если `python3.11 -m venv` недоступен в CentOS, установите `virtualenv` для выбранного Python и создайте окружение через `python3.11 -m virtualenv .venv`.
+
+### 5. Скомпилировать локальный CPU backend
+
+`llama-cpp-python` компилируется из исходников с помощью CMake. На машинах без OpenBLAS уберите `-DGGML_BLAS=ON` и `-DGGML_BLAS_VENDOR=OpenBLAS`.
+
+```bash
+export CMAKE_ARGS='-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS'
+export FORCE_CMAKE=1
+python -m pip install --no-cache-dir --no-binary=llama-cpp-python 'llama-cpp-python>=0.3.27,<0.4'
+unset FORCE_CMAKE CMAKE_ARGS
+```
+
+Это компиляция CPU backend; поддержка GPU/Vulkan требует отдельного набора драйверов и параметров сборки. GGUF-модель не входит в Git и должна быть загружена отдельно через интерфейс Лешего.
+
+### 6. Проверка и запуск
+
+```bash
+python -m compileall -q src
+python -m pytest -q
+LESHY_LLM_BACKEND=echo python -m leshy.web_server
+```
+
+Тестовый режим `echo` позволяет проверить веб-сервер без скачивания модели. Web UI использует порт **8765**. Для обычного режима остановите тестовый сервер и запустите `python -m leshy.web_server` после настройки GGUF-модели. Доступ по LAN ограничьте firewall и/или `LESHY_API_TOKEN`.
+
+### 7. Сборка исполняемого Linux-пакета (экспериментально)
+
+```bash
+python -m pip install 'pyinstaller>=6.11,<7'
+python -m PyInstaller --noconfirm --clean --onedir --name Leshy \
+  --collect-all leshy src/leshy/web_server.py
+```
+
+Результат будет в `dist/Leshy/`. **Это не проверенный релизный Linux-дистрибутив**: PyInstaller может потребовать дополнительные `--collect-*` для динамических зависимостей, а модель и runtime-файлы должны поставляться отдельно. Канонический способ запуска Linux сейчас — из `.venv`.
+
+### 8. Автозапуск через systemd (по желанию)
+
+Выполняйте от обычного пользователя, в каталоге клонированного проекта:
+
+```bash
+PROJECT_DIR="$(pwd)"
+mkdir -p "$HOME/.config/systemd/user"
+cat > "$HOME/.config/systemd/user/leshy.service" <<EOF
+[Unit]
+Description=Leshy AI Web Server
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$PROJECT_DIR
+ExecStart=$PROJECT_DIR/.venv/bin/python -m leshy.web_server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable --now leshy.service
+systemctl --user status leshy.service
+```
+
+Чтобы пользовательский сервис продолжал работать после выхода из SSH, администратор может выполнить `sudo loginctl enable-linger "$USER"`. Логи: `journalctl --user -u leshy.service -f`.
+
+**Статус проверки:** команды документированы по конфигурации `pyproject.toml`, но полная установка и компиляция на обеих ОС должны быть подтверждены отдельными CI/VM-прогонами; до этого не считать их протестированными.
+
+## Windows-сборка
+
+Локальная сборка выполняется из корня репозитория:
 
 ```powershell
-.\windows\build.ps1
+./windows/build.ps1
 ```
 
-Он:
+Скрипт:
 
 1. устанавливает build-зависимости;
 2. собирает `Leshy.exe` через PyInstaller;
-3. добавляет Web UI и VERSION;
-4. запускает frozen smoke-test `/v1/status`;
-5. запускает frozen smoke-test `/v1/chat`;
-6. сохраняет `LeshyBrain` при публикации новой сборки;
-7. собирает установщик Inno Setup.
+3. запускает frozen smoke-test `/v1/status` и `/v1/chat` на тестовом backend;
+4. собирает установщик Inno Setup;
+5. проверяет наличие `dist/LeshySetup-<version>.exe`.
 
-Результат:
+Для последнего шага требуется Inno Setup 6 (`ISCC.exe`).
+
+GitHub workflow `.github/workflows/windows-build.yml` выполняет тот же процесс и публикует установщик как artifact только после успешного smoke-test.
+
+## Web UI
+
+Стартовый экран соответствует варианту 4: тёмный лесной фон, визуальное ядро Лешего, название, фраза «Я здесь. Слушаю. Думаю. Помогаю.» и поле ввода.
+
+После первой реплики без перезагрузки открывается вариант 3: слева навигация, по центру диалог, справа системная панель модели, обучения, знаний и Telegram. Первая реплика при переходе не теряется.
+
+## Telegram
+
+Telegram использует исходящее соединение/long polling и подходит для установки за NAT.
+
+Настраиваются:
+
+- Bot Token;
+- разрешённые Telegram ID.
+
+Токен хранится локально в `LeshyBrain/secrets`, а не в Git. Каждый Telegram-пользователь получает собственный owner/session namespace.
+
+Команды первого контура:
+
+- `/status`;
+- `/learning_on`;
+- `/learning_off`.
+
+Обычный текст отправляется в тот же чат-runtime, что используется Web UI.
+
+## Память
+
+История диалогов хранится в SQLite. Явная долговременная память доступна командами:
+
+- `/remember текст` — сохранить факт для текущего пользователя;
+- `/memories` — показать его сохранённую память.
+
+Память пользователей изолируется по `owner_id` и подмешивается только в контекст соответствующего пользователя.
+
+## Интернет-поиск и знания
+
+Явный поиск можно вызвать сообщением вида:
 
 ```text
-dist\Leshy\Leshy.exe
-dist\LeshySetup-<version>.exe
+/search актуальная версия Python
 ```
 
-Для создания установщика требуется Inno Setup 6 (`ISCC.exe`).
+Леший также может включать live-search для явно динамических запросов. Результаты поиска сначала считаются `candidate`; сниппет или веб-страница не становится доверенным знанием автоматически.
 
----
+Пайплайн:
 
-# Сборка Linux и macOS
+`research → candidate → verification → trusted`
 
-На Linux/macOS используется PyInstaller. Сборка должна выполняться на той ОС и архитектуре, для которой нужен результат.
+Для знания сохраняются источник/URL, время получения, confidence и audit-события.
 
-Базово:
+## Самообучение
 
-```bash
-python -m pip install -e ".[build]"
-python -m pip install "llama-cpp-python>=0.3.27,<0.4"
-```
+В Web UI есть постоянный переключатель **Самообучение ВКЛ/ВЫКЛ**. Состояние хранится в SQLite и переживает перезапуск.
 
-Далее выполняется PyInstaller-сборка с включением `web`, `VERSION` и runtime-зависимостей. Полная готовая команда приведена в [`docs/HELP_AND_INSTALLATION.md`](docs/HELP_AND_INSTALLATION.md).
+- `ВЫКЛ`: автономное исследование запрещено, но прямой пользовательский поиск разрешён;
+- `ВКЛ`: фоновый worker обрабатывает очередь исследований и безопасный учебный план, не отправляя пользовательские переписки в интернет автоматически.
 
-PyInstaller не является полноценным cross-compiler: Windows-сборку следует делать на Windows, Linux-сборку — на Linux, macOS-сборку — на macOS.
+## LeshyBrain
 
----
+`LeshyBrain` — каноническое локальное пользовательское хранилище. Оно включает как минимум:
 
-# LeshyBrain
+- `data/leshy.sqlite3` — сессии, память, знания, audit и состояние;
+- `models/` — GGUF-модели;
+- `runtime/` — локальные ускоренные runtime;
+- `secrets/` — Telegram и другие локальные секреты;
+- `logs/` — `leshy.log`, `problems.log` и backend-логи;
+- `workspace/` — рабочая область инструментов.
 
-`LeshyBrain` — каноническое локальное пользовательское хранилище.
+На Windows пользовательский Data Root не обязан находиться в AppData. В профиле Windows допускается только небольшой locator выбранного каталога. Если выбранный путь недоступен, приложение не должно молча создавать второй пустой `LeshyBrain`.
 
-Минимальная структура:
+## Диагностика
 
-```text
-LeshyBrain/
-  data/leshy.sqlite3
-  models/
-  runtime/
-  secrets/
-  logs/
-  workspace/
-```
+Основные логи находятся в `LeshyBrain/logs`. Логирование использует ротацию и redaction токенов, паролей, Bearer-заголовков и других секретов.
 
-Не удаляйте `LeshyBrain` при обычном обновлении, если хотите сохранить память, модели, настройки, Telegram token и другие локальные данные.
+Папка репозитория `log/` предназначена только для очищенных диагностических материалов разработчика и не является runtime-хранилищем.
 
----
+## Quality Gate
 
-# Обновление
+Установщик считается готовым к передаче только после одновременного прохождения:
 
-Общий порядок:
-
-1. остановить Лешего;
-2. сделать резервную копию `LeshyBrain`;
-3. выполнить `git pull`;
-4. активировать venv;
-5. выполнить `python -m pip install -e .`;
-6. запустить тесты;
-7. перезапустить runtime.
-
-Для frozen-сборки после обновления исходников нужно собрать приложение заново.
-
----
-
-# Quality Gate
-
-Готовая сборка должна пройти как минимум:
-
-- Python import/compile checks;
+- import/compile checks;
 - unit/regression tests;
-- Web JavaScript checks;
-- UI regression checks;
-- frozen `/v1/status` smoke-test;
-- frozen `/v1/chat` smoke-test;
-- проверку итогового исполняемого пакета.
+- Web JavaScript check;
+- UI 4→3 checks;
+- frozen Windows `/v1/status` smoke-test;
+- frozen Windows `/v1/chat` smoke-test;
+- успешной сборки `LeshySetup-<version>.exe`.
 
-Сбой GitHub Actions до назначения runner (`runner_id=0`, без реально выполненных steps) является инфраструктурным сбоем, а не результатом тестирования кода.
+Сбой CI до назначения runner (`runner_id=0`, без выполненных steps) является инфраструктурным сбоем GitHub Actions и не считается результатом тестирования кода.
 
----
+## Документация
 
-# Документация
+Ключевые документы находятся в `docs/`, включая:
 
-Основные документы:
+- `BROWSER_AGENT.md`;
+- `PRIORITY_WORKING_RELEASE_1.10.3.md`;
+- `UI_CONTRACT_1.10.3.md`;
+- `WINDOWS_TRAY_AUTOSTART_DATA_ROOT.md`;
+- `REIMPLEMENTATION_MINIMUM_1.10.3.md`;
+- политики логирования, ускорителей, динамических данных и безопасности.
 
-- [`docs/HELP_AND_INSTALLATION.md`](docs/HELP_AND_INSTALLATION.md) — справочник, Linux/macOS/Windows, сборка и обновление;
-- [`docs/BROWSER_AGENT.md`](docs/BROWSER_AGENT.md) — Browser Agent;
-- [`docs/VOICE_UI.md`](docs/VOICE_UI.md) — голосовой UI;
-- [`docs/VOICE_ENGINES.md`](docs/VOICE_ENGINES.md) — голосовые движки;
-- [`docs/MCP_TOOLS_GATEWAY.md`](docs/MCP_TOOLS_GATEWAY.md) — MCP Tools Gateway;
-- [`docs/DOCUMENT_INTELLIGENCE.md`](docs/DOCUMENT_INTELLIGENCE.md) — документы;
-- [`docs/WINDOWS_TRAY_AUTOSTART_DATA_ROOT.md`](docs/WINDOWS_TRAY_AUTOSTART_DATA_ROOT.md) — Windows runtime и Data Root;
-- [`docs/LOGGING.md`](docs/LOGGING.md) — логирование.
+## Лицензия
 
----
-
-# Лицензия
-
-Код репозитория распространяется по **GNU General Public License v2.0**, если для конкретного компонента явно не указано иное. Сторонние библиотеки и модели сохраняют собственные лицензии.
+Код репозитория распространяется по **GNU General Public License v2.0**, если для конкретного компонента явно не указано иное. Сторонние библиотеки и модели сохраняют свои лицензии.

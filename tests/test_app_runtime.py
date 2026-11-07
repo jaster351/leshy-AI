@@ -50,21 +50,46 @@ class AppRuntimeTests(unittest.TestCase):
                 restarted = LeshyApp(settings)
                 self.assertTrue(restarted.learning.is_enabled())
             finally:
-                app.stop_background()
+                # stop_background() is not merely cosmetic here: after enabling
+                # self-learning both runtime instances may still be touching the
+                # shared data directory. Stop them before TemporaryDirectory
+                # starts removing that directory.
                 if restarted is not None:
                     restarted.stop_background()
+                app.stop_background()
+
+    def test_stop_background_waits_for_learning_workers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = LeshyApp(self.make_settings(Path(temp)))
+            app.start_background()
+            app.stop_background()
+            # Не учитывать одноимённые потоки других экземпляров в общем runner.
+            workers = (
+                app.self_learning._thread,
+                app.self_learning.material_learning._thread,
+                app.self_learning.social_watch._thread,
+            )
+            self.assertTrue(all(worker is not None for worker in workers))
+            self.assertFalse(any(worker.is_alive() for worker in workers))
+            self.assertFalse(app.self_learning.status()["running"])
 
     def test_explicit_memory_is_persistent_and_isolated(self):
         with tempfile.TemporaryDirectory() as temp:
             settings = self.make_settings(Path(temp))
             app = LeshyApp(settings)
-            saved = app.chat("/remember Любимый редактор — VS Code", owner_id="one", session_id="m1")
-            self.assertIn("Запомнил", saved["answer"])
-            restarted = LeshyApp(settings)
-            items = restarted.memories("one")
-            self.assertEqual(len(items), 1)
-            self.assertIn("VS Code", items[0]["content"])
-            self.assertEqual(restarted.memories("two"), [])
+            restarted = None
+            try:
+                saved = app.chat("/remember Любимый редактор — VS Code", owner_id="one", session_id="m1")
+                self.assertIn("Запомнил", saved["answer"])
+                restarted = LeshyApp(settings)
+                items = restarted.memories("one")
+                self.assertEqual(len(items), 1)
+                self.assertIn("VS Code", items[0]["content"])
+                self.assertEqual(restarted.memories("two"), [])
+            finally:
+                if restarted is not None:
+                    restarted.stop_background()
+                app.stop_background()
 
 
 if __name__ == "__main__":

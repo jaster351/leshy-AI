@@ -29,6 +29,17 @@
   }
 
   function names(values, fallback){return Array.isArray(values)&&values.length?values.join(', '):fallback;}
+  function gpuDetails(caps){
+    if(!Array.isArray(caps.gpu_devices)||!caps.gpu_devices.length)
+      return names(caps.gpu_names,'Не обнаружен');
+    return caps.gpu_devices.map(device=>{
+      const details=[device.vendor&&device.vendor!=='Unknown'?device.vendor:null];
+      if(Number.isFinite(device.vram_bytes)&&device.vram_bytes>0)
+        details.push((device.vram_bytes/1073741824).toFixed(1)+' ГиБ VRAM');
+      if(device.driver_version)details.push('драйвер '+device.driver_version);
+      return String(device.name||'GPU')+(details.filter(Boolean).length?' ('+details.filter(Boolean).join(' · ')+')':'');
+    }).join('; ');
+  }
 
   async function refresh(card){
     const status=await request('/v1/hardware');
@@ -41,15 +52,16 @@
     chips.innerHTML='';
     [
       ['CPU',true,caps.cpu_name||'CPU'],
-      ['GPU',!!caps.gpu,names(caps.gpu_names,'Не обнаружен')],
+      ['GPU',!!caps.gpu,gpuDetails(caps)],
       ['NPU',!!caps.npu,names(caps.npu_names,'Не обнаружен')]
     ].forEach(([title,ready,detail])=>{
       const chip=el('div',{class:'compute-chip '+(ready?'compute-ready':'compute-off')});
-      chip.append(el('b',null,title+(ready?' · доступен':' · нет')),el('span',null,detail));
+      chip.append(el('b',null,title+(ready?(title==='GPU'?' · обнаружен':' · доступен'):' · нет')),el('span',null,detail));
       chips.appendChild(chip);
     });
     const summary=card.querySelector('[data-compute-summary]');
-    summary.textContent='Активный план: '+(plan.effective_mode||'—')+' · основной backend: '+(plan.chat_backend||'—')+' · фон: '+((plan.background_devices||[]).join(' + ')||'—');
+    summary.textContent='Активный план: '+(plan.effective_mode||'—')+' · основной backend: '+(plan.chat_backend||'—')+' · фон: '+((plan.background_devices||[]).join(' + ')||'—')+
+      (caps.gpu?' · GPU обнаружен, работоспособность backend проверяется отдельно':'');
     const warnings=card.querySelector('[data-compute-warnings]');
     const list=[...(caps.notes||[]),...(plan.warnings||[])];
     warnings.textContent=list.length?list.join(' · '):'Леший автоматически выбирает доступные ускорители и сохраняет CPU как резерв для системных задач и fallback.';

@@ -43,6 +43,28 @@ def creator_identity_answer(message: str) -> str | None:
     return None
 
 
+def is_owner_identity_question(message: str) -> bool:
+    """Личная идентификация — лишь по подтверждённому Telegram ID.
+
+    Имя/аватар Telegram и слова «я хозяин» не подтверждают владельца.
+    Сам этот предикат не выдаёт никаких полномочий.
+    """
+    value = " ".join(str(message or "").lower().replace("ё", "е").split())
+    value = re.sub(r"[^а-яa-z0-9\s]", " ", value)
+    value = " ".join(value.split())
+    return any(phrase in value for phrase in (
+        "а я по твоему кто",
+        "я по твоему кто",
+        "ты знаешь кто я",
+        "ты знаешь кто я такой",
+        "кто я для тебя",
+        "кто я такой для тебя",
+        "ты меня узнаешь",
+        "ты меня узнал",
+        "ты меня узнала",
+    ))
+
+
 def _save_direct_user(app, message: str, owner_id: str, session_id: str | None) -> str:
     sid = app._ensure_session(owner_id, session_id)
     now = utcnow()
@@ -149,5 +171,6 @@ __all__ = [
     "CREATOR_FULL_NAME",
     "CREATOR_ANSWER",
     "creator_identity_answer",
+    "is_owner_identity_question",
     "install_creator_identity_routing",
 ]

@@ -21,6 +21,8 @@ class ClusterNode:
     gpu_names: tuple[str, ...] = ()
     npu_names: tuple[str, ...] = ()
     models: tuple[str, ...] = ()
+    memory_total_gb: float = 0.0
+    memory_available_gb: float = 0.0
     queue_depth: int = 0
     load: float = 0.0
     accepting_tasks: bool = True
@@ -34,6 +36,15 @@ class ClusterNode:
             return False
         if "cpu" in required and self.cpu_threads < 1:
             return False
+        for item in required:
+            if not item.startswith("ram>="):
+                continue
+            try:
+                minimum = float(item.split("=", 1)[1])
+            except (TypeError, ValueError):
+                continue
+            if self.memory_available_gb and self.memory_available_gb < minimum:
+                return False
         if task.model and self.models and task.model not in self.models:
             return False
         if task.mode == MODEL_PARALLEL_MODE and task.model and task.model not in self.models:
@@ -108,7 +119,7 @@ class ClusterResult:
 
 
 class PeerDiscovery(Protocol):
-    """Tracker/DHT/mDNS могут реализовать один и тот же discovery-контракт."""
+    """Tracker/DHT/mDNS/LAN discovery реализуют один и тот же контракт."""
 
     def announce(self, node: ClusterNode) -> None: ...
     def peers(self) -> list[ClusterNode]: ...
@@ -138,17 +149,46 @@ class RabbitMQTopology:
         return "node." + task.origin_node_id
 
 
+def cluster_public_summary(status: dict[str, Any], *, enabled: bool) -> dict[str, Any]:
+    """Safe aggregate for all users; never publish peer addresses or node identities."""
+    if not enabled:
+        return {
+            "enabled": False, "scope": "trusted_lan", "node_count": 0,
+            "busy_nodes": 0, "available_nodes": 0, "cpu_threads": 0,
+            "ram_total_gb": 0.0, "gpu_count": 0, "npu_count": 0,
+        }
+    peers = list(status.get("peers") or [])
+    inflight = dict(status.get("inflight_by_node") or {})
+    busy = sum(
+        int(
+            int(peer.get("queue_depth") or 0) + int(inflight.get(peer.get("node_id"), 0)) > 0
+        )
+        for peer in peers
+    )
+    return {
+        "enabled": True,
+        "scope": "trusted_lan",
+        "node_count": len(peers),
+        "busy_nodes": busy,
+        "available_nodes": max(0, len(peers) - busy),
+        "cpu_threads": sum(int(peer.get("cpu_threads") or 0) for peer in peers),
+        "ram_total_gb": round(sum(float(peer.get("memory_total_gb") or 0) for peer in peers), 1),
+        "gpu_count": sum(len(peer.get("gpu_names") or ()) for peer in peers),
+        "npu_count": sum(len(peer.get("npu_names") or ()) for peer in peers),
+    }
+
+
 class ClusterOrchestrator:
-    """Распределяет подзадачи между узлами и возвращает результат инициатору.
+    """Распределяет полезные подзадачи между компьютерами Лешего.
 
-    В cooperative-режиме только origin/leader формирует итоговый пользовательский
-    текст. Остальные узлы выполняют поиск, RAG, инструменты, анализ, ASR/TTS или
-    другие независимые подзадачи и возвращают структурированные результаты по
-    task_id. Это предотвращает потерю/перестановку токенов.
+    В cooperative-режиме origin/leader формирует итоговый пользовательский ответ,
+    а остальные компьютеры выполняют независимые полезные подзадачи: инференс
+    подагентов, поиск, RAG/GraphRAG, embeddings, документы, ASR/TTS и фоновые
+    вычисления. Никакого Proof-of-Work или монетизации здесь нет.
 
-    model_parallel зарезервирован для настоящего distributed inference одной
-    совместимой модели/runtime. Два независимых генератора не склеиваются по
-    половине ответа.
+    model_parallel зарезервирован для совместимого runtime, который умеет
+    действительно делить одну модель между несколькими узлами. Независимые LLM
+    никогда не склеиваются по половине токенов одного ответа.
     """
 
     def __init__(
@@ -165,6 +205,8 @@ class ClusterOrchestrator:
         self.peer_ttl_seconds = max(5.0, float(peer_ttl_seconds))
         self._lock = threading.RLock()
         self._peers: dict[str, ClusterNode] = {local_node.node_id: local_node}
+        # Unfinished placements from this origin must count before remote heartbeat catches up.
+        self._inflight: dict[str, int] = {}
 
     def announce_and_refresh(self) -> list[ClusterNode]:
         if self.discovery is None:
@@ -195,21 +237,55 @@ class ClusterOrchestrator:
             return list(self._peers.values())
 
     @staticmethod
-    def _score(node: ClusterNode, task: ClusterTask) -> tuple[float, str]:
-        accelerator_bonus = 0.0
+    def _score(node: ClusterNode, task: ClusterTask, *, inflight: int = 0) -> tuple[float, str]:
         required = set(task.requirements)
+        accelerator_bonus = 0.0
+        if node.gpu_names:
+            accelerator_bonus -= 18.0 if task.kind in {"agent.prompt", "llm.chat", "embedding.batch"} else 6.0
+        if node.npu_names:
+            accelerator_bonus -= 10.0 if task.kind in {"embedding.batch", "vision.embed"} else 3.0
         if "gpu" in required and node.gpu_names:
             accelerator_bonus -= 25.0
         if "npu" in required and node.npu_names:
             accelerator_bonus -= 20.0
-        score = node.queue_depth * 20.0 + max(0.0, node.load) * 100.0 + accelerator_bonus
+
+        memory_bonus = 0.0
+        if node.memory_available_gb > 0:
+            memory_bonus = -min(node.memory_available_gb, 64.0) * 0.35
+
+        cpu_bonus = -min(max(0, node.cpu_threads), 64) * 0.10
+        score = (
+            (node.queue_depth + inflight) * 125.0
+            + max(0.0, node.load) * 100.0
+            + accelerator_bonus
+            + memory_bonus
+            + cpu_bonus
+        )
         return score, node.node_id
 
-    def choose_executor(self, task: ClusterTask) -> ClusterNode:
-        candidates = [node for node in self.peers() if node.supports(task)]
+    def _choose_executor_locked(self, task: ClusterTask) -> ClusterNode:
+        candidates = [node for node in self._peers.values() if node.supports(task)]
         if not candidates:
             return self.local_node
-        return min(candidates, key=lambda node: self._score(node, task))
+        # An idle compatible node takes precedence over another node's busy inference slot.
+        # This prevents a fast GPU from becoming the destination for every parallel task.
+        if task.kind == "agent.prompt":
+            idle = [
+                node for node in candidates
+                if node.queue_depth + self._inflight.get(node.node_id, 0) == 0
+            ]
+            if idle:
+                candidates = idle
+        return min(
+            candidates,
+            key=lambda node: self._score(
+                node, task, inflight=self._inflight.get(node.node_id, 0)
+            ),
+        )
+
+    def choose_executor(self, task: ClusterTask) -> ClusterNode:
+        with self._lock:
+            return self._choose_executor_locked(task)
 
     def execute_or_delegate(
         self,
@@ -226,27 +302,42 @@ class ClusterOrchestrator:
                 error="Срок жизни кластерной задачи истёк",
             )
 
-        node = self.choose_executor(task)
-        if node.node_id == self.local_node.node_id or self.transport is None:
-            event("cluster_task_local", task_id=task.task_id, kind=task.kind, priority=task.priority)
-            return local_handler(task)
+        # Selection and reservation are atomic: concurrent requests from this
+        # origin must see each other's unfinished placements immediately.
+        with self._lock:
+            node = self._choose_executor_locked(task)
+            self._inflight[node.node_id] = self._inflight.get(node.node_id, 0) + 1
+        try:
+            if node.node_id == self.local_node.node_id or self.transport is None:
+                event("cluster_task_local", task_id=task.task_id, kind=task.kind, priority=task.priority)
+                return local_handler(task)
 
-        event(
-            "cluster_task_delegated",
-            task_id=task.task_id,
-            kind=task.kind,
-            priority=task.priority,
-            origin_node_id=task.origin_node_id,
-            executor_node_id=node.node_id,
-        )
-        result = self.transport.submit(node, task)
-        if result.task_id != task.task_id or result.origin_node_id != task.origin_node_id:
-            raise RuntimeError("Удалённый узел вернул результат не для исходной задачи")
-        return result
+            event(
+                "cluster_task_delegated",
+                task_id=task.task_id,
+                kind=task.kind,
+                priority=task.priority,
+                origin_node_id=task.origin_node_id,
+                executor_node_id=node.node_id,
+            )
+            result = self.transport.submit(node, task)
+            if result.task_id != task.task_id or result.origin_node_id != task.origin_node_id:
+                raise RuntimeError("Удалённый узел вернул результат не для исходной задачи")
+            return result
+        finally:
+            with self._lock:
+                remaining = self._inflight.get(node.node_id, 1) - 1
+                if remaining > 0:
+                    self._inflight[node.node_id] = remaining
+                else:
+                    self._inflight.pop(node.node_id, None)
 
     def status(self) -> dict[str, Any]:
         peers = self.peers()
+        with self._lock:
+            pending = dict(self._inflight)
         return {
+            "inflight_by_node": pending,
             "local_node_id": self.local_node.node_id,
             "peer_count": len(peers),
             "discovery_enabled": self.discovery is not None,
@@ -260,6 +351,8 @@ class ClusterOrchestrator:
                     "gpu_names": list(node.gpu_names),
                     "npu_names": list(node.npu_names),
                     "models": list(node.models),
+                    "memory_total_gb": round(node.memory_total_gb, 2),
+                    "memory_available_gb": round(node.memory_available_gb, 2),
                     "queue_depth": node.queue_depth,
                     "load": node.load,
                     "accepting_tasks": node.accepting_tasks,
@@ -280,4 +373,5 @@ __all__ = [
     "ClusterTransport",
     "RabbitMQTopology",
     "ClusterOrchestrator",
+    "cluster_public_summary",
 ]
