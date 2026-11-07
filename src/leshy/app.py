@@ -350,16 +350,16 @@ class LeshyApp:
 
         # Дата/время и погода — проверяемые инструменты, а не прогноз LLM.
         # Ничего не меняем в обычном диалоге и его скорости.
-        from .verified_clock import clock_answer
+        from .verified_clock import checked_clock_answer
         from .weather_runtime import weather_answer
-        factual = clock_answer(message)
+        factual, sources = checked_clock_answer(message, self.live_search)
         if factual is None:
             factual = weather_answer(message)
-        if factual is not None:
             sources = (
                 [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
-                if "Источник: Open-Meteo" in factual else []
+                if factual is not None and "Источник: Open-Meteo" in factual else []
             )
+        if factual is not None:
             event("chat_factual_tool_answered", kind="weather" if sources else "clock_or_unavailable_weather",
                   session_id=sid, source_count=len(sources))
             return {
