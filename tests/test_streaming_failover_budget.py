@@ -56,6 +56,15 @@ class AdaptiveStreamTests(unittest.TestCase):
             "".join(_adaptive_stream(router, [ChatMessage("user", "Hello")]))
         self.assertEqual(cpu.calls, 0)
 
+    def test_stream_context_error_does_not_quarantine_gpu(self):
+        gpu = FakeStream(parts=["ok"])
+        router = AdaptiveLLM([("gpu-vulkan", gpu)])
+        with patch.object(AdaptiveLLM, "_budget_for", side_effect=LLMUnavailable("контекст превышен")):
+            with self.assertRaisesRegex(LLMUnavailable, "контекст"):
+                list(_adaptive_stream(router, [ChatMessage("user", "много текста")]))
+        self.assertEqual(gpu.calls, 0)
+        self.assertEqual(router.status()["backends"][0]["failures"], 0)
+
     def test_stream_budget_is_compacted_before_backend(self):
         class Capture(FakeStream):
             def stream_chat(self, messages, *, cancel_event=None):

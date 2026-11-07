@@ -80,6 +80,19 @@ class AdaptiveCircuitBreakerTests(unittest.TestCase):
         self.assertEqual(gpu.calls, 1)
         self.assertEqual(cpu.calls, 0)
 
+    def test_invalid_context_never_quarantines_healthy_backend(self):
+        from unittest.mock import patch
+        gpu = FakeLLM(answer="normal")
+        router = AdaptiveLLM([("gpu-vulkan", gpu)])
+        with patch.object(AdaptiveLLM, "_budget_for", side_effect=LLMUnavailable("контекст 5000 > 4096")):
+            with self.assertRaisesRegex(LLMUnavailable, "контекст"):
+                router.chat([ChatMessage("user", "слишком длинно")])
+        self.assertEqual(gpu.calls, 0)
+        state = router.status()["backends"][0]
+        self.assertEqual(state["failures"], 0)
+        self.assertFalse(state["quarantined"])
+        self.assertEqual(router.chat([ChatMessage("user", "коротко")]), "normal")
+
     def test_embeddings_do_not_retry_during_cooldown(self):
         backend = FakeEmbeddings(fail=True)
         router = AdaptiveEmbeddings([("cpu-native", backend)], cooldown_seconds=60)

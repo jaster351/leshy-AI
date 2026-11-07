@@ -126,7 +126,15 @@ class AdaptiveLLM:
         for state in ordered:
             started = time.monotonic()
             try:
-                text = state.provider.chat(self._budget_for(state, prepared_messages))
+                budgeted = self._budget_for(state, prepared_messages)
+            except LLMUnavailable as exc:
+                # Oversized user context is not an unhealthy GPU/CPU/NPU.
+                # Do not quarantine a working model due to an invalid input.
+                event("adaptive_llm_context_rejected", backend=state.name)
+                errors.append(f"{state.name}: {str(exc)[:180]}")
+                continue
+            try:
+                text = state.provider.chat(budgeted)
                 if not str(text or "").strip() or not finalize_model_output(str(text)).strip():
                     raise LLMUnavailable("Backend не вернул видимого ответа (пустое содержимое или только reasoning)")
             except Exception as exc:

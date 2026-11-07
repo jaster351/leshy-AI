@@ -309,10 +309,15 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
             return
         started = time.monotonic()
         yielded = False
+        # Отказ оценки контекста не означает, что backend недоступен.
+        # Не переводим живой Vulkan/OpenVINO в cooldown за длинный prompt.
         try:
-            # По данным Windows логов 7 ноября prompt 8k/4096 context:
-            # compact per backend до отправки SSE-запроса.
             budgeted = self._budget_for(state, prepared)
+        except LLMUnavailable as exc:
+            event("adaptive_llm_stream_context_rejected", backend=state.name)
+            errors.append(f"{state.name}: {str(exc)[:180]}")
+            continue
+        try:
             provider_stream = getattr(state.provider, "stream_chat", None)
             if callable(provider_stream):
                 for delta in provider_stream(budgeted, cancel_event=cancel_event):
