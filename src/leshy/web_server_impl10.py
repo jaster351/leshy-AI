@@ -9,6 +9,7 @@ from .app import LeshyApp
 from .diagnostics import problem
 from .lenta_browser_session import LentaSessionStore
 from .module_settings import module_enabled
+from .cluster_controls import set_autodiscovery_enabled
 
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
@@ -19,6 +20,9 @@ def _runtime_html(settings) -> bytes:
     marker = '<script src="/lenta-settings-panel.js"></script>'
     if marker not in html_text:
         html_text = html_text.replace("</body>", marker + "\n</body>")
+    cluster_marker = '<script src="/cluster-diagnostics-panel.js"></script>'
+    if cluster_marker not in html_text:
+        html_text = html_text.replace("</body>", cluster_marker + "\n</body>")
     return html_text.encode("utf-8")
 
 
@@ -47,6 +51,22 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+
+            if parsed.path == "/cluster-diagnostics-panel.js":
+                try:
+                    return self._send_asset("cluster-diagnostics-panel.js", "application/javascript; charset=utf-8")
+                except FileNotFoundError:
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Панель диагностики кластера не найдена"})
+
+            if parsed.path == "/v1/cluster/diagnostics":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                try:
+                    enabled = module_enabled(app.storage, "distributed-cluster")
+                    return self._json(HTTPStatus.OK, app.distributed_cluster.diagnostics(cluster_enabled=enabled))
+                except Exception as exc:
+                    problem("cluster_diagnostics_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось прочитать диагностику LAN"})
 
             if parsed.path == "/lenta-settings-panel.js":
                 try:
@@ -140,6 +160,26 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("lenta_mark_authenticated_failed", str(exc))
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+
+            if parsed.path == "/v1/cluster/autodiscovery":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                try:
+                    body = self._body()
+                    enabled = body.get("enabled")
+                    if not isinstance(enabled, bool):
+                        raise ValueError("Требуется enabled=true/false")
+                    set_autodiscovery_enabled(app.storage, enabled)
+                    app.distributed_cluster.set_autodiscovery(enabled)
+                    active = module_enabled(app.storage, "distributed-cluster")
+                    return self._json(
+                        HTTPStatus.OK, app.distributed_cluster.diagnostics(cluster_enabled=active),
+                    )
+                except ValueError as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                except Exception as exc:
+                    problem("cluster_autodiscovery_setting_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить автообнаружение"})
 
             if parsed.path == "/v1/cluster/task":
                 if not module_enabled(app.storage, "distributed-cluster"):

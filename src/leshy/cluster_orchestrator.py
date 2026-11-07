@@ -228,6 +228,11 @@ class ClusterOrchestrator:
         event("cluster_peers_refreshed", peer_count=len(self._peers))
         return self.peers()
 
+    def forget_remote_peers(self) -> None:
+        """После отключения discovery не выдавать устаревшие узлы за активные."""
+        with self._lock:
+            self._peers = {self.local_node.node_id: self.local_node}
+
     def register_peer(self, peer: ClusterNode) -> None:
         with self._lock:
             self._peers[peer.node_id] = peer

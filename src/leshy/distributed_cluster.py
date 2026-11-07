@@ -11,9 +11,11 @@ import socket
 import threading
 import time
 from typing import Any
-from urllib import request
+from urllib import parse, request
 
 from .cluster_orchestrator import ClusterNode, ClusterOrchestrator, ClusterResult, ClusterTask
+from .cluster_controls import autodiscovery_enabled
+from .version import VERSION
 from .diagnostics import event, problem
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
@@ -112,6 +114,33 @@ class LanPeerDiscovery:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_node: ClusterNode | None = None
+        self._stats = {
+            "accepted": 0, "other_cluster": 0, "invalid_signature": 0,
+            "same_node_id": 0, "invalid_packet": 0, "announcements_failed": 0,
+        }
+        self._last_packet_at = 0.0
+        self._last_accepted_at = 0.0
+        self._last_error = ""
+
+    def _record(self, name: str, *, detail: str = "") -> None:
+        with self._lock:
+            self._stats[name] = self._stats.get(name, 0) + 1
+            self._last_packet_at = time.time()
+            if name == "accepted":
+                self._last_accepted_at = self._last_packet_at
+            if detail:
+                self._last_error = detail[:200]
+
+    def diagnostics(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "port_udp": self.port,
+                "listener_running": bool(self._thread and self._thread.is_alive()),
+                "counts": dict(self._stats),
+                "last_packet_at": self._last_packet_at,
+                "last_accepted_at": self._last_accepted_at,
+                "last_error": self._last_error,
+            }
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -125,6 +154,8 @@ class LanPeerDiscovery:
         thread = self._thread
         if thread and thread.is_alive():
             thread.join(timeout=1.5)
+        with self._lock:
+            self._peers.clear()
 
     def announce(self, node: ClusterNode) -> None:
         self._last_node = node
@@ -142,6 +173,7 @@ class LanPeerDiscovery:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             sock.sendto(packet, ("255.255.255.255", self.port))
         except Exception as exc:
+            self._record("announcements_failed", detail=type(exc).__name__)
             problem("cluster_discovery_announce_failed", str(exc))
         finally:
             sock.close()
@@ -154,18 +186,31 @@ class LanPeerDiscovery:
                 self._peers.pop(key, None)
             return list(self._peers.values())
 
-    def _accept_packet(self, raw: bytes) -> None:
+    def _accept_packet(self, raw: bytes, source_ip: str = "") -> None:
         try:
             data = json.loads(raw.decode("utf-8"))
             signature = str(data.pop("signature", ""))
-            if data.get("magic") != _DISCOVERY_MAGIC or data.get("cluster_id") != self.identity.cluster_id:
+            if data.get("magic") != _DISCOVERY_MAGIC:
+                self._record("invalid_packet")
+                return
+            if data.get("cluster_id") != self.identity.cluster_id:
+                self._record("other_cluster")
                 return
             expected = _hmac(self.identity.secret, _canonical(data))
             if not hmac.compare_digest(signature, expected):
+                self._record("invalid_signature")
                 return
             node_data = data.get("node") or {}
             node_id = str(node_data.get("node_id") or "")
-            if not node_id or node_id == self.identity.node_id:
+            if not node_id:
+                self._record("invalid_packet")
+                return
+            if node_id == self.identity.node_id:
+                # Broadcast возвращает собственные объявления. Их нельзя считать
+                # признаком клонированного node-id второго компьютера.
+                own_ip = parse.urlsplit(self._last_node.endpoint).hostname if self._last_node else _local_ip()
+                if source_ip and source_ip != own_ip:
+                    self._record("same_node_id")
                 return
             peer = ClusterNode(
                 node_id=node_id,
@@ -185,7 +230,9 @@ class LanPeerDiscovery:
                 return
             with self._lock:
                 self._peers[peer.node_id] = peer
+            self._record("accepted")
         except Exception:
+            self._record("invalid_packet")
             return
 
     def _loop(self) -> None:
@@ -202,14 +249,16 @@ class LanPeerDiscovery:
                     self.announce(self._last_node)
                     next_announce = now + 5.0
                 try:
-                    raw, _address = sock.recvfrom(_MAX_DISCOVERY_PACKET)
-                    self._accept_packet(raw)
+                    raw, address = sock.recvfrom(_MAX_DISCOVERY_PACKET)
+                    self._accept_packet(raw, str(address[0]))
                 except socket.timeout:
                     continue
                 except OSError:
                     if not self._stop.is_set():
                         time.sleep(0.2)
         except Exception as exc:
+            with self._lock:
+                self._last_error = f"{type(exc).__name__}: {str(exc)[:160]}"
             problem("cluster_discovery_listener_failed", str(exc))
         finally:
             sock.close()
@@ -287,6 +336,11 @@ class DistributedClusterRuntime:
         )
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._configuration_lock = threading.RLock()
+        self._autodiscovery_configured = autodiscovery_enabled(app.storage)
+        self._console_nodes: tuple[str, ...] | None = None
+        self._console_notice = ""
+        self.orchestrator.discovery = self.discovery if self._autodiscovery_configured else None
 
     def _models(self) -> tuple[str, ...]:
         values: list[str] = []
@@ -341,13 +395,42 @@ class DistributedClusterRuntime:
         current.accepting_tasks = refreshed.accepting_tasks
         current.last_seen = time.time()
 
+    def set_autodiscovery(self, enabled: bool) -> None:
+        """Пуск/остановка UDP discovery без остановки LLM и без перезапуска Web."""
+        with self._configuration_lock:
+            self._autodiscovery_configured = bool(enabled)
+            running = bool(self._thread and self._thread.is_alive())
+            if enabled:
+                self.orchestrator.discovery = self.discovery
+                if running:
+                    self.discovery.start()
+            else:
+                self.orchestrator.discovery = None
+                self.discovery.stop()
+                self.orchestrator.forget_remote_peers()
+            self._console_nodes = None
+        print(f"[Леший {VERSION}] Автообнаружение LAN: {'ВКЛ' if enabled else 'ВЫКЛ'}", flush=True)
+        event("cluster_autodiscovery_changed", enabled=bool(enabled))
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        self.discovery.start()
+        with self._configuration_lock:
+            if self._autodiscovery_configured:
+                self.orchestrator.discovery = self.discovery
+                self.discovery.start()
+            else:
+                self.orchestrator.discovery = None
+                self.orchestrator.forget_remote_peers()
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="leshy-cluster-runtime", daemon=True)
         self._thread.start()
+        print(
+            f"[Леший {VERSION}] Кластер: ВКЛ | узел {self.identity.node_id[:12]} "
+            f"| cluster_id {self.identity.cluster_id[:12]} | UDP {_DISCOVERY_PORT}: "
+            f"{'автопоиск' if self._autodiscovery_configured else 'выключен'}",
+            flush=True,
+        )
         event(
             "distributed_cluster_started",
             node_id=self.identity.node_id,
@@ -358,21 +441,96 @@ class DistributedClusterRuntime:
     def stop(self) -> None:
         self._stop.set()
         self.discovery.stop()
+        self.orchestrator.forget_remote_peers()
         thread = self._thread
         if thread and thread.is_alive():
             thread.join(timeout=1.5)
+        self._console_nodes = None
+        print(f"[Леший {VERSION}] Кластер: ВЫКЛ", flush=True)
 
     def _loop(self) -> None:
         while not self._stop.wait(5.0):
             try:
                 self.refresh_local_node()
                 self.orchestrator.announce_and_refresh()
+                self._console_diagnostics()
             except Exception as exc:
                 problem("distributed_cluster_refresh_failed", str(exc))
 
     def refresh(self) -> list[ClusterNode]:
         self.refresh_local_node()
         return self.orchestrator.announce_and_refresh()
+
+    def _console_diagnostics(self) -> None:
+        """Печатаем изменения состояния, не засоряя консоль каждые 5 секунд."""
+        peers = self.orchestrator.peers()
+        nodes = tuple(sorted(peer.node_id for peer in peers))
+        if nodes != self._console_nodes:
+            self._console_nodes = nodes
+            print(
+                f"[Леший {VERSION}] Кластер: {len(nodes)} узл. | "
+                f"автообнаружение {'ВКЛ' if self._autodiscovery_configured else 'ВЫКЛ'} "
+                f"| задач в работе {sum(self.orchestrator.status()['inflight_by_node'].values())}",
+                flush=True,
+            )
+            for peer in peers:
+                if peer.node_id == self.identity.node_id:
+                    continue
+                print(
+                    f"[Леший {VERSION}] LAN-узел {peer.node_id[:12]} | "
+                    f"{peer.endpoint} | CPU {peer.cpu_threads} | "
+                    f"GPU {len(peer.gpu_names)} | NPU {len(peer.npu_names)} "
+                    f"| очередь {peer.queue_depth}",
+                    flush=True,
+                )
+        counters = self.discovery.diagnostics()["counts"]
+        issue = (
+            "обнаружены объявления ДРУГОГО кластера — проверьте cluster-secret"
+            if counters.get("other_cluster") and len(nodes) < 2 else
+            "чужой узел использует тот же node_id"
+            if counters.get("same_node_id", 0) > 10 and len(nodes) < 2 else ""
+        )
+        if issue and issue != self._console_notice:
+            self._console_notice = issue
+            print(f"[Леший {VERSION}] Диагностика LAN: {issue}", flush=True)
+
+    def diagnostics(self, *, cluster_enabled: bool = True) -> dict[str, Any]:
+        self.refresh_local_node()
+        state = self.status()
+        discovery = self.discovery.diagnostics()
+        remote = max(0, int(state["peer_count"]) - 1) if cluster_enabled else 0
+        hints: list[str] = []
+        if not cluster_enabled:
+            hints.append("Кластер выключен: включите переключатель в настройках.")
+        elif not self._autodiscovery_configured:
+            hints.append("Автообнаружение выключено. Другие компьютеры не ищутся.")
+        elif not discovery["listener_running"]:
+            hints.append("UDP-приёмник не работает: проверьте порт 38765 и повторно включите обнаружение.")
+        if cluster_enabled and self._autodiscovery_configured and remote == 0:
+            counts = discovery["counts"]
+            if counts.get("other_cluster"):
+                hints.append("В сети есть Леший с другим cluster_id: проверьте общий cluster-secret.txt.")
+            if counts.get("invalid_signature"):
+                hints.append("Получены объявления с неверной подписью: проверьте общий секрет.")
+            if counts.get("same_node_id", 0) > 10:
+                hints.append("Объявления совпадают с локальным node_id: проверьте уникальность node-id.txt.")
+            hints.append("Другие доверенные узлы не найдены: проверьте UDP 38765, локальную сеть и Windows Firewall.")
+        if discovery["last_error"]:
+            hints.append("Ошибка UDP: " + discovery["last_error"])
+        return {
+            "version": VERSION,
+            "enabled": bool(cluster_enabled),
+            "autodiscovery_enabled": self._autodiscovery_configured,
+            "cluster_id": self.identity.cluster_id,
+            "node_id": self.identity.node_id,
+            "endpoint": self.local_node.endpoint,
+            "peer_count": state["peer_count"] if cluster_enabled else 0,
+            "remote_peers": state["peers"] if cluster_enabled else [],
+            "inflight_by_node": state["inflight_by_node"] if cluster_enabled else {},
+            "udp": discovery,
+            "tcp_port": int(os.getenv("LESHY_PORT", "8765")),
+            "hints": hints,
+        }
 
     def _execute_local(self, task: ClusterTask) -> ClusterResult:
         try:
@@ -490,6 +648,9 @@ class DistributedClusterRuntime:
         value = self.orchestrator.status()
         value.update({
             "enabled": True,
+            "version": VERSION,
+            "autodiscovery_enabled": self._autodiscovery_configured,
+            "udp": self.discovery.diagnostics(),
             "cluster_id": self.identity.cluster_id,
             "node_id": self.identity.node_id,
             "advertise_endpoint": self.local_node.endpoint,
