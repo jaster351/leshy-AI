@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -216,8 +217,32 @@ class DiagnosticPublisher:
             self._run_git(git, sync_repo, "checkout", "-B", self.BRANCH, f"origin/{self.BRANCH}", "--quiet")
             self._run_git(git, sync_repo, "reset", "--hard", f"origin/{self.BRANCH}", "--quiet")
 
+        # Несколько Windows-узлов публикуют в одну ветку. Раньше каждый
+        # новый push удалял предыдущий current, и логи другого компьютера
+        # безвозвратно пропадали между проверками. Перед заменой сохраняем
+        # прежний санитизированный снимок в history.
         if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
+            old_meta = dest / "upload-metadata.json"
+            if old_meta.is_file():
+                try:
+                    metadata_text = old_meta.read_text(encoding="utf-8")
+                    old_info = json.loads(metadata_text)
+                    timestamp = datetime.fromisoformat(str(old_info["uploaded_at"]).replace("Z", "+00:00"))
+                    if timestamp.tzinfo is None:
+                        raise ValueError("metadata timestamp has no timezone")
+                    stamp = timestamp.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+                    digest = hashlib.sha256(metadata_text.encode("utf-8")).hexdigest()[:16]
+                    archive = sync_repo / "log/windows-local/history" / f"{stamp}-{digest}"
+                    if not archive.exists():
+                        archive.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copytree(dest, archive)
+                except (ValueError, KeyError, OSError, TypeError, json.JSONDecodeError) as exc:
+                    # Не удаляем единственный экземпляр диагностики при
+                    # повреждённых метаданных: следующий запуск повторит.
+                    raise RuntimeError("Cannot archive previous sanitized logs before replacement") from exc
+            else:
+                raise RuntimeError("Previous diagnostics snapshot has no metadata; refusing to overwrite")
+            shutil.rmtree(dest)
         dest.mkdir(parents=True, exist_ok=True)
 
         for relative, text in logs:
