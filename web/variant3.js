@@ -312,7 +312,14 @@
       if(!input || input.dataset.recoveryEnter==='1') return;
       input.dataset.recoveryEnter='1';
       input.addEventListener('keydown',event=>{
-        if(event.key==='Enter'&&!event.shiftKey){ event.preventDefault(); sendSafe(input); }
+        // index.html already handles Enter and calls preventDefault().
+        // Without this guard the second listener runs again, and the
+        // multitask chat controller interprets that second call as "Stop".
+        if(event.defaultPrevented || event.isComposing) return;
+        if(event.key==='Enter'&&!event.shiftKey){
+          event.preventDefault();
+          sendSafe(input);
+        }
       });
     });
 
