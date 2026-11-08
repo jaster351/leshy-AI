@@ -217,6 +217,12 @@ class TelegramProxyTransport:
     def open(self, req, *, timeout: float):
         with self._lock:
             cfg = self._read()
+        # Validate the destination in both direct/system-proxy and custom-proxy modes.
+        # Bot tokens are embedded in Telegram URLs: never allow arbitrary hosts.
+        url = req.full_url if isinstance(req, request.Request) else str(req)
+        target = parse.urlsplit(url)
+        if target.scheme != "https" or target.hostname != "api.telegram.org" or target.port is not None:
+            raise ValueError("Telegram разрешён только для HTTPS Telegram Bot API")
         if not cfg["enabled"]:
             # Backwards compatible: use existing OS/environment proxy policy.
             # Сохраняем политику системных прокси, добавляя только явно
@@ -227,10 +233,6 @@ class TelegramProxyTransport:
                 request.HTTPSHandler(context=_telegram_tls_context()),
                 _NoRedirects(),
             ).open(req, timeout=timeout)
-        url = req.full_url if isinstance(req, request.Request) else str(req)
-        target = parse.urlsplit(url)
-        if target.scheme != "https" or target.hostname != "api.telegram.org" or target.port is not None:
-            raise ValueError("Прокси Telegram разрешён только для HTTPS Telegram Bot API")
         try:
             return self._opener(cfg).open(req, timeout=timeout)
         except error.HTTPError:
