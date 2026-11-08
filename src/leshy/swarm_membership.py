@@ -16,6 +16,7 @@ from urllib import parse, request
 
 from .community_identity import CommunityIdentity
 from .swarm_bootstrap import GitHubBootstrapDirectory
+from .swarm_pinned_transport import post_seed_hello
 from .swarm_peer_exchange import SwarmPeerCache, public_peer_url
 from .diagnostics import event, problem
 from .storage import utcnow
@@ -251,18 +252,10 @@ class SwarmMembership:
             hello["public_endpoint"] = self._advertise_url
         signed = self._identity.sign("cluster.hello", hello)
         payload = json.dumps(signed, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        req = request.Request(
-            self._endpoint,
-            data=payload, method="POST",
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        raw = post_seed_hello(
+            self._endpoint, payload, timeout=5.0,
+            max_bytes=_MAX_RESPONSE_BYTES, allow_local_http=self._allow_local_http,
         )
-        local_dev = parse.urlsplit(self._endpoint).hostname in {"127.0.0.1", "::1", "localhost"}
-        proxy = request.ProxyHandler({}) if local_dev else request.ProxyHandler()
-        opener = request.build_opener(proxy, _RejectRedirect())
-        with opener.open(req, timeout=5.0) as response:
-            if response.status != 200:
-                raise RuntimeError("Bootstrap отклонил регистрацию")
-            raw = response.read(_MAX_RESPONSE_BYTES + 1)
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise ValueError("Слишком большой bootstrap-ответ")
         data = json.loads(raw)
