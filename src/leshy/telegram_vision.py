@@ -107,7 +107,7 @@ def _local_endpoint() -> tuple[str, str]:
 
 def _ollama_vision_backend(*, preferred: str = "") -> tuple[str, str] | None:
     """Discover already installed vision-capable local models using /api/show."""
-    base = _loopback_origin(os.getenv("LESHY_VISION_OLLAMA_URL", "http://127.0.0.1:11434"))
+    base = _loopback_origin(os.getenv("LESHY_VISION_OLLAMA_URL") or "http://127.0.0.1:11434")
     opener = request.build_opener(request.ProxyHandler({}), _RejectRedirects())
     try:
         with opener.open(request.Request(base + "/api/tags", method="GET"), timeout=2.0) as response:
@@ -115,6 +115,8 @@ def _ollama_vision_backend(*, preferred: str = "") -> tuple[str, str] | None:
         if len(raw) > 65536:
             return None
         tags = json.loads(raw)
+        if not isinstance(tags, dict):
+            return None
         available = tags.get("models", [])
         if not isinstance(available, list):
             return None
@@ -145,6 +147,8 @@ def _ollama_vision_backend(*, preferred: str = "") -> tuple[str, str] | None:
             if len(raw) > 65536:
                 continue
             metadata = json.loads(raw)
+            if not isinstance(metadata, dict):
+                continue
             capabilities = metadata.get("capabilities", [])
             if isinstance(capabilities, list) and "vision" in capabilities:
                 return base + "/api/chat", name
