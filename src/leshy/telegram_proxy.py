@@ -217,34 +217,35 @@ class TelegramProxyTransport:
     def open(self, req, *, timeout: float):
         with self._lock:
             cfg = self._read()
-        if not cfg["enabled"]:
-            # Backwards compatible: use existing OS/environment proxy policy.
-            # Сохраняем политику системных прокси, добавляя только явно
-            # выбранный доверенный CA. Никаких CERT_NONE или check_hostname=False.
-            if os.getenv("LESHY_TELEGRAM_CA_BUNDLE", "").strip():
-                return request.build_opener(
-                    request.HTTPSHandler(context=_telegram_tls_context()), _NoRedirects(),
-                ).open(req, timeout=timeout)
-            return request.urlopen(req, timeout=timeout)
         url = req.full_url if isinstance(req, request.Request) else str(req)
         target = parse.urlsplit(url)
         if target.scheme != "https" or target.hostname != "api.telegram.org" or target.port is not None:
-            raise ValueError("Прокси Telegram разрешён только для HTTPS Telegram Bot API")
+            raise ValueError("Telegram разрешён только для HTTPS Telegram Bot API")
         try:
-            return self._opener(cfg).open(req, timeout=timeout)
-        except error.HTTPError:
-            raise
+            if not cfg["enabled"]:
+                opener = request.build_opener(
+                    request.HTTPSHandler(context=_telegram_tls_context()),
+                    _NoRedirects(),
+                )
+            else:
+                opener = self._opener(cfg)
+            return opener.open(req, timeout=timeout)
+        except error.HTTPError as exc:
+            # Keep HTTP status, Retry-After and response body, never the bot token URL.
+            raise error.HTTPError(
+                "https://api.telegram.org/<redacted>",
+                exc.code, "Telegram HTTP error", exc.headers, exc.fp,
+            ) from None
         except Exception as exc:
-            # SSL-ошибка может приходить внутри URLError.reason. Не маскируем
-            # её как "прокси недоступен"; сертификаты проверяем обязательно.
             reason = exc.reason if isinstance(exc, error.URLError) else exc
             if isinstance(reason, ssl.SSLCertVerificationError):
                 raise ConnectionError(
                     "Telegram TLS: сертификат не доверен (CERTIFICATE_VERIFY_FAILED); "
                     "проверьте корневой CA прокси/антивируса"
                 ) from None
-            # Никогда не печатаем URL (он может содержать bot token) и пароль.
-            raise ConnectionError(f"Прокси Telegram недоступен ({type(exc).__name__})") from None
+            raise ConnectionError(
+                f"Telegram transport недоступен ({type(exc).__name__})"
+            ) from None
 
 
 __all__ = ["TelegramProxyTransport"]
