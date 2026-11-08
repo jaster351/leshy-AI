@@ -386,8 +386,23 @@ def _console_live_status(app: LeshyApp, stop: threading.Event) -> None:
             route_mode = str(route.get("mode") or "ожидание")[:30]
             route_reason = str(route.get("reason") or "")[:70]
             route_text = route_mode + (f" ({route_reason})" if route_reason else "")
+            provider = getattr(getattr(app, "research", None), "search_provider", None)
+            configured = getattr(provider, "providers", None)
+            provider_names = "→".join(
+                type(item).__name__.replace("Search", "") for item in configured
+            ) if configured else (type(provider).__name__ if provider else "нет")
+            last_web = getattr(app, "_last_web_search", None) or {}
+            web_state = str(last_web.get("state") or "не проверяли")
+            web_latency = int(last_web.get("elapsed_ms") or 0)
+            web_sources = int(last_web.get("results") or 0)
+            web_at = str(last_web.get("at") or "—")
+            web_text = (
+                f"{web_state}, {web_latency}мс, {web_sources} источн., {web_at}"
+                if last_web else "не проверяли"
+            )
             signature = (model_text, active, waiting, peers, inflight,
-                         sync_state, sync_received, sync_sent, sync_last, telegram_text, route_text)
+                         sync_state, sync_received, sync_sent, sync_last,
+                         telegram_text, route_text, provider_names, web_text)
             now = time.monotonic()
             if signature != last_signature or now - last_printed >= 30.0:
                 print(
@@ -398,7 +413,9 @@ def _console_live_status(app: LeshyApp, stop: threading.Event) -> None:
                     f"очередь {waiting} | кластер {peers} узл. | задачи {inflight} | "
                     f"знания: {sync_state}, получено {sync_received}, отдано {sync_sent}, "
                     f"последний обмен {sync_last or '—'} | Telegram: {telegram_text} | "
-                    f"последний маршрут: {route_text}",
+                    f"последний маршрут: {route_text} | "
+                    f"поисковики: {provider_names} | "
+                    f"последний поиск: {web_text}",
                     flush=True,
                 )
                 last_signature = signature
