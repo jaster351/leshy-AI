@@ -35,8 +35,19 @@ def install_interactive_search_budget(app_class) -> None:
         result_queue: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
         started = time.monotonic()
 
+        def report_search(state: str, elapsed_ms: int, results: int = 0) -> None:
+            # Только технические метрики: никаких запросов, URL, токенов
+            # и произвольного текста ошибок в динамической консоли.
+            self._last_web_search = {
+                "state": state,
+                "elapsed_ms": elapsed_ms,
+                "results": results,
+                "at": time.strftime("%H:%M:%S"),
+            }
+
         with _ACTIVE_LOCK:
             if _ACTIVE_DETACHED >= _MAX_DETACHED_SEARCHES:
+                report_search("занято", int((time.monotonic() - started) * 1000))
                 event(
                     "interactive_search_capacity_exhausted",
                     active_detached=_ACTIVE_DETACHED,
@@ -68,6 +79,7 @@ def install_interactive_search_budget(app_class) -> None:
             kind, payload = result_queue.get(timeout=INTERACTIVE_SEARCH_BUDGET_SECONDS)
         except queue.Empty as exc:
             elapsed_ms = int((time.monotonic() - started) * 1000)
+            report_search("тайм-аут", elapsed_ms)
             event(
                 "interactive_search_budget_exceeded",
                 query=str(query or "")[:300],
@@ -81,9 +93,12 @@ def install_interactive_search_budget(app_class) -> None:
 
         elapsed_ms = int((time.monotonic() - started) * 1000)
         if kind == "error":
+            report_search("ошибка", elapsed_ms)
             problem("interactive_search_failed", str(payload), elapsed_ms=elapsed_ms)
             raise payload  # type: ignore[misc]
-        event("interactive_search_finished", elapsed_ms=elapsed_ms, query=str(query or "")[:300])
+        count = len(payload.get("results") or []) if isinstance(payload, dict) else 0
+        report_search("источники найдены" if count else "без результатов", elapsed_ms, count)
+        event("interactive_search_finished", elapsed_ms=elapsed_ms, source_count=count)
         return payload  # type: ignore[return-value]
 
     app_class.live_search = live_search

@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest import TestCase
+from unittest.mock import patch
+
+from leshy.reliable_web_runtime import (
+    DuckDuckGoHtmlSearch, _configure_app_search,
+)
+from leshy.research import (
+    DdgsSearch, FallbackSearch, SearchResult, SearchUnavailable, SearxngSearch,
+)
+
+
+def _already_created_app():
+    """Входной app уже создан Web server'ом: __init__ не вызывается повторно."""
+    original = FallbackSearch(
+        SearxngSearch("http://127.0.0.1:8080", timeout=3),
+        DdgsSearch(timeout=3),
+    )
+    return SimpleNamespace(research=SimpleNamespace(search_provider=original))
+
+
+class ReliableSearchStartupTests(TestCase):
+    def test_already_created_app_gets_html_fallback(self):
+        app = _already_created_app()
+        _configure_app_search(app)
+        self.assertEqual(
+            [type(item).__name__ for item in app.research.search_provider.providers],
+            ["SearxngSearch", "DuckDuckGoHtmlSearch", "DdgsSearch"],
+        )
+
+    def test_configuration_is_idempotent(self):
+        app = _already_created_app()
+        _configure_app_search(app)
+        first = app.research.search_provider
+        _configure_app_search(app)
+        self.assertIs(app.research.search_provider, first)
+        self.assertEqual(
+            sum(isinstance(item, DuckDuckGoHtmlSearch) for item in first.providers), 1,
+        )
+
+    def test_unavailable_local_searxng_tries_html_before_ddgs(self):
+        app = _already_created_app()
+        _configure_app_search(app)
+        fixture = [SearchResult(
+            "Python documentation",
+            "https://docs.python.org/3/",
+            "Latest Python documentation.",
+        )]
+        with (
+            patch.object(
+                SearxngSearch, "search",
+                side_effect=SearchUnavailable("WinError 10061: connection refused"),
+            ) as local,
+            patch.object(DuckDuckGoHtmlSearch, "search", return_value=fixture) as html,
+            patch.object(
+                DdgsSearch, "search",
+                side_effect=AssertionError("Slow DDGS should not run after HTML success"),
+            ) as slow,
+        ):
+            result = app.research.search_provider.search("Python latest release")
+        self.assertEqual(result, fixture)
+        local.assert_called_once()
+        html.assert_called_once()
+        slow.assert_not_called()
+
+    def test_existing_nondefault_provider_is_preserved(self):
+        class CustomProvider:
+            def search(self, query, limit=5):
+                return []
+
+        app = SimpleNamespace(
+            research=SimpleNamespace(
+                search_provider=FallbackSearch(CustomProvider(), DdgsSearch()),
+            ),
+        )
+        _configure_app_search(app)
+        self.assertEqual(
+            [type(item).__name__ for item in app.research.search_provider.providers],
+            ["CustomProvider", "DuckDuckGoHtmlSearch", "DdgsSearch"],
+        )
+
+
+if __name__ == "__main__":
+    import unittest
+
+    unittest.main()

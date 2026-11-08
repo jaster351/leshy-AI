@@ -9,7 +9,7 @@ from urllib import parse, request
 
 from .diagnostics import event, problem
 from .llm import ChatMessage
-from .research import FallbackSearch, SearchResult
+from .research import DdgsSearch, FallbackSearch, SearchResult
 from .research_policy import research_reason
 from .realtime_chat import RealtimeChatManager
 from .storage import utcnow
@@ -113,7 +113,9 @@ class DuckDuckGoHtmlSearch:
             },
         )
         try:
-            with request.urlopen(req, timeout=12) as response:
+            # Отводим не более 6 секунд резервному HTML-поиску:
+            # общий бюджет интерактивного поиска — 12 секунд.
+            with request.urlopen(req, timeout=6) as response:
                 raw = response.read(1_500_000)
         except Exception as exc:
             raise RuntimeError(f"DuckDuckGo HTML недоступен: {exc}") from exc
@@ -141,12 +143,29 @@ _ORIGINAL_PENDING_SESSIONS = None
 
 
 def _configure_app_search(app) -> None:
+    """Установить резервные источники в порядке реального latency budget.
+
+    SearXNG -> HTML DuckDuckGo -> DDGS. Раньше DDGS (до девяти
+    последовательных backend) стоял перед HTML и блокировал его до
+    истечения общего 12-секундного бюджета.
+    """
     provider = getattr(getattr(app, "research", None), "search_provider", None)
     if provider is not None and not bool(getattr(provider, "_leshy_reliable_web", False)):
-        combined = FallbackSearch(provider, DuckDuckGoHtmlSearch())
+        original = (
+            list(provider.providers) if isinstance(provider, FallbackSearch)
+            else [provider]
+        )
+        fast = [item for item in original if not isinstance(item, DdgsSearch)]
+        slow = [item for item in original if isinstance(item, DdgsSearch)]
+        if not any(isinstance(item, DuckDuckGoHtmlSearch) for item in fast):
+            fast.append(DuckDuckGoHtmlSearch())
+        combined = FallbackSearch(*fast, *slow)
         setattr(combined, "_leshy_reliable_web", True)
         app.research.search_provider = combined
-        event("reliable_web_search_ready", providers="configured+duckduckgo-html")
+        event(
+            "reliable_web_search_ready",
+            providers=" -> ".join(type(item).__name__ for item in combined.providers),
+        )
     # Recovery должен работать только с сообщениями, существовавшими до старта
     # текущего процесса. Новые Telegram updates нельзя одновременно забирать
     # polling-потоком и startup recovery.
@@ -154,10 +173,14 @@ def _configure_app_search(app) -> None:
         app.startup_recovery_cutoff = utcnow()
 
 
-def install_reliable_web_runtime(app_class) -> None:
+def install_reliable_web_runtime(app_class, app=None) -> None:
     """Общий исправляющий слой Web/Voice/Telegram/recovery интернет-поиска."""
     global _INSTALLED, _ORIGINAL_APP_INIT, _ORIGINAL_LIVE_SEARCH
     global _ORIGINAL_ANSWER_NEEDS_RESEARCH, _ORIGINAL_BUILD_CONTEXT, _ORIGINAL_PENDING_SESSIONS
+    # Для уже существующего LeshyApp (например, прямой вызов make_handler)
+    # нельзя рассчитывать только на monkeypatch его __init__.
+    if app is not None:
+        _configure_app_search(app)
     if _INSTALLED:
         return
     _INSTALLED = True
@@ -211,9 +234,10 @@ def install_reliable_web_runtime(app_class) -> None:
         if attempted and sources:
             messages.append(ChatMessage(
                 "system",
-                "Веб-поиск уже реально выполнен приложением. Найденные сниппеты уже сохранены как candidate-знания и "
-                "поставлены на верификацию. Запрещено утверждать, что у тебя нет доступа к интернету или что ты не можешь "
-                "обновлять знания. Ответь по найденным источникам; при недостатке доказательств прямо укажи неопределённость.",
+                "Веб-поиск уже реально выполнен приложением, получены результаты. "
+                "Сниппеты могут быть сохранены как candidate-знания только если включено обучение. "
+                "Не утверждай, что поиск недоступен, если источники переданы. "
+                "Ответь по найденным источникам; при недостатке доказательств прямо укажи неопределённость.",
             ))
         elif attempted and explicit:
             search_error = ""

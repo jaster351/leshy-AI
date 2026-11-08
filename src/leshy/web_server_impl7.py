@@ -48,7 +48,7 @@ def _restore_reference_chat_timing() -> None:
 def _install_runtime_contracts(app=None) -> None:
     """Ставить idempotency последним, поверх всех специальных chat routing."""
     install_explicit_learning_routing(LeshyApp)
-    install_reliable_web_runtime(LeshyApp)
+    install_reliable_web_runtime(LeshyApp, app)
     install_freshness_memory_runtime(app)
     install_freshness_cache_runtime()
     install_runtime_latency_fixes(app)

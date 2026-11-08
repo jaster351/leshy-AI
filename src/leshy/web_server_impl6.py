@@ -30,7 +30,7 @@ def _install_russian_voice_tts() -> None:
 
 def make_handler(app, telegram, settings, model_catalog):
     install_explicit_learning_routing(LeshyApp)
-    install_reliable_web_runtime(LeshyApp)
+    install_reliable_web_runtime(LeshyApp, app)
     install_freshness_memory_runtime(app)
     install_freshness_cache_runtime()
     install_runtime_latency_fixes(app)
