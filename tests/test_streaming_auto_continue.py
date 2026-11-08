@@ -35,7 +35,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
         second = _StreamResponse(
             'data: {"choices":[{"delta":{"content":" пределом и теперь завершено."},"finish_reason":null}]}\n',
             'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n', 'data: [DONE]\n')
-        with patch("leshy.streaming_backends.request.urlopen", side_effect=[first, second]) as urlopen:
+        with patch("leshy.streaming_backends._open_local_llama", side_effect=[first, second]) as urlopen:
             result = "".join(_llama_stream(provider, [ChatMessage("user", "Дай длинный ответ")]))
         self.assertEqual(result, "Начало ответа, которое оборвалось за пределом и теперь завершено.")
         self.assertEqual(urlopen.call_count, 2)
@@ -50,7 +50,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
             'data: [DONE]\n',
         )
         from leshy.llm import LLMUnavailable
-        with patch("leshy.streaming_backends.request.urlopen", return_value=empty) as urlopen:
+        with patch("leshy.streaming_backends._open_local_llama", return_value=empty) as urlopen:
             with self.assertRaises(LLMUnavailable):
                 list(_llama_stream(provider, [ChatMessage("user", "Привет")]))
         self.assertEqual(urlopen.call_count, 1)
@@ -64,7 +64,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
         )
         # Не подменять monotonic: новый SSE watchdog тоже зависит от часов.
         with patch("leshy.streaming_backends._AUTO_CONTINUATION_FIRST_ROUND_BUDGET_SECONDS", 0):
-            with patch("leshy.streaming_backends.request.urlopen", return_value=response) as urlopen:
+            with patch("leshy.streaming_backends._open_local_llama", return_value=response) as urlopen:
                 answer = "".join(_llama_stream(provider, [ChatMessage("user", "Задача")]))
         self.assertIn("Ответ получен", answer)
         self.assertIn("лимиту времени", answer)
@@ -93,7 +93,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
 
         response = SlowResponse()
         with patch("leshy.streaming_backends._stream_hard_limit_seconds", return_value=0.18):
-            with patch("leshy.streaming_backends.request.urlopen", return_value=response):
+            with patch("leshy.streaming_backends._open_local_llama", return_value=response):
                 started = time.monotonic()
                 chunks = list(_llama_stream(provider, [ChatMessage("user", "Длинный запрос")]))
         self.assertIn("Ответ сохранён частично", "".join(chunks))
@@ -117,7 +117,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
                 yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n'
                 yield b'data: [DONE]\n'
 
-        with patch("leshy.streaming_backends.request.urlopen", return_value=ProgressResponse()):
+        with patch("leshy.streaming_backends._open_local_llama", return_value=ProgressResponse()):
             with patch("leshy.streaming_backends._stream_hard_limit_seconds", return_value=1.0):
                 started = time.monotonic()
                 answer = "".join(_llama_stream(provider, [ChatMessage("user","Подробно")]))
@@ -136,7 +136,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
                 yield from response
                 raise TimeoutError("simulated read timeout")
             def close(self): pass
-        with patch("leshy.streaming_backends.request.urlopen", return_value=TimedOut()):
+        with patch("leshy.streaming_backends._open_local_llama", return_value=TimedOut()):
             result = "".join(_llama_stream(provider, [ChatMessage("user", "Привет")]))
         self.assertIn("Важная часть ответа", result)
         self.assertIn("Ответ сохранён частично", result)
@@ -175,7 +175,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
             cancel.set()
         helper = threading.Thread(target=cancel_soon, daemon=True)
         helper.start()
-        with patch("leshy.streaming_backends.request.urlopen", return_value=response):
+        with patch("leshy.streaming_backends._open_local_llama", return_value=response):
             started = time.monotonic()
             self.assertEqual(
                 list(_llama_stream(provider, [ChatMessage("user", "Отмена")], cancel_event=cancel)),
@@ -199,7 +199,7 @@ class StreamingAutoContinueTests(unittest.TestCase):
         response = _StreamResponse(
             'data: {"choices":[{"delta":{"content":"Готовый законченный ответ."},"finish_reason":null}]}\n',
             'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n', 'data: [DONE]\n')
-        with patch("leshy.streaming_backends.request.urlopen", return_value=response) as urlopen:
+        with patch("leshy.streaming_backends._open_local_llama", return_value=response) as urlopen:
             result = "".join(_llama_stream(provider, [ChatMessage("user", "Короткий вопрос")]))
         self.assertEqual(result, "Готовый законченный ответ.")
         self.assertEqual(urlopen.call_count, 1)

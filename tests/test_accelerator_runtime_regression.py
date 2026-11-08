@@ -67,7 +67,7 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
         provider._process = unittest.mock.Mock()
         provider._process.poll.return_value = None
         exc = HTTPError("http://127.0.0.1:12345/v1/chat/completions", 503, "busy", hdrs=None, fp=None)
-        with patch("leshy.accelerator_runtime.request.urlopen", side_effect=exc):
+        with patch("leshy.accelerator_runtime._open_local_llama", side_effect=exc):
             with self.assertRaises(LLMUnavailable):
                 provider.chat([ChatMessage("user", "hello")])
 
@@ -79,7 +79,7 @@ class AcceleratorRuntimeRegressionTests(unittest.TestCase):
         cpu = _Fallback()
         router = AdaptiveLLM([("npu-openvino", provider), ("cpu-native", cpu)], cooldown_seconds=60)
         exc = HTTPError("http://127.0.0.1:12345/v1/chat/completions", 503, "busy", hdrs=None, fp=None)
-        with patch("leshy.accelerator_runtime.request.urlopen", side_effect=exc) as urlopen:
+        with patch("leshy.accelerator_runtime._open_local_llama", side_effect=exc) as urlopen:
             self.assertEqual(router.chat([ChatMessage("user", "first")]), "fallback-ok")
             self.assertEqual(router.chat([ChatMessage("user", "second")]), "fallback-ok")
         self.assertEqual(urlopen.call_count, 1)
