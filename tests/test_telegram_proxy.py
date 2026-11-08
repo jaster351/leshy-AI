@@ -197,3 +197,31 @@ class TelegramProxyTests(unittest.TestCase):
             self.proxy.open(self.request, timeout=2)
         self.assertTrue(any(isinstance(arg, _NoRedirects)
                             for arg in factory.call_args.args))
+
+
+    def test_http_redirect_rejected_without_token_or_followup(self):
+        import io
+        from leshy.telegram_proxy import _NoRedirects
+        secret = "secret-redirect-token"
+        req = request.Request(f"https://api.telegram.org/bot{secret}/getMe")
+        handler = _NoRedirects()
+        with self.assertRaises(ConnectionError) as caught:
+            handler.redirect_request(
+                req, io.BytesIO(b""), 302, "Found",
+                {"Location": "https://untrusted.example/collect"}, "https://untrusted.example/collect",
+            )
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertNotIn("untrusted.example", str(caught.exception))
+
+    def test_tls_verification_failure_is_sanitized_in_system_proxy_mode(self):
+        import ssl
+        certificate_error = ssl.SSLCertVerificationError("certificate verify failed")
+        with patch("leshy.telegram_proxy.request.build_opener") as factory:
+            factory.return_value.open.side_effect = error.URLError(certificate_error)
+            with self.assertRaises(ConnectionError) as caught:
+                self.proxy.open(
+                    request.Request("https://api.telegram.org/botsecret-tls-token/getMe"),
+                    timeout=2,
+                )
+        self.assertIn("CERTIFICATE_VERIFY_FAILED", str(caught.exception))
+        self.assertNotIn("secret-tls-token", str(caught.exception))
