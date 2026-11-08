@@ -18,7 +18,16 @@
     if(!response.ok)throw Error(data.error||('HTTP '+response.status));
     return data;
   }
-  let polling=false,latest=null;
+  let polling=false,latest=null,latestSwarm=null;
+  function drawSwarm(data){
+    latestSwarm=data;
+    switchState($('leshySwarmAutoJoinToggle'),!!data.auto_join_enabled);
+    const states={disabled:'выключено',starting:'запуск',waiting_for_bootstrap:'ожидание публичной точки входа',registered:'узел зарегистрирован (без выдачи вычислительных задач)',retrying:'повтор подключения'};
+    txt('leshySwarmState','Состояние: '+(states[data.state]||data.state||'неизвестно')+
+      ' · Зарегистрированных узлов: '+(data.peer_count_reported||0)+
+      ' · Последний контакт: '+(data.last_contact||'не было')+
+      (data.last_error?' · Диагностика: '+data.last_error:''));
+  }
   function draw(data){
     latest=data;
     txt('leshyClusterDiagVersion',data.version);
@@ -84,6 +93,8 @@
       }catch(error){
         txt('leshyClusterKnowledgeSync','Нет данных синхронизации: '+error.message);
       }
+      try{drawSwarm(await api('/v1/swarm/status'));}
+      catch(error){txt('leshySwarmState','Нет данных глобальной сети: '+error.message);}
       txt('leshyClusterDiagUpdated','Обновлено '+new Date().toLocaleTimeString('ru-RU'));
     }catch(error){
       txt('leshyClusterDiagUpdated','Ошибка диагностики: '+error.message);
@@ -101,6 +112,16 @@
     }catch(error){
       txt('leshyClusterDiagUpdated','Ошибка сохранения: '+error.message);
     }finally{button.disabled=false;}
+  }
+  async function toggleSwarm(){
+    const button=$('leshySwarmAutoJoinToggle');
+    if(!button||!latestSwarm)return;
+    button.disabled=true;
+    try{
+      const next=!latestSwarm.auto_join_enabled;
+      drawSwarm(await api('/v1/swarm/settings',{method:'POST',body:JSON.stringify({auto_join_enabled:next})}));
+    }catch(error){txt('leshySwarmState','Ошибка изменения настройки: '+error.message);}
+    finally{button.disabled=false;}
   }
   function toggleCluster(){
     const button=document.querySelector('[data-module-toggle="distributed-cluster"]');
@@ -126,6 +147,11 @@
       '<div style="flex:1"><div class="item-title">Автообнаружение LAN</div><div class="item-meta">Поиск через UDP 38765; настройка переживает перезапуск</div></div>',
       '<button id="leshyClusterDiscoveryToggle" type="button" class="switch" role="switch" aria-label="Включить или выключить автообнаружение" aria-checked="false"></button>',
       '</div></div>',
+      '<div class="item"><div class="row">',
+      '<div style="flex:1"><div class="item-title">Автоматическое подключение к глобальному рою</div>',
+      '<div class="item-meta">Включено по умолчанию: при наличии официальной HTTPS-точки входа Леший регистрирует публичный идентификатор узла и поддерживает связь. Оператор точки входа видит IP подключения. Никакие сообщения, файлы, пароли и вычислительные задачи чужим узлам не передаются. Вы можете отключить это в любой момент.</div></div>',
+      '<button id="leshySwarmAutoJoinToggle" type="button" class="switch" role="switch" aria-label="Автоматическое глобальное подключение" aria-checked="true"></button>',
+      '</div><div class="item-meta" id="leshySwarmState">Ожидание статуса…</div></div>',
       '<div class="item"><div class="item-title">Локальная диагностика</div>',
       '<div class="item-meta">Версия: <b id="leshyClusterDiagVersion">—</b> · Компьютеров: <b id="leshyClusterDiagPeers">—</b> · Задач в работе: <b id="leshyClusterDiagInFlight">—</b></div>',
       '<div class="item-meta">cluster_id: <code id="leshyClusterDiagId">—</code></div>',
@@ -153,6 +179,7 @@
     existing.appendChild(area);
     $('leshyClusterModuleToggle').addEventListener('click',toggleCluster);
     $('leshyClusterDiscoveryToggle').addEventListener('click',toggleDiscovery);
+    $('leshySwarmAutoJoinToggle').addEventListener('click',toggleSwarm);
     $('leshyClusterDiagRefresh').addEventListener('click',refresh);
     refresh();
   }
