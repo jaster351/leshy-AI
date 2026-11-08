@@ -10,7 +10,7 @@ from .diagnostics import event, problem
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
-from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context
+from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
 from .storage import utcnow
 from .verified_clock import current_clock_context
 from .source_reading import read_supplied_source, supplied_public_url
@@ -123,8 +123,9 @@ class RealtimeChatManager:
     def _search_plan(self, message: str) -> dict[str, Any]:
         trusted = self.app.knowledge.search(message, trusted_only=True, limit=5)
         candidates = self.app.knowledge.search_candidates(message, limit=5)
-        reason = adaptive_research_reason(message, trusted, candidates)
-        needed = bool(reason or self.app._needs_live_search(message) or cinema_query(message))
+        creative = is_offline_creative_request(message)
+        reason = None if creative else adaptive_research_reason(message, trusted, candidates)
+        needed = False if creative else bool(reason or self.app._needs_live_search(message) or cinema_query(message))
         self.app._last_internet_route = {
             "mode": "поиск" if needed else "локально",
             "reason": str(reason or ("явный запрос" if needed else "TTL/контекст позволяют ответ без сети"))[:100],
@@ -157,6 +158,15 @@ class RealtimeChatManager:
                 "Markdown с языком, например ```python, чтобы Web и Telegram могли показать кнопку копирования.",
             )
         ]
+        if is_offline_creative_request(message):
+            context[0] = ChatMessage(
+                "system",
+                context[0].content + " Текущая задача — локальная генерация/редактирование текста. "
+                "Не выполнялся интернет-поиск для подтверждения поздравлений. "
+                "Не говори, что веб-поиск подтвердил шаблон, не ссылайся на "
+                "устаревшие шаблоны базы как на причину отказа: сразу напиши "
+                "готовый естественный текст, используя требования пользователя.",
+            )
         context.append(ChatMessage("system", current_clock_context()))
         source_context, source_links = read_supplied_source(self.app, message)
         if source_context:
@@ -173,13 +183,18 @@ class RealtimeChatManager:
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
 
-        plan = search_plan or self._search_plan(message)
-        trusted = list(plan.get("trusted") or [])
+        plan = dict(search_plan or self._search_plan(message))
+        if is_offline_creative_request(message):
+            # Final barrier: a freshness hook cannot force a search here.
+            plan["needed"] = False
+            plan["reason"] = ""
+            plan["stale"] = []
+        trusted = [] if is_offline_creative_request(message) else list(plan.get("trusted") or [])
         if trusted:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
 
-        cinema_plan = cinema_query(message, rows)
+        cinema_plan = None if is_offline_creative_request(message) else cinema_query(message, rows)
         if cinema_plan is not None:
             context.append(ChatMessage("system", cinema_instruction(cinema_plan)))
         sources: list[dict[str, str]] = list(source_links)
@@ -379,6 +394,10 @@ class RealtimeChatManager:
                 yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
                 return
             plan = self._search_plan(message)
+            if is_offline_creative_request(message):
+                plan["needed"] = False
+                plan["reason"] = ""
+                plan["stale"] = []
             if plan.get("needed"):
                 yield StreamEvent("activity", {
                     "kind": "web_search",
@@ -389,7 +408,7 @@ class RealtimeChatManager:
                 event("chat_web_search_visible", request_id=rid, session_id=sid, reason=str(plan.get("reason") or ""))
 
             messages, sources, search_attempted = self._build_context(message, owner_id, rows, search_plan=plan)
-            cinema_plan = cinema_query(message, rows)
+            cinema_plan = None if is_offline_creative_request(message) else cinema_query(message, rows)
             if cinema_plan is not None and not sources:
                 answer = cinema_no_data(cinema_plan)
                 answered_at = self.app._save_assistant(sid, answer)

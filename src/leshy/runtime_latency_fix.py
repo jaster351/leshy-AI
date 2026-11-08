@@ -7,7 +7,7 @@ from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .realtime_chat import RealtimeChatManager
 from .research import DdgsSearch
-from .adaptive_internet_policy import adaptive_research_reason
+from .adaptive_internet_policy import adaptive_research_reason, is_offline_creative_request
 from .temporal_grounding import ground_search_query
 
 # Подтверждено runtime-логом ddgs 2026-11-02. Несуществующие для текущего
@@ -196,6 +196,16 @@ def install_runtime_latency_fixes(app=None) -> None:
             list(plan.get("trusted") or []),
             list(plan.get("candidates") or []),
         )
+        # Последняя защита после всех freshness/latency обёрток: старое
+        # правило «новый => интернет» не применяется к генерации текста.
+        if is_offline_creative_request(message):
+            plan["needed"] = False
+            plan["reason"] = ""
+            plan["stale"] = []
+            plan["fresh_dynamic"] = []
+            plan["freshness_satisfied"] = False
+            event("creative_local_fast_path")
+            return plan
         freshness_satisfied = bool(plan.get("freshness_satisfied"))
         explicit_recheck = forced_reason == "явный запрос интернет-поиска"
         if forced_reason and (not freshness_satisfied or explicit_recheck):

@@ -43,10 +43,70 @@ def _text(value: str) -> str:
 
 
 def is_explicit_web_request(query: str) -> bool:
-    q = str(query or "").strip()
+    q = _current_user_text(query).strip()
     return q.lower().startswith("/search ") or (
         research_reason(q, trusted_count=1, candidate_count=1) == "явный запрос интернет-поиска"
     )
+
+
+def _current_user_text(query: str) -> str:
+    """Для Telegram Reply классифицируем просьбу, а не старую цитату."""
+    original = str(query or "").strip()
+    marker = "[Текущий текст пользователя]"
+    if marker in original:
+        original = original.rsplit(marker, 1)[-1].strip()
+    return original
+
+
+def is_offline_creative_request(query: str) -> bool:
+    """Писательские и поздравительные задачи не зависят от поисковиков.
+
+    Исключения: пользователь просит веб-проверку или создание текста по
+    новым *внешним* фактам — такие запросы требуют реального поиска.
+    """
+    current = _current_user_text(query)
+    q = _text(current)
+    # Пользователь может прислать готовое поздравление для редактирования.
+    greeting = q.startswith((
+        "с днем рождения", "с днём рождения", "поздравляю", "с праздником",
+        "с новым годом", "с днем свадьбы", "с днём свадьбы",
+    ))
+    writing = any(q.startswith(prefix) for prefix in _OFFLINE_TASKS + (
+        "поздравь ", "поздравить ", "перепиши ", "исправь текст",
+        "улучши текст", "переделай текст", "сделай поздравлен",
+        "сделай текст", "пожелай ",
+    ))
+    if not (greeting or writing):
+        return False
+    if is_explicit_web_request(current):
+        return False
+
+    # Чаще всего даже слова «новый», «версия», «новости» внутри наброска
+    # поздравления описывают *текст*, а не задачу получения свежих фактов.
+    greeting_content = greeting or any(
+        part in q[:150] for part in (
+            "поздравлен", "поздравительн", "пожелан", "тост",
+            "с днем рождения", "с днём рождения", "с новым годом",
+        )
+    )
+    external_facts = any(marker in q for marker in (
+        "по последним новостям", "на основе последних новостей",
+        "на основе актуальных данных", "с учетом свежих данных",
+        "с учетом сегодняшних событий", "с актуальными фактами",
+        "проверь сведения", "проверь по источникам",
+    )) or bool(_EXACT_IDENT.search(current))
+    if greeting_content:
+        return not external_facts
+
+    explicit_dynamic = _REALTIME + _WEATHER + _NEWS + _VERSION + _SCHEDULE + _RULES + _SECURITY
+    if any(marker in q for marker in explicit_dynamic):
+        return False
+    if any(marker in q for marker in (
+        "сегодня", "сейчас", "вчера", "завтра", "today", "right now",
+        "последние события", "последние изменения",
+    )):
+        return False
+    return True
 
 
 def ttl_for_context(query: str) -> int:
@@ -94,10 +154,13 @@ def knowledge_is_current(row: dict[str, Any], query: str, *, now: datetime | Non
 def adaptive_research_reason(query: str, trusted: list[dict] | None = None, candidates: list[dict] | None = None) -> str | None:
     trusted = list(trusted or [])
     candidates = list(candidates or [])
-    q = _text(query)
+    current = _current_user_text(query)
+    q = _text(current)
     # Явное требование проверить интернет нельзя подавить даже свежим кэшем.
-    basic = research_reason(query, trusted_count=len(trusted), candidate_count=len(candidates))
-    if is_explicit_web_request(query):
+    if is_offline_creative_request(query):
+        return None
+    basic = research_reason(current, trusted_count=len(trusted), candidate_count=len(candidates))
+    if is_explicit_web_request(current):
         return "явный запрос интернет-поиска"
     # Задания на генерацию текста и объяснение общих принципов не должны
     # обращаться к интернету только из-за слов «новый» или «последний».
@@ -148,5 +211,5 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
 
 __all__ = [
     "SIX_MONTHS_SECONDS", "ttl_for_context", "knowledge_is_current",
-    "adaptive_research_reason", "is_explicit_web_request",
+    "adaptive_research_reason", "is_explicit_web_request", "is_offline_creative_request",
 ]

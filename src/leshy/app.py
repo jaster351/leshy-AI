@@ -22,7 +22,7 @@ from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
-from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_explicit_web_request
+from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_explicit_web_request, is_offline_creative_request
 from .self_learning import SelfLearningWorker
 from .storage import Storage, utcnow
 from .version import VERSION
@@ -405,6 +405,15 @@ class LeshyApp:
                 "и нельзя понять, о каком человеке или объекте речь, задай одно короткое уточнение вместо выдумывания фактов.",
             )
         ]
+        creative = is_offline_creative_request(message)
+        if creative:
+            context[0] = ChatMessage(
+                "system",
+                context[0].content +
+                " Текущий запрос — творческий текст, не фактическая проверка. "
+                "Интернет-поиск здесь НЕ выполнялся. Не говори об итогах веб-поиска "
+                "или об устаревших шаблонах. Напиши готовый текст локально.",
+            )
         context.append(ChatMessage("system", current_clock_context()))
         source_context, source_links = read_supplied_source(self, message)
         if source_context:
@@ -423,11 +432,14 @@ class LeshyApp:
 
         trusted = self.knowledge.search(message, trusted_only=True, limit=5)
         candidates = self.knowledge.search_candidates(message, limit=5)
+        if creative:
+            trusted = []
+            candidates = []
         if trusted:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
 
-        cinema_plan = cinema_query(message, rows)
+        cinema_plan = None if creative else cinema_query(message, rows)
         if cinema_plan is not None:
             context.append(ChatMessage("system", cinema_instruction(cinema_plan)))
         sources: list[dict[str, str]] = list(source_links)
@@ -463,8 +475,8 @@ class LeshyApp:
                 problem("live_search_failed", search_error, query=message[:500])
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
-        reason = adaptive_research_reason(message, trusted, candidates)
-        needed = bool(cinema_plan is not None or reason or self._needs_live_search(message))
+        reason = None if creative else adaptive_research_reason(message, trusted, candidates)
+        needed = False if creative else bool(cinema_plan is not None or reason or self._needs_live_search(message))
         self._last_internet_route = {
             "mode": "поиск" if needed else "локально",
             "reason": str(reason or ("явный запрос" if needed else "TTL/контекст позволяют ответ без сети"))[:100],
@@ -499,7 +511,7 @@ class LeshyApp:
         event("chat_generation_started", session_id=sid, owner_id=owner_id, context_messages=len(messages))
         try:
             answer = self.llm.chat(messages)
-            if self._answer_needs_research(answer):
+            if not creative and self._answer_needs_research(answer):
                 if not search_attempted:
                     append_live_search("модель обнаружила пробел в знаниях")
                 if sources:

@@ -10,6 +10,7 @@ from .llm import ChatMessage
 from .realtime_chat import RealtimeChatManager, StreamEvent
 from .research import PROMPT_INJECTION_MARKERS, ResearchEngine
 from .research_policy import research_reason
+from .adaptive_internet_policy import is_offline_creative_request
 from .storage import utcnow
 from .temporal_grounding import temporal_grounding
 
@@ -36,7 +37,7 @@ _ORIGINAL_STREAM = None
 
 def is_dynamic_query(query: str) -> bool:
     value = " ".join(str(query or "").lower().replace("ё", "е").split())
-    if not value:
+    if not value or is_offline_creative_request(query):
         return False
     if temporal_grounding(value) is not None:
         return True
@@ -275,6 +276,11 @@ def install_freshness_memory_runtime(app=None) -> None:
 
         def search_plan(self, message: str) -> dict[str, Any]:
             plan = dict(_ORIGINAL_SEARCH_PLAN(self, message))
+            if is_offline_creative_request(message):
+                plan["needed"] = False
+                plan["reason"] = ""
+                plan["stale"] = []
+                return plan
             stale = self.app.knowledge.search_stale_dynamic(message, limit=5) if is_dynamic_query(message) else []
             plan["stale"] = stale
             if stale:
