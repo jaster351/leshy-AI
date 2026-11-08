@@ -185,13 +185,15 @@ class SwarmMembership:
             return
         self._last_directory_refresh = now
         new_seeds = self._directory.refresh()
-        if new_seeds:
+        if not self._directory.last_error:
+            # An empty *valid* directory is deliberate operator revocation.
+            # Do not keep contacting a seed removed from GitHub.
             self._seed_urls = tuple(
                 bootstrap_endpoint(url, allow_local_http=self._allow_local_http)
                 for url in new_seeds
             )
             self._seed_index = 0
-            self._endpoint = self._seed_urls[0]
+            self._endpoint = self._seed_urls[0] if self._seed_urls else ""
             event("swarm_directory_loaded", seed_count=len(self._seed_urls),
                   source=self._directory.source)
         elif not self._seed_urls:
