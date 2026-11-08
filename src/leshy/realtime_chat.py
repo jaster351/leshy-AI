@@ -189,7 +189,7 @@ class RealtimeChatManager:
             plan["needed"] = False
             plan["reason"] = ""
             plan["stale"] = []
-        trusted = list(plan.get("trusted") or [])
+        trusted = [] if is_offline_creative_request(message) else list(plan.get("trusted") or [])
         if trusted:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
