@@ -64,8 +64,9 @@ class SwarmMembership:
     """Opt-out auto-discovery, without remote execution permissions.
 
     A new install has network membership enabled, as advertised in installer
-    disclosure. No registration can take place until a trusted bootstrap URL
-    is explicitly provided by the distributor. This is *not* a compute opt-in.
+    disclosure. Public seed addresses come from the pinned read-only GitHub
+    manifest and are cached locally. No registration can take place until at
+    least one operational HTTPS seed exists. This is *not* a compute opt-in.
     """
 
     def __init__(self, app):
@@ -87,6 +88,7 @@ class SwarmMembership:
         # Keep the previous environment override for private pilots, while
         # making the public GitHub catalog the default discovery route.
         self._manual_endpoint = ""
+        self._manual_configured = bool(os.environ.get("LESHY_SWARM_BOOTSTRAP_URL", "").strip())
         try:
             self._manual_endpoint = bootstrap_endpoint(
                 os.environ.get("LESHY_SWARM_BOOTSTRAP_URL", ""),
@@ -140,7 +142,7 @@ class SwarmMembership:
                 "github_used_for_membership_only": True,
                 "state": self._status if enabled else "disabled",
                 "last_contact": self._last_contact,
-                "last_error": self._last_error or self._bootstrap_error,
+                "last_error": self._last_error or self._bootstrap_error or self._directory.last_error,
                 "peer_count_reported": self._peers_seen if enabled else 0,
                 "resource_sharing_enabled": False,
                 "remote_execution_enabled": False,
@@ -173,7 +175,7 @@ class SwarmMembership:
         Once a seed is available, heartbeats go straight to that seed; GitHub
         receives no identity, task, knowledge or per-node status updates.
         """
-        if self._manual_endpoint:
+        if self._manual_configured:
             return
         now = time.monotonic()
         if self._last_directory_refresh and now - self._last_directory_refresh < _DIRECTORY_REFRESH_SECONDS:
@@ -242,6 +244,13 @@ class SwarmMembership:
                 with self._lock:
                     self._status = "disabled"
             else:
+                if self._bootstrap_error and self._manual_configured:
+                    with self._lock:
+                        self._status = "configuration_error"
+                        self._last_error = self._bootstrap_error
+                    self._wake.wait(delay)
+                    self._wake.clear()
+                    continue
                 if not self._endpoint:
                     self._discover_seeds()
                 if not self._endpoint:
@@ -269,7 +278,10 @@ class SwarmMembership:
                     # Fail over to the next known seed without hitting GitHub.
                     # Refresh the public directory only after the known list
                     # has failed and the refresh interval permits it.
-                    if not self._try_next_seed():
+                    rotated = self._try_next_seed()
+                    if not rotated or (
+                        self._seed_urls and failures % len(self._seed_urls) == 0
+                    ):
                         self._discover_seeds()
                     delay = min(300.0, 10.0 * 2 ** min(failures, 4))
                     problem("swarm_membership_failed", type(exc).__name__)
