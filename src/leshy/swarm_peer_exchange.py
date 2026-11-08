@@ -19,7 +19,7 @@ from .swarm_bootstrap import _seed_url
 _PEER_TTL_SECONDS = 6 * 3600
 _MAX_PEERS = 64
 _MAX_INCOMING = 16
-_MAX_FILE = 24 * 1024
+_MAX_FILE = 48 * 1024
 _KEY_ID = re.compile(r"^[a-f0-9]{64}$")
 _GITHUB_HOSTS = frozenset({
     "github.com", "www.github.com", "api.github.com",
