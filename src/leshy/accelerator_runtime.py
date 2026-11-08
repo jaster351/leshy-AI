@@ -270,6 +270,7 @@ class LlamaServerLLM:
         self._chat_lock = threading.RLock()
         self._ready_since: float | None = None
         self._performance_profile: LocalInferenceProfile | None = None
+        self._last_health_error = ""
 
     def _stop_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
@@ -290,8 +291,14 @@ class LlamaServerLLM:
     def _is_healthy(self, base: str, timeout: float = 0.75) -> bool:
         try:
             with _open_local_llama(base + "/health", timeout=timeout) as response:
+                self._last_health_error = "" if response.status == 200 else f"HTTP {response.status}"
                 return response.status == 200
-        except Exception:
+        except error.HTTPError as exc:
+            self._last_health_error = f"HTTP {exc.code}"
+            return False
+        except Exception as exc:
+            # Never include a URL/secret in startup diagnostics.
+            self._last_health_error = type(exc).__name__
             return False
 
     def _ensure_server(self) -> str:
@@ -351,6 +358,7 @@ class LlamaServerLLM:
                     pass
             self._port = port
             self._performance_profile = profile
+            self._last_health_error = ""
             base = f"http://127.0.0.1:{port}"
             event(
                 "accelerator_server_start",
@@ -373,6 +381,10 @@ class LlamaServerLLM:
                     event("accelerator_server_ready", backend=self.backend, port=port, device=self.device, resident=True)
                     return base
                 time.sleep(0.25)
+            event("accelerator_server_health_timeout",
+                  backend=self.backend, port=port,
+                  last_health_error=self._last_health_error or "no_http_200",
+                  process_running=self._process is not None and self._process.poll() is None)
             self._stop_process()
             raise LLMUnavailable(
                 f"Локальный {self.backend} backend не стал готов за {int(self.startup_timeout)} секунд"
