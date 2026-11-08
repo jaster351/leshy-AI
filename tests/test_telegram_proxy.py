@@ -20,9 +20,13 @@ class TelegramProxyTests(unittest.TestCase):
     def test_disabled_by_default_keeps_existing_network_path(self):
         self.assertFalse(self.proxy.status()["enabled"])
         fake=Mock()
-        with patch("leshy.telegram_proxy.request.urlopen", return_value=fake) as urlopen:
+        opener=Mock()
+        opener.open.return_value=fake
+        with patch("leshy.telegram_proxy.request.build_opener", return_value=opener) as build:
             self.assertIs(self.proxy.open(self.request, timeout=3), fake)
-        urlopen.assert_called_once()
+        opener.open.assert_called_once_with(self.request, timeout=3)
+        from leshy.telegram_proxy import _NoRedirects
+        self.assertTrue(any(isinstance(h, _NoRedirects) for h in build.call_args.args))
 
     def test_http_without_credentials_and_status_mask(self):
         status=self.proxy.configure({"enabled":True,"scheme":"http","host":"proxy.local","port":3128,"auth":False})
@@ -143,6 +147,57 @@ class TelegramProxyTests(unittest.TestCase):
         with patch.object(self.proxy,"_opener",return_value=opener):
             self.assertIs(self.proxy.open(self.request,timeout=4),fake)
         self.proxy.configure({"enabled":False,"scheme":"http","host":"","port":0})
-        with patch("leshy.telegram_proxy.request.urlopen",return_value=fake) as direct:
+        direct=Mock()
+        direct.open.return_value=fake
+        with patch("leshy.telegram_proxy.request.build_opener",return_value=direct) as build:
             self.assertIs(self.proxy.open(self.request,timeout=4),fake)
-        direct.assert_called_once()
+        direct.open.assert_called_once_with(self.request,timeout=4)
+        from leshy.telegram_proxy import _NoRedirects
+        self.assertTrue(any(isinstance(h,_NoRedirects) for h in build.call_args.args))
+
+    def test_system_proxy_mode_rejects_http_redirect_without_leaking_token(self):
+        from leshy.telegram_proxy import _NoRedirects
+        from urllib import error
+        token = "secret-token-do-not-log"
+        req = request.Request("https://api.telegram.org/bot" + token + "/getMe")
+        handler = _NoRedirects()
+        with self.assertRaises(ConnectionError) as caught:
+            handler.redirect_request(req, None, 302, "Found",
+                                     {"Location": "https://example.net/"},
+                                     "https://example.net/")
+        self.assertNotIn(token, str(caught.exception))
+
+    def test_system_proxy_mode_preserves_environment_proxy_handler(self):
+        from leshy.telegram_proxy import _NoRedirects
+        import os
+        with patch.dict(os.environ, {"https_proxy": "http://proxy.local:3128", "no_proxy": ""}):
+            opener = request.build_opener(
+                request.HTTPSHandler(), _NoRedirects(),
+            )
+            handlers = [h for h in opener.handlers if isinstance(h, request.ProxyHandler)]
+            self.assertTrue(handlers)
+            self.assertEqual(handlers[0].proxies.get("https"), "http://proxy.local:3128")
+
+    def test_system_proxy_redirect_rejected_by_urllib_pipeline(self):
+        """A real opener must reject 302 before issuing a second request."""
+        import io
+        from email.message import Message
+        from urllib.response import addinfourl
+        from leshy.telegram_proxy import _NoRedirects
+
+        token = "do-not-disclose-token"
+        target = request.Request(f"https://api.telegram.org/bot{token}/getMe")
+        seen = []
+
+        class FakeHTTPS(request.HTTPSHandler):
+            def https_open(self, req):
+                seen.append(req.full_url)
+                headers = Message()
+                headers["Location"] = "https://example.invalid/collect"
+                return addinfourl(io.BytesIO(b""), headers, req.full_url, 302)
+
+        opener = request.build_opener(request.ProxyHandler({}), FakeHTTPS(), _NoRedirects())
+        with self.assertRaises(ConnectionError) as caught:
+            opener.open(target, timeout=1)
+        self.assertEqual(seen, [target.full_url])
+        self.assertNotIn(token, str(caught.exception))
