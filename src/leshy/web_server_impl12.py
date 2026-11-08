@@ -8,6 +8,7 @@ from urllib import parse
 from . import web_server_impl11 as previous
 from .cluster_knowledge_sync import KnowledgeSyncService
 from .diagnostics import problem
+from .swarm_membership import SwarmMembership
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
 
@@ -28,8 +29,25 @@ def make_handler(app, telegram, settings, model_catalog):
         app.stop_background = stop_with_sync
         service.start()
 
+    swarm = getattr(app, "swarm_membership", None)
+    if not isinstance(swarm, SwarmMembership):
+        swarm = SwarmMembership(app)
+        app.swarm_membership = swarm
+        previous_stop = app.stop_background
+
+        def stop_with_swarm():
+            swarm.stop()
+            previous_stop()
+
+        app.stop_background = stop_with_swarm
+        swarm.start()
+
     class Handler(Parent):
         def do_GET(self):
+            if parse.urlsplit(self.path).path == "/v1/swarm/status":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                return self._json(HTTPStatus.OK, swarm.status())
             if parse.urlsplit(self.path).path == "/v1/cluster/knowledge-sync/status":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
@@ -37,6 +55,18 @@ def make_handler(app, telegram, settings, model_catalog):
             return super().do_GET()
 
         def do_POST(self):
+            if parse.urlsplit(self.path).path == "/v1/swarm/settings":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                try:
+                    body = self._body()
+                    enabled = body.get("auto_join_enabled")
+                    if type(enabled) is not bool:
+                        raise ValueError("auto_join_enabled должен быть boolean")
+                    swarm.set_enabled(enabled)
+                    return self._json(HTTPStatus.OK, swarm.status())
+                except (ValueError, AttributeError, TypeError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             if parse.urlsplit(self.path).path == "/v1/cluster/knowledge-sync/pull":
                 try:
                     body = self._body()
