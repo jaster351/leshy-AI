@@ -219,7 +219,9 @@ class TelegramProxyTransport:
             cfg = self._read()
         url = req.full_url if isinstance(req, request.Request) else str(req)
         target = parse.urlsplit(url)
-        if target.scheme != "https" or target.hostname != "api.telegram.org" or target.port is not None:
+        if (target.scheme != "https" or target.hostname != "api.telegram.org"
+                or target.port is not None or target.username is not None
+                or target.password is not None or target.fragment):
             raise ValueError("Telegram разрешён только для HTTPS Telegram Bot API")
         try:
             if not cfg["enabled"]:
