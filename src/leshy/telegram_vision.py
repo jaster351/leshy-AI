@@ -59,15 +59,36 @@ def _kind(image: bytes) -> str:
     raise TelegramImageError("Неподдерживаемый формат изображения: требуется JPEG, PNG или WebP")
 
 
+class _RejectRedirects(request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise VisionUnavailable("Локальный vision backend перенаправил запрос; редирект запрещён")
+
+
+def _loopback_origin(url: str) -> str:
+    parsed = parse.urlsplit(str(url or "").strip())
+    if (
+        parsed.scheme != "http"
+        or (parsed.hostname or "").lower() not in {"127.0.0.1", "localhost", "::1"}
+        or parsed.username is not None or parsed.password is not None
+        or parsed.query or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise VisionNotConfigured("Ollama vision доступен только на локальном адресе http://127.0.0.1")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise VisionNotConfigured("Некорректный локальный порт vision") from exc
+    if port is not None and not 1 <= port <= 65535:
+        raise VisionNotConfigured("Некорректный локальный порт vision")
+    return parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+
+
 def _local_endpoint() -> tuple[str, str]:
+    """Explicit OpenAI-compatible loopback backend, never an external API."""
     url = str(os.getenv("LESHY_VISION_ENDPOINT") or "").strip()
     model = str(os.getenv("LESHY_VISION_MODEL") or "").strip()
     if not url or not model:
-        raise VisionNotConfigured(
-            "Фотографию получил, но локальная vision-модель не настроена. "
-            "Укажите LESHY_VISION_ENDPOINT и LESHY_VISION_MODEL для локального "
-            "OpenAI-совместимого сервера с поддержкой изображений."
-        )
+        raise VisionNotConfigured("LESHY_VISION_ENDPOINT и LESHY_VISION_MODEL должны быть заданы вместе")
     parsed = parse.urlsplit(url)
     if parsed.scheme != "http" or (parsed.hostname or "").lower() not in {
         "127.0.0.1", "localhost", "::1",
@@ -81,13 +102,81 @@ def _local_endpoint() -> tuple[str, str]:
         path = "/v1/chat/completions"
     if path != "/v1/chat/completions":
         raise VisionNotConfigured("Vision endpoint должен вести на /v1/chat/completions")
-    host = parsed.netloc
-    return f"http://{host}{path}", model
+    return f"http://{parsed.netloc}{path}", model
 
 
-class _RejectRedirects(request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise VisionUnavailable("Локальный vision backend перенаправил запрос; редирект запрещён")
+def _ollama_vision_backend(*, preferred: str = "") -> tuple[str, str] | None:
+    """Discover already installed vision-capable local models using /api/show."""
+    base = _loopback_origin(os.getenv("LESHY_VISION_OLLAMA_URL") or "http://127.0.0.1:11434")
+    opener = request.build_opener(request.ProxyHandler({}), _RejectRedirects())
+    try:
+        with opener.open(request.Request(base + "/api/tags", method="GET"), timeout=2.0) as response:
+            raw = response.read(65537)
+        if len(raw) > 65536:
+            return None
+        tags = json.loads(raw)
+        if not isinstance(tags, dict):
+            return None
+        available = tags.get("models", [])
+        if not isinstance(available, list):
+            return None
+    except (error.URLError, OSError, TimeoutError, ValueError, TypeError, VisionUnavailable):
+        return None
+
+    names = []
+    for row in available[:100]:
+        name = str(row.get("name") or row.get("model") or "").strip() if isinstance(row, dict) else ""
+        if 1 <= len(name) <= 120 and name not in names:
+            names.append(name)
+    if preferred:
+        names = [name for name in names if name == preferred or name.split(":")[0] == preferred]
+
+    def rank(name: str) -> tuple[int, str]:
+        hints = ("qwen2.5vl:3b", "qwen3-vl", "qwen2.5vl", "qwen3.5",
+                 "gemma3", "llava", "minicpm-v", "internvl", "moondream")
+        return next((i for i, hint in enumerate(hints) if hint in name.lower()), len(hints)), name.lower()
+
+    for name in sorted(names, key=rank)[:16]:
+        req = request.Request(
+            base + "/api/show", data=json.dumps({"model": name}).encode("utf-8"),
+            method="POST", headers={"Content-Type": "application/json"},
+        )
+        try:
+            with opener.open(req, timeout=2.5) as response:
+                raw = response.read(65537)
+            if len(raw) > 65536:
+                continue
+            metadata = json.loads(raw)
+            if not isinstance(metadata, dict):
+                continue
+            capabilities = metadata.get("capabilities", [])
+            if isinstance(capabilities, list) and "vision" in capabilities:
+                return base + "/api/chat", name
+        except (error.URLError, OSError, TimeoutError, ValueError, TypeError, VisionUnavailable):
+            continue
+    return None
+
+
+def _vision_backend() -> tuple[str, str, str]:
+    explicit_endpoint = str(os.getenv("LESHY_VISION_ENDPOINT") or "").strip()
+    preferred = str(os.getenv("LESHY_VISION_MODEL") or "").strip()
+    if explicit_endpoint:
+        endpoint, model = _local_endpoint()
+        return "openai", endpoint, model
+    found = _ollama_vision_backend(preferred=preferred)
+    if found is not None:
+        return "ollama", *found
+    if preferred:
+        raise VisionNotConfigured(
+            f"Локальная vision-модель {preferred!r} не найдена в Ollama или не поддерживает изображения. "
+            "Проверьте, что Ollama запущена и модель установлена."
+        )
+    raise VisionNotConfigured(
+        "Фотографию получил, но подходящая локальная vision-модель не найдена. "
+        "Установите Ollama и выполните: ollama pull qwen2.5vl:3b. "
+        "После установки Леший обнаружит модель автоматически, без LESHY_VISION_ENDPOINT. "
+        "Существующий llama.cpp GGUF может требовать отдельный мультимодальный mmproj."
+    )
 
 
 class LocalTelegramVision:
@@ -129,7 +218,7 @@ class LocalTelegramVision:
         return image
 
     def describe(self, message: dict) -> str:
-        endpoint, model = _local_endpoint()
+        backend, endpoint, model = _vision_backend()
         attachment = image_attachment(message)
         if attachment is None:
             raise TelegramImageError("Изображение отсутствует")
@@ -137,19 +226,28 @@ class LocalTelegramVision:
         media_type = _kind(image)
         caption = str(message.get("caption") or "").strip()[:2000]
         question = caption or "Опиши, пожалуйста, что изображено на фотографии."
-        payload = {
-            "model": model,
-            "stream": False,
-            "temperature": 0.2,
-            "max_tokens": 384,
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": question},
-                    {"type": "image_url", "image_url": {"url": "data:" + media_type + ";base64," + base64.b64encode(image).decode("ascii")}},
-                ],
-            }],
-        }
+        encoded = base64.b64encode(image).decode("ascii")
+        if backend == "ollama":
+            payload = {
+                "model": model,
+                "stream": False,
+                "messages": [{"role": "user", "content": question, "images": [encoded]}],
+                "options": {"temperature": 0.2, "num_predict": 384},
+            }
+        else:
+            payload = {
+                "model": model,
+                "stream": False,
+                "temperature": 0.2,
+                "max_tokens": 384,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": question},
+                        {"type": "image_url", "image_url": {"url": "data:" + media_type + ";base64," + encoded}},
+                    ],
+                }],
+            }
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         # Запрещаем HTTP_PROXY/HTTPS_PROXY для чувствительных image bytes.
         # Endpoint разрешён только на loopback, редиректы также запрещены.
@@ -157,7 +255,7 @@ class LocalTelegramVision:
         try:
             with opener.open(
                 request.Request(endpoint, data=data, headers={"Content-Type": "application/json"}, method="POST"),
-                timeout=45,
+                timeout=90,
             ) as response:
                 body = response.read(MAX_RESPONSE_BYTES + 1)
         except error.HTTPError as exc:
@@ -175,16 +273,19 @@ class LocalTelegramVision:
             ) from None
         except (error.URLError, OSError, TimeoutError):
             raise VisionUnavailable(
-                "Локальный vision backend недоступен или превысил лимит 45 секунд"
+                "Локальный vision backend недоступен или превысил лимит 90 секунд"
             ) from None
         if len(body) > MAX_RESPONSE_BYTES:
             raise VisionUnavailable("Vision backend вернул слишком большой ответ")
         try:
             result = json.loads(body)
-            choice = result["choices"][0]
-            content = choice["message"]["content"]
-            if isinstance(content, list):
-                content = " ".join(str(x.get("text") or "") for x in content if isinstance(x, dict))
+            if backend == "ollama":
+                content = result["message"]["content"]
+            else:
+                choice = result["choices"][0]
+                content = choice["message"]["content"]
+                if isinstance(content, list):
+                    content = " ".join(str(x.get("text") or "") for x in content if isinstance(x, dict))
             content = str(content or "").strip()
         except (ValueError, TypeError, LookupError):
             raise VisionUnavailable("Vision backend вернул неверный формат ответа") from None
