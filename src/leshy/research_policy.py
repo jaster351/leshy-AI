@@ -101,6 +101,31 @@ def is_casual_checkin(query: str) -> bool:
     )
 
 
+_LOCAL_DIALOGUE_RE = re.compile(
+    r"^(?:"
+    r"вы\s+(?:же\s+)?друг\s+друга\s+видите\s+в\s+чате|"
+    r"вы\s+видите\s+друг\s+друга\s+в\s+чате|"
+    r"кто\s+из\s+вас\s+мне\s+сейчас\s+ответил\s+последним?|"
+    r"как\s+себя\s+чувствуешь|"
+    r"прикольно[,!]?\s+вы\s+сделаны\s+из\s+одного\s+кода\b.*|"
+    r"попробуй(?:те)?\s+поговорить\s+с\s+самим\s+собой\b.*|"
+    r"(?:ответь|ответьте)\b.*\bбез\s+(?:использования\s+)?(?:интернета|инструментария|поиска)\b.*|"
+    r"используй(?:те)?\s+(?:только\s+)?(?:свою\s+)?локальную\s+базу\s+знаний\b.*"
+    r")\s*[?!.]*$",
+    re.IGNORECASE,
+)
+
+
+def is_local_dialogue_request(query: str) -> bool:
+    """Обращения к своему/соседнему агенту и локальные инструкции — не веб-факты.
+
+    Полные или очень узкие якорные совпадения: не отключаем поиск для
+    внешних фактов по схожим словам внутри других вопросов.
+    """
+    q = normalize_query(_current_user_text(query))
+    return bool(_LOCAL_DIALOGUE_RE.fullmatch(q))
+
+
 def external_freshness_requested(query: str) -> bool:
     """Меняющиеся внешние сведения (не любое вхождение трёх букв)."""
     return bool(_EXTERNAL_FRESH_RE.search(normalize_query(_current_user_text(query))))
@@ -127,7 +152,7 @@ def research_reason(
         return None
     if q.startswith("/search ") or any(marker in q for marker in _EXPLICIT_WEB_MARKERS) or any(pattern.search(q) for pattern in _EXPLICIT_WEB_PATTERNS):
         return "явный запрос интернет-поиска"
-    if is_casual_checkin(current):
+    if is_casual_checkin(current) or is_local_dialogue_request(current):
         return None
     if external_freshness_requested(current):
         return "требуются актуальные данные"
