@@ -16,6 +16,7 @@ from urllib import parse, request
 
 from .community_identity import CommunityIdentity
 from .swarm_bootstrap import GitHubBootstrapDirectory
+from .swarm_peer_exchange import SwarmPeerCache, public_peer_url
 from .diagnostics import event, problem
 from .storage import utcnow
 from .version import VERSION
@@ -103,6 +104,17 @@ class SwarmMembership:
         self._endpoint = self._manual_endpoint or (self._seed_urls[0] if self._seed_urls else "")
         self._last_directory_refresh = 0.0
         self._seed_index = 0
+        self._peer_cache = SwarmPeerCache(self.app.settings.brain_dir)
+        self._peer_urls = self._peer_cache.load()
+        self._advertise_url = ""
+        self._advertise_error = ""
+        raw_advertisement = os.getenv("LESHY_SWARM_PUBLIC_ENDPOINT", "").strip()
+        if raw_advertisement:
+            try:
+                self._advertise_url = public_peer_url(raw_advertisement)
+            except (TypeError, ValueError) as exc:
+                self._advertise_error = str(exc)
+        # Never publish user device IP/port automatically.
 
     def enabled(self) -> bool:
         with self.app.storage.connection() as conn:
@@ -137,13 +149,15 @@ class SwarmMembership:
                 "bootstrap_configured": bool(self._endpoint),
                 "bootstrap_source": "environment" if self._manual_endpoint else self._directory.source or "github_catalog",
                 "seed_count": len(self._seed_urls),
+                "discovered_public_peer_count": len(self._peer_urls),
+                "volunteer_public_endpoint_enabled": bool(self._advertise_url),
                 "directory_digest": self._directory.last_digest,
                 "github_directory_url": self._directory.url,
                 "github_used_for_membership_only": True,
                 "state": self._status if enabled else "disabled",
                 "last_contact": self._last_contact,
                 "last_error": (
-                    self._last_error or self._bootstrap_error
+                    self._advertise_error or self._last_error or self._bootstrap_error
                     or (self._directory.last_error if self._status == "waiting_for_seeds" else "")
                 ),
                 "peer_count_reported": self._peers_seen if enabled else 0,
@@ -199,12 +213,27 @@ class SwarmMembership:
         elif not self._seed_urls:
             self._endpoint = ""
 
+    def _candidate_hops(self) -> tuple[str, ...]:
+        hops = list(self._seed_urls)
+        self._peer_urls = self._peer_cache.urls()
+        for peer in self._peer_urls:
+            hops.append(bootstrap_endpoint(peer))
+        return tuple(dict.fromkeys(hops))
+
     def _try_next_seed(self) -> bool:
-        if self._manual_endpoint or len(self._seed_urls) <= 1:
+        # Preserve explicitly configured private pilot endpoint.
+        if self._manual_configured:
             return False
-        self._seed_index = (self._seed_index + 1) % len(self._seed_urls)
-        self._endpoint = self._seed_urls[self._seed_index]
-        return True
+        hops = self._candidate_hops()
+        if not hops:
+            return False
+        try:
+            next_index = (hops.index(self._endpoint) + 1) % len(hops)
+        except ValueError:
+            next_index = 0
+        previous = self._endpoint
+        self._endpoint = hops[next_index]
+        return len(hops) > 1 and self._endpoint != previous
 
     def _hello(self) -> int:
         if not self._endpoint:
@@ -212,12 +241,15 @@ class SwarmMembership:
         if self._identity is None:
             # Dedicated node identity, not any user's profile or Telegram identity.
             self._identity = CommunityIdentity(self.app.settings.brain_dir, "swarm:node")
-        signed = self._identity.sign("cluster.hello", {
+        hello = {
             "swarm_protocol": 1,
             "version": VERSION,
             "resource_sharing_enabled": False,
             "remote_execution_enabled": False,
-        })
+        }
+        if self._advertise_url:
+            hello["public_endpoint"] = self._advertise_url
+        signed = self._identity.sign("cluster.hello", hello)
         payload = json.dumps(signed, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         req = request.Request(
             self._endpoint,
@@ -239,6 +271,10 @@ class SwarmMembership:
         count = data.get("peer_count", 0)
         if type(count) is not int or count < 0:
             raise ValueError("Некорректное число участников")
+        # Public hints only, never authorization for remote execution.
+        self._peer_urls = self._peer_cache.learn(
+            data.get("peers", []), own_key_id=self._identity.key_id,
+        )
         return min(count, 1_000_000_000)
 
     def _run(self) -> None:
@@ -249,6 +285,13 @@ class SwarmMembership:
                 with self._lock:
                     self._status = "disabled"
             else:
+                if self._advertise_error:
+                    with self._lock:
+                        self._status = "configuration_error"
+                        self._last_error = self._advertise_error
+                    self._wake.wait(delay)
+                    self._wake.clear()
+                    continue
                 if self._bootstrap_error and self._manual_configured:
                     with self._lock:
                         self._status = "configuration_error"
@@ -256,6 +299,9 @@ class SwarmMembership:
                     self._wake.wait(delay)
                     self._wake.clear()
                     continue
+                if not self._endpoint:
+                    hops = self._candidate_hops()
+                    self._endpoint = hops[0] if hops else ""
                 if not self._endpoint:
                     self._discover_seeds()
                 if not self._endpoint:
