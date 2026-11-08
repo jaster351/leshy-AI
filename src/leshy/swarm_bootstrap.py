@@ -41,6 +41,8 @@ def _seed_url(raw: str, *, allow_local_http: bool = False) -> str:
         raise ValueError("Неверный URL или порт") from exc
     host = (parsed.hostname or "").lower().rstrip(".")
     loopback = host in {"127.0.0.1", "::1", "localhost"}
+    if loopback and not allow_local_http:
+        raise ValueError("Loopback допустим только в локальном пилоте")
     if not host or parsed.username is not None or parsed.password is not None:
         raise ValueError("Адрес seed не должен содержать учётных данных")
     if parsed.query or parsed.fragment or parsed.path.rstrip("/") not in {"", "/v1/swarm"}:
@@ -57,14 +59,13 @@ def _seed_url(raw: str, *, allow_local_http: bool = False) -> str:
         ):
             raise ValueError("Seed должен быть публично доступным")
         try:
-            # No literal local/CGNAT/private addresses in the public directory.
-            if not ipaddress.ip_address(host).is_global:
-                raise ValueError("Локальные и частные адреса в публичном каталоге запрещены")
-        except ValueError as exc:
-            if "запрещены" in str(exc):
-                raise
-            if "." not in host:
-                raise ValueError("Seed требует публичный DNS-адрес") from exc
+            literal_ip = ipaddress.ip_address(host)
+        except ValueError:
+            literal_ip = None
+        if literal_ip is not None and not literal_ip.is_global:
+            raise ValueError("Локальные и частные адреса в публичном каталоге запрещены")
+        if literal_ip is None and "." not in host:
+            raise ValueError("Seed требует публичный DNS-адрес")
     return parse.urlunsplit((parsed.scheme, parsed.netloc.lower(), parsed.path.rstrip("/"), "", ""))
 
 
