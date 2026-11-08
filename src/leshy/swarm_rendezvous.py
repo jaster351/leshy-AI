@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from .community_identity import ReplayGuard, verify_envelope
+from .swarm_peer_exchange import public_peer_url
 
 
 _PEER_TTL = 240
@@ -31,19 +32,31 @@ class RendezvousRegistry:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS peers ("
                 "key_id TEXT PRIMARY KEY, last_seen INTEGER NOT NULL, "
-                "protocol INTEGER NOT NULL)"
+                "protocol INTEGER NOT NULL, public_endpoint TEXT NOT NULL DEFAULT '')"
             )
+            # In-place upgrade of the earlier local pilot registry.
+            cols = {row[1] for row in db.execute("PRAGMA table_info(peers)")}
+            if "public_endpoint" not in cols:
+                db.execute("ALTER TABLE peers ADD COLUMN public_endpoint TEXT NOT NULL DEFAULT ''")
 
     def register(self, envelope: dict) -> dict:
         info = verify_envelope(envelope, replay_guard=self._replay_guard)
         if info["kind"] != "cluster.hello":
             raise ValueError("Неизвестная операция")
         payload = info["payload"]
-        if set(payload) != {
+        required = {
             "swarm_protocol", "version", "resource_sharing_enabled",
             "remote_execution_enabled",
-        }:
+        }
+        if set(payload) not in (required, required | {"public_endpoint"}):
             raise ValueError("Некорректные поля регистрации")
+        # Only an explicitly advertised *public* HTTPS endpoint can be gossiped.
+        # This is an unverified contact hint, never permission to run jobs.
+        advertised = payload.get("public_endpoint", "")
+        if advertised:
+            advertised = public_peer_url(advertised)
+        elif not isinstance(advertised, str):
+            raise ValueError("Неверный публичный endpoint")
         if payload["swarm_protocol"] != 1 or (
             payload["resource_sharing_enabled"] is not False
             or payload["remote_execution_enabled"] is not False
@@ -56,12 +69,25 @@ class RendezvousRegistry:
         with self._lock, sqlite3.connect(self._path, timeout=10) as db:
             db.execute("DELETE FROM peers WHERE last_seen<?", (now - _PEER_TTL,))
             db.execute(
-                "INSERT INTO peers(key_id,last_seen,protocol) VALUES(?,?,1) "
-                "ON CONFLICT(key_id) DO UPDATE SET last_seen=excluded.last_seen",
-                (info["key_id"], now),
+                "INSERT INTO peers(key_id,last_seen,protocol,public_endpoint) VALUES(?,?,1,?) "
+                "ON CONFLICT(key_id) DO UPDATE SET "
+                "last_seen=excluded.last_seen,public_endpoint=excluded.public_endpoint",
+                (info["key_id"], now, advertised),
             )
             count = int(db.execute("SELECT COUNT(*) FROM peers").fetchone()[0])
-        return {"accepted": True, "peer_count": count, "ttl_seconds": _PEER_TTL}
+            # Peer endpoints are voluntary public declarations. The registry
+            # never publishes IPs of outbound-only nodes or their private data.
+            peers = [
+                {"key_id": row[0], "url": row[1]}
+                for row in db.execute(
+                    "SELECT key_id,public_endpoint FROM peers "
+                    "WHERE public_endpoint<>'' AND key_id<>? "
+                    "ORDER BY last_seen DESC LIMIT 16",
+                    (info["key_id"],),
+                )
+            ]
+        return {"accepted": True, "peer_count": count, "ttl_seconds": _PEER_TTL,
+                "peers": peers}
 
     def count(self) -> int:
         now = int(time.time())
