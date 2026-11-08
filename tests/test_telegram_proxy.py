@@ -164,3 +164,26 @@ class TelegramProxyTests(unittest.TestCase):
         self.assertTrue(any(isinstance(h, request.HTTPSHandler) for h in handlers))
         self.assertTrue(any(isinstance(h, _NoRedirects) for h in handlers))
         self.assertFalse(any(isinstance(h, request.ProxyHandler) for h in handlers))
+
+    def test_http_302_is_blocked_by_real_opener_pipeline(self):
+        """HTTPErrorProcessor должен передать 302 запретителю перенаправлений."""
+        import io
+        from email.message import Message
+        from urllib.response import addinfourl
+
+        token = "SECRET-BOT-TOKEN"
+        target = request.Request(f"https://api.telegram.org/bot{token}/getMe")
+
+        class FakeHTTPS(request.HTTPSHandler):
+            def https_open(self, req):
+                headers = Message()
+                headers["Location"] = "https://example.com/collect"
+                response = addinfourl(io.BytesIO(b""), headers, req.full_url, 302)
+                response.code = 302
+                response.msg = "Found"
+                return response
+
+        opener = request.build_opener(request.ProxyHandler({}), FakeHTTPS(), _NoRedirects())
+        with self.assertRaises(ConnectionError) as caught:
+            opener.open(target, timeout=2)
+        self.assertNotIn(token, str(caught.exception))
