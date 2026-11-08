@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
-from .research_policy import research_reason
+from .research_policy import research_reason, is_casual_checkin
 
 SIX_MONTHS_SECONDS = 180 * 24 * 60 * 60
 
@@ -162,6 +162,8 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     basic = research_reason(current, trusted_count=len(trusted), candidate_count=len(candidates))
     if is_explicit_web_request(current):
         return "явный запрос интернет-поиска"
+    if is_casual_checkin(current):
+        return None
     # Задания на генерацию текста и объяснение общих принципов не должны
     # обращаться к интернету только из-за слов «новый» или «последний».
     # Исключение: явно актуальные внешние факты (новости, цены, CVE, законы).
