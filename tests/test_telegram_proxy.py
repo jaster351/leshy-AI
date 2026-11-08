@@ -225,3 +225,34 @@ class TelegramProxyTests(unittest.TestCase):
                 )
         self.assertIn("CERTIFICATE_VERIFY_FAILED", str(caught.exception))
         self.assertNotIn("secret-tls-token", str(caught.exception))
+
+    def test_rejects_userinfo_and_fragment_before_any_network_request(self):
+        # Even an allowed hostname must not carry hidden URL credentials.
+        invalid = (
+            "https://attacker@api.telegram.org/botTOKEN/getMe",
+            "https://user:pass@api.telegram.org/botTOKEN/getMe",
+            "https://api.telegram.org/botTOKEN/getMe#fragment",
+            "https://api.telegram.org:443/botTOKEN/getMe",
+        )
+        with patch("leshy.telegram_proxy.request.build_opener") as factory:
+            for url in invalid:
+                with self.subTest(url=url), self.assertRaises(ValueError):
+                    self.proxy.open(request.Request(url), timeout=2)
+            factory.assert_not_called()
+
+    def test_redacted_http_error_geturl_and_response_headers(self):
+        import io
+        token = "TOKEN-PRIVATE"
+        req = request.Request(f"https://api.telegram.org/bot{token}/getMe")
+        original = error.HTTPError(req.full_url, 429, "Too Many Requests",
+                                   {"Retry-After": "11"}, io.BytesIO(b"rate limited"))
+        with patch("leshy.telegram_proxy.request.build_opener") as factory:
+            factory.return_value.open.side_effect = original
+            with self.assertRaises(error.HTTPError) as caught:
+                self.proxy.open(req, timeout=2)
+        failure = caught.exception
+        self.assertEqual(failure.geturl(), "https://api.telegram.org/<redacted>")
+        self.assertEqual(failure.code, 429)
+        self.assertEqual(failure.headers.get("Retry-After"), "11")
+        self.assertEqual(failure.read(), b"rate limited")
+        self.assertNotIn(token, str(failure))
