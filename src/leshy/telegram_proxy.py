@@ -221,11 +221,12 @@ class TelegramProxyTransport:
             # Backwards compatible: use existing OS/environment proxy policy.
             # Сохраняем политику системных прокси, добавляя только явно
             # выбранный доверенный CA. Никаких CERT_NONE или check_hostname=False.
-            if os.getenv("LESHY_TELEGRAM_CA_BUNDLE", "").strip():
-                return request.build_opener(
-                    request.HTTPSHandler(context=_telegram_tls_context()), _NoRedirects(),
-                ).open(req, timeout=timeout)
-            return request.urlopen(req, timeout=timeout)
+            # Use urllib's default environment/system proxy policy, but never
+            # follow a redirect carrying the bot token to another host.
+            return request.build_opener(
+                request.HTTPSHandler(context=_telegram_tls_context()),
+                _NoRedirects(),
+            ).open(req, timeout=timeout)
         url = req.full_url if isinstance(req, request.Request) else str(req)
         target = parse.urlsplit(url)
         if target.scheme != "https" or target.hostname != "api.telegram.org" or target.port is not None:
