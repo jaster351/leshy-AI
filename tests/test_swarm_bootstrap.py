@@ -93,6 +93,26 @@ class GitHubBootstrapTests(TestCase):
             self.assertEqual(recovered.cached(), ("https://bootstrap.example.org",))
             self.assertEqual(recovered.source, "local_cache")
 
+    def test_empty_valid_directory_revokes_previous_seeds(self):
+        from types import SimpleNamespace
+        from leshy.swarm_membership import SwarmMembership
+
+        with TemporaryDirectory() as tmp:
+            membership = SwarmMembership.__new__(SwarmMembership)
+            membership._manual_configured = False
+            membership._last_directory_refresh = 0.0
+            membership._allow_local_http = False
+            membership._seed_urls = ("https://bootstrap.example.org/v1/swarm/hello",)
+            membership._endpoint = membership._seed_urls[0]
+            membership._seed_index = 0
+            membership._directory = SimpleNamespace(
+                refresh=lambda: (), last_error="", source="github",
+            )
+            with patch("leshy.swarm_membership.event"):
+                membership._discover_seeds()
+            self.assertEqual(membership._seed_urls, ())
+            self.assertEqual(membership._endpoint, "")
+
     def test_failed_or_malicious_update_retains_approved_cache(self):
         with TemporaryDirectory() as tmp:
             entry = GitHubBootstrapDirectory(tmp)
