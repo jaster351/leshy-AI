@@ -177,3 +177,27 @@ class TelegramProxyTests(unittest.TestCase):
             handlers = [h for h in opener.handlers if isinstance(h, request.ProxyHandler)]
             self.assertTrue(handlers)
             self.assertEqual(handlers[0].proxies.get("https"), "http://proxy.local:3128")
+
+    def test_system_proxy_redirect_rejected_by_urllib_pipeline(self):
+        """A real opener must reject 302 before issuing a second request."""
+        import io
+        from email.message import Message
+        from urllib.response import addinfourl
+        from leshy.telegram_proxy import _NoRedirects
+
+        token = "do-not-disclose-token"
+        target = request.Request(f"https://api.telegram.org/bot{token}/getMe")
+        seen = []
+
+        class FakeHTTPS(request.HTTPSHandler):
+            def https_open(self, req):
+                seen.append(req.full_url)
+                headers = Message()
+                headers["Location"] = "https://example.invalid/collect"
+                return addinfourl(io.BytesIO(b""), headers, req.full_url, 302)
+
+        opener = request.build_opener(request.ProxyHandler({}), FakeHTTPS(), _NoRedirects())
+        with self.assertRaises(ConnectionError) as caught:
+            opener.open(target, timeout=1)
+        self.assertEqual(seen, [target.full_url])
+        self.assertNotIn(token, str(caught.exception))
