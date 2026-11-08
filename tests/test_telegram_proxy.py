@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib import request
 
-from leshy.telegram_proxy import TelegramProxyTransport, _ForceHTTPProxy
+from leshy.telegram_proxy import TelegramProxyTransport, _ForceHTTPProxy, _NoRedirects
 
 
 class TelegramProxyTests(unittest.TestCase):
@@ -20,9 +20,12 @@ class TelegramProxyTests(unittest.TestCase):
     def test_disabled_by_default_keeps_existing_network_path(self):
         self.assertFalse(self.proxy.status()["enabled"])
         fake=Mock()
-        with patch("leshy.telegram_proxy.request.urlopen", return_value=fake) as urlopen:
+        opener=Mock()
+        opener.open.return_value=fake
+        with patch("leshy.telegram_proxy.request.build_opener", return_value=opener) as build:
             self.assertIs(self.proxy.open(self.request, timeout=3), fake)
-        urlopen.assert_called_once()
+        self.assertTrue(any(isinstance(h, _NoRedirects) for h in build.call_args.args))
+        opener.open.assert_called_once_with(self.request, timeout=3)
 
     def test_http_without_credentials_and_status_mask(self):
         status=self.proxy.configure({"enabled":True,"scheme":"http","host":"proxy.local","port":3128,"auth":False})
@@ -135,6 +138,17 @@ class TelegramProxyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.proxy.open(request.Request("https://example.com/"),timeout=2)
 
+    def test_system_proxy_mode_rejects_external_destination(self):
+        with self.assertRaises(ValueError):
+            self.proxy.open(request.Request("https://example.com/botSECRET/getMe"), timeout=2)
+
+    def test_redirect_rejection_does_not_disclose_bot_token(self):
+        handler=_NoRedirects()
+        req=request.Request("https://api.telegram.org/botSECRET/getMe")
+        with self.assertRaises(ConnectionError) as caught:
+            handler.redirect_request(req,None,302,"Found",{},"https://evil.example/")
+        self.assertNotIn("SECRET",str(caught.exception))
+
     def test_runtime_change_takes_effect_without_restart(self):
         self.proxy.configure({"enabled":True,"scheme":"http","host":"proxy.local","port":3128})
         fake=Mock()
@@ -143,6 +157,6 @@ class TelegramProxyTests(unittest.TestCase):
         with patch.object(self.proxy,"_opener",return_value=opener):
             self.assertIs(self.proxy.open(self.request,timeout=4),fake)
         self.proxy.configure({"enabled":False,"scheme":"http","host":"","port":0})
-        with patch("leshy.telegram_proxy.request.urlopen",return_value=fake) as direct:
+        with patch("leshy.telegram_proxy.request.build_opener",return_value=opener):
             self.assertIs(self.proxy.open(self.request,timeout=4),fake)
-        direct.assert_called_once()
+        self.assertEqual(opener.open.call_count,2)
