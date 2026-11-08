@@ -15,6 +15,7 @@ import time
 from urllib import parse, request
 
 from .community_identity import CommunityIdentity
+from .swarm_bootstrap import GitHubBootstrapDirectory
 from .diagnostics import event, problem
 from .storage import utcnow
 from .version import VERSION
@@ -23,6 +24,7 @@ from .version import VERSION
 _SETTING = "swarm.public.auto_join"
 _DEFAULT_ENABLED = True
 _HEARTBEAT_SECONDS = 90
+_DIRECTORY_REFRESH_SECONDS = 15 * 60
 _MAX_RESPONSE_BYTES = 4096
 
 
@@ -78,14 +80,27 @@ class SwarmMembership:
         self._peers_seen = 0
         self._status = "starting"
         self._bootstrap_error = ""
+        self._allow_local_http = os.getenv("LESHY_SWARM_DEV_ALLOW_HTTP", "") == "1"
+        self._directory = GitHubBootstrapDirectory(
+            self.app.settings.brain_dir, allow_local_http=self._allow_local_http,
+        )
+        # Keep the previous environment override for private pilots, while
+        # making the public GitHub catalog the default discovery route.
+        self._manual_endpoint = ""
         try:
-            self._endpoint = bootstrap_endpoint(
+            self._manual_endpoint = bootstrap_endpoint(
                 os.environ.get("LESHY_SWARM_BOOTSTRAP_URL", ""),
-                allow_local_http=os.environ.get("LESHY_SWARM_DEV_ALLOW_HTTP", "") == "1",
+                allow_local_http=self._allow_local_http,
             )
         except ValueError as exc:
-            self._endpoint = ""
             self._bootstrap_error = str(exc)
+        self._seed_urls = tuple(
+            bootstrap_endpoint(url, allow_local_http=self._allow_local_http)
+            for url in self._directory.cached()
+        )
+        self._endpoint = self._manual_endpoint or (self._seed_urls[0] if self._seed_urls else "")
+        self._last_directory_refresh = 0.0
+        self._seed_index = 0
 
     def enabled(self) -> bool:
         with self.app.storage.connection() as conn:
@@ -118,6 +133,11 @@ class SwarmMembership:
             return {
                 "auto_join_enabled": enabled,
                 "bootstrap_configured": bool(self._endpoint),
+                "bootstrap_source": "environment" if self._manual_endpoint else self._directory.source or "github_catalog",
+                "seed_count": len(self._seed_urls),
+                "directory_digest": self._directory.last_digest,
+                "github_directory_url": self._directory.url,
+                "github_used_for_membership_only": True,
                 "state": self._status if enabled else "disabled",
                 "last_contact": self._last_contact,
                 "last_error": self._last_error or self._bootstrap_error,
@@ -146,6 +166,38 @@ class SwarmMembership:
         self._wake.set()
         if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout=1.0)
+
+    def _discover_seeds(self) -> None:
+        """Fetch GitHub only when no known seed works, at a bounded cadence.
+
+        Once a seed is available, heartbeats go straight to that seed; GitHub
+        receives no identity, task, knowledge or per-node status updates.
+        """
+        if self._manual_endpoint:
+            return
+        now = time.monotonic()
+        if self._last_directory_refresh and now - self._last_directory_refresh < _DIRECTORY_REFRESH_SECONDS:
+            return
+        self._last_directory_refresh = now
+        new_seeds = self._directory.refresh()
+        if new_seeds:
+            self._seed_urls = tuple(
+                bootstrap_endpoint(url, allow_local_http=self._allow_local_http)
+                for url in new_seeds
+            )
+            self._seed_index = 0
+            self._endpoint = self._seed_urls[0]
+            event("swarm_directory_loaded", seed_count=len(self._seed_urls),
+                  source=self._directory.source)
+        elif not self._seed_urls:
+            self._endpoint = ""
+
+    def _try_next_seed(self) -> bool:
+        if self._manual_endpoint or len(self._seed_urls) <= 1:
+            return False
+        self._seed_index = (self._seed_index + 1) % len(self._seed_urls)
+        self._endpoint = self._seed_urls[self._seed_index]
+        return True
 
     def _hello(self) -> int:
         if not self._endpoint:
@@ -189,11 +241,16 @@ class SwarmMembership:
             if not self.enabled():
                 with self._lock:
                     self._status = "disabled"
-            elif not self._endpoint:
-                with self._lock:
-                    self._status = "waiting_for_bootstrap"
-                    self._last_error = self._bootstrap_error
             else:
+                if not self._endpoint:
+                    self._discover_seeds()
+                if not self._endpoint:
+                    with self._lock:
+                        self._status = "waiting_for_seeds"
+                        self._last_error = self._directory.last_error or self._bootstrap_error
+                    self._wake.wait(delay)
+                    self._wake.clear()
+                    continue
                 try:
                     count = self._hello()
                     with self._lock:
@@ -209,6 +266,11 @@ class SwarmMembership:
                     with self._lock:
                         self._status = "retrying"
                         self._last_error = type(exc).__name__
+                    # Fail over to the next known seed without hitting GitHub.
+                    # Refresh the public directory only after the known list
+                    # has failed and the refresh interval permits it.
+                    if not self._try_next_seed():
+                        self._discover_seeds()
                     delay = min(300.0, 10.0 * 2 ** min(failures, 4))
                     problem("swarm_membership_failed", type(exc).__name__)
             self._wake.wait(delay)
