@@ -27,6 +27,43 @@ _RACE_DEADLINE_SECONDS = 8.0
 # self-learning storms and detached network workers.
 _MAX_PARALLEL_SEARCH_WORKERS = 12
 _SLOTS = threading.BoundedSemaphore(_MAX_PARALLEL_SEARCH_WORKERS)
+_METRICS_LOCK = threading.RLock()
+_METRICS = {
+    "requests": 0, "successes": 0, "unavailable": 0,
+    "last_successful_provider": "", "last_success_at": "",
+    "provider_successes": {}, "provider_errors": {}, "provider_empty": {},
+}
+
+
+def _bump(kind: str, provider: str = "") -> None:
+    with _METRICS_LOCK:
+        if kind in {"requests", "successes", "unavailable"}:
+            _METRICS[kind] += 1
+        else:
+            key = {
+                "success": "provider_successes",
+                "error": "provider_errors", "empty": "provider_empty",
+            }.get(kind)
+            if key:
+                values = _METRICS[key]
+                values[provider] = values.get(provider, 0) + 1
+                if kind == "success":
+                    _METRICS["last_successful_provider"] = provider
+                    _METRICS["last_success_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def search_provider_status() -> dict:
+    """Metrics only: never expose query text, source URLs or user identifiers."""
+    with _METRICS_LOCK:
+        return {
+            **{k: v for k, v in _METRICS.items() if not isinstance(v, dict)},
+            "provider_successes": dict(_METRICS["provider_successes"]),
+            "provider_errors": dict(_METRICS["provider_errors"]),
+            "provider_empty": dict(_METRICS["provider_empty"]),
+            "parallel": True,
+            "deadline_seconds": _RACE_DEADLINE_SECONDS,
+            "last_status_scope": "текущий процесс",
+        }
 
 
 class _NoRedirects(request.HTTPRedirectHandler):
@@ -105,6 +142,7 @@ class RacingSearch(FallbackSearch):
         outcomes: queue.Queue[tuple[str, str, list[SearchResult] | None]] = queue.Queue()
         launched = 0
         started = time.monotonic()
+        _bump("requests")
 
         def worker(provider, name: str) -> None:
             try:
@@ -115,8 +153,11 @@ class RacingSearch(FallbackSearch):
                     and parse.urlsplit(item.url).scheme in {"https", "http"}
                     and parse.urlsplit(item.url).hostname
                 ]
-                outcomes.put(("success" if valid else "empty", name, valid[:limit]))
+                outcome = "success" if valid else "empty"
+                _bump(outcome, name)
+                outcomes.put((outcome, name, valid[:limit]))
             except Exception:
+                _bump("error", name)
                 outcomes.put(("error", name, None))
             finally:
                 _SLOTS.release()
@@ -138,6 +179,7 @@ class RacingSearch(FallbackSearch):
                 _SLOTS.release()
 
         if launched == 0:
+            _bump("unavailable")
             event("search_parallel_saturated", max_workers=_MAX_PARALLEL_SEARCH_WORKERS)
             raise SearchUnavailable("Поисковые источники заняты: слишком много одновременных запросов")
 
@@ -151,6 +193,7 @@ class RacingSearch(FallbackSearch):
             except queue.Empty:
                 break
             if outcome == "success" and results:
+                _bump("successes")
                 event(
                     "search_parallel_provider_selected",
                     provider=name, elapsed_ms=int((time.monotonic() - started) * 1000),
@@ -158,6 +201,7 @@ class RacingSearch(FallbackSearch):
                 )
                 return results
             failures += 1
+        _bump("unavailable")
         event(
             "search_parallel_exhausted",
             attempted=launched, finished=failures,
@@ -166,4 +210,4 @@ class RacingSearch(FallbackSearch):
         raise SearchUnavailable("Независимые поисковые источники не ответили вовремя или не нашли результатов")
 
 
-__all__ = ["BingRssSearch", "RacingSearch"]
+__all__ = ["BingRssSearch", "RacingSearch", "search_provider_status"]
