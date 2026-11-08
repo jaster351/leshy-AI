@@ -418,6 +418,7 @@ class FastTelegramBridge(RichTelegramBridge):
 
     def _run(self) -> None:
         backoff = 0.5
+        conflict_backoff = 30.0  # Другой экземпляр уже опрашивает этот bot token.
         if self._bot_id is None:
             self._refresh_bot_identity()
         while not self._stop.is_set():
@@ -443,10 +444,20 @@ class FastTelegramBridge(RichTelegramBridge):
                     self._queue.join()
                 self._last_error = ""
                 backoff = 0.5
+                conflict_backoff = 30.0
             except (error.URLError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError) as exc:
                 self._last_error = str(exc)[:500]
-                problem("telegram_poll_failed", self._last_error, retry_seconds=backoff)
-                self._stop.wait(backoff); backoff = min(backoff * 2, 5.0)
+                # HTTP 409 означает конкурирующий getUpdates того же токена.
+                # Не устраиваем бесконечную гонку каждые 5 секунд: уступаем
+                # другому poller и пробуем снова позже, не теряя offset.
+                conflict = "HTTP 409" in self._last_error and "Conflict" in self._last_error
+                retry = conflict_backoff if conflict else backoff
+                problem("telegram_poll_failed", self._last_error, retry_seconds=retry)
+                self._stop.wait(retry)
+                if conflict:
+                    conflict_backoff = min(conflict_backoff * 2, 300.0)
+                else:
+                    backoff = min(backoff * 2, 5.0)
             except Exception as exc:
                 self._last_error = str(exc)[:500]
                 problem("telegram_unexpected_error", self._last_error)
