@@ -35,9 +35,23 @@ _SMALL_TALK = (
     "как дела", "ты тут", "hello", "hi", "thanks",
 )
 
+# Только короткие обращения к самому ассистенту, а не вопросы о третьих лицах.
+_CASUAL_CHECKIN_RE = re.compile(
+    r"^(?:ты\s+)?(?:чем\s+(?:ты\s+)?занят(?:а)?|"
+    r"что\s+(?:ты\s+)?делаешь|чем\s+(?:ты\s+)?занимаешься)"
+    r"(?:\s+(?:сейчас|вообще))?\s*[?!.]*$"
+)
+
 
 def normalize_query(text: str) -> str:
     return " ".join(str(text).strip().lower().split())
+
+
+def is_casual_checkin(query: str) -> bool:
+    """Социальный вопрос самому Лешему: отвечать локально, без обязательного веб-поиска."""
+    # В Telegram Reply цитата предыдущего сообщения не определяет маршрут.
+    current = str(query or "").rsplit("[Текущий текст пользователя]", 1)[-1]
+    return bool(_CASUAL_CHECKIN_RE.fullmatch(normalize_query(current)))
 
 
 def research_reason(
@@ -60,6 +74,8 @@ def research_reason(
         return None
     if any(marker in q for marker in _EXPLICIT_WEB_MARKERS) or any(pattern.search(q) for pattern in _EXPLICIT_WEB_PATTERNS):
         return "явный запрос интернет-поиска"
+    if is_casual_checkin(query):
+        return None
     if any(marker in q for marker in _FRESHNESS_MARKERS):
         return "требуются актуальные данные"
     if any(q == marker or q.startswith(marker + " ") for marker in _SMALL_TALK):
