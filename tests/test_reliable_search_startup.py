@@ -7,6 +7,7 @@ from unittest.mock import patch
 from leshy.reliable_web_runtime import (
     DuckDuckGoHtmlSearch, _configure_app_search,
 )
+from leshy.search_parallel import BingRssSearch, RacingSearch
 from leshy.research import (
     DdgsSearch, FallbackSearch, SearchResult, SearchUnavailable, SearxngSearch,
 )
@@ -27,7 +28,7 @@ class ReliableSearchStartupTests(TestCase):
         _configure_app_search(app)
         self.assertEqual(
             [type(item).__name__ for item in app.research.search_provider.providers],
-            ["SearxngSearch", "DuckDuckGoHtmlSearch", "DdgsSearch"],
+            ["SearxngSearch", "DuckDuckGoHtmlSearch", "BingRssSearch", "DdgsSearch"],
         )
 
     def test_configuration_is_idempotent(self):
@@ -36,11 +37,15 @@ class ReliableSearchStartupTests(TestCase):
         first = app.research.search_provider
         _configure_app_search(app)
         self.assertIs(app.research.search_provider, first)
+        self.assertIsInstance(first, RacingSearch)
         self.assertEqual(
             sum(isinstance(item, DuckDuckGoHtmlSearch) for item in first.providers), 1,
         )
+        self.assertEqual(
+            sum(isinstance(item, BingRssSearch) for item in first.providers), 1,
+        )
 
-    def test_unavailable_local_searxng_tries_html_before_ddgs(self):
+    def test_slow_or_unavailable_searxng_does_not_prevent_html_result(self):
         app = _already_created_app()
         _configure_app_search(app)
         fixture = [SearchResult(
@@ -54,16 +59,14 @@ class ReliableSearchStartupTests(TestCase):
                 side_effect=SearchUnavailable("WinError 10061: connection refused"),
             ) as local,
             patch.object(DuckDuckGoHtmlSearch, "search", return_value=fixture) as html,
-            patch.object(
-                DdgsSearch, "search",
-                side_effect=AssertionError("Slow DDGS should not run after HTML success"),
-            ) as slow,
+            patch.object(BingRssSearch, "search", return_value=[]),
+            patch.object(DdgsSearch, "search", return_value=[]) as slow,
         ):
             result = app.research.search_provider.search("Python latest release")
         self.assertEqual(result, fixture)
         local.assert_called_once()
         html.assert_called_once()
-        slow.assert_not_called()
+        slow.assert_called_once()
 
     def test_existing_nondefault_provider_is_preserved(self):
         class CustomProvider:
@@ -78,7 +81,7 @@ class ReliableSearchStartupTests(TestCase):
         _configure_app_search(app)
         self.assertEqual(
             [type(item).__name__ for item in app.research.search_provider.providers],
-            ["CustomProvider", "DuckDuckGoHtmlSearch", "DdgsSearch"],
+            ["CustomProvider", "DuckDuckGoHtmlSearch", "BingRssSearch", "DdgsSearch"],
         )
 
 
