@@ -47,6 +47,25 @@ class InternetIntentRoutingTests(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertIsNone(adaptive_research_reason(query, [], []))
 
+    def test_cross_node_conversation_stays_local_despite_unverified_knowledge(self):
+        candidates = [{"status": "candidate", "captured_at": "2026-11-08T00:00:00+00:00"}]
+        for query in (
+            "Вы же друг друга видите в чате, да?",
+            "Попробуйте поговорить с самим собой. Каждый будет отвечать на предыдущие сообщения самого себя.",
+            "Прикольно, вы сделаны из одного кода, а такие разные получились.",
+            "Как себя чувствуешь?",
+            "Кто из вас мне сейчас ответил последний?",
+            "Ответьте без использования инструментария, используйте свою локальную базу знаний.",
+        ):
+            with self.subTest(query=query):
+                self.assertIsNone(adaptive_research_reason(query, [], candidates))
+        self.assertIsNotNone(
+            adaptive_research_reason("Проверь в интернете последние новости о кластерах", [], candidates)
+        )
+        self.assertIsNotNone(
+            adaptive_research_reason("Какой сейчас курс доллара?", [], candidates)
+        )
+
     def test_external_current_facts_require_search_without_fresh_trusted_sources(self):
         online = (
             "Какая погода завтра?",

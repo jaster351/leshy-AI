@@ -11,7 +11,7 @@ from .cinema_research import cinema_query, cinema_instruction, cinema_search, ci
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
-from .research_policy import is_casual_checkin
+from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
 from .verified_clock import current_clock_context
 from .source_reading import read_supplied_source, supplied_public_url
@@ -491,7 +491,7 @@ class RealtimeChatManager:
 
             answer = "".join(answer_parts).strip()
             stopped = cancel.is_set()
-            if not stopped and search_attempted and not is_casual_checkin(message) and self.app._answer_needs_research(answer):
+            if not stopped and search_attempted and not (is_casual_checkin(message) or is_local_dialogue_request(message)) and self.app._answer_needs_research(answer):
                 event("chat_stream_web_refusal_detected", request_id=rid, source_count=len(sources))
                 if sources:
                     try:
