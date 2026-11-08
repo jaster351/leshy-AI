@@ -10,7 +10,7 @@ from types import MethodType
 from urllib import request, error
 
 from .diagnostics import event, exception
-from .accelerator_runtime import _visible_answer_options
+from .accelerator_runtime import _visible_answer_options, _open_local_llama
 from .context_budget import _normalize_system_messages, apply_context_budget, estimate_tokens
 from .llm import ChatMessage, LLMUnavailable
 from .adaptive_backend import _hardware_kind
@@ -180,7 +180,7 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                     # while producing tokens every few seconds. Reset the idle
                     # timer on *real* tokens; keep an independent hard ceiling.
                     io_timeout = max(0.05, min(float(self.request_timeout), _STREAM_IDLE_SECONDS))
-                    with request.urlopen(req, timeout=io_timeout) as response:
+                    with _open_local_llama(req, timeout=io_timeout) as response:
                         stream_started = time.monotonic()
                         last_progress = [stream_started]
                         watchdog_stop, watchdog_timeout, timeout_reason = _arm_stream_watchdog(
