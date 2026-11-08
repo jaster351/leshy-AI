@@ -8,6 +8,16 @@ from .diagnostics import event, problem
 
 
 INTERACTIVE_SEARCH_BUDGET_SECONDS = 12.0
+_EXPLICIT_SEARCH_BUDGET_SECONDS = 18.0
+
+
+def _search_budget_for_reason(reason: str) -> float:
+    # When the user explicitly asks to search, a slower but accurate source
+    # is preferable to an answer falsely pretending to have verified facts.
+    return (_EXPLICIT_SEARCH_BUDGET_SECONDS
+            if str(reason or "").strip() in {
+                "явный запрос интернет-поиска", "прямой запрос пользователя",
+            } else INTERACTIVE_SEARCH_BUDGET_SECONDS)
 _MAX_DETACHED_SEARCHES = 3
 _INSTALLED = False
 _ORIGINAL_LIVE_SEARCH = None
@@ -34,6 +44,7 @@ def install_interactive_search_budget(app_class) -> None:
         global _ACTIVE_DETACHED
         result_queue: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
         started = time.monotonic()
+        budget = _search_budget_for_reason(reason)
 
         def report_search(state: str, elapsed_ms: int, results: int = 0) -> None:
             # Только технические метрики: никаких запросов, URL, токенов
@@ -76,7 +87,7 @@ def install_interactive_search_budget(app_class) -> None:
         thread = threading.Thread(target=worker, name="leshy-live-search-budget", daemon=True)
         thread.start()
         try:
-            kind, payload = result_queue.get(timeout=INTERACTIVE_SEARCH_BUDGET_SECONDS)
+            kind, payload = result_queue.get(timeout=budget)
         except queue.Empty as exc:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             report_search("тайм-аут", elapsed_ms)
@@ -84,11 +95,11 @@ def install_interactive_search_budget(app_class) -> None:
                 "interactive_search_budget_exceeded",
                 query=str(query or "")[:300],
                 reason=str(reason or "")[:200],
-                budget_seconds=INTERACTIVE_SEARCH_BUDGET_SECONDS,
+                budget_seconds=budget,
                 elapsed_ms=elapsed_ms,
             )
             raise TimeoutError(
-                f"Свежий интернет-поиск не завершился за {int(INTERACTIVE_SEARCH_BUDGET_SECONDS)} секунд"
+                f"Свежий интернет-поиск не завершился за {int(budget)} секунд"
             ) from exc
 
         elapsed_ms = int((time.monotonic() - started) * 1000)
@@ -105,6 +116,7 @@ def install_interactive_search_budget(app_class) -> None:
     event(
         "interactive_search_budget_installed",
         budget_seconds=INTERACTIVE_SEARCH_BUDGET_SECONDS,
+        explicit_budget_seconds=_EXPLICIT_SEARCH_BUDGET_SECONDS,
         max_detached_searches=_MAX_DETACHED_SEARCHES,
     )
 
