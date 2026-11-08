@@ -52,3 +52,37 @@ def test_http_error_preserves_metadata_without_exposing_token(tmp_path, status):
     assert result.read() == b"failure"
     assert "SECRET" not in result.geturl()
     assert "SECRET" not in str(result)
+
+
+def test_redirect_rejected_without_leaking_token(tmp_path):
+    from leshy.telegram_proxy import _NoRedirects
+
+    transport = TelegramProxyTransport(tmp_path)
+    url = "https://api.telegram.org/botSECRET/getMe"
+    with patch.object(transport, "_read", return_value={"enabled": False}), \
+         patch("leshy.telegram_proxy.request.build_opener") as opener:
+        opener.return_value.open.side_effect = lambda *_args, **_kwargs: (
+            _NoRedirects().redirect_request(
+                request.Request(url), None, 302, "redirect",
+                {"Location": "https://evil.example/botSECRET"}, "https://evil.example/botSECRET"
+            )
+        )
+        with pytest.raises(ConnectionError) as caught:
+            transport.open(request.Request(url), timeout=2)
+    assert "SECRET" not in str(caught.value)
+    assert "evil.example" not in str(caught.value)
+
+
+def test_tls_verification_failure_does_not_expose_token(tmp_path):
+    import ssl
+
+    transport = TelegramProxyTransport(tmp_path)
+    url = "https://api.telegram.org/botSECRET/getMe"
+    tls_error = ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED")
+    with patch.object(transport, "_read", return_value={"enabled": False}), \
+         patch("leshy.telegram_proxy.request.build_opener") as opener:
+        opener.return_value.open.side_effect = error.URLError(tls_error)
+        with pytest.raises(ConnectionError) as caught:
+            transport.open(request.Request(url), timeout=2)
+    assert "CERTIFICATE_VERIFY_FAILED" in str(caught.value)
+    assert "SECRET" not in str(caught.value)
