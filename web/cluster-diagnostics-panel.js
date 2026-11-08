@@ -22,8 +22,10 @@
   function drawSwarm(data){
     latestSwarm=data;
     switchState($('leshySwarmAutoJoinToggle'),!!data.auto_join_enabled);
-    const states={disabled:'выключено',starting:'запуск',waiting_for_bootstrap:'ожидание публичной точки входа',registered:'узел зарегистрирован (без выдачи вычислительных задач)',retrying:'повтор подключения'};
+    const states={disabled:'выключено',starting:'запуск',waiting_for_bootstrap:'ожидание публичной точки входа',waiting_for_seeds:'каталог GitHub доступен, ожидаются реальные начальные узлы',configuration_error:'ошибка адреса bootstrap',registered:'узел зарегистрирован (без выдачи вычислительных задач)',retrying:'повтор подключения'};
     txt('leshySwarmState','Состояние: '+(states[data.state]||data.state||'неизвестно')+
+      ' · Источник: '+({github:'GitHub',local_cache:'локальный кэш',github_catalog:'GitHub-каталог',environment:'ручной адрес'}[data.bootstrap_source]||data.bootstrap_source||'—')+
+      ' · Известных seed: '+(data.seed_count||0)+
       ' · Зарегистрированных узлов: '+(data.peer_count_reported||0)+
       ' · Последний контакт: '+(data.last_contact||'не было')+
       (data.last_error?' · Диагностика: '+data.last_error:''));
@@ -149,7 +151,7 @@
       '</div></div>',
       '<div class="item"><div class="row">',
       '<div style="flex:1"><div class="item-title">Автоматическое подключение к глобальному рою</div>',
-      '<div class="item-meta">Включено по умолчанию: при наличии официальной HTTPS-точки входа Леший регистрирует публичный идентификатор узла и поддерживает связь. Оператор точки входа видит IP подключения. Никакие сообщения, файлы, пароли и вычислительные задачи чужим узлам не передаются. Вы можете отключить это в любой момент.</div></div>',
+      '<div class="item-meta">Включено по умолчанию: сначала читается только список первоначальных адресов из GitHub и сохраняется на компьютере. Далее связь идёт напрямую к известным узлам, без GitHub. GitHub видит IP при загрузке каталога; оператор seed видит IP и публичный идентификатор узла. Никакие сообщения, файлы, пароли и вычислительные задачи чужим узлам не передаются. Можно отключить в любой момент.</div></div>',
       '<button id="leshySwarmAutoJoinToggle" type="button" class="switch" role="switch" aria-label="Автоматическое глобальное подключение" aria-checked="true"></button>',
       '</div><div class="item-meta" id="leshySwarmState">Ожидание статуса…</div></div>',
       '<div class="item"><div class="item-title">Локальная диагностика</div>',
