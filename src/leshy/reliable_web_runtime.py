@@ -9,7 +9,8 @@ from urllib import parse, request
 
 from .diagnostics import event, problem
 from .llm import ChatMessage
-from .research import DdgsSearch, FallbackSearch, SearchResult
+from .research import DdgsSearch, FallbackSearch, SearchResult, SearxngSearch
+from .search_parallel import BingRssSearch, RacingSearch
 from .research_policy import research_reason
 from .realtime_chat import RealtimeChatManager
 from .storage import utcnow
@@ -143,11 +144,11 @@ _ORIGINAL_PENDING_SESSIONS = None
 
 
 def _configure_app_search(app) -> None:
-    """Установить резервные источники в порядке реального latency budget.
+    """Run independent providers simultaneously, bounded by 8s.
 
-    SearXNG -> HTML DuckDuckGo -> DDGS. Раньше DDGS (до девяти
-    последовательных backend) стоял перед HTML и блокировал его до
-    истечения общего 12-секундного бюджета.
+    Earlier SearXNG -> DDG HTML -> DDGS ran sequentially. One slow
+    search site could consume the entire interactive 12-second budget
+    without giving the other sites any opportunity.
     """
     provider = getattr(getattr(app, "research", None), "search_provider", None)
     if provider is not None and not bool(getattr(provider, "_leshy_reliable_web", False)):
@@ -156,15 +157,30 @@ def _configure_app_search(app) -> None:
             else [provider]
         )
         fast = [item for item in original if not isinstance(item, DdgsSearch)]
-        slow = [item for item in original if isinstance(item, DdgsSearch)]
+        for item in fast:
+            # SearXNG can be configured with a 20-second request timeout.
+            # Never let a single local service hold a worker for 20 seconds.
+            if isinstance(item, SearxngSearch):
+                item.timeout = min(float(item.timeout), 4.0)
         if not any(isinstance(item, DuckDuckGoHtmlSearch) for item in fast):
             fast.append(DuckDuckGoHtmlSearch())
-        combined = FallbackSearch(*fast, *slow)
+        if not any(isinstance(item, BingRssSearch) for item in fast):
+            fast.append(BingRssSearch(timeout=4.0))
+        # Full DDGS auto/backends used to occupy many seconds *per source*
+        # and kept detached worker slots busy after the chat timed out.
+        # Preserve independent engines, but cap to a short bounded subset.
+        slow = [
+            DdgsSearch(timeout=3, backends=("google", "mojeek", "yandex"))
+            for item in original if isinstance(item, DdgsSearch)
+        ]
+        combined = RacingSearch(*fast, *slow, deadline_seconds=8.0)
         setattr(combined, "_leshy_reliable_web", True)
         app.research.search_provider = combined
         event(
             "reliable_web_search_ready",
-            providers=" -> ".join(type(item).__name__ for item in combined.providers),
+            providers=" || ".join(type(item).__name__ for item in combined.providers),
+            parallel=True,
+            deadline_seconds=8.0,
         )
     # Recovery должен работать только с сообщениями, существовавшими до старта
     # текущего процесса. Новые Telegram updates нельзя одновременно забирать
