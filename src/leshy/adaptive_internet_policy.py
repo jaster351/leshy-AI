@@ -23,6 +23,9 @@ _REALTIME = ("курс валют", "курс доллара", "курс евр�
 _WEATHER = ("погод", "weather", "температура на улице", "прогноз")
 _NEWS = ("новост", "news", "происшеств", "вышел", "опубликовал", "опубликована")
 _VERSION = ("версия", "релиз", "обновлен", "патч", "release", "version", "changelog")
+_PLACES = ("ресторан", "отел", "гостиниц", "поездк", "путешеств")
+_MEDICAL = ("дозировк", "противопоказан")
+_SERVICE_AVAILABILITY = ("работает ли", "открыт ли", "доступен ли")
 _SCHEDULE = ("расписан", "авиарейс", "поезд", "расписание", "schedule", "билет", "рейс")
 _RULES = ("закон", "правил", "регламент", "штраф", "налог", "санкц", "пдд", "гост", "постановлен", "тариф")
 _SECURITY = ("cve-", "уязвим", "exploit", "vulnerab", "security advisory", "patch tuesday")
@@ -37,11 +40,15 @@ _OFFLINE_TASKS = (
 )
 _EXACT_IDENT = re.compile(r"\b(?:CVE-\d{4}-\d{4,}|GHSA-[0-9a-z-]+)\b", re.I)
 # Определение термина или принципа не является запросом актуального значения.
-_DEFINITION_RE = re.compile(r"^(?:что такое|что значит|что означает|что представляет собой|what is)\s+")
+_DEFINITION_RE = re.compile(
+    r"^(?:что такое|что значит|что означает|что представляет собой|what is|"
+    r"как устроен(?:а|о|ы)?|как формируется|как работает|"
+    r"объясни\s+(?:как|что|принцип))\s+"
+)
 # Признаки, из-за которых определение превращается в проверку свежих фактов.
 _RECENCY_RE = re.compile(
     r"\b(?:сегодня|сейчас|вчера|завтра|последн\w*|актуальн\w*|текущ\w*|"
-    r"новост\w*|свеж\w*|latest|current|today|202[5-9])\b"
+    r"нов(?:ый|ая|ое|ые|ую|ых)|новост\w*|свеж\w*|latest|current|today|202[5-9])\b"
 )
 _CREATIVE_ART_RE = re.compile(
     r"^(?:придумай|сочини|нарисуй|"
@@ -131,11 +138,13 @@ def is_offline_creative_request(query: str) -> bool:
 def ttl_for_context(query: str) -> int:
     """Базовая актуальность 180 дней; для быстрых фактов существенно меньше."""
     q = _text(query)
-    if any(x in q for x in _STABLE):
+    if any(x in q for x in _STABLE) and not _RECENCY_RE.search(q):
         return 2 * 365 * 24 * 60 * 60
     if any(x in q for x in _WEATHER):
         return 30 * 60
     if any(x in q for x in _REALTIME):
+        return 15 * 60
+    if any(x in q for x in _SERVICE_AVAILABILITY):
         return 15 * 60
     if any(x in q for x in _NEWS):
         return 60 * 60
@@ -143,6 +152,10 @@ def ttl_for_context(query: str) -> int:
         return 6 * 60 * 60
     if any(x in q for x in _SCHEDULE):
         return 6 * 60 * 60
+    if any(x in q for x in _PLACES):
+        return 24 * 60 * 60
+    if any(x in q for x in _MEDICAL):
+        return 7 * 24 * 60 * 60
     if any(x in q for x in _VERSION):
         return 24 * 60 * 60
     if any(x in q for x in _RULES):
@@ -187,6 +200,10 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     # не названы актуальный период, конкретная CVE/GHSA или внешний источник.
     if _DEFINITION_RE.match(q) and not _RECENCY_RE.search(q) and not _EXACT_IDENT.search(current) and not trusted and not candidates:
         return None
+    # «Объясни закон Ома» — постоянный физический принцип, а не новая
+    # редакция правового акта. Явное требование обновлений по-прежнему ищется.
+    if any(x in q for x in _STABLE) and not _RECENCY_RE.search(q) and not _EXACT_IDENT.search(current) and not trusted and not candidates:
+        return None
     # Задания на генерацию текста и объяснение общих принципов не должны
     # обращаться к интернету только из-за слов «новый» или «последний».
     # Исключение: явно актуальные внешние факты (новости, цены, CVE, законы).
@@ -194,14 +211,14 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     time_sensitive = external_freshness_requested(current) or bool(_EXACT_IDENT.search(current))
     if offline_task and not time_sensitive:
         return None
+    if _EXACT_IDENT.search(current):
+        return "свежая проверка бюллетеня безопасности"
     if basic == "требуются актуальные данные":
         # Проверенная запись ещё внутри TTL: используем её без задержки
         # сетевого round-trip. Явный запрос интернета обработан выше.
         if trusted and any(knowledge_is_current(row, query) for row in trusted):
             return None
         return basic
-    if _EXACT_IDENT.search(query):
-        return "свежая проверка бюллетеня безопасности"
     if any(x in q for x in _STABLE) and not _RECENCY_RE.search(q) and not _EXACT_IDENT.search(current):
         return None
     if any(marker in q for marker in _SECURITY):
