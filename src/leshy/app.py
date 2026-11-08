@@ -432,6 +432,9 @@ class LeshyApp:
 
         trusted = self.knowledge.search(message, trusted_only=True, limit=5)
         candidates = self.knowledge.search_candidates(message, limit=5)
+        if creative:
+            trusted = []
+            candidates = []
         if trusted:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
