@@ -200,7 +200,17 @@ class LlamaCppRuntimeManager:
         req = request.Request(asset.url, headers={"User-Agent": "Leshy-Accelerator-Runtime/1.10"})
         digest = sha256()
         downloaded = 0
-        with request.urlopen(req, timeout=90) as response, target.open("wb") as handle:
+        # External GitHub releases must use the configured network/proxy.
+        # Distinguish download HTTP 504 from a local CPU inference failure.
+        try:
+            response = request.urlopen(req, timeout=90)
+        except error.HTTPError as exc:
+            event("accelerator_runtime_download_http_failed",
+                  backend=asset.backend, asset=asset.name, http_status=exc.code)
+            raise RuntimeError(
+                f"Не удалось скачать {asset.backend} runtime: внешний источник или прокси вернул HTTP {exc.code}"
+            ) from exc
+        with response, target.open("wb") as handle:
             total = int(response.headers.get("Content-Length") or 0)
             while True:
                 block = response.read(4 * 1024 * 1024)
