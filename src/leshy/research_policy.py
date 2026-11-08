@@ -59,7 +59,8 @@ _SMALL_TALK = frozenset((
 # Полное совпадение обязательно: «что нового у Microsoft?» НЕ сюда.
 _CASUAL_CHECKIN_RE = re.compile(
     r"^(?:ты\s+)?(?:чем\s+(?:ты\s+)?занят(?:а)?|"
-    r"что\s+(?:ты\s+)?делаешь|чем\s+(?:ты\s+)?занимаешься)"
+    r"что\s+(?:ты\s+)?делаешь|что\s+ты\s+сейчас\s+делаешь|"
+    r"чем\s+(?:ты\s+)?занимаешься)"
     r"(?:\s+(?:сейчас|вообще|сегодня))?\s*[?!.]*$"
 )
 _ASSISTANT_SOCIAL_RE = re.compile(
@@ -90,6 +91,8 @@ def _current_user_text(query: str) -> str:
 def is_casual_checkin(query: str) -> bool:
     """Разговор или вопрос о самом Лешем — не основание для веб-поиска."""
     q = normalize_query(_current_user_text(query))
+    # Обращение или вводное слово не меняет смысл короткого вопроса.
+    q = re.sub(r"^(?:(?:слушай|леший|леша|эй)\s*[,!:]\s*)+", "", q)
     return bool(
         _CASUAL_CHECKIN_RE.fullmatch(q)
         or _ASSISTANT_SOCIAL_RE.fullmatch(q)
