@@ -165,6 +165,27 @@ class TelegramProxyTests(unittest.TestCase):
         self.assertEqual(exc.read(), b'{"ok":false}')
         self.assertNotIn(secret, str(exc) + exc.url)
 
+    def test_http_403_and_503_preserve_status_without_exposing_bot_token(self):
+        import io
+        for status in (403, 503):
+            with self.subTest(status=status):
+                secret = "private-telegram-token"
+                req = request.Request(f"https://api.telegram.org/bot{secret}/getMe")
+                original = error.HTTPError(
+                    req.full_url, status, "server response",
+                    {"Content-Type": "application/json"},
+                    io.BytesIO(b'{"ok":false}'),
+                )
+                with patch("leshy.telegram_proxy.request.build_opener") as factory:
+                    factory.return_value.open.side_effect = original
+                    with self.assertRaises(error.HTTPError) as caught:
+                        self.proxy.open(req, timeout=2)
+                failure = caught.exception
+                self.assertEqual(failure.code, status)
+                self.assertEqual(failure.headers.get("Content-Type"), "application/json")
+                self.assertEqual(failure.read(), b'{"ok":false}')
+                self.assertNotIn(secret, str(failure) + failure.url)
+
     def test_rejects_external_target_without_custom_proxy(self):
         with self.assertRaises(ValueError):
             self.proxy.open(request.Request("https://example.org/"), timeout=2)
