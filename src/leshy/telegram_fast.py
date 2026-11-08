@@ -10,6 +10,7 @@ from urllib import parse, error
 from .diagnostics import event, problem
 from .realtime_chat import RealtimeChatManager
 from .telegram_vision import (LocalTelegramVision, image_attachment, VisionUnavailable, VisionNotConfigured, TelegramImageError)
+from .telegram_vision_context import RecentTelegramPhotos
 from .telegram_rich import TelegramBridge as RichTelegramBridge, telegram_html_chunks
 
 
@@ -38,6 +39,7 @@ class FastTelegramBridge(RichTelegramBridge):
         super().__init__(app, brain_dir)
         self._realtime = RealtimeChatManager(app)
         self._telegram_backoff_until = 0.0
+        self._recent_photos = RecentTelegramPhotos()
 
     def status(self) -> dict:
         value = super().status()
@@ -245,6 +247,11 @@ class FastTelegramBridge(RichTelegramBridge):
         user_id = str(sender.get("id") or "")
         message_id = message.get("message_id")
         media = image_attachment(message)
+        # Lazy creation also supports minimal bridges used in unit tests.
+        recent_photos = getattr(self, "_recent_photos", None)
+        if recent_photos is None:
+            recent_photos = RecentTelegramPhotos()
+            self._recent_photos = recent_photos
         # Telegram Reply на ранее присланное фото: текущее текстовое сообщение
         # должно использовать вложение из reply_to_message, а не text-only LLM.
         reply = message.get("reply_to_message")
@@ -262,17 +269,28 @@ class FastTelegramBridge(RichTelegramBridge):
                 self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
             return
 
-        # Изображение не должно уходить в text-only LLM по полю caption.
-        # Сначала проверены адресация группы и Telegram allow-list.
+        # A following "Кто это?" must refer to the last photo by this sender,
+        # not to Leshy's creator/persona. Never send it to text-only inference.
+        # Only short-lived Telegram file identifiers are kept in process memory.
+        if media is not None:
+            recent_photos.remember(chat_id, user_id, message)
         if media is not None or reply_photo is not None:
             vision_message = message
             if media is None and isinstance(reply, dict):
+                recent_photos.remember(chat_id, user_id, reply)
                 vision_message = dict(reply)
                 vision_message["caption"] = text
             self._handle_vision_message(
                 vision_message, chat_id=chat_id, user_id=user_id, message_id=message_id,
             )
             return
+        if text:
+            last_photo = recent_photos.recall(chat_id, user_id, text)
+            if last_photo is not None:
+                self._handle_vision_message(
+                    last_photo, chat_id=chat_id, user_id=user_id, message_id=message_id,
+                )
+                return
         text = self._resolve_message_text(message, chat_id=chat_id, user_id=user_id)
         if not text:
             return
