@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 from typing import Any
-from urllib import error, request
+from urllib import error, parse, request
 import zipfile
 
 from .diagnostics import event, exception
@@ -24,6 +24,28 @@ from .performance_runtime import LocalInferenceProfile, choose_llama_profile
 _GITHUB_RELEASES = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15"
 _RUNTIME_LOCK = threading.RLock()
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+
+class _NoLocalRedirect(request.HTTPRedirectHandler):
+    """Local llama-server endpoints may not redirect requests outside loopback."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_local_llama(req: str | request.Request, *, timeout: float):
+    """Reach only 127.0.0.1 directly, regardless of Windows/PAC/proxy settings.
+
+    urllib's default opener can inherit the user's HTTP proxy on Windows.
+    External downloads (GitHub/Hugging Face), Telegram and web search must
+    continue using their original, independently configured transports.
+    """
+    url = req.full_url if isinstance(req, request.Request) else str(req)
+    address = parse.urlsplit(url)
+    if address.scheme != "http" or address.hostname != "127.0.0.1" or address.port is None:
+        raise ValueError("Локальный llama-server разрешён только на 127.0.0.1")
+    opener = request.build_opener(request.ProxyHandler({}), _NoLocalRedirect())
+    return opener.open(req, timeout=timeout)
 
 
 def _visible_answer_options(model_name: str) -> dict[str, Any]:
@@ -267,7 +289,7 @@ class LlamaServerLLM:
 
     def _is_healthy(self, base: str, timeout: float = 0.75) -> bool:
         try:
-            with request.urlopen(base + "/health", timeout=timeout) as response:
+            with _open_local_llama(base + "/health", timeout=timeout) as response:
                 return response.status == 200
         except Exception:
             return False
@@ -396,7 +418,7 @@ class LlamaServerLLM:
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-                with request.urlopen(req, timeout=self.request_timeout) as response:
+                with _open_local_llama(req, timeout=self.request_timeout) as response:
                     body = json.loads(response.read().decode("utf-8"))
                 choice = body["choices"][0]
                 message = choice["message"]
