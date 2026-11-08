@@ -142,7 +142,10 @@ class SwarmMembership:
                 "github_used_for_membership_only": True,
                 "state": self._status if enabled else "disabled",
                 "last_contact": self._last_contact,
-                "last_error": self._last_error or self._bootstrap_error or self._directory.last_error,
+                "last_error": (
+                    self._last_error or self._bootstrap_error
+                    or (self._directory.last_error if self._status == "waiting_for_seeds" else "")
+                ),
                 "peer_count_reported": self._peers_seen if enabled else 0,
                 "resource_sharing_enabled": False,
                 "remote_execution_enabled": False,
