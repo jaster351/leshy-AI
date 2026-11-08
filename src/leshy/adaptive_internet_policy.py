@@ -51,9 +51,9 @@ _RECENCY_RE = re.compile(
     r"нов(?:ый|ая|ое|ые|ую|ых)|новост\w*|свеж\w*|latest|current|today|202[5-9])\b"
 )
 _CREATIVE_ART_RE = re.compile(
-    r"^(?:придумай|сочини|нарисуй|"
-    r"напиши\s+(?:стих\w*|сказк\w*|истори\w*|песн\w*|рассказ\w*|поздравлен\w*)|"
-    r"составь\s+(?:поздравлен\w*|пожелан\w*|тост))\b"
+    r"^(?:(?:придумай|сочини|напиши)\s+"
+    r"(?:стих\w*|сказк\w*|истори\w*|песн\w*|рассказ\w*|поздравлен\w*|шутк\w*|тост)|"
+    r"нарисуй\b|составь\s+(?:поздравлен\w*|пожелан\w*|тост))\b"
 )
 
 
@@ -124,7 +124,10 @@ def is_offline_creative_request(query: str) -> bool:
     if greeting_content:
         return not external_facts
 
-    explicit_dynamic = _REALTIME + _WEATHER + _NEWS + _VERSION + _SCHEDULE + _RULES + _SECURITY
+    explicit_dynamic = (
+        _REALTIME + _WEATHER + _NEWS + _VERSION + _SCHEDULE + _RULES
+        + _SECURITY + _PLACES + _MEDICAL + ("цен", "стоимост", "покуп", "магазин")
+    )
     if any(marker in q for marker in explicit_dynamic):
         return False
     if any(marker in q for marker in (
@@ -150,10 +153,10 @@ def ttl_for_context(query: str) -> int:
         return 60 * 60
     if any(x in q for x in _SECURITY):
         return 6 * 60 * 60
-    if any(x in q for x in _SCHEDULE):
-        return 6 * 60 * 60
     if any(x in q for x in _PLACES):
         return 24 * 60 * 60
+    if any(x in q for x in _SCHEDULE):
+        return 6 * 60 * 60
     if any(x in q for x in _MEDICAL):
         return 7 * 24 * 60 * 60
     if any(x in q for x in _VERSION):
