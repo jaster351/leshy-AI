@@ -8,11 +8,15 @@ import re
 from typing import Any
 
 
-_CINEMA = re.compile(
-    r"кинотеатр|кинопоиск|киноафиш|афиш|сеанс|премьер|фильм|"
-    r"\bкино\b|мягк(?:ий|ого|ом)|\bт[рг]ц\s+алмаз\b",
+# Не считать любой вопрос о ФИЛЬМЕ запросом киноафиши. Например:
+# «Помоги найти фильм Одиссея Нолана» — поиск фильма, не сеансов на сегодня.
+_CINEMA_VENUE = re.compile(
+    r"кинотеатр|киноафиш|\bкино\b|мягк(?:ий|ого|ом)\s+кинотеатр|"
+    r"\bт[рг]ц\s+алмаз\b",
     re.IGNORECASE,
 )
+_SCREENING_INTENT = re.compile(r"сеанс\w*|афиш\w*|показыва\w*|билет\w*", re.IGNORECASE)
+_FILM_TOPIC = re.compile(r"фильм\w*|\bкино\b", re.IGNORECASE)
 _FOLLOWUP = re.compile(
     r"что (?:там )?нового|что показыва|что ид[её]т|что скоро|"
     r"а (?:что|когда|сколько)|сколько стоит|есть ли места|"
@@ -55,10 +59,13 @@ def cinema_query(message: str, rows: Any = (), *, day: str | None = None) -> Cin
         return None
     history = _message_history(rows)
     previous = next(
-        (entry for entry in history if entry != value and _CINEMA.search(entry)),
+        (entry for entry in history if entry != value and _CINEMA_VENUE.search(entry)),
         "",
     )
-    direct = bool(_CINEMA.search(value))
+    direct = bool(
+        _CINEMA_VENUE.search(value)
+        or (_SCREENING_INTENT.search(value) and _FILM_TOPIC.search(value))
+    )
     if not direct and not (_FOLLOWUP.search(value) and previous):
         return None
 
