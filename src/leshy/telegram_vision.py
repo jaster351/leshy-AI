@@ -214,7 +214,7 @@ class LocalTelegramVision:
         return image
 
     def describe(self, message: dict) -> str:
-        endpoint, model = _local_endpoint()
+        backend, endpoint, model = _vision_backend()
         attachment = image_attachment(message)
         if attachment is None:
             raise TelegramImageError("Изображение отсутствует")
@@ -222,19 +222,28 @@ class LocalTelegramVision:
         media_type = _kind(image)
         caption = str(message.get("caption") or "").strip()[:2000]
         question = caption or "Опиши, пожалуйста, что изображено на фотографии."
-        payload = {
-            "model": model,
-            "stream": False,
-            "temperature": 0.2,
-            "max_tokens": 384,
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": question},
-                    {"type": "image_url", "image_url": {"url": "data:" + media_type + ";base64," + base64.b64encode(image).decode("ascii")}},
-                ],
-            }],
-        }
+        encoded = base64.b64encode(image).decode("ascii")
+        if backend == "ollama":
+            payload = {
+                "model": model,
+                "stream": False,
+                "messages": [{"role": "user", "content": question, "images": [encoded]}],
+                "options": {"temperature": 0.2, "num_predict": 384},
+            }
+        else:
+            payload = {
+                "model": model,
+                "stream": False,
+                "temperature": 0.2,
+                "max_tokens": 384,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": question},
+                        {"type": "image_url", "image_url": {"url": "data:" + media_type + ";base64," + encoded}},
+                    ],
+                }],
+            }
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         # Запрещаем HTTP_PROXY/HTTPS_PROXY для чувствительных image bytes.
         # Endpoint разрешён только на loopback, редиректы также запрещены.
@@ -242,7 +251,7 @@ class LocalTelegramVision:
         try:
             with opener.open(
                 request.Request(endpoint, data=data, headers={"Content-Type": "application/json"}, method="POST"),
-                timeout=45,
+                timeout=90,
             ) as response:
                 body = response.read(MAX_RESPONSE_BYTES + 1)
         except error.HTTPError as exc:
@@ -260,16 +269,19 @@ class LocalTelegramVision:
             ) from None
         except (error.URLError, OSError, TimeoutError):
             raise VisionUnavailable(
-                "Локальный vision backend недоступен или превысил лимит 45 секунд"
+                "Локальный vision backend недоступен или превысил лимит 90 секунд"
             ) from None
         if len(body) > MAX_RESPONSE_BYTES:
             raise VisionUnavailable("Vision backend вернул слишком большой ответ")
         try:
             result = json.loads(body)
-            choice = result["choices"][0]
-            content = choice["message"]["content"]
-            if isinstance(content, list):
-                content = " ".join(str(x.get("text") or "") for x in content if isinstance(x, dict))
+            if backend == "ollama":
+                content = result["message"]["content"]
+            else:
+                choice = result["choices"][0]
+                content = choice["message"]["content"]
+                if isinstance(content, list):
+                    content = " ".join(str(x.get("text") or "") for x in content if isinstance(x, dict))
             content = str(content or "").strip()
         except (ValueError, TypeError, LookupError):
             raise VisionUnavailable("Vision backend вернул неверный формат ответа") from None
