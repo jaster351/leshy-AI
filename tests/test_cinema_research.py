@@ -25,6 +25,25 @@ class CinemaResearchTests(unittest.TestCase):
         self.assertTrue(plan.upcoming)
         self.assertEqual(len(cinema_queries(plan)), 2)
 
+    def test_movie_title_search_is_not_cinema_showtimes(self):
+        # Log 2026-11-08 18:11: a request to find Nolan's film was
+        # incorrectly translated into a generic cinema timetable search.
+        for query in (
+            "Вы оба можете мне помочь найти фильм Одиссея, фильм Нолана.",
+            "Найди фильм Одиссея Нолана",
+            "Какой новый фильм у Нолана?",
+            "Какая премьера фильма у Нолана?",
+            "Найди фильм на Кинопоиске",
+        ):
+            with self.subTest(query=query):
+                self.assertIsNone(cinema_query(query, day="2026-11-08"))
+        self.assertIsNotNone(cinema_query("Какие сеансы фильма Одиссея?", day="2026-11-08"))
+        self.assertIsNotNone(cinema_query("Что показывают сегодня в кинотеатре?", day="2026-11-08"))
+
+    def test_movie_title_history_does_not_trigger_cinema_followup(self):
+        rows = [{"role": "user", "content": "Найди фильм Одиссея режиссёр Нолан"}]
+        self.assertIsNone(cinema_query("что нового?", rows, day="2026-11-08"))
+
     def test_no_leak_from_other_topic(self):
         self.assertIsNone(cinema_query("что нового?", [
             {"role": "user", "content": "Проверим сервер по IP"}
