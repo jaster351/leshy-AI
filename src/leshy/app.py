@@ -23,6 +23,7 @@ from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_explicit_web_request, is_offline_creative_request
+from .research_policy import is_casual_checkin
 from .self_learning import SelfLearningWorker
 from .storage import Storage, utcnow
 from .version import VERSION
@@ -511,7 +512,7 @@ class LeshyApp:
         event("chat_generation_started", session_id=sid, owner_id=owner_id, context_messages=len(messages))
         try:
             answer = self.llm.chat(messages)
-            if not creative and self._answer_needs_research(answer):
+            if not creative and not is_casual_checkin(message) and self._answer_needs_research(answer):
                 if not search_attempted:
                     append_live_search("модель обнаружила пробел в знаниях")
                 if sources:
