@@ -51,3 +51,10 @@ def test_empty_and_invalid_catalog_seeds_do_not_raise():
     membership = object.__new__(SwarmMembership)
     membership._allow_local_http = False
     assert membership._validated_seeds(("", "not a url", "http://127.0.0.1/")) == ()
+
+
+def test_malformed_directory_collection_is_ignored():
+    membership = object.__new__(SwarmMembership)
+    membership._allow_local_http = False
+    for invalid in (None, "https://seed.example.net", 42, {"seeds": []}):
+        assert membership._validated_seeds(invalid) == ()
