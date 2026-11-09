@@ -69,7 +69,7 @@ def test_proxy_bypass_allows_direct_pinned_connection():
     "http://127.0.0.1/other",
 ])
 def test_local_pilot_rejects_unexpected_url_without_network(url):
-    with patch("leshy.swarm_pinned_transport.request.build_opener") as opener, \\
+    with patch("leshy.swarm_pinned_transport.request.build_opener") as opener, \
          patch("leshy.swarm_pinned_transport.socket.getaddrinfo") as dns:
         with pytest.raises(ValueError, match="маршрут"):
             post_seed_hello(url, b"{}", allow_local_http=True)
