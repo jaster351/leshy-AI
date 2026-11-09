@@ -86,7 +86,13 @@ class SwarmMembership:
         self._last_directory_refresh = 0.0
         self._seed_index = 0
         self._peer_cache = SwarmPeerCache(self.app.settings.brain_dir)
-        self._peer_urls = self._peer_cache.load()
+        try:
+            cached_peers = self._peer_cache.load()
+            self._peer_urls = cached_peers if isinstance(cached_peers, (list, tuple)) else ()
+        except (OSError, TypeError, ValueError) as exc:
+            # Corrupted peer cache must not prevent startup or seed discovery.
+            self._peer_urls = ()
+            problem("swarm_peer_cache_failed", type(exc).__name__)
         self._advertise_url = ""
         self._advertise_error = ""
         raw_advertisement = os.getenv("LESHY_SWARM_PUBLIC_ENDPOINT", "").strip()
