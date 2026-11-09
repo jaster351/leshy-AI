@@ -77,6 +77,22 @@ class SwarmMembershipTests(unittest.TestCase):
                 "swarm.auto_join.changed", "swarm.auto_join.changed",
             ])
 
+    def test_empty_peer_hint_cannot_replace_valid_bootstrap(self):
+        from unittest.mock import patch
+        with TemporaryDirectory() as tmp:
+            app = SimpleNamespace(
+                settings=SimpleNamespace(brain_dir=Path(tmp)),
+                storage=_Storage(Path(tmp) / "state.sqlite3"),
+            )
+            with patch.dict("os.environ", {"LESHY_SWARM_BOOTSTRAP_URL": ""}):
+                swarm = SwarmMembership(app)
+            swarm._seed_urls = ("https://seed.example.org/v1/swarm/hello",)
+            swarm._endpoint = swarm._seed_urls[0]
+            with patch.object(swarm._peer_cache, "urls", return_value=["", "  ", None]):
+                self.assertEqual(swarm._candidate_hops(), swarm._seed_urls)
+                self.assertFalse(swarm._try_next_seed())
+                self.assertEqual(swarm._endpoint, swarm._seed_urls[0])
+
     def test_registry_verifies_signed_identity_and_replay(self):
         with TemporaryDirectory() as tmp:
             ident = CommunityIdentity(Path(tmp), "swarm:node")
