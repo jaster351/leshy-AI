@@ -81,10 +81,7 @@ class SwarmMembership:
             )
         except ValueError as exc:
             self._bootstrap_error = str(exc)
-        self._seed_urls = tuple(
-            bootstrap_endpoint(url, allow_local_http=self._allow_local_http)
-            for url in self._directory.cached()
-        )
+        self._seed_urls = self._validated_seeds(self._directory.cached())
         self._endpoint = self._manual_endpoint or (self._seed_urls[0] if self._seed_urls else "")
         self._last_directory_refresh = 0.0
         self._seed_index = 0
@@ -170,6 +167,18 @@ class SwarmMembership:
         if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout=1.0)
 
+    def _validated_seeds(self, urls) -> tuple[str, ...]:
+        """Ignore malformed cached/catalog entries without killing membership."""
+        valid = []
+        for url in urls:
+            try:
+                endpoint = bootstrap_endpoint(url, allow_local_http=self._allow_local_http)
+                if endpoint:
+                    valid.append(endpoint)
+            except (TypeError, ValueError):
+                continue
+        return tuple(dict.fromkeys(valid))
+
     def _discover_seeds(self) -> None:
         """Fetch GitHub only when no known seed works, at a bounded cadence.
 
@@ -186,10 +195,7 @@ class SwarmMembership:
         if not self._directory.last_error:
             # An empty *valid* directory is deliberate operator revocation.
             # Do not keep contacting a seed removed from GitHub.
-            self._seed_urls = tuple(
-                bootstrap_endpoint(url, allow_local_http=self._allow_local_http)
-                for url in new_seeds
-            )
+            self._seed_urls = self._validated_seeds(new_seeds)
             self._seed_index = 0
             self._endpoint = self._seed_urls[0] if self._seed_urls else ""
             event("swarm_directory_loaded", seed_count=len(self._seed_urls),
