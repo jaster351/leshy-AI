@@ -233,7 +233,9 @@ class SwarmMembership:
         self._peer_urls = peer_urls
         for peer in peer_urls:
             try:
-                hops.append(bootstrap_endpoint(peer))
+                endpoint = bootstrap_endpoint(peer)
+                if endpoint:
+                    hops.append(endpoint)
             except (TypeError, ValueError):
                 # A stale or corrupted peer hint must not terminate the
                 # membership worker before its retry/error boundary.
