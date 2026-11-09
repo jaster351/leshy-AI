@@ -195,7 +195,14 @@ class SwarmMembership:
         if self._last_directory_refresh and now - self._last_directory_refresh < _DIRECTORY_REFRESH_SECONDS:
             return
         self._last_directory_refresh = now
-        new_seeds = self._directory.refresh()
+        try:
+            new_seeds = self._directory.refresh()
+        except Exception as exc:
+            # A broken/unavailable directory must not terminate membership.
+            # Keep previously validated seeds and retry on the next refresh.
+            self._last_error = type(exc).__name__
+            problem("swarm_directory_refresh_failed", type(exc).__name__)
+            return
         if not self._directory.last_error:
             # An empty *valid* directory is deliberate operator revocation.
             # Do not keep contacting a seed removed from GitHub.
@@ -209,8 +216,16 @@ class SwarmMembership:
 
     def _candidate_hops(self) -> tuple[str, ...]:
         hops = list(self._seed_urls)
-        self._peer_urls = self._peer_cache.urls()
-        for peer in self._peer_urls:
+        try:
+            peer_urls = self._peer_cache.urls()
+            if not isinstance(peer_urls, (list, tuple)):
+                peer_urls = ()
+        except (OSError, TypeError, ValueError) as exc:
+            # Corrupted local hints must not block validated catalog seeds.
+            problem("swarm_peer_cache_failed", type(exc).__name__)
+            peer_urls = ()
+        self._peer_urls = peer_urls
+        for peer in peer_urls:
             try:
                 hops.append(bootstrap_endpoint(peer))
             except (TypeError, ValueError):
