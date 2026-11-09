@@ -8,7 +8,6 @@ validated by this client. Fail closed instead of silently bypassing policy.
 
 import http.client
 import ipaddress
-import os
 import socket
 import ssl
 from urllib import parse, request
@@ -42,6 +41,18 @@ class _PinnedHTTPS(http.client.HTTPSConnection):
             raise
 
 
+def _effective_https_proxy(host: str) -> bool:
+    """Only refuse a proxy actually applicable to this HTTPS destination.
+
+    NO_PROXY/HTTP_PROXY alone do not proxy HTTPS. Honour platform-specific
+    bypass rules (including Windows proxy settings) before deciding.
+    """
+    proxies = request.getproxies()
+    if not (proxies.get("https") or proxies.get("all")):
+        return False
+    return not request.proxy_bypass(host)
+
+
 def post_seed_hello(url: str, payload: bytes, *, timeout: float = 5.0,
                     max_bytes: int = 4096, allow_local_http: bool = False) -> bytes:
     parsed = parse.urlsplit(url)
@@ -63,7 +74,7 @@ def post_seed_hello(url: str, payload: bytes, *, timeout: float = 5.0,
         raise ValueError("Недопустимый маршрут публичного seed")
     # A configured proxy may resolve the hostname itself, bypassing DNS pinning.
     # Refuse until a verified proxy transport is implemented.
-    if request.getproxies():
+    if _effective_https_proxy(host):
         raise ValueError("Публичный swarm seed через прокси пока запрещён")
     ips = _public_addresses(host, port)
     conn = _PinnedHTTPS(host, port, ips[0], timeout)
