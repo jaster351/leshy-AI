@@ -82,7 +82,10 @@ def post_seed_hello(url: str, payload: bytes, *, timeout: float = 5.0,
             response = conn.getresponse()
             if response.status != 200:
                 raise ValueError("Bootstrap отклонил регистрацию")
-            return response.read(max_bytes + 1)
+            data = response.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise ValueError("Ответ bootstrap превышает допустимый размер")
+            return data
         finally:
             conn.close()
     if parsed.scheme != "https" or local or parsed.username or parsed.password:
@@ -102,7 +105,10 @@ def post_seed_hello(url: str, payload: bytes, *, timeout: float = 5.0,
         response = conn.getresponse()
         if response.status != 200:
             raise ValueError("Bootstrap отклонил регистрацию")
-        return response.read(max_bytes + 1)
+        data = response.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise ValueError("Ответ bootstrap превышает допустимый размер")
+            return data
     finally:
         conn.close()
 
