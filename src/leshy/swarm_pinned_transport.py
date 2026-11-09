@@ -26,6 +26,14 @@ def _public_addresses(host: str, port: int) -> tuple[str, ...]:
     return tuple(addresses)
 
 
+class _PinnedLoopbackHTTP(http.client.HTTPConnection):
+    """Never resolve localhost through DNS or a proxy in the dev pilot."""
+
+    def connect(self) -> None:
+        address = "::1" if self.host == "::1" else "127.0.0.1"
+        self.sock = socket.create_connection((address, self.port), self.timeout)
+
+
 class _PinnedHTTPS(http.client.HTTPSConnection):
     def __init__(self, host: str, port: int, ip: str, timeout: float):
         super().__init__(host, port, timeout=timeout, context=ssl.create_default_context())
@@ -66,14 +74,17 @@ def post_seed_hello(url: str, payload: bytes, *, timeout: float = 5.0,
                 or parsed.query or parsed.fragment
                 or parsed.path != "/v1/swarm/hello"):
             raise ValueError("Недопустимый маршрут локального seed")
-        opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
-        req = request.Request(url, data=payload, method="POST", headers={
-            "Content-Type": "application/json", "Accept": "application/json",
-        })
-        with opener.open(req, timeout=timeout) as response:
+        conn = _PinnedLoopbackHTTP(host, port, timeout=timeout)
+        try:
+            conn.request("POST", "/v1/swarm/hello", body=payload, headers={
+                "Content-Type": "application/json", "Accept": "application/json",
+            })
+            response = conn.getresponse()
             if response.status != 200:
                 raise ValueError("Bootstrap отклонил регистрацию")
             return response.read(max_bytes + 1)
+        finally:
+            conn.close()
     if parsed.scheme != "https" or local or parsed.username or parsed.password:
         raise ValueError("Публичный seed требует HTTPS и публичный адрес")
     if parsed.query or parsed.fragment or parsed.path != "/v1/swarm/hello":
@@ -96,6 +107,3 @@ def post_seed_hello(url: str, payload: bytes, *, timeout: float = 5.0,
         conn.close()
 
 
-class _NoRedirect(request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
