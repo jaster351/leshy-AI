@@ -42,7 +42,20 @@ def test_public_hello_reads_only_limit_plus_one():
         response = connection.return_value.getresponse.return_value
         response.status = 200
         response.read.return_value = b"x" * 17
-        assert post_seed_hello("https://seed.example.org/v1/swarm/hello",
-                               b"{}", max_bytes=16) == b"x" * 17
+        with pytest.raises(ValueError, match="превышает"):
+            post_seed_hello("https://seed.example.org/v1/swarm/hello",
+                            b"{}", max_bytes=16)
+        response.read.assert_called_once_with(17)
+        connection.return_value.close.assert_called_once()
+
+
+def test_local_hello_rejects_oversized_response():
+    with patch("leshy.swarm_pinned_transport._PinnedLoopbackHTTP") as connection:
+        response = connection.return_value.getresponse.return_value
+        response.status = 200
+        response.read.return_value = b"x" * 17
+        with pytest.raises(ValueError, match="превышает"):
+            post_seed_hello("http://localhost/v1/swarm/hello", b"{}",
+                            max_bytes=16, allow_local_http=True)
         response.read.assert_called_once_with(17)
         connection.return_value.close.assert_called_once()
