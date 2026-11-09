@@ -32,7 +32,10 @@ _MAX_RESPONSE_BYTES = 4096
 
 class _RejectRedirect(request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ValueError("Swarm bootstrap redirect prohdef bootstrap_endpoint(value: str, *, allow_local_http: bool = False) -> str:
+        raise ValueError("Swarm bootstrap redirect prohibited")
+
+
+def bootstrap_endpoint(value: str, *, allow_local_http: bool = False) -> str:
     """Apply the catalog URL policy to manual endpoints and peer hints too."""
     raw = str(value or "").strip()
     if not raw:
@@ -40,7 +43,6 @@ class _RejectRedirect(request.HTTPRedirectHandler):
     validated = _seed_url(raw, allow_local_http=allow_local_http)
     url = parse.urlsplit(validated)
     return parse.urlunsplit((url.scheme, url.netloc, "/v1/swarm/hello", "", ""))
-, "", ""))
 
 
 class SwarmMembership:
