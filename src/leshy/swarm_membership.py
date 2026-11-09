@@ -169,6 +169,10 @@ class SwarmMembership:
 
     def _validated_seeds(self, urls) -> tuple[str, ...]:
         """Ignore malformed cached/catalog entries without killing membership."""
+        # A damaged cache or unexpected directory payload may be null.
+        # Treat it as no seeds rather than terminating the worker.
+        if not isinstance(urls, (list, tuple)):
+            return ()
         valid = []
         for url in urls:
             try:
