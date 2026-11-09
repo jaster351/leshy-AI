@@ -15,7 +15,7 @@ import time
 from urllib import parse, request
 
 from .community_identity import CommunityIdentity
-from .swarm_bootstrap import GitHubBootstrapDirectory
+from .swarm_bootstrap import GitHubBootstrapDirectory, _seed_url
 from .swarm_peer_exchange import SwarmPeerCache, public_peer_url
 from .diagnostics import event, problem
 from .storage import utcnow
@@ -35,29 +35,16 @@ class _RejectRedirect(request.HTTPRedirectHandler):
 
 
 def bootstrap_endpoint(value: str, *, allow_local_http: bool = False) -> str:
-    """Accept a configured HTTPS origin, never unknown/private redirect targets."""
-    url = parse.urlsplit(str(value or "").strip())
-    if not url.scheme and not url.netloc:
+    """Normalize seed URLs with the same literal-IP restrictions as the catalog.
+
+    DNS-resolved private addresses still require a connection-level guard;
+    see security issue #132. This check is not a DNS-rebinding defense.
+    """
+    raw = str(value or "").strip()
+    if not raw:
         return ""
-    local = url.hostname in {"127.0.0.1", "::1", "localhost"}
-    if (
-        not url.hostname
-        or url.username is not None or url.password is not None
-        or url.query or url.fragment
-        or (url.scheme != "https" and not (
-            allow_local_http and local and url.scheme == "http"
-        ))
-    ):
-        raise ValueError("Для публичного bootstrap требуется HTTPS URL без логина, query и fragment")
-    try:
-        port = url.port
-    except ValueError as exc:
-        raise ValueError("Некорректный порт bootstrap") from exc
-    if port is not None and not (1 <= port <= 65535):
-        raise ValueError("Некорректный порт bootstrap")
-    path = url.path.rstrip("/")
-    if path and path != "/v1/swarm":
-        raise ValueError("Bootstrap должен указывать на HTTPS origin или /v1/swarm")
+    approved = _seed_url(raw, allow_local_http=allow_local_http)
+    url = parse.urlsplit(approved)
     return parse.urlunsplit((url.scheme, url.netloc, "/v1/swarm/hello", "", ""))
 
 
