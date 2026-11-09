@@ -209,6 +209,12 @@ class SwarmMembership:
             self._last_error = type(exc).__name__
             problem("swarm_directory_refresh_failed", type(exc).__name__)
             return
+        if not self._directory.last_error and not isinstance(new_seeds, (list, tuple)):
+            # Malformed successful responses are not an operator revocation.
+            # Preserve known-good seeds instead of silently clearing them.
+            self._last_error = "invalid_directory_payload"
+            problem("swarm_directory_refresh_failed", "invalid_directory_payload")
+            return
         if not self._directory.last_error:
             # An empty *valid* directory is deliberate operator revocation.
             # Do not keep contacting a seed removed from GitHub.
