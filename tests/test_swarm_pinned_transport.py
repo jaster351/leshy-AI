@@ -59,3 +59,19 @@ def test_proxy_bypass_allows_direct_pinned_connection():
          patch("leshy.swarm_pinned_transport.request.proxy_bypass", return_value=True) as bypass:
         assert _effective_https_proxy("seed.example.org") is False
         bypass.assert_called_once_with("seed.example.org")
+
+
+@pytest.mark.parametrize("url", [
+    "http://localhost/admin",
+    "http://localhost/v1/swarm/hello?target=other",
+    "http://localhost/v1/swarm/hello#fragment",
+    "http://user:password@localhost/v1/swarm/hello",
+    "http://127.0.0.1/other",
+])
+def test_local_pilot_rejects_unexpected_url_without_network(url):
+    with patch("leshy.swarm_pinned_transport.request.build_opener") as opener, \\
+         patch("leshy.swarm_pinned_transport.socket.getaddrinfo") as dns:
+        with pytest.raises(ValueError, match="маршрут"):
+            post_seed_hello(url, b"{}", allow_local_http=True)
+        opener.assert_not_called()
+        dns.assert_not_called()
