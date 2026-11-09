@@ -106,9 +106,9 @@ def post_seed_hello(url: str, payload: bytes, *, timeout: float = 5.0,
         if response.status != 200:
             raise ValueError("Bootstrap отклонил регистрацию")
         data = response.read(max_bytes + 1)
-            if len(data) > max_bytes:
-                raise ValueError("Ответ bootstrap превышает допустимый размер")
-            return data
+        if len(data) > max_bytes:
+            raise ValueError("Ответ bootstrap превышает допустимый размер")
+        return data
     finally:
         conn.close()
 
