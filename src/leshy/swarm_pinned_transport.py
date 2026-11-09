@@ -60,6 +60,12 @@ def post_seed_hello(url: str, payload: bytes, *, timeout: float = 5.0,
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     local = host in {"localhost", "127.0.0.1", "::1"}
     if parsed.scheme == "http" and allow_local_http and local:
+        # The local pilot is not a general-purpose HTTP client: reject
+        # credentials, alternate paths and query/fragment before any I/O.
+        if (parsed.username is not None or parsed.password is not None
+                or parsed.query or parsed.fragment
+                or parsed.path != "/v1/swarm/hello"):
+            raise ValueError("Недопустимый маршрут локального seed")
         opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
         req = request.Request(url, data=payload, method="POST", headers={
             "Content-Type": "application/json", "Accept": "application/json",
