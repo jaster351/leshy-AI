@@ -201,7 +201,12 @@ class SwarmMembership:
         hops = list(self._seed_urls)
         self._peer_urls = self._peer_cache.urls()
         for peer in self._peer_urls:
-            hops.append(bootstrap_endpoint(peer))
+            try:
+                hops.append(bootstrap_endpoint(peer))
+            except (TypeError, ValueError):
+                # A stale or corrupted peer hint must not terminate the
+                # membership worker before its retry/error boundary.
+                continue
         return tuple(dict.fromkeys(hops))
 
     def _try_next_seed(self) -> bool:
