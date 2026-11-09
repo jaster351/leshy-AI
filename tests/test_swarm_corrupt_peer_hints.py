@@ -58,3 +58,46 @@ def test_malformed_directory_collection_is_ignored():
     membership._allow_local_http = False
     for invalid in (None, "https://seed.example.net", 42, {"seeds": []}):
         assert membership._validated_seeds(invalid) == ()
+
+
+class _BrokenPeerCache:
+    def urls(self):
+        raise ValueError("corrupt peer cache")
+
+
+class _BrokenDirectory:
+    last_error = ""
+
+    def refresh(self):
+        raise OSError("offline directory")
+
+
+def test_peer_cache_exception_keeps_valid_catalog_seeds(monkeypatch):
+    monkeypatch.setattr("leshy.swarm_membership.problem", lambda *args: None)
+    membership = object.__new__(SwarmMembership)
+    membership._seed_urls = ("https://seed.example.net/v1/swarm/hello",)
+    membership._peer_cache = _BrokenPeerCache()
+    assert membership._candidate_hops() == membership._seed_urls
+    assert membership._peer_urls == ()
+
+
+def test_peer_cache_malformed_collection_keeps_catalog_seeds():
+    membership = object.__new__(SwarmMembership)
+    membership._seed_urls = ("https://seed.example.net/v1/swarm/hello",)
+    membership._peer_cache = type("Cache", (), {"urls": lambda self: None})()
+    assert membership._candidate_hops() == membership._seed_urls
+
+
+def test_directory_refresh_exception_keeps_previous_seeds(monkeypatch):
+    monkeypatch.setattr("leshy.swarm_membership.problem", lambda *args: None)
+    membership = object.__new__(SwarmMembership)
+    membership._manual_configured = False
+    membership._last_directory_refresh = 0.0
+    membership._directory = _BrokenDirectory()
+    membership._seed_urls = ("https://seed.example.net/v1/swarm/hello",)
+    membership._endpoint = membership._seed_urls[0]
+    membership._last_error = ""
+    membership._discover_seeds()
+    assert membership._seed_urls == ("https://seed.example.net/v1/swarm/hello",)
+    assert membership._endpoint == membership._seed_urls[0]
+    assert membership._last_error == "OSError"
