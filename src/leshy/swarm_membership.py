@@ -216,9 +216,15 @@ class SwarmMembership:
             problem("swarm_directory_refresh_failed", "invalid_directory_payload")
             return
         if not self._directory.last_error:
-            # An empty *valid* directory is deliberate operator revocation.
-            # Do not keep contacting a seed removed from GitHub.
-            self._seed_urls = self._validated_seeds(new_seeds)
+            # An explicitly empty directory is an operator revocation. A
+            # nonempty but entirely malformed directory is NOT a revocation:
+            # retain the last validated seeds until the next refresh.
+            validated = self._validated_seeds(new_seeds)
+            if new_seeds and not validated:
+                self._last_error = "invalid_directory_entries"
+                problem("swarm_directory_refresh_failed", "invalid_directory_entries")
+                return
+            self._seed_urls = validated
             self._seed_index = 0
             self._endpoint = self._seed_urls[0] if self._seed_urls else ""
             event("swarm_directory_loaded", seed_count=len(self._seed_urls),
