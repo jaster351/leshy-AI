@@ -350,7 +350,7 @@ class SwarmMembership:
                         self._seed_urls and failures % len(self._seed_urls) == 0
                     ):
                         self._discover_seeds()
-                    delay = min(300.0, 10.0 * 2 ** min(failures, 4))
+                    delay = 1.0 if rotated else min(300.0, 10.0 * 2 ** min(failures, 4))
                     problem("swarm_membership_failed", type(exc).__name__)
             self._wake.wait(delay)
             self._wake.clear()
