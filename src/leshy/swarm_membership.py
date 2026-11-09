@@ -257,6 +257,8 @@ class SwarmMembership:
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise ValueError("Слишком большой bootstrap-ответ")
         data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("Некорректный формат bootstrap-ответа")
         if data.get("accepted") is not True:
             raise RuntimeError("Bootstrap не подтвердил регистрацию")
         count = data.get("peer_count", 0)
