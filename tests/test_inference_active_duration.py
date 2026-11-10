@@ -5,6 +5,7 @@ These tests are intentionally not executed by the autonomous development job.
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from leshy.inference_scheduler import InferenceScheduler, PRIORITY_BACKGROUND, PRIORITY_WEB
 
@@ -85,6 +86,28 @@ class InferenceActiveDurationTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertFalse(errors, errors)
         self.assertTrue(granted.is_set())
+        self.assertIsNone(scheduler.status()["active"])
+
+    def test_release_event_separates_queue_wait_from_held_time(self):
+        scheduler = InferenceScheduler()
+        recorded = []
+
+        def capture(name, **fields):
+            recorded.append((name, fields))
+
+        # No backend is started: this verifies the metrics contract deterministically.
+        with patch("leshy.inference_scheduler.event", side_effect=capture):
+            with patch("leshy.inference_scheduler.time.monotonic",
+                       side_effect=[10.0, 10.25, 10.25, 10.75]):
+                waiter = scheduler.acquire(source="background", priority=PRIORITY_BACKGROUND)
+                scheduler.release(waiter)
+
+        release = [fields for name, fields in recorded if name == "inference_queue_released"]
+        self.assertEqual(len(release), 1)
+        self.assertEqual(release[0]["total_ms"], 750)
+        self.assertEqual(release[0]["held_ms"], 500)
+        self.assertEqual(release[0]["source"], "background")
+        self.assertEqual(release[0]["queue_depth"], 0)
         self.assertIsNone(scheduler.status()["active"])
 
     def test_idle_status_has_no_active_duration(self):
