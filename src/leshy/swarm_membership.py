@@ -238,7 +238,7 @@ class SwarmMembership:
     def _candidate_hops(self) -> tuple[str, ...]:
         hops = list(self._seed_urls)
         # An explicit empty catalog revokes all discovered fallback hints too.
-        if self._catalog_revoked:
+        if getattr(self, "_catalog_revoked", False):
             return tuple(hops)
         try:
             peer_urls = self._peer_cache.urls()
