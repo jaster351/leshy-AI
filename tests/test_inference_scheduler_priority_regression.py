@@ -93,6 +93,34 @@ class InferenceSchedulerPriorityRegression(unittest.TestCase):
         finally:
             self.scheduler.release(holder)
 
+    def test_equal_priority_keeps_fifo_order(self):
+        holder = self.scheduler.acquire(source="holder", priority=PRIORITY_WEB)
+        order = []
+        errors = []
+
+        def worker(name):
+            try:
+                with self.scheduler.slot(source=name, priority=PRIORITY_BACKGROUND, timeout=2):
+                    order.append(name)
+            except Exception as exc:
+                errors.append(exc)
+
+        first = threading.Thread(target=worker, args=("first",))
+        second = threading.Thread(target=worker, args=("second",))
+        try:
+            first.start()
+            self._wait_for_depth(1)
+            second.start()
+            self._wait_for_depth(2)
+        finally:
+            self.scheduler.release(holder)
+            first.join(timeout=3)
+            second.join(timeout=3)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertFalse(errors, errors)
+        self.assertEqual(order, ["first", "second"])
+
     def test_priority_for_owner_and_background(self):
         self.assertEqual(InferenceScheduler.priority_for("web:owner"), PRIORITY_WEB)
         self.assertEqual(InferenceScheduler.priority_for("telegram:123"), PRIORITY_TELEGRAM)
