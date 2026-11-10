@@ -15,7 +15,8 @@ import time
 from urllib import parse, request
 
 from .community_identity import CommunityIdentity
-from .swarm_bootstrap import GitHubBootstrapDirectory
+from .swarm_bootstrap import GitHubBootstrapDirectory, _seed_url
+from .swarm_pinned_transport import post_seed_hello
 from .swarm_peer_exchange import SwarmPeerCache, public_peer_url
 from .diagnostics import event, problem
 from .storage import utcnow
@@ -35,29 +36,12 @@ class _RejectRedirect(request.HTTPRedirectHandler):
 
 
 def bootstrap_endpoint(value: str, *, allow_local_http: bool = False) -> str:
-    """Accept a configured HTTPS origin, never unknown/private redirect targets."""
-    url = parse.urlsplit(str(value or "").strip())
-    if not url.scheme and not url.netloc:
+    """Apply the catalog URL policy to manual endpoints and peer hints too."""
+    raw = str(value or "").strip()
+    if not raw:
         return ""
-    local = url.hostname in {"127.0.0.1", "::1", "localhost"}
-    if (
-        not url.hostname
-        or url.username is not None or url.password is not None
-        or url.query or url.fragment
-        or (url.scheme != "https" and not (
-            allow_local_http and local and url.scheme == "http"
-        ))
-    ):
-        raise ValueError("Для публичного bootstrap требуется HTTPS URL без логина, query и fragment")
-    try:
-        port = url.port
-    except ValueError as exc:
-        raise ValueError("Некорректный порт bootstrap") from exc
-    if port is not None and not (1 <= port <= 65535):
-        raise ValueError("Некорректный порт bootstrap")
-    path = url.path.rstrip("/")
-    if path and path != "/v1/swarm":
-        raise ValueError("Bootstrap должен указывать на HTTPS origin или /v1/swarm")
+    validated = _seed_url(raw, allow_local_http=allow_local_http)
+    url = parse.urlsplit(validated)
     return parse.urlunsplit((url.scheme, url.netloc, "/v1/swarm/hello", "", ""))
 
 
@@ -97,15 +81,19 @@ class SwarmMembership:
             )
         except ValueError as exc:
             self._bootstrap_error = str(exc)
-        self._seed_urls = tuple(
-            bootstrap_endpoint(url, allow_local_http=self._allow_local_http)
-            for url in self._directory.cached()
-        )
+        self._seed_urls = self._validated_seeds(self._directory.cached())
         self._endpoint = self._manual_endpoint or (self._seed_urls[0] if self._seed_urls else "")
         self._last_directory_refresh = 0.0
+        self._catalog_revoked = False
         self._seed_index = 0
         self._peer_cache = SwarmPeerCache(self.app.settings.brain_dir)
-        self._peer_urls = self._peer_cache.load()
+        try:
+            cached_peers = self._peer_cache.load()
+            self._peer_urls = cached_peers if isinstance(cached_peers, (list, tuple)) else ()
+        except (OSError, TypeError, ValueError) as exc:
+            # Corrupted peer cache must not prevent startup or seed discovery.
+            self._peer_urls = ()
+            problem("swarm_peer_cache_failed", type(exc).__name__)
         self._advertise_url = ""
         self._advertise_error = ""
         raw_advertisement = os.getenv("LESHY_SWARM_PUBLIC_ENDPOINT", "").strip()
@@ -186,11 +174,26 @@ class SwarmMembership:
         if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout=1.0)
 
-    def _discover_seeds(self) -> None:
-        """Fetch GitHub only when no known seed works, at a bounded cadence.
+    def _validated_seeds(self, urls) -> tuple[str, ...]:
+        """Ignore malformed cached/catalog entries without killing membership."""
+        # A damaged cache or unexpected directory payload may be null.
+        # Treat it as no seeds rather than terminating the worker.
+        if not isinstance(urls, (list, tuple)):
+            return ()
+        valid = []
+        for url in urls:
+            try:
+                endpoint = bootstrap_endpoint(url, allow_local_http=self._allow_local_http)
+                if endpoint:
+                    valid.append(endpoint)
+            except (TypeError, ValueError):
+                continue
+        return tuple(dict.fromkeys(valid))
 
-        Once a seed is available, heartbeats go straight to that seed; GitHub
-        receives no identity, task, knowledge or per-node status updates.
+    def _discover_seeds(self) -> None:
+        """Refresh the public directory on a bounded cadence, even while healthy.
+
+        Only the catalog is fetched; identity and heartbeats go to the seed.
         """
         if self._manual_configured:
             return
@@ -198,16 +201,35 @@ class SwarmMembership:
         if self._last_directory_refresh and now - self._last_directory_refresh < _DIRECTORY_REFRESH_SECONDS:
             return
         self._last_directory_refresh = now
-        new_seeds = self._directory.refresh()
+        try:
+            new_seeds = self._directory.refresh()
+        except Exception as exc:
+            # A broken/unavailable directory must not terminate membership.
+            # Keep previously validated seeds and retry on the next refresh.
+            self._last_error = type(exc).__name__
+            problem("swarm_directory_refresh_failed", type(exc).__name__)
+            return
+        if not self._directory.last_error and not isinstance(new_seeds, (list, tuple)):
+            # Malformed successful responses are not an operator revocation.
+            # Preserve known-good seeds instead of silently clearing them.
+            self._last_error = "invalid_directory_payload"
+            problem("swarm_directory_refresh_failed", "invalid_directory_payload")
+            return
         if not self._directory.last_error:
-            # An empty *valid* directory is deliberate operator revocation.
-            # Do not keep contacting a seed removed from GitHub.
-            self._seed_urls = tuple(
-                bootstrap_endpoint(url, allow_local_http=self._allow_local_http)
-                for url in new_seeds
-            )
+            # An explicitly empty directory is an operator revocation. A
+            # nonempty but entirely malformed directory is NOT a revocation:
+            # retain the last validated seeds until the next refresh.
+            validated = self._validated_seeds(new_seeds)
+            if new_seeds and not validated:
+                self._last_error = "invalid_directory_entries"
+                problem("swarm_directory_refresh_failed", "invalid_directory_entries")
+                return
+            self._seed_urls = validated
+            self._catalog_revoked = not bool(new_seeds)
             self._seed_index = 0
-            self._endpoint = self._seed_urls[0] if self._seed_urls else ""
+            # Keep a healthy endpoint only while it remains authorized.
+            if self._endpoint not in self._seed_urls:
+                self._endpoint = self._seed_urls[0] if self._seed_urls else ""
             event("swarm_directory_loaded", seed_count=len(self._seed_urls),
                   source=self._directory.source)
         elif not self._seed_urls:
@@ -215,9 +237,27 @@ class SwarmMembership:
 
     def _candidate_hops(self) -> tuple[str, ...]:
         hops = list(self._seed_urls)
-        self._peer_urls = self._peer_cache.urls()
-        for peer in self._peer_urls:
-            hops.append(bootstrap_endpoint(peer))
+        # An explicit empty catalog revokes all discovered fallback hints too.
+        if getattr(self, "_catalog_revoked", False):
+            return tuple(hops)
+        try:
+            peer_urls = self._peer_cache.urls()
+            if not isinstance(peer_urls, (list, tuple)):
+                peer_urls = ()
+        except (OSError, TypeError, ValueError) as exc:
+            # Corrupted local hints must not block validated catalog seeds.
+            problem("swarm_peer_cache_failed", type(exc).__name__)
+            peer_urls = ()
+        self._peer_urls = peer_urls
+        for peer in peer_urls:
+            try:
+                endpoint = bootstrap_endpoint(peer)
+                if endpoint:
+                    hops.append(endpoint)
+            except (TypeError, ValueError):
+                # A stale or corrupted peer hint must not terminate the
+                # membership worker before its retry/error boundary.
+                continue
         return tuple(dict.fromkeys(hops))
 
     def _try_next_seed(self) -> bool:
@@ -251,21 +291,15 @@ class SwarmMembership:
             hello["public_endpoint"] = self._advertise_url
         signed = self._identity.sign("cluster.hello", hello)
         payload = json.dumps(signed, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        req = request.Request(
-            self._endpoint,
-            data=payload, method="POST",
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        raw = post_seed_hello(
+            self._endpoint, payload, timeout=5.0,
+            max_bytes=_MAX_RESPONSE_BYTES, allow_local_http=self._allow_local_http,
         )
-        local_dev = parse.urlsplit(self._endpoint).hostname in {"127.0.0.1", "::1", "localhost"}
-        proxy = request.ProxyHandler({}) if local_dev else request.ProxyHandler()
-        opener = request.build_opener(proxy, _RejectRedirect())
-        with opener.open(req, timeout=5.0) as response:
-            if response.status != 200:
-                raise RuntimeError("Bootstrap отклонил регистрацию")
-            raw = response.read(_MAX_RESPONSE_BYTES + 1)
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise ValueError("Слишком большой bootstrap-ответ")
         data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("Некорректный формат bootstrap-ответа")
         if data.get("accepted") is not True:
             raise RuntimeError("Bootstrap не подтвердил регистрацию")
         count = data.get("peer_count", 0)
@@ -299,7 +333,9 @@ class SwarmMembership:
                     self._wake.wait(delay)
                     self._wake.clear()
                     continue
-                if not self._endpoint:
+                # Check revocations even if the current bootstrap is healthy.
+                self._discover_seeds()
+                if not self._endpoint and not self._catalog_revoked:
                     hops = self._candidate_hops()
                     self._endpoint = hops[0] if hops else ""
                 if not self._endpoint:
@@ -334,7 +370,7 @@ class SwarmMembership:
                         self._seed_urls and failures % len(self._seed_urls) == 0
                     ):
                         self._discover_seeds()
-                    delay = min(300.0, 10.0 * 2 ** min(failures, 4))
+                    delay = 1.0 if rotated else min(300.0, 10.0 * 2 ** min(failures, 4))
                     problem("swarm_membership_failed", type(exc).__name__)
             self._wake.wait(delay)
             self._wake.clear()
