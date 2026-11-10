@@ -89,6 +89,16 @@ class InferenceScheduler:
                 queue_depth=len(self._waiters),
                 active_source=self._active.source if self._active else "",
             )
+            # Только наблюдаемость: активный backend не вытесняется.
+            if self._active is not None and self._active.priority < waiter.priority:
+                event(
+                    "inference_priority_inversion",
+                    waiting_source=waiter.source,
+                    waiting_priority=waiter.priority,
+                    active_source=self._active.source,
+                    active_priority=self._active.priority,
+                    active_held_ms=int((time.monotonic() - (self._active.granted_at if self._active.granted_at is not None else self._active.queued_at)) * 1000),
+                )
             while True:
                 if cancel_event is not None and cancel_event.is_set():
                     self._waiters = [item for item in self._waiters if item is not waiter]
