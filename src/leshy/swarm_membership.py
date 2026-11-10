@@ -84,6 +84,7 @@ class SwarmMembership:
         self._seed_urls = self._validated_seeds(self._directory.cached())
         self._endpoint = self._manual_endpoint or (self._seed_urls[0] if self._seed_urls else "")
         self._last_directory_refresh = 0.0
+        self._catalog_revoked = False
         self._seed_index = 0
         self._peer_cache = SwarmPeerCache(self.app.settings.brain_dir)
         try:
@@ -190,10 +191,9 @@ class SwarmMembership:
         return tuple(dict.fromkeys(valid))
 
     def _discover_seeds(self) -> None:
-        """Fetch GitHub only when no known seed works, at a bounded cadence.
+        """Refresh the public directory on a bounded cadence, even while healthy.
 
-        Once a seed is available, heartbeats go straight to that seed; GitHub
-        receives no identity, task, knowledge or per-node status updates.
+        Only the catalog is fetched; identity and heartbeats go to the seed.
         """
         if self._manual_configured:
             return
@@ -225,8 +225,11 @@ class SwarmMembership:
                 problem("swarm_directory_refresh_failed", "invalid_directory_entries")
                 return
             self._seed_urls = validated
+            self._catalog_revoked = not bool(new_seeds)
             self._seed_index = 0
-            self._endpoint = self._seed_urls[0] if self._seed_urls else ""
+            # Keep a healthy endpoint only while it remains authorized.
+            if self._endpoint not in self._seed_urls:
+                self._endpoint = self._seed_urls[0] if self._seed_urls else ""
             event("swarm_directory_loaded", seed_count=len(self._seed_urls),
                   source=self._directory.source)
         elif not self._seed_urls:
@@ -234,6 +237,9 @@ class SwarmMembership:
 
     def _candidate_hops(self) -> tuple[str, ...]:
         hops = list(self._seed_urls)
+        # An explicit empty catalog revokes all discovered fallback hints too.
+        if self._catalog_revoked:
+            return tuple(hops)
         try:
             peer_urls = self._peer_cache.urls()
             if not isinstance(peer_urls, (list, tuple)):
@@ -327,7 +333,9 @@ class SwarmMembership:
                     self._wake.wait(delay)
                     self._wake.clear()
                     continue
-                if not self._endpoint:
+                # Check revocations even if the current bootstrap is healthy.
+                self._discover_seeds()
+                if not self._endpoint and not self._catalog_revoked:
                     hops = self._candidate_hops()
                     self._endpoint = hops[0] if hops else ""
                 if not self._endpoint:
