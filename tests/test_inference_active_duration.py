@@ -40,6 +40,18 @@ class InferenceActiveDurationTests(unittest.TestCase):
         self.assertEqual(result["status"]["active"]["source"], "background")
         self.assertLess(result["status"]["active"]["held_ms"], 35)
 
+    def test_exception_releases_slot_and_next_request_can_run(self):
+        scheduler = InferenceScheduler()
+        with self.assertRaisesRegex(RuntimeError, "backend failed"):
+            with scheduler.slot(source="background", priority=PRIORITY_BACKGROUND):
+                self.assertEqual(scheduler.status()["active"]["source"], "background")
+                raise RuntimeError("backend failed")
+        self.assertIsNone(scheduler.status()["active"])
+        self.assertEqual(scheduler.status()["queue_depth"], 0)
+        with scheduler.slot(source="web", priority=PRIORITY_WEB, timeout=0.5):
+            self.assertEqual(scheduler.status()["active"]["source"], "web")
+        self.assertIsNone(scheduler.status()["active"])
+
     def test_idle_status_has_no_active_duration(self):
         scheduler = InferenceScheduler()
         self.assertIsNone(scheduler.status()["active"])
