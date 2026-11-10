@@ -52,6 +52,41 @@ class InferenceActiveDurationTests(unittest.TestCase):
             self.assertEqual(scheduler.status()["active"]["source"], "web")
         self.assertIsNone(scheduler.status()["active"])
 
+    def test_web_waits_until_active_background_releases_without_false_preemption(self):
+        scheduler = InferenceScheduler()
+        background = scheduler.acquire(source="background", priority=PRIORITY_BACKGROUND)
+        entered = threading.Event()
+        granted = threading.Event()
+        errors = []
+
+        def web_request():
+            entered.set()
+            try:
+                with scheduler.slot(source="web", priority=PRIORITY_WEB, timeout=2):
+                    granted.set()
+            except Exception as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=web_request, daemon=True)
+        thread.start()
+        self.assertTrue(entered.wait(1))
+        try:
+            deadline = time.monotonic() + 1
+            while scheduler.status()["queue_depth"] == 0 and time.monotonic() < deadline:
+                time.sleep(0.005)
+            status = scheduler.status()
+            self.assertEqual(status["active"]["source"], "background")
+            self.assertEqual(status["waiting"][0]["source"], "web")
+            self.assertFalse(granted.is_set())
+            self.assertGreaterEqual(status["active"]["held_ms"], 0)
+        finally:
+            scheduler.release(background)
+            thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(errors, errors)
+        self.assertTrue(granted.is_set())
+        self.assertIsNone(scheduler.status()["active"])
+
     def test_idle_status_has_no_active_duration(self):
         scheduler = InferenceScheduler()
         self.assertIsNone(scheduler.status()["active"])
