@@ -149,6 +149,48 @@ class InferenceActiveDurationTests(unittest.TestCase):
         self.assertFalse(errors, errors)
         self.assertEqual(scheduler.status()["queue_depth"], 0)
 
+    def test_equal_or_lower_priority_waiter_does_not_log_inversion(self):
+        for waiting_priority in (PRIORITY_BACKGROUND, PRIORITY_BACKGROUND - 1):
+            with self.subTest(waiting_priority=waiting_priority):
+                scheduler = InferenceScheduler()
+                active = scheduler.acquire(source="background-active", priority=PRIORITY_BACKGROUND)
+                cancelled = threading.Event()
+                recorded = []
+                errors = []
+
+                def wait_for_slot():
+                    try:
+                        scheduler.acquire(
+                            source="background-waiting",
+                            priority=waiting_priority,
+                            cancel_event=cancelled,
+                            timeout=1,
+                        )
+                    except InterruptedError:
+                        return
+                    except Exception as exc:
+                        errors.append(exc)
+
+                with patch("leshy.inference_scheduler.event",
+                           side_effect=lambda name, **fields: recorded.append((name, fields))):
+                    thread = threading.Thread(target=wait_for_slot, daemon=True)
+                    thread.start()
+                    try:
+                        deadline = time.monotonic() + 0.5
+                        while scheduler.status()["queue_depth"] == 0 and time.monotonic() < deadline:
+                            time.sleep(0.005)
+                        self.assertEqual(scheduler.status()["queue_depth"], 1)
+                        self.assertFalse(any(name == "inference_priority_inversion"
+                                             for name, _ in recorded))
+                        self.assertEqual(scheduler.status()["active"]["source"], "background-active")
+                    finally:
+                        cancelled.set()
+                        thread.join(2)
+                        scheduler.release(active)
+                self.assertFalse(thread.is_alive())
+                self.assertFalse(errors, errors)
+                self.assertEqual(scheduler.status()["queue_depth"], 0)
+
     def test_idle_status_has_no_active_duration(self):
         scheduler = InferenceScheduler()
         self.assertIsNone(scheduler.status()["active"])
