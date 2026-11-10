@@ -110,6 +110,45 @@ class InferenceActiveDurationTests(unittest.TestCase):
         self.assertEqual(release[0]["queue_depth"], 0)
         self.assertIsNone(scheduler.status()["active"])
 
+    def test_priority_inversion_is_logged_once_without_releasing_background(self):
+        scheduler = InferenceScheduler()
+        recorded = []
+        background = scheduler.acquire(source="background", priority=PRIORITY_BACKGROUND)
+        cancelled = threading.Event()
+        errors = []
+
+        def waiting_web():
+            try:
+                scheduler.acquire(source="web", priority=PRIORITY_WEB,
+                                  cancel_event=cancelled, timeout=1)
+            except InterruptedError:
+                return
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch("leshy.inference_scheduler.event",
+                   side_effect=lambda name, **fields: recorded.append((name, fields))):
+            thread = threading.Thread(target=waiting_web, daemon=True)
+            thread.start()
+            try:
+                deadline = time.monotonic() + 0.5
+                while scheduler.status()["queue_depth"] == 0 and time.monotonic() < deadline:
+                    time.sleep(0.005)
+                self.assertEqual(scheduler.status()["active"]["source"], "background")
+                inversions = [fields for name, fields in recorded
+                              if name == "inference_priority_inversion"]
+                self.assertEqual(len(inversions), 1)
+                self.assertEqual(inversions[0]["waiting_source"], "web")
+                self.assertEqual(inversions[0]["active_source"], "background")
+                self.assertGreaterEqual(inversions[0]["active_held_ms"], 0)
+            finally:
+                cancelled.set()
+                thread.join(2)
+                scheduler.release(background)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(errors, errors)
+        self.assertEqual(scheduler.status()["queue_depth"], 0)
+
     def test_idle_status_has_no_active_duration(self):
         scheduler = InferenceScheduler()
         self.assertIsNone(scheduler.status()["active"])
