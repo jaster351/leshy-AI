@@ -24,6 +24,7 @@ class _Waiter:
     source: str
     queued_at: float
     granted: bool = False
+    granted_at: float | None = None
 
 
 class InferenceScheduler:
@@ -100,6 +101,7 @@ class InferenceScheduler:
                 if self._active is None and self._next_waiter() is waiter:
                     self._waiters.remove(waiter)
                     waiter.granted = True
+                    waiter.granted_at = time.monotonic()
                     self._active = waiter
                     event(
                         "inference_queue_granted",
@@ -117,13 +119,15 @@ class InferenceScheduler:
     def release(self, waiter: _Waiter) -> None:
         with self._condition:
             if self._active is waiter:
-                held_ms = int((time.monotonic() - waiter.queued_at) * 1000)
+                now = time.monotonic()
+                held_ms = int((now - (waiter.granted_at if waiter.granted_at is not None else waiter.queued_at)) * 1000)
                 self._active = None
                 event(
                     "inference_queue_released",
                     source=waiter.source,
                     priority=waiter.priority,
-                    total_ms=held_ms,
+                    total_ms=int((now - waiter.queued_at) * 1000),
+                    held_ms=held_ms,
                     queue_depth=len(self._waiters),
                 )
             self._condition.notify_all()
@@ -155,6 +159,7 @@ class InferenceScheduler:
                 "active": None if self._active is None else {
                     "source": self._active.source,
                     "priority": self._active.priority,
+                    "held_ms": int((time.monotonic() - (self._active.granted_at if self._active.granted_at is not None else self._active.queued_at)) * 1000),
                 },
                 "waiting": [
                     {
