@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import base64
 import re
 import time
 from typing import Any, Iterator
 
+from .creator_identity_data import CREATOR_NAME_B64
 from .diagnostics import event, problem
 from .realtime_chat import RealtimeChatManager, StreamEvent
 from .storage import utcnow
 
 
-CREATOR_FULL_NAME = "Тихонов Михаил Викторович"
+CREATOR_FULL_NAME = base64.b64decode(CREATOR_NAME_B64, validate=True).decode("utf-8")
 CREATOR_ANSWER = f"Мой создатель — {CREATOR_FULL_NAME}."
 
 _INSTALLED = False
