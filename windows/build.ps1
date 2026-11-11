@@ -26,7 +26,7 @@ $liveExe = Join-Path $liveRoot 'Leshy.exe'
 $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 
 # Diagnostic output is a single rotating file beside existing build logs.
-$script:profileFile = Join-Path $autoRoot 'logs\build-performance-latest.log'
+$script:profileFile = Join-Path $brainRoot 'logs\build-performance-latest.log'
 $script:profileStageFile = Join-Path $autoRoot 'profile-stage.tmp'
 $script:profileJob = $null
 $script:profileActive = $false
@@ -55,7 +55,7 @@ function Build-Stage([string]$Name) {
   }
 }
 try {
-  New-Item -Path (Join-Path $autoRoot 'logs') -ItemType Directory -Force -ErrorAction Stop | Out-Null
+  New-Item -Path (Join-Path $brainRoot 'logs') -ItemType Directory -Force -ErrorAction Stop | Out-Null
   # Always truncate at the start of the next run, including failed previous builds.
   Set-Content -LiteralPath $script:profileFile -Value "LESHY BUILD PROFILE started=$((Get-Date).ToString('o')) version=$version machine=$env:COMPUTERNAME" -Encoding UTF8 -ErrorAction Stop
   $script:profileActive = $true
