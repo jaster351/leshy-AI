@@ -194,7 +194,14 @@ class BrowserUseAdapter:
         """Вернуть пользователю результат браузера, а не служебную квитанцию."""
         content = str(final or "").strip()
         data = {"result": content, "allowed_hosts": list(hosts), "url": action.url}
-        if not content or (action.risk is BrowserRisk.READ and len(content) < 60):
+        # Короткое содержательное сообщение допустимо; пустой отчёт — нет.
+        generic = re.fullmatch(
+            r"(?is)(?:готово[.!]*|успешно[.!]*|done[.!]*|completed[.!]*|"
+            r"страница (?:прочитана|открыта)[.!]*|"
+            r"browser use завершил браузерную задачу[.!]*)",
+            content,
+        )
+        if not content or (action.risk is BrowserRisk.READ and generic):
             return BrowserActionResult(
                 "failed",
                 "Браузер завершил работу, но не вернул содержимое страницы или полезный итог.",
