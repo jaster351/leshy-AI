@@ -11,6 +11,7 @@ from typing import Any, Awaitable
 from urllib.parse import urlparse
 
 from .diagnostics import event, problem
+from .action_safety_guard import check_external_action
 
 
 class ToolPermission(str, Enum):
@@ -259,6 +260,8 @@ class McpToolsGateway:
         manifest = self.registry.get(tool_id)
         if not manifest.enabled:
             raise RuntimeError("Инструмент выключен")
+        # Подтверждение человека не отменяет независимые запреты безопасности.
+        check_external_action(str(tool_name), arguments)
         if self._needs_approval(manifest) and not approved:
             event("mcp_tool_approval_required", tool_id=manifest.tool_id, tool_name=tool_name)
             raise ToolApprovalRequired(manifest, tool_name)
