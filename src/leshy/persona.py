@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .llm import ChatMessage
 from .temporal_grounding import temporal_system_instruction
+from .verified_clock import current_date_anchor
 
 
 LESHY_IDENTITY_PROMPT = """/no_think
@@ -36,7 +37,13 @@ def with_leshy_identity(messages: list[ChatMessage]) -> list[ChatMessage]:
     items = list(messages)
     latest_user = next((str(item.content) for item in reversed(items) if item.role == "user"), "")
     temporal = temporal_system_instruction(latest_user)
-    identity = LESHY_IDENTITY_PROMPT if not temporal else LESHY_IDENTITY_PROMPT + "\n\n" + temporal
+    # Put the live clock immediately after /no_think so context truncation
+    # retains it even when identity, web sources and conversation are long.
+    identity = LESHY_IDENTITY_PROMPT.replace(
+        "/no_think\n", "/no_think\n" + current_date_anchor() + "\n", 1,
+    )
+    if temporal:
+        identity += "\n\n" + temporal
 
     system_parts = [identity]
     conversation: list[ChatMessage] = []
@@ -45,7 +52,7 @@ def with_leshy_identity(messages: list[ChatMessage]) -> list[ChatMessage]:
             content = str(item.content or "").strip()
             # Не дублируем собственный identity prompt при повторной подготовке
             # уже нормализованного списка сообщений.
-            if content and content != LESHY_IDENTITY_PROMPT and not content.startswith(LESHY_IDENTITY_PROMPT + "\n\n"):
+            if content and content != LESHY_IDENTITY_PROMPT and not content.startswith(LESHY_IDENTITY_PROMPT + "\n\n") and not content.startswith("/no_think\nТЕКУЩАЯ ДАТА ПО ЧАСАМ КОМПЬЮТЕРА:"):
                 system_parts.append(content)
             continue
         conversation.append(item)
