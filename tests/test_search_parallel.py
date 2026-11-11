@@ -28,6 +28,32 @@ class _Provider:
 
 
 class SearchParallelRegressionTests(unittest.TestCase):
+    def test_fast_browser_answer_does_not_wake_http_fallback(self):
+        browser = _Provider(delay=0.02, results=[
+            SearchResult("Chrome", "https://example.org/chrome", "Из браузерной выдачи")
+        ])
+        http = _Provider(delay=0.01, results=[
+            SearchResult("HTTP", "https://example.org/http", "Резерв")
+        ])
+        result = RacingSearch(browser, http, hedge_delay_seconds=0.15).search("поиск")
+        self.assertEqual(result[0].title, "Chrome")
+        self.assertEqual(browser.calls, 1)
+        self.assertEqual(http.calls, 0)
+
+    def test_slow_browser_activates_independent_http_fallback(self):
+        browser = _Provider(delay=1.2, results=[
+            SearchResult("Поздно", "https://example.org/later", "Большая задержка")
+        ])
+        http = _Provider(delay=0.02, results=[
+            SearchResult("Своевременно", "https://example.org/fast", "Проверенный результат")
+        ])
+        started = time.monotonic()
+        result = RacingSearch(
+            browser, http, hedge_delay_seconds=0.1, deadline_seconds=2.0,
+        ).search("поиск")
+        self.assertEqual(result[0].title, "Своевременно")
+        self.assertLess(time.monotonic() - started, 0.65)
+
     def test_slow_ddgs_does_not_block_fast_independent_provider(self):
         slow = _Provider(delay=1.6, failure=RuntimeError("timeout"))
         fast = _Provider(delay=0.02, results=[
