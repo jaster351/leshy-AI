@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T17:13:42Z",
+  "updated_at": "2026-11-11T18:03:19Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-11T17:13:42Z",
-    "previous_issue_at": "2026-11-11T16:14:38Z",
+    "searched_at": "2026-11-11T18:03:19Z",
+    "previous_issue_at": "2026-11-11T17:13:42Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "doi:10.18653/2026.nora-1.2"
+      "arXiv:2610.41056"
     ],
-    "note": "Впервые включена публикация сборника от 10 ноября; это дополнение покрытия, а не работа после прошлого выпуска. Для просмотренных источников новые значимые публикации или существенные версии после прошлого выпуска не подтверждены. Задержка индексации этой работы не установлена."
+    "note": "Впервые включён релевантный препринт от 29 октября, ранее отсутствовавший в истории. Это дополнение покрытия, не новая публикация после прошлого выпуска; значимых новых версий после прошлого выпуска в просмотренных первоисточниках не подтверждено."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -129,6 +129,22 @@
       "dataset_url": "https://aclanthology.org/attachments/2026.nora-1.2.supplementary_material.zip",
       "inclusion_reason": "first_time_coverage_of_recent_proceedings_publication",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "arXiv:2610.41056",
+      "version": "v1",
+      "first_published_at": "2026-10-29T22:54:17Z",
+      "version_published_at": "2026-10-29T22:54:17Z",
+      "checked_at": "2026-11-11T18:03:19Z",
+      "publication_status": "preprint",
+      "source_access": "abstract_only",
+      "url": "https://arxiv.org/abs/2610.41056",
+      "package": "knowledge/updates/2026-11-11/1800-memory-robustness-research.jsonl",
+      "record_id": "robust-memory-eca-staleness-poisoning",
+      "code_url": null,
+      "dataset_url": null,
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_preprint",
+      "new_since_previous_issue": false
     }
   ],
   "issues": [
@@ -179,33 +195,35 @@
         "doi:10.18653/2026.nora-1.2"
       ],
       "note": "Впервые включена публикация сборника от 10 ноября; это дополнение покрытия, а не работа после прошлого выпуска. Для просмотренных источников новые значимые публикации или существенные версии после прошлого выпуска не подтверждены. Задержка индексации этой работы не установлена."
+    },
+    {
+      "searched_at": "2026-11-11T18:03:19Z",
+      "previous_issue_at": "2026-11-11T17:13:42Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "arXiv:2610.41056"
+      ],
+      "note": "Впервые включён релевантный препринт от 29 октября, ранее отсутствовавший в истории. Это дополнение покрытия, не новая публикация после прошлого выпуска; значимых новых версий после прошлого выпуска в просмотренных первоисточниках не подтверждено."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-11T17:13:42Z",
-    "incremental_since": "2026-11-11T16:14:38Z",
+    "completed_at": "2026-11-11T18:03:19Z",
+    "incremental_since": "2026-11-11T17:13:42Z",
     "additional_lookback_start": "2026-10-12",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
     "first_time_coverage_ids": [
-      "doi:10.18653/2026.nora-1.2"
+      "arXiv:2610.41056"
+    ],
+    "query_topics": [
+      "LLM-agent memory, RAG provenance, poisoning, rollback and source verification",
+      "new and replaced cs.AI/cs.IR submissions"
     ],
     "opened_primary_urls": [
       "https://arxiv.org/list/cs.AI/new",
       "https://arxiv.org/list/cs.IR/new",
-      "https://aclanthology.org/2026.nora-1.2/",
-      "https://aclanthology.org/2026.nora-1.2.pdf",
-      "https://arxiv.org/abs/2608.19564",
-      "https://arxiv.org/src/2608.19564v2/anc/README.md",
-      "https://arxiv.org/src/2608.19564v2/anc/NORA_REPRODUCIBILITY.md"
+      "https://arxiv.org/abs/2610.41056"
     ],
-    "artifact_binary_not_parsed": [
-      "https://aclanthology.org/attachments/2026.nora-1.2.supplementary_material.zip"
-    ],
-    "note": "Публикация и препринт одной работы считаются одним происхождением. Документация артефакта прочитана, код не запускался. Отсутствие находок в просмотренных источниках не доказывает отсутствие других работ.",
-    "query_topics": [
-      "новые работы и версии о происхождении, проверке, конфликтах и отравлении памяти LLM-агентов",
-      "память при повторном использовании и выбор действия агентом"
-    ]
+    "note": "Для включённой работы удалось проверить только первичный абстракт и метаданные arXiv; численные детали вне абстракта не утверждаются."
   },
   "pending_primary_reviews": [
     {
