@@ -12,7 +12,7 @@ from .swarm_resource_consent import ResourceScope, SwarmConsent
 
 _KEY = "swarm.resource_consent.v1"
 _CONFIRM = "РАЗРЕШАЮ ИСПОЛЬЗОВАНИЕ РЕСУРСОВ"
-_REVISION = "2026-11-11.8"
+_REVISION = "2026-11-11.9"
 _MAX_SECONDS = 24 * 60 * 60
 _QUOTAS = {
     "cpu": "max_cpu_percent",
