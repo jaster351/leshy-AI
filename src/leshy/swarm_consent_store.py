@@ -1,7 +1,7 @@
-"""Persist and revoke explicitly granted *future* swarm compute permissions.
+"""Хранение и отзыв явного разрешения на будущие вычисления роя.
 
-This stores user intent only. It does NOT activate public task execution.
-Writes and audit_log events share the same SQLite transaction.
+Здесь сохраняется только намерение пользователя, а не включается исполнение
+внешних задач. Согласие и запись в журнале фиксируются в одной транзакции.
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ class SwarmConsentStore:
                 **{v: data[v] for v in _QUOTAS.values()},
             )
         except (ValueError, TypeError, KeyError, AttributeError):
-            return None  # Invalid/corrupt record cannot grant anything.
+            return None  # Повреждённая запись никогда не даёт полномочий.
 
     def status(self) -> dict:
         consent = self._read()
@@ -59,7 +59,7 @@ class SwarmConsentStore:
         )
         return {
             "consent_active": current,
-            "resource_sharing_enabled": False,  # No public compute runtime yet.
+            "resource_sharing_enabled": False,  # Исполнитель публичных задач пока отсутствует.
             "external_jobs_accepted": False,
             "agreement_revision_required": _REVISION,
             "scopes": sorted(scope.value for scope in consent.scopes) if current else [],
