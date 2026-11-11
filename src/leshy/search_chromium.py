@@ -18,6 +18,7 @@ import time
 from urllib.parse import parse_qs, quote_plus, urlsplit, urlunsplit
 
 from .browser_launch_policy import chromium_launch_policy
+from .search_challenge_handoff import BROKER
 from .research import SearchResult, SearchUnavailable
 from .system_browser import ensure_system_browser
 
@@ -159,7 +160,7 @@ def chromium_search_status() -> dict:
         return {**_STATUS, "profile": "dedicated_local_anonymous",
                 "profile_persistent": True,
                 "uses_personal_browser_profile": False,
-                "captcha_handling": "human_in_browser_no_bypass"}
+                "captcha_handling": "live_owner_handoff_no_bypass"}
 
 
 def _open_context(pw, *, root: Path, headless: bool):
@@ -226,16 +227,42 @@ class ChromiumSearch:
                         _status(user_agent=user_agent, cookie_count=cookie_count)
                     except Exception:
                         pass
+                    ticket = None
                     if _is_challenge(title, body, status):
-                        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                        _status(state="needs_human_verification", last_challenge_at=stamp)
-                        with _STATUS_LOCK:
-                            _STATUS["challenges"] += 1
-                        raise SearchChallenge(
-                            "Поисковик запросил CAPTCHA/подтверждение. "
-                            "Можно открыть отдельный профиль Лешего и пройти проверку вручную."
-                        )
+                        # Give ordinary JavaScript/interstitial checks a chance
+                        # to finish in the actual browser before asking a human.
+                        page.wait_for_timeout(1400)
+                        title = page.title()
+                        body = page.locator("body").inner_text(timeout=2_000)
+                        if _is_challenge(title, body, None) or (
+                            status in (403, 429) and not _collect_links(page, self.engine, 1)
+                        ):
+                            stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                            _status(state="needs_human_verification", last_challenge_at=stamp)
+                            with _STATUS_LOCK:
+                                _STATUS["challenges"] += 1
+                            ticket = BROKER.create(page, self.engine)
+                            if ticket is None:
+                                raise SearchChallenge("Другой поиск уже ожидает подтверждения")
+
+                            def challenge_resolved() -> bool:
+                                try:
+                                    current_title = page.title()
+                                    current_body = page.locator("body").inner_text(timeout=2_000)
+                                    if _is_challenge(current_title, current_body, None):
+                                        return False
+                                    # A blank page or intermediate redirect is
+                                    # NOT proof that a human challenge passed.
+                                    return bool(_collect_links(page, self.engine, 1))
+                                except Exception:
+                                    return False
+
+                            if not BROKER.await_solution(page, ticket, challenge_resolved):
+                                raise SearchChallenge("Ожидание подтверждения CAPTCHA не завершилось")
+                            _status(state="resumed_after_human_verification")
                     results = _collect_links(page, self.engine, max(1, min(int(limit), 10)))
+                    if ticket is not None:
+                        BROKER.complete(ticket, results)
                     if not results:
                         _status(state="no_results")
                         return []
