@@ -8,6 +8,7 @@ import unittest
 
 from leshy.knowledge import KnowledgeBase
 from leshy.repository_knowledge import import_directory
+from leshy.knowledge_catalog_lookup import find_catalog_matches, load_relevant_catalog_knowledge
 from leshy.storage import Storage, utcnow
 
 
@@ -99,6 +100,99 @@ class RepositoryKnowledgeTests(unittest.TestCase):
         import_directory(self.knowledge, self.catalog)
         self.assertEqual(self.rows()[0]["checked_at"], old["checked_at"])
         self.assertEqual(self.knowledge.search_candidates("public fact"), [])
+
+
+    def _write_catalog_index(self, metadata):
+        (self.catalog / "index.json").write_text(
+            json.dumps({"schema_version": 1, "records": metadata}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def test_on_demand_lookup_is_disabled_when_learning_is_off(self):
+        self.write(self.record)
+        self._write_catalog_index({
+            self.record["id"]: {
+                "version": 1, "package": "knowledge/updates/batch.jsonl",
+                "review_status": "verified",
+            },
+        })
+        self.assertEqual(
+            load_relevant_catalog_knowledge(
+                self.knowledge, self.catalog, "public fact", enabled=False,
+            ), [],
+        )
+        self.assertEqual(self.rows(), [])
+        matches = load_relevant_catalog_knowledge(
+            self.knowledge, self.catalog, "public fact", enabled=True,
+        )
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["review_status"], "candidate")
+        self.assertEqual(self.rows()[0]["status"], "candidate")
+        self.assertEqual(self.rows()[0]["source_url"], "https://docs.python.org/3/")
+        self.assertEqual(
+            len(load_relevant_catalog_knowledge(
+                self.knowledge, self.catalog, "public fact", enabled=True,
+            )), 1,
+        )
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_lookup_uses_only_manifest_latest_revision(self):
+        updated = {**self.record, "version": 2, "claim": "A revised public fact."}
+        self.write(self.record, name="old.jsonl")
+        self.write(updated, name="new.jsonl")
+        self._write_catalog_index({
+            self.record["id"]: {
+                "version": 2, "package": "knowledge/updates/new.jsonl",
+                "review_status": "verified",
+            },
+        })
+        matches = find_catalog_matches(self.catalog, "public fact")
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["record"]["claim"], updated["claim"])
+        self.assertEqual(matches[0]["record"]["version"], 2)
+
+    def test_lookup_excludes_retracted_and_expired_records(self):
+        self.write(self.record)
+        self._write_catalog_index({
+            self.record["id"]: {
+                "version": 2, "package": "knowledge/updates/batch.jsonl",
+                "review_status": "retracted",
+            },
+        })
+        self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
+        expired = {
+            **self.record, "data_class": "dynamic",
+            "checked_at": "2020-01-01T00:00:00Z", "ttl_seconds": 60,
+        }
+        self.write(expired)
+        self._write_catalog_index({
+            self.record["id"]: {
+                "version": 1, "package": "knowledge/updates/batch.jsonl",
+                "review_status": "verified",
+            },
+        })
+        self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
+
+    def test_learning_toggle_changed_during_lookup_prevents_import(self):
+        self.write(self.record)
+        self._write_catalog_index({
+            self.record["id"]: {
+                "version": 1, "package": "knowledge/updates/batch.jsonl",
+                "review_status": "verified",
+            },
+        })
+        states = iter((True, False))
+        matches = load_relevant_catalog_knowledge(
+            self.knowledge, self.catalog, "public fact",
+            enabled=lambda: next(states), limit=4,
+        )
+        self.assertEqual(matches, [])
+        self.assertEqual(self.rows(), [])
+
+    def test_lookup_requires_a_current_catalog_index(self):
+        self.write(self.record)
+        self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
+
 
 
 if __name__ == "__main__":

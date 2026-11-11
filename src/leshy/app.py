@@ -252,6 +252,33 @@ class LeshyApp:
         items = self.memories(owner_id, limit=8)
         return "\n".join(f"- {item['content']}" for item in items) if items else ""
 
+    def _catalog_matches(self, message: str, trusted: list[dict],
+                         candidates: list[dict]) -> list[dict]:
+        """Selectively use repository knowledge on a local miss.
+
+        Both the scheduled import and this lookup require self-learning ON.
+        Public catalogue entries remain candidates until independently verified.
+        """
+        if (
+            trusted or candidates
+            or not self.learning.is_enabled()
+            or is_casual_checkin(message)
+            or is_local_dialogue_request(message)
+        ):
+            return []
+        try:
+            from .knowledge_catalog_lookup import load_relevant_catalog_knowledge
+            return load_relevant_catalog_knowledge(
+                self.knowledge,
+                self.self_learning.repository_sync.directory() / "updates",
+                message,
+                enabled=self.learning.is_enabled,
+                limit=4,
+            )
+        except Exception as exc:
+            problem("repository_knowledge_lookup_failed", type(exc).__name__)
+            return []
+
     @staticmethod
     def _image_prompt(text: str) -> str | None:
         value = " ".join(str(text or "").split()).strip()
@@ -441,9 +468,16 @@ class LeshyApp:
 
         trusted = self.knowledge.search(message, trusted_only=True, limit=5)
         candidates = self.knowledge.search_candidates(message, limit=5)
+        catalog_matches: list[dict] = []
         if creative:
             trusted = []
             candidates = []
+        elif not trusted and not candidates:
+            catalog_matches = self._catalog_matches(message, trusted, candidates)
+            if catalog_matches:
+                candidates = catalog_matches
+                from .knowledge_catalog_lookup import format_catalog_context
+                context.append(ChatMessage("system", format_catalog_context(catalog_matches)))
         if trusted:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
@@ -502,7 +536,7 @@ class LeshyApp:
             answer = cinema_no_data(cinema_plan)
             return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
 
-        if search_attempted and not sources:
+        if search_attempted and not sources and not catalog_matches:
             answer = (
                 "Не удалось проверить актуальные сведения: поисковые источники временно недоступны. Попробуйте позже."
                 if search_error else

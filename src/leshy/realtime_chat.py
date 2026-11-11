@@ -125,6 +125,13 @@ class RealtimeChatManager:
         trusted = self.app.knowledge.search(message, trusted_only=True, limit=5)
         candidates = self.app.knowledge.search_candidates(message, limit=5)
         creative = is_offline_creative_request(message)
+        catalog_matches: list[dict] = []
+        if not creative and not trusted and not candidates:
+            lookup = getattr(self.app, "_catalog_matches", None)
+            if callable(lookup):
+                catalog_matches = lookup(message, trusted, candidates)
+                if catalog_matches:
+                    candidates = catalog_matches
         reason = None if creative else adaptive_research_reason(message, trusted, candidates)
         needed = False if creative else bool(reason or self.app._needs_live_search(message) or cinema_query(message))
         self.app._last_internet_route = {
@@ -139,6 +146,7 @@ class RealtimeChatManager:
         return {
             "trusted": trusted,
             "candidates": candidates,
+            "catalog_matches": catalog_matches,
             "reason": reason or ("требуются актуальные данные" if needed else ""),
             "needed": needed,
         }
@@ -194,6 +202,11 @@ class RealtimeChatManager:
         if trusted:
             facts = "\n".join(f"- {item['claim']} (источник: {item['source_url']})" for item in trusted)
             context.append(ChatMessage("system", "Проверенные локальные знания Лешего:\n" + facts))
+        if plan.get("catalog_matches"):
+            from .knowledge_catalog_lookup import format_catalog_context
+            context.append(ChatMessage(
+                "system", format_catalog_context(list(plan["catalog_matches"])),
+            ))
 
         cinema_plan = None if is_offline_creative_request(message) else cinema_query(message, rows)
         if cinema_plan is not None:
