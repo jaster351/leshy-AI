@@ -10,6 +10,9 @@ import json
 import os
 from urllib import error, parse, request
 
+from .photo_geolocation import geolocation_vision_prompt, is_photo_geolocation_request
+from .diagnostics import event
+
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_RESPONSE_BYTES = 1024 * 1024
 
@@ -226,6 +229,10 @@ class LocalTelegramVision:
         media_type = _kind(image)
         caption = str(message.get("caption") or "").strip()[:2000]
         question = caption or "Опиши, пожалуйста, что изображено на фотографии."
+        if is_photo_geolocation_request(question):
+            question = geolocation_vision_prompt(question)
+            # No photo, location guesses or image metadata in logs.
+            event("telegram_photo_geolocation_requested", backend=backend)
         encoded = base64.b64encode(image).decode("ascii")
         if backend == "ollama":
             payload = {
