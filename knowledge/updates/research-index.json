@@ -1,16 +1,15 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T13:11:53Z",
+  "updated_at": "2026-11-11T14:11:22Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-11T13:11:53Z",
+    "searched_at": "2026-11-11T14:11:22Z",
+    "search_started_at": "2026-11-11T14:00:28Z",
+    "previous_issue_at": "2026-11-11T13:11:53Z",
     "discovery_lookback_days": 30,
-    "note": "Поиск после предыдущего выпуска; дополнительно проверены ранее не включённые работы за 30 дней. Дата обнаружения не означает дату публикации или доказанную задержку индексации.",
     "newly_included_ids": [
-      "arXiv:2611.14320",
-      "arXiv:2611.14326"
+      "arXiv:2611.13966"
     ],
-    "prior_run_started_at": "2026-11-11T12:11:06.900423+00:00",
-    "previous_issue_cutoff_known": false
+    "note": "Дополнение покрытия: впервые проверена работа от 10 ноября, ранее отсутствовавшая в выпусках. Она не считается публикацией после предыдущего выпуска; задержка индексации не установлена."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -74,6 +73,94 @@
       "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
       "record_id": "fgse-falsification-gate-v1",
       "code_url": null
+    },
+    {
+      "id": "arXiv:2611.13966",
+      "version": "v1",
+      "first_published_at": "2026-11-10T12:04:54Z",
+      "version_published_at": "2026-11-10T12:04:54Z",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "publication_status": "preprint_submitted_to_journal",
+      "url": "https://arxiv.org/abs/2611.13966",
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "record_id": "tiga-controlled-taxonomy-induction",
+      "code_url": "https://github.com/bschaarmann/TIGA",
+      "inclusion_reason": "previously_uncovered_relevant_work_found_in_lookback",
+      "new_since_previous_issue": false
     }
-  ]
+  ],
+  "issues": [
+    {
+      "searched_at": "2026-11-11T13:11:53Z",
+      "discovery_lookback_days": 30,
+      "note": "Поиск после предыдущего выпуска; дополнительно проверены ранее не включённые работы за 30 дней. Дата обнаружения не означает дату публикации или доказанную задержку индексации.",
+      "newly_included_ids": [
+        "arXiv:2611.14320",
+        "arXiv:2611.14326"
+      ],
+      "prior_run_started_at": "2026-11-11T12:11:06.900423+00:00",
+      "previous_issue_cutoff_known": false
+    },
+    {
+      "searched_at": "2026-11-11T14:11:22Z",
+      "search_started_at": "2026-11-11T14:00:28Z",
+      "previous_issue_at": "2026-11-11T13:11:53Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "arXiv:2611.13966"
+      ],
+      "note": "Дополнение покрытия: впервые проверена работа от 10 ноября, ранее отсутствовавшая в выпусках. Она не считается публикацией после предыдущего выпуска; задержка индексации не установлена."
+    }
+  ],
+  "last_search": {
+    "started_at": "2026-11-11T14:00:28Z",
+    "completed_at": "2026-11-11T14:11:22Z",
+    "incremental_since": "2026-11-11T13:14:21Z",
+    "additional_lookback_start": "2026-10-12",
+    "new_publications_or_significant_versions_after_previous_issue_found": [],
+    "first_time_coverage_ids": [
+      "arXiv:2611.13966"
+    ],
+    "listing_urls": [
+      "https://arxiv.org/list/cs.AI/new",
+      "https://arxiv.org/list/cs.IR/new",
+      "https://arxiv.org/list/cs.AI/recent"
+    ],
+    "queries": [
+      "LLM agent memory poisoning provenance rollback November 11 2026 arxiv",
+      "retrieval augmented generation knowledge updates source attribution contradiction November 2026",
+      "site:arxiv.org/abs/2611 \"memory\" \"poisoning\"",
+      "site:arxiv.org/abs/2611 \"provenance\" \"agent\""
+    ],
+    "screened_not_featured": [
+      {
+        "id": "arXiv:2606.24322",
+        "version": "v1",
+        "first_published_at": "2026-06-23T08:57:50Z",
+        "review_scope": "abstract_and_version_history",
+        "reason": "Outside lookback; no later version listed."
+      },
+      {
+        "id": "arXiv:2607.27080",
+        "version": "v1",
+        "first_published_at": "2026-07-29T16:06:54Z",
+        "review_scope": "abstract_and_version_history",
+        "reason": "Outside lookback; no later version listed."
+      },
+      {
+        "id": "arXiv:2611.14019",
+        "version": "v1",
+        "first_published_at": "2026-11-10T12:53:12Z",
+        "review_scope": "abstract_and_version_history",
+        "reason": "Skill-code evolution is less direct for this issue's knowledge validation focus; no detailed review performed."
+      },
+      {
+        "id": "arXiv:2611.13696",
+        "version": "v1",
+        "first_published_at": "2026-11-10T07:43:02Z",
+        "review_scope": "abstract_and_version_history",
+        "reason": "Abstract-level screening only; no full-paper quality assessment or independent verification in this issue."
+      }
+    ]
+  }
 }

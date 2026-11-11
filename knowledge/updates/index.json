@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T13:11:53Z",
-  "latest_package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
-  "record_count": 45,
+  "updated_at": "2026-11-11T14:11:22Z",
+  "latest_package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+  "record_count": 63,
   "records": {
     "si-seven-base-units": {
       "version": 1,
@@ -363,28 +363,176 @@
       "data_class": "static",
       "checked_at": "2026-11-11T13:11:53Z",
       "review_status": "candidate"
+    },
+    "chemistry-atomic-number-element": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "chemistry",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "chemistry-mass-number-nucleon-count": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "chemistry",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "chemistry-isotopes-proton-neutron-count": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "chemistry",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "chemistry-monatomic-ion-charge": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "chemistry",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "chemistry-catalyst-alternative-path": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "chemistry",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "engineering-ohm-law-domain": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "engineering",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "engineering-kirchhoff-current-rule": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "engineering",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "engineering-kirchhoff-voltage-rule": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "engineering",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "engineering-series-resistance": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "engineering",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "engineering-parallel-resistance": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "engineering",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "engineering-dc-resistor-power": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "engineering",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "biology-rna-ribose-uracil": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "biology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "biology-transcription-rna-from-dna": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "biology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "biology-translation-ribosome": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "biology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "biology-allele-genomic-locus": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "biology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "biology-homozygous-heterozygous-locus": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "biology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "astronomy-light-year-distance": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "astronomy",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "verified"
+    },
+    "tiga-controlled-taxonomy-induction": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "category": "research",
+      "data_class": "static",
+      "checked_at": "2026-11-11T14:11:22Z",
+      "review_status": "candidate"
     }
   },
   "next_foundation_domains": [
-    "chemistry",
-    "engineering",
     "world_history",
     "languages",
-    "biology",
-    "physics_and_astronomy"
+    "culture",
+    "physics_and_astronomy",
+    "mathematics_and_logic",
+    "geography"
   ],
   "note": "Индекс публикаций, не подтверждение импорта или обучения весов локальной модели.",
   "category_counts": {
     "foundations": 8,
     "technology": 10,
-    "research": 6,
+    "research": 7,
     "security": 5,
     "science": 1,
     "news": 1,
     "mathematics": 4,
     "geography": 5,
     "history": 4,
-    "language": 1
+    "language": 1,
+    "chemistry": 5,
+    "engineering": 6,
+    "biology": 5,
+    "astronomy": 1
   },
   "coverage_expansions": [
     {
@@ -409,6 +557,27 @@
         "text_encoding",
         "security_engineering",
         "agent_memory_research"
+      ]
+    },
+    {
+      "checked_at": "2026-11-11T14:11:22Z",
+      "package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
+      "record_count": 18,
+      "categories": [
+        "chemistry",
+        "engineering",
+        "biology",
+        "astronomy",
+        "research"
+      ],
+      "domains": [
+        "atomic_structure",
+        "catalysis",
+        "dc_circuits",
+        "molecular_biology",
+        "genetics",
+        "astronomical_units",
+        "controlled_taxonomy_induction"
       ]
     }
   ]
