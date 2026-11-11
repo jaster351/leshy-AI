@@ -180,7 +180,9 @@ def _configure_app_search(app) -> None:
         }
         if chromium_enabled:
             try:
-                fast.insert(0, ChromiumSearch())
+                fast.insert(0, ChromiumSearch(
+                    brain_dir=getattr(getattr(app, "settings", None), "brain_dir", None)
+                ))
             except ValueError as exc:
                 problem("chromium_search_config_invalid", type(exc).__name__)
         combined = RacingSearch(
