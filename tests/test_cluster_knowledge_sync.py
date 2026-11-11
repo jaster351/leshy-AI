@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
-from leshy.cluster_knowledge_sync import KnowledgeSyncService, _public_source
+from leshy.cluster_knowledge_sync import KnowledgeSyncService, _public_source, _safe_public_record
 from leshy.distributed_cluster import ClusterIdentity
 from leshy.knowledge import KnowledgeBase
 from leshy.storage import Storage
@@ -75,6 +75,37 @@ class KnowledgeSyncTests(unittest.TestCase):
             rows = conn.execute("SELECT claim,status FROM knowledge").fetchall()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["status"], "candidate")
+
+    def test_sensitive_content_is_not_shared_even_from_public_source(self):
+        self.assertTrue(_safe_public_record("Научная публикация о настройке кластерного узла."))
+        self.assertFalse(_safe_public_record("Напишите support@example.org"))
+        self.assertFalse(_safe_public_record("пароль: secret1234"))
+        self.assertFalse(_safe_public_record("token=123xyz"))
+        self.assertFalse(_safe_public_record("Телефон +7 999 123 45 67"))
+        self.knowledge_a.add_candidate(
+            topic="Внешняя статья",
+            claim="Сведения о поставщике: support@example.org и личные контакты.",
+            source_url="https://security.example.org/article",
+            source_type="web",
+        )
+        self.knowledge_a.add_candidate(
+            topic="Внешняя статья",
+            claim="Публичное техническое описание алгоритма обмена знаниями.",
+            source_url="https://security.example.org/article2",
+            source_type="web",
+        )
+        page = self.sync_a._export(0)
+        self.assertEqual(len(page["items"]), 1)
+        self.assertIn("Публичное техническое", page["items"][0]["claim"])
+        imported = self.sync_b._import_page({
+            "items": [{
+                "topic": "Данные участника",
+                "claim": "В записи присутствует личный контакт worker@example.org",
+                "source_url": "https://security.example.org/article3",
+                "source_title": "Официальная статья",
+            }]
+        })
+        self.assertEqual(imported, 0)
 
     def test_invalid_secret_cannot_decrypt(self):
         bad = _Cluster(Path(self.temp.name) / "identity-stranger")
