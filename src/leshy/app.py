@@ -259,7 +259,12 @@ class LeshyApp:
         Both the scheduled import and this lookup require self-learning ON.
         Public catalogue entries remain candidates until independently verified.
         """
-        if trusted or candidates or not self.learning.is_enabled():
+        if (
+            trusted or candidates
+            or not self.learning.is_enabled()
+            or is_casual_checkin(message)
+            or is_local_dialogue_request(message)
+        ):
             return []
         try:
             from .knowledge_catalog_lookup import load_relevant_catalog_knowledge
