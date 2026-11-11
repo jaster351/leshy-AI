@@ -6,11 +6,13 @@ Telegram download URLs or bot credentials. No external vision service.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 from urllib import error, parse, request
 
 from .photo_geolocation import geolocation_vision_prompt, is_photo_geolocation_request
+from .photo_location_memory import PhotoLocationMemory
 from .diagnostics import event
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -220,16 +222,36 @@ class LocalTelegramVision:
             raise TelegramImageError("Тип файла не совпадает с форматом изображения")
         return image
 
-    def describe(self, message: dict) -> str:
-        backend, endpoint, model = _vision_backend()
+    def describe(self, message: dict, *, owner_id: str = "", on_fingerprint=None) -> str:
         attachment = image_attachment(message)
         if attachment is None:
             raise TelegramImageError("Изображение отсутствует")
         image = self._download(attachment)
         media_type = _kind(image)
+        digest = hashlib.sha256(image).hexdigest()
+        if callable(on_fingerprint):
+            on_fingerprint(digest)
         caption = str(message.get("caption") or "").strip()[:2000]
         question = caption or "Опиши, пожалуйста, что изображено на фотографии."
-        if is_photo_geolocation_request(question):
+        is_geo = is_photo_geolocation_request(question)
+        memory = None
+        if is_geo and owner_id:
+            try:
+                memory = PhotoLocationMemory(self.bridge.app.storage)
+                previous = memory.exact(owner_id=owner_id, image_sha256=digest)
+                if previous and previous.get("city"):
+                    landmark = previous.get("landmark") or "это место"
+                    event("telegram_photo_location_recalled", exact_photo=True)
+                    return (
+                        "Вы уже уточняли место этого снимка. "
+                        f"По Вашему подтверждённому примеру: {landmark} — "
+                        f"{previous['city']}. Это ранее сохранённое исправление, "
+                        "а не новая проверка по карте."
+                    )
+            except Exception as exc:
+                event("telegram_photo_location_memory_unavailable", error_type=type(exc).__name__)
+        backend, endpoint, model = _vision_backend()
+        if is_geo:
             question = geolocation_vision_prompt(question)
             # No photo, location guesses or image metadata in logs.
             event("telegram_photo_geolocation_requested", backend=backend)
@@ -298,6 +320,26 @@ class LocalTelegramVision:
             raise VisionUnavailable("Vision backend вернул неверный формат ответа") from None
         if not content:
             raise VisionUnavailable("Vision backend вернул пустое описание изображения")
+        if is_geo and memory is not None:
+            try:
+                examples = memory.matching_landmarks(
+                    owner_id=owner_id, visual_description=content,
+                )
+                if examples:
+                    hints = "; ".join(
+                        f"{item['landmark']} — {item['city']}"
+                        for item in examples
+                    )
+                    content += (
+                        "\n\nРанее Вы подтверждали такие публичные ориентиры: "
+                        + hints
+                        + ". Это подсказка из Ваших исправлений, а НЕ доказательство, "
+                        "что на данном фото тот же памятник: необходимо сравнить "
+                        "внешний вид и, если требуется, проверить сведения через поиск."
+                    )
+                    event("telegram_photo_location_recalled", exact_photo=False, examples=len(examples))
+            except Exception as exc:
+                event("telegram_photo_location_memory_unavailable", error_type=type(exc).__name__)
         return content[:12000]
 
 
