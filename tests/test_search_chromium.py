@@ -68,6 +68,9 @@ class _Page:
             )
         return self.rows
 
+    def wait_for_timeout(self, timeout):
+        pass
+
     def evaluate(self, expression):
         assert expression == "navigator.userAgent"
         return "Mozilla/5.0 Chrome/133.0.0.0"
@@ -151,7 +154,7 @@ class ChromiumSearchTests(unittest.TestCase):
             with patch.dict(sys.modules, _playwright_modules()), patch(
                 "leshy.search_chromium._open_context",
                 return_value=(context, "Microsoft Edge"),
-            ):
+            ), patch("leshy.search_chromium.BROKER.create", return_value=None):
                 with self.assertRaises(SearchChallenge):
                     ChromiumSearch(brain_dir=tmp).search("новости")
             self.assertTrue(context.closed)
