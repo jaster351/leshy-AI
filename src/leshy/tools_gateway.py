@@ -261,8 +261,12 @@ class McpToolsGateway:
         if not manifest.enabled:
             raise RuntimeError("Инструмент выключен")
         # Подтверждение человека не отменяет независимые запреты безопасности.
-        check_external_action(str(tool_name), arguments)
-        if self._needs_approval(manifest) and not approved:
+        try:
+            assessment = check_external_action(str(tool_name), arguments)
+        except PermissionError:
+            event("mcp_tool_blocked", tool_id=manifest.tool_id, tool_name=str(tool_name))
+            raise
+        if (self._needs_approval(manifest) or assessment.requires_human_approval) and not approved:
             event("mcp_tool_approval_required", tool_id=manifest.tool_id, tool_name=tool_name)
             raise ToolApprovalRequired(manifest, tool_name)
         try:
