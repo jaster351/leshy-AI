@@ -15,6 +15,7 @@ from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
 from .verified_clock import current_clock_context
 from .source_reading import read_supplied_source, supplied_public_url
+from .contextual_web_query import contextual_search_query, relevant_url_search_results
 
 
 @dataclass(slots=True)
@@ -158,6 +159,7 @@ class RealtimeChatManager:
         rows: list[Any],
         *,
         search_plan: dict[str, Any] | None = None,
+        lookup_query: str | None = None,
     ) -> tuple[list[ChatMessage], list[dict[str, str]], bool]:
         context: list[ChatMessage] = [
             ChatMessage(
@@ -192,7 +194,13 @@ class RealtimeChatManager:
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
 
-        plan = dict(search_plan or self._search_plan(message))
+        search_query = lookup_query or message
+        if search_query != message:
+            context.append(ChatMessage(
+                "system", "Текущий запрос пользователя уточняет тему из этого же диалога: "
+                + search_query[:240] + ". Не заменяй её другой темой.",
+            ))
+        plan = dict(search_plan or self._search_plan(search_query))
         if is_offline_creative_request(message):
             # Final barrier: a freshness hook cannot force a search here.
             plan["needed"] = False
@@ -216,20 +224,23 @@ class RealtimeChatManager:
         if search_attempted:
             try:
                 search_result = (cinema_search(self.app, cinema_plan) if cinema_plan is not None
-                                 else self.app.live_search(message, limit=5, reason=str(plan.get("reason") or "требуются актуальные данные")))
+                                 else self.app.live_search(search_query, limit=5, reason=str(plan.get("reason") or "требуются актуальные данные")))
+                search_hits = relevant_url_search_results(
+                    search_query, list(search_result.get("results") or []),
+                )
                 sources.extend(
                     {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
-                    for item in search_result.get("results", [])
+                    for item in search_hits
                 )
-                if search_result.get("error") and not search_result.get("results"):
+                if search_result.get("error") and not search_hits:
                     context.append(ChatMessage(
                         "system",
                         "Текущий веб-поиск временно не выполнен: " + str(search_result["error"])[:400],
                     ))
-                if search_result.get("results"):
+                if search_hits:
                     snippets = "\n".join(
                         f"- {item.get('title','')}: {item.get('snippet','')} [{item.get('url','')}]"
-                        for item in search_result["results"]
+                        for item in search_hits
                     )
                     context.append(ChatMessage(
                         "system",
@@ -407,7 +418,11 @@ class RealtimeChatManager:
                 yield StreamEvent("start", {"request_id": rid, "session_id": sid})
                 yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
                 return
-            plan = self._search_plan(message)
+            lookup_query, force_search = contextual_search_query(message, rows)
+            plan = self._search_plan(lookup_query)
+            if force_search:
+                plan["needed"] = True
+                plan["reason"] = "проверка ссылки или предыдущего вопроса пользователя"
             if is_offline_creative_request(message):
                 plan["needed"] = False
                 plan["reason"] = ""
@@ -421,7 +436,9 @@ class RealtimeChatManager:
                 })
                 event("chat_web_search_visible", request_id=rid, session_id=sid, reason=str(plan.get("reason") or ""))
 
-            messages, sources, search_attempted = self._build_context(message, owner_id, rows, search_plan=plan)
+            messages, sources, search_attempted = self._build_context(
+                message, owner_id, rows, search_plan=plan, lookup_query=lookup_query,
+            )
             cinema_plan = None if is_offline_creative_request(message) else cinema_query(message, rows)
             if cinema_plan is not None and not sources:
                 answer = cinema_no_data(cinema_plan)
