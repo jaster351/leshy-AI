@@ -294,6 +294,73 @@ class BingRssSearch:
         return results
 
 
+
+class ClusterPeerSearch:
+    """Optional authenticated search on another live LAN cluster node.
+
+    The remote task executes *local search providers only*, so two connected
+    nodes cannot recursively bounce the same query between each other.
+    """
+    def __init__(self, app):
+        self.app = app
+
+    def search(self, query: str, limit: int = 5) -> list[SearchResult]:
+        try:
+            from .module_settings import module_enabled
+            from .distributed_cluster import HttpClusterTransport
+            from .cluster_orchestrator import ClusterTask
+
+            cluster = getattr(self.app, "distributed_cluster", None)
+            if cluster is None or not module_enabled(self.app.storage, "distributed-cluster"):
+                return []
+            local_id = cluster.identity.node_id
+            nodes = [
+                peer for peer in cluster.orchestrator.peers()
+                if peer.node_id != local_id and peer.accepting_tasks
+                and peer.endpoint.startswith(("http://", "https://"))
+                and time.time() - peer.last_seen <= 30.0
+            ]
+            if not nodes:
+                return []
+            # One backup request avoids turning two-node search into a fan-out
+            # storm. Prefer the idle peer, then deterministic node-id tie break.
+            peer = min(nodes, key=lambda node: (node.queue_depth, node.node_id))
+            task = ClusterTask.create(
+                origin_node_id=local_id,
+                reply_to=cluster.local_node.endpoint,
+                owner_id="cluster:public-search",
+                session_id="",
+                request_id="",
+                priority=60,
+                kind="web.search",
+                payload={"query": str(query or "")[:400], "limit": max(1, min(int(limit), 10))},
+                ttl_seconds=9.0,
+            )
+            result = HttpClusterTransport(cluster.identity, timeout=6.0).submit(peer, task)
+            if not result.ok or result.task_id != task.task_id or result.origin_node_id != local_id:
+                return []
+            items = result.payload.get("items") or []
+            found: list[SearchResult] = []
+            for item in items[:max(1, min(int(limit), 10))]:
+                if not isinstance(item, dict):
+                    continue
+                url = str(item.get("url") or "")
+                parsed = parse.urlsplit(url)
+                if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                    continue
+                found.append(SearchResult(
+                    str(item.get("title") or "")[:500],
+                    url,
+                    str(item.get("snippet") or "")[:1600],
+                ))
+            if found:
+                event("cluster_web_search_succeeded", count=len(found))
+            return found
+        except Exception as exc:
+            event("cluster_web_search_unavailable", error_type=type(exc).__name__)
+            return []
+
+
 class RacingSearch(FallbackSearch):
     """First successful independent search provider wins; no sequential stalls.
 
@@ -416,4 +483,4 @@ class RacingSearch(FallbackSearch):
         raise SearchUnavailable("Независимые поисковые источники не ответили вовремя или не нашли результатов")
 
 
-__all__ = ["BingRssSearch", "RacingSearch", "search_provider_status"]
+__all__ = ["BingRssSearch", "ClusterPeerSearch", "RacingSearch", "search_provider_status"]
