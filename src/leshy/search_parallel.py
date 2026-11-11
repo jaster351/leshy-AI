@@ -10,6 +10,7 @@ Never claim internet success solely because an HTTP endpoint responded 200.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 import html
 import queue
 import re
@@ -92,6 +93,44 @@ def _search_words(value: str) -> list[str]:
     return re.findall(r"[^\W_]+", text, flags=re.UNICODE)
 
 
+
+# News is a category, not a named entity: technology headlines seldom repeat
+# "нового" / "новостях" and may be published in English.
+_NEWS_INTENT = re.compile(r"\b(?:новост\w*|news|нового\s+в\s+(?:it|айти)|latest\s+(?:tech|technology))\b", re.IGNORECASE)
+_TECH_TOPIC = re.compile(r"\b(?:it|айти|tech(?:nology)?|технолог\w*|информационн\w*\s+технолог\w*|кибер\w*|cyber\w*|software|софт\w*)\b", re.IGNORECASE)
+_TECH_SOURCE_TERMS = frozenset("""
+it tech technology technologies technological ai ии искусственный интеллект нейросет
+нейросети программирование программисты software hardware сервер процессор видеокарт
+security cybersecurity кибербезопасность разработк технолог компьютер linux windows
+microsoft google apple nvidia intel amd android ios openai cloud облачн смартфон
+робот робототехник data digital chip chips чип чипы processor gpu cpu npu
+""".split())
+_TECH_NEWS_HOSTS = frozenset((
+    "techcrunch.com", "theverge.com", "arstechnica.com", "wired.com",
+    "zdnet.com", "bleepingcomputer.com", "theregister.com",
+    "habr.com", "3dnews.ru", "ixbt.com", "cnews.ru",
+))
+
+
+def _is_news_query(query: str) -> bool:
+    return bool(_NEWS_INTENT.search(str(query or "")))
+
+
+def _is_tech_news_query(query: str) -> bool:
+    return _is_news_query(query) and bool(_TECH_TOPIC.search(str(query or "")))
+
+
+def _tech_news_hit(item: SearchResult) -> bool:
+    tokens = set(_search_words(item.title + " " + item.snippet))
+    if tokens & _TECH_SOURCE_TERMS:
+        return True
+    # Also recognize inflected forms, which exact token matching misses.
+    if any(word.startswith(("технолог", "программ", "кибер", "нейросет", "искусственн", "computer", "computing", "security", "software")) for word in tokens):
+        return True
+    host = (parse.urlsplit(item.url).hostname or "").lower().removeprefix("www.")
+    return any(host == domain or host.endswith("." + domain) for domain in _TECH_NEWS_HOSTS)
+
+
 def _topic_words(query: str) -> list[str]:
     return [
         word for word in _search_words(query)
@@ -103,6 +142,15 @@ def _focused_rss_query(query: str) -> str:
     """Remove conversational filler for RSS, preserving the concrete subject."""
     if "site:" in query.lower() or "://" in query:
         return query
+    # Broad news queries must be topical and dated; a conversation like
+    # "что нового в новостях по IT" is not a useful literal search phrase.
+    if _is_news_query(query):
+        stamp = datetime.now().astimezone().strftime("%Y-%m-%d")
+        if _is_tech_news_query(query):
+            return f"IT технологии новости {stamp}"
+        return f"главные новости {stamp}" if not any(
+            word not in _SEARCH_FILLER for word in _search_words(query)
+        ) else query
     all_words = _search_words(query)
     topic = _topic_words(query)
     if not (topic and len(topic) <= 8 and len(all_words) - len(topic) >= 2):
@@ -119,6 +167,14 @@ def _relevant_search_results(query: str, values: list[SearchResult]) -> list[Sea
     Works across languages without introducing an LLM or a network call.
     An ambiguous query without substantive terms remains unfiltered.
     """
+    if _is_tech_news_query(query):
+        # Article headlines may discuss companies or products without ever
+        # saying the word "technology"; avoid false no-results for IT news.
+        return [item for item in values if _tech_news_hit(item)]
+    if _is_news_query(query):
+        # Category-wide news has no mandatory named entity to match. Search
+        # provider still needs a real URL; news intent alone is not a subject.
+        return values
     topic = _topic_words(query)
     names = [word for word in topic if any(ch.isalpha() for ch in word)]
     if not names:
@@ -230,7 +286,7 @@ class RacingSearch(FallbackSearch):
 
         def worker(provider, name: str) -> None:
             try:
-                provider_query = _focused_rss_query(cleaned) if isinstance(provider, BingRssSearch) else cleaned
+                provider_query = _focused_rss_query(cleaned) if isinstance(provider, BingRssSearch) or _is_tech_news_query(cleaned) else cleaned
                 values = provider.search(provider_query, limit=limit)
                 valid = [
                     item for item in (values or [])
