@@ -130,9 +130,14 @@ class RacingSearch(FallbackSearch):
     is separately bounded. No request details/URLs are logged in metrics.
     """
 
-    def __init__(self, *providers, deadline_seconds: float = _RACE_DEADLINE_SECONDS):
+    def __init__(self, *providers, deadline_seconds: float = _RACE_DEADLINE_SECONDS,
+                 hedge_delay_seconds: float = 0.0):
         super().__init__(*providers)
         self.deadline_seconds = max(1.0, min(float(deadline_seconds), 10.0))
+        # When a real Chromium provider is first, wait briefly for its result
+        # before waking independent HTTP fallbacks. Normal RacingSearch stays
+        # fully parallel by default for backwards compatibility.
+        self.hedge_delay_seconds = max(0.0, min(float(hedge_delay_seconds), 3.0))
 
     def search(self, query: str, limit: int = 5) -> list[SearchResult]:
         cleaned = " ".join(str(query or "").split()).strip()
@@ -162,45 +167,69 @@ class RacingSearch(FallbackSearch):
             finally:
                 _SLOTS.release()
 
-        for provider in self.providers:
+        def launch(provider) -> bool:
+            nonlocal launched
             if not _SLOTS.acquire(blocking=False):
-                # Other jobs may already be in flight; never create unbounded
-                # threads while the user awaits an interactive response.
-                continue
+                return False
             name = type(provider).__name__
             try:
                 threading.Thread(
                     target=worker, args=(provider, name),
-                    name="leshy-search-" + name,
-                    daemon=True,
+                    name="leshy-search-" + name, daemon=True,
                 ).start()
                 launched += 1
+                return True
             except Exception:
                 _SLOTS.release()
+                return False
+
+        def receive(timeout: float) -> list[SearchResult] | None:
+            nonlocal finished
+            try:
+                outcome, name, results = outcomes.get(timeout=timeout)
+            except queue.Empty:
+                return None
+            if outcome == "success" and results:
+                _bump("successes")
+                event(
+                    "search_parallel_provider_selected", provider=name,
+                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                    results=len(results),
+                )
+                return results
+            finished += 1
+            return None
+
+        providers = tuple(self.providers)
+        finished = 0
+        offset = 0
+        if self.hedge_delay_seconds > 0 and providers:
+            if launch(providers[0]):
+                offset = 1
+                initial = receive(min(
+                    self.hedge_delay_seconds,
+                    max(0.001, self.deadline_seconds - (time.monotonic() - started)),
+                ))
+                if initial:
+                    return initial
+            # A failed first provider should not force the full hedge delay.
+
+        for provider in providers[offset:]:
+            launch(provider)
 
         if launched == 0:
             _bump("unavailable")
             event("search_parallel_saturated", max_workers=_MAX_PARALLEL_SEARCH_WORKERS)
             raise SearchUnavailable("Поисковые источники заняты: слишком много одновременных запросов")
 
-        failures = 0
-        while failures < launched:
+        while finished < launched:
             remaining = self.deadline_seconds - (time.monotonic() - started)
             if remaining <= 0:
                 break
-            try:
-                outcome, name, results = outcomes.get(timeout=remaining)
-            except queue.Empty:
-                break
-            if outcome == "success" and results:
-                _bump("successes")
-                event(
-                    "search_parallel_provider_selected",
-                    provider=name, elapsed_ms=int((time.monotonic() - started) * 1000),
-                    results=len(results),
-                )
-                return results
-            failures += 1
+            result = receive(remaining)
+            if result:
+                return result
+
         _bump("unavailable")
         event(
             "search_parallel_exhausted",
