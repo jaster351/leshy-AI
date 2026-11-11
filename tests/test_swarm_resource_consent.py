@@ -1,4 +1,4 @@
-"""Regression examples for the optional swarm resource policy."""
+"""Регрессионные проверки отдельного разрешения на ресурсы роя."""
 from datetime import datetime, timedelta, timezone
 
 from leshy.swarm_resource_consent import (
@@ -12,7 +12,7 @@ def consent(**overrides):
     values = dict(
         local_owner_confirmed=True,
         enabled=True,
-        agreement_revision="2026-11-11.7",
+        agreement_revision="2026-11-11.8",
         granted_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(minutes=30),
         scopes=frozenset({ResourceScope.CPU}),
@@ -22,7 +22,7 @@ def consent(**overrides):
     return SwarmConsent(**values)
 
 
-def decide(c, task=None, revision="2026-11-11.7"):
+def decide(c, task=None, revision="2026-11-11.8"):
     return authorize_resource_task(
         c, task or ResourceTask("authenticated_swarm_peer", ResourceScope.CPU, 10, peer_identity_verified=True),
         current_revision=revision, now=NOW,
