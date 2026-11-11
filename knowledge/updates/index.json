@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T14:11:22Z",
-  "latest_package": "knowledge/updates/2026-11-11/1400-chemistry-circuits-biology-and-taxonomy.jsonl",
-  "record_count": 63,
+  "updated_at": "2026-11-11T15:15:33Z",
+  "latest_package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+  "record_count": 80,
   "records": {
     "si-seven-base-units": {
       "version": 1,
@@ -507,32 +507,169 @@
       "data_class": "static",
       "checked_at": "2026-11-11T14:11:22Z",
       "review_status": "candidate"
+    },
+    "linguistics-morpheme-meaning-unit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "linguistics-morpheme-versus-syllable": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "linguistics-affix-prefix-suffix": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "linguistics-derivation-versus-inflection": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "astronomy-moon-phases-illumination": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "astronomy",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "astronomy-moon-synchronous-rotation": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "astronomy",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "astronomy-lunar-orbit-versus-phase-period": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "astronomy",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "astronomy-lunar-eclipse-earth-shadow": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "astronomy",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "astronomy-solar-eclipse-moon": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "astronomy",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "astronomy-eclipse-orbital-inclination": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "astronomy",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "history-japan-surrender-instrument-1945": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "history",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "history-armistice-1918-november11": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "history",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "culture-woodcut-relief-printing": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "culture",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "culture-etching-intaglio": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "culture",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "cdd-context-conflict-observability": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "research",
+      "data_class": "static",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "candidate"
+    },
+    "cve-2026-125345": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "security",
+      "data_class": "dynamic",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
+    },
+    "cve-2026-125347": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "category": "security",
+      "data_class": "dynamic",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "review_status": "verified"
     }
   },
   "next_foundation_domains": [
     "world_history",
-    "languages",
-    "culture",
-    "physics_and_astronomy",
     "mathematics_and_logic",
-    "geography"
+    "geography",
+    "physics",
+    "chemistry",
+    "engineering"
   ],
   "note": "Индекс публикаций, не подтверждение импорта или обучения весов локальной модели.",
   "category_counts": {
     "foundations": 8,
     "technology": 10,
-    "research": 7,
-    "security": 5,
+    "research": 8,
+    "security": 7,
     "science": 1,
     "news": 1,
     "mathematics": 4,
     "geography": 5,
-    "history": 4,
-    "language": 1,
+    "history": 6,
+    "language": 5,
     "chemistry": 5,
     "engineering": 6,
     "biology": 5,
-    "astronomy": 1
+    "astronomy": 7,
+    "culture": 2
   },
   "coverage_expansions": [
     {
@@ -578,6 +715,27 @@
         "genetics",
         "astronomical_units",
         "controlled_taxonomy_induction"
+      ]
+    },
+    {
+      "checked_at": "2026-11-11T15:15:33Z",
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "record_count": 17,
+      "categories": [
+        "language",
+        "astronomy",
+        "history",
+        "culture",
+        "research",
+        "security"
+      ],
+      "domains": [
+        "morphology",
+        "lunar_motion_and_eclipses",
+        "world_war_documents",
+        "printmaking",
+        "browser_vulnerability_advisories",
+        "rag_knowledge_conflict_diagnostics"
       ]
     }
   ]

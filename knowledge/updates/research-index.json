@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T14:11:22Z",
+  "updated_at": "2026-11-11T15:15:33Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-11T14:11:22Z",
-    "search_started_at": "2026-11-11T14:00:28Z",
-    "previous_issue_at": "2026-11-11T13:11:53Z",
+    "searched_at": "2026-11-11T15:15:33Z",
+    "search_started_at": "2026-11-11T15:00:03Z",
+    "previous_issue_at": "2026-11-11T14:11:22Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "arXiv:2611.13966"
+      "doi:10.18653/2026.groundlm-1.21"
     ],
-    "note": "Дополнение покрытия: впервые проверена работа от 10 ноября, ранее отсутствовавшая в выпусках. Она не считается публикацией после предыдущего выпуска; задержка индексации не установлена."
+    "note": "Дополнение покрытия: впервые проверена публикация сборника от 29 октября. Препринт впервые опубликован 14 мая, последняя заявленная редакция arXiv v4 — 19 июля. Новые результаты после предыдущего выпуска не установлены."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -87,6 +87,27 @@
       "code_url": "https://github.com/bschaarmann/TIGA",
       "inclusion_reason": "previously_uncovered_relevant_work_found_in_lookback",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "doi:10.18653/2026.groundlm-1.21",
+      "aliases": [
+        "arXiv:2605.14473"
+      ],
+      "version": null,
+      "source_edition": "GroundLM 2026 publisher PDF; no revision number",
+      "first_published_at": "2026-05-14T07:14:19Z",
+      "publisher_publication_date": "2026-10-29",
+      "version_published_at": null,
+      "latest_preprint_version": "v4",
+      "latest_preprint_revision_at": "2026-07-19T02:26:21Z",
+      "checked_at": "2026-11-11T15:15:33Z",
+      "publication_status": "workshop_proceedings",
+      "url": "https://aclanthology.org/2026.groundlm-1.21/",
+      "package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
+      "record_id": "cdd-context-conflict-observability",
+      "code_url": null,
+      "inclusion_reason": "first_time_coverage_of_recent_proceedings_publication",
+      "new_since_previous_issue": false
     }
   ],
   "issues": [
@@ -110,57 +131,56 @@
         "arXiv:2611.13966"
       ],
       "note": "Дополнение покрытия: впервые проверена работа от 10 ноября, ранее отсутствовавшая в выпусках. Она не считается публикацией после предыдущего выпуска; задержка индексации не установлена."
+    },
+    {
+      "searched_at": "2026-11-11T15:15:33Z",
+      "search_started_at": "2026-11-11T15:00:03Z",
+      "previous_issue_at": "2026-11-11T14:11:22Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "doi:10.18653/2026.groundlm-1.21"
+      ],
+      "note": "Дополнение покрытия: впервые проверена публикация сборника от 29 октября. Препринт впервые опубликован 14 мая, последняя заявленная редакция arXiv v4 — 19 июля. Новые результаты после предыдущего выпуска не установлены."
     }
   ],
   "last_search": {
-    "started_at": "2026-11-11T14:00:28Z",
-    "completed_at": "2026-11-11T14:11:22Z",
-    "incremental_since": "2026-11-11T13:14:21Z",
+    "started_at": "2026-11-11T15:00:03Z",
+    "completed_at": "2026-11-11T15:15:33Z",
+    "incremental_since": "2026-11-11T14:14:10Z",
     "additional_lookback_start": "2026-10-12",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
     "first_time_coverage_ids": [
-      "arXiv:2611.13966"
-    ],
-    "listing_urls": [
-      "https://arxiv.org/list/cs.AI/new",
-      "https://arxiv.org/list/cs.IR/new",
-      "https://arxiv.org/list/cs.AI/recent"
+      "doi:10.18653/2026.groundlm-1.21"
     ],
     "queries": [
-      "LLM agent memory poisoning provenance rollback November 11 2026 arxiv",
-      "retrieval augmented generation knowledge updates source attribution contradiction November 2026",
-      "site:arxiv.org/abs/2611 \"memory\" \"poisoning\"",
-      "site:arxiv.org/abs/2611 \"provenance\" \"agent\""
+      "LLM agent memory provenance poisoning knowledge updates research November 11 2026",
+      "RAG source verification contradiction memory rollback new research November 2026",
+      "\"FortMem\" \"Secure Stateful\" site:dl.acm.org",
+      "\"FortMem\" \"PASTP\" arxiv github",
+      "\"Does RAG Know When Retrieval Is Wrong\" arxiv github"
     ],
-    "screened_not_featured": [
-      {
-        "id": "arXiv:2606.24322",
-        "version": "v1",
-        "first_published_at": "2026-06-23T08:57:50Z",
-        "review_scope": "abstract_and_version_history",
-        "reason": "Outside lookback; no later version listed."
-      },
-      {
-        "id": "arXiv:2607.27080",
-        "version": "v1",
-        "first_published_at": "2026-07-29T16:06:54Z",
-        "review_scope": "abstract_and_version_history",
-        "reason": "Outside lookback; no later version listed."
-      },
-      {
-        "id": "arXiv:2611.14019",
-        "version": "v1",
-        "first_published_at": "2026-11-10T12:53:12Z",
-        "review_scope": "abstract_and_version_history",
-        "reason": "Skill-code evolution is less direct for this issue's knowledge validation focus; no detailed review performed."
-      },
-      {
-        "id": "arXiv:2611.13696",
-        "version": "v1",
-        "first_published_at": "2026-11-10T07:43:02Z",
-        "review_scope": "abstract_and_version_history",
-        "reason": "Abstract-level screening only; no full-paper quality assessment or independent verification in this issue."
-      }
-    ]
-  }
+    "opened_primary_urls": [
+      "https://aclanthology.org/2026.groundlm-1.21/",
+      "https://aclanthology.org/2026.groundlm-1.21.pdf",
+      "https://arxiv.org/abs/2605.14473"
+    ],
+    "note": "Поиск не является доказательством отсутствия иных публикаций; вторичные подборки не считались независимыми подтверждениями."
+  },
+  "pending_primary_reviews": [
+    {
+      "reported_title": "FortMem: Secure Stateful Data Management for Long-Term LLM Agent Memory",
+      "reported_doi": "10.1145/3799682.3840872",
+      "reported_publication_date": "2026-11-06",
+      "verified_publication_date": null,
+      "status": "pending_primary_source_access",
+      "secondary_discovery_url": "https://multiagentsecurity.ai/paper?paper_id=doi%3A10.1145%2F3799682.3840872",
+      "attempted_primary_urls": [
+        "https://doi.org/10.1145/3799682.3840872",
+        "https://dl.acm.org/doi/10.1145/3799682.3840872",
+        "https://api.crossref.org/works/10.1145/3799682.3840872"
+      ],
+      "last_attempt_at": "2026-11-11T15:15:33Z",
+      "note": "Первоисточник не удалось прочитать; метаданные не подтверждены. В подборку и импортируемые утверждения работа не включена."
+    }
+  ]
 }
