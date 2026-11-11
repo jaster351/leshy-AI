@@ -30,6 +30,7 @@ from .storage import Storage, utcnow
 from .version import VERSION
 from .verified_clock import current_clock_context
 from .source_reading import read_supplied_source
+from .contextual_web_query import contextual_search_query, relevant_url_search_results
 
 
 def _inference_timeout(default: int) -> float:
@@ -432,6 +433,7 @@ class LeshyApp:
                 "image_job": job,
             }
 
+        lookup_query, force_search = contextual_search_query(message, rows)
         context: list[ChatMessage] = [
             ChatMessage(
                 "system",
@@ -452,6 +454,11 @@ class LeshyApp:
             )
         context.append(ChatMessage("system", current_clock_context()))
         source_context, source_links = read_supplied_source(self, message)
+        if lookup_query != message:
+            context.append(ChatMessage(
+                "system", "Текущий вопрос связан с темой из этого же диалога: "
+                + lookup_query[:240] + ". Не меняй тему и не придумывай содержание сайта.",
+            ))
         if source_context:
             if source_links:
                 context.append(ChatMessage(
@@ -466,14 +473,14 @@ class LeshyApp:
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
 
-        trusted = self.knowledge.search(message, trusted_only=True, limit=5)
-        candidates = self.knowledge.search_candidates(message, limit=5)
+        trusted = self.knowledge.search(lookup_query, trusted_only=True, limit=5)
+        candidates = self.knowledge.search_candidates(lookup_query, limit=5)
         catalog_matches: list[dict] = []
         if creative:
             trusted = []
             candidates = []
         elif not trusted and not candidates:
-            catalog_matches = self._catalog_matches(message, trusted, candidates)
+            catalog_matches = self._catalog_matches(lookup_query, trusted, candidates)
             if catalog_matches:
                 candidates = catalog_matches
                 from .knowledge_catalog_lookup import format_catalog_context
@@ -494,15 +501,18 @@ class LeshyApp:
             search_attempted = True
             try:
                 search_result = (cinema_search(self, cinema_plan) if cinema_plan is not None
-                                 else self.live_search(message, limit=5, reason=reason_text))
+                                 else self.live_search(lookup_query, limit=5, reason=reason_text))
+                search_hits = relevant_url_search_results(
+                    lookup_query, list(search_result.get("results") or []),
+                )
                 sources.extend(
                     {"title": str(item.get("title") or ""), "url": str(item.get("url") or "")}
-                    for item in search_result.get("results", [])
+                    for item in search_hits
                 )
-                if search_result.get("results"):
+                if search_hits:
                     snippets = "\n".join(
                         f"- {item.get('title','')}: {item.get('snippet','')} [{item.get('url','')}]"
-                        for item in search_result["results"]
+                        for item in search_hits
                     )
                     context.append(ChatMessage(
                         "system",
@@ -518,8 +528,8 @@ class LeshyApp:
                 problem("live_search_failed", search_error, query=message[:500])
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
-        reason = None if creative else adaptive_research_reason(message, trusted, candidates)
-        needed = False if creative else bool(cinema_plan is not None or reason or self._needs_live_search(message))
+        reason = None if creative else adaptive_research_reason(lookup_query, trusted, candidates)
+        needed = False if creative else bool(force_search or cinema_plan is not None or reason or self._needs_live_search(lookup_query))
         self._last_internet_route = {
             "mode": "поиск" if needed else "локально",
             "reason": str(reason or ("явный запрос" if needed else "TTL/контекст позволяют ответ без сети"))[:100],
@@ -536,7 +546,7 @@ class LeshyApp:
             answer = cinema_no_data(cinema_plan)
             return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
 
-        if search_attempted and not sources and not catalog_matches:
+        if search_attempted and not sources and (not catalog_matches or force_search):
             answer = (
                 "Не удалось проверить актуальные сведения: поисковые источники временно недоступны. Попробуйте позже."
                 if search_error else
