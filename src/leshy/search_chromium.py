@@ -32,10 +32,11 @@ _ENGINE_SELECTORS = {
     "duckduckgo": 'a[data-testid="result-title-a"], article h2 a',
 }
 _CHALLENGE_MARKERS = (
-    "captcha", "verify you are human", "verify you're human",
+    "verify you are human", "verify you're human",
     "unusual traffic", "please verify", "security challenge",
     "проверка безопасности", "подтвердите, что вы человек",
     "подтвердите, что вы не робот", "robot check", "are you a robot",
+    "checking your browser", "just a moment...",
 )
 _BROWSER_LOCK = Lock()
 _STATUS_LOCK = RLock()
@@ -46,6 +47,8 @@ _STATUS = {
     "last_success_at": "",
     "last_challenge_at": "",
     "last_error": "",
+    "user_agent": "",
+    "cookie_count": 0,
     "searches": 0,
     "successes": 0,
     "challenges": 0,
@@ -75,10 +78,20 @@ def _search_page(engine: str, query: str) -> str:
 
 
 def _is_challenge(title: str, body: str, status: int | None) -> bool:
-    text = " ".join((title + " " + body[:4000]).lower().split())
+    heading = str(title or "").lower()
+    prefix = str(body or "")[:1500].lower()
+    text = " ".join((heading + " " + prefix).split())
+    if status in (403, 429):
+        return True
     if any(marker in text for marker in _CHALLENGE_MARKERS):
         return True
-    return status in (403, 429)
+    # The search topic itself may be "CAPTCHA"; matching this word in
+    # arbitrary search results must not be mistaken for a challenge page.
+    return "captcha" in heading or (
+        "captcha" in prefix[:500] and any(
+            marker in prefix[:500] for marker in ("robot", "verify", "проверк", "введите")
+        )
+    )
 
 
 def _clean_result(url: str, title: str, snippet: str) -> SearchResult | None:
@@ -207,6 +220,12 @@ class ChromiumSearch:
                     status = response.status if response is not None else None
                     body = page.locator("body").inner_text(timeout=2_000)
                     title = page.title()
+                    try:
+                        user_agent = str(page.evaluate("navigator.userAgent") or "")[:240]
+                        cookie_count = len(context.cookies())
+                        _status(user_agent=user_agent, cookie_count=cookie_count)
+                    except Exception:
+                        pass
                     if _is_challenge(title, body, status):
                         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                         _status(state="needs_human_verification", last_challenge_at=stamp)
