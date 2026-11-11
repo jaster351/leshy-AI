@@ -1,14 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T19:01:06Z",
+  "updated_at": "2026-11-11T20:05:11Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-11T19:01:06Z",
-    "previous_issue_at": "2026-11-11T18:03:19Z",
+    "searched_at": "2026-11-11T20:05:11Z",
+    "previous_issue_at": "2026-11-11T19:01:06Z",
     "discovery_lookback_days": 30,
-    "newly_included_ids": [
-      "arXiv:2611.13946"
-    ],
-    "note": "Впервые включён препринт от 10 ноября, обнаруженный в свежем списке cs.AI. Это дополнение покрытия, а не новая версия после прошлого выпуска."
+    "newly_included_ids": [],
+    "note": "В свежих списках cs.AI/cs.IR и целевом поиске не подтверждены значимые новые работы или существенные редакции после прошлого выпуска. Уже рассмотренные работы не повторены."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -228,28 +226,30 @@
         "arXiv:2611.13946"
       ],
       "note": "Впервые включён препринт от 10 ноября, обнаруженный в свежем списке cs.AI. Это дополнение покрытия, а не новая версия после прошлого выпуска."
+    },
+    {
+      "searched_at": "2026-11-11T20:05:11Z",
+      "previous_issue_at": "2026-11-11T19:01:06Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [],
+      "note": "В свежих списках cs.AI/cs.IR и целевом поиске не подтверждены значимые новые работы или существенные редакции после прошлого выпуска. Уже рассмотренные работы не повторены."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-11T19:01:06Z",
-    "incremental_since": "2026-11-11T18:03:19Z",
-    "additional_lookback_start": "2026-10-12",
+    "completed_at": "2026-11-11T20:05:11Z",
+    "incremental_since": "2026-11-11T19:01:06Z",
+    "additional_lookback_start": "2026-10-13",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
-    "first_time_coverage_ids": [
-      "arXiv:2611.13946"
-    ],
+    "first_time_coverage_ids": [],
     "query_topics": [
-      "LLM-agent memory, provenance, poisoning, rollback and RAG verification",
+      "LLM-agent memory provenance poisoning RAG updates November 12 2026",
       "new and replaced cs.AI/cs.IR submissions"
     ],
     "opened_primary_urls": [
       "https://arxiv.org/list/cs.AI/new",
-      "https://arxiv.org/list/cs.IR/new",
-      "https://arxiv.org/abs/2611.13946",
-      "https://arxiv.org/html/2611.13946v1",
-      "https://github.com/ZJU-LLM-Safety/TreeAgent"
+      "https://arxiv.org/list/cs.IR/new"
     ],
-    "note": "Проверены препринт, полный HTML и публичный репозиторий авторов; независимая репликация не выполнялась."
+    "note": "Поиск возвращал уже учтённые идентификаторы; повторов в выпуске нет."
   },
   "pending_primary_reviews": [
     {

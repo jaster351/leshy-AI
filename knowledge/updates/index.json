@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T19:01:06Z",
-  "latest_package": "knowledge/updates/2026-11-12/0000-treeagent-memory-research.jsonl",
-  "record_count": 1103,
+  "updated_at": "2026-11-11T20:05:11Z",
+  "latest_package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+  "record_count": 1696,
   "records": {
     "si-seven-base-units": {
       "version": 1,
@@ -8827,6 +8827,4750 @@
       "data_class": "static",
       "checked_at": "2026-11-11T19:01:06Z",
       "review_status": "candidate"
+    },
+    "cldr49-ru-locale-key-calendar": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-cf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-colalternate": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-colbackwards": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-colcasefirst": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-colcaselevel": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-collation": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-colnormalization": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-colnumeric": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-colreorder": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-colstrength": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-currency": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-d0": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-dx": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-em": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-fw": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-h0": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-hc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-i0": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-k0": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-kv": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-lb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-lw": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-m0": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-ms": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-mu": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-numbers": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-rg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-s0": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-sd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-ss": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-t": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-t0": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-timezone": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-va": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-x": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-key-x0": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-buddhist": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-chinese": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-coptic": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-dangi": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-ethiopic": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-ethiopic-amete-alem": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-gregorian": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-hebrew": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-indian": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-islamic": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-islamic-civil": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-islamic-umalqura": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-iso8601": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-japanese": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-persian": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-calendar-roc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-cf-account": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-cf-standard": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-compat": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-dictionary": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-ducet": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-phonebook": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-phonetic": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-pinyin": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-search": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-standard": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-stroke": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-traditional": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-unihan": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-collation-zhuyin": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-d0-fwidth": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-d0-hwidth": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-hc-c12": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-hc-c24": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-hc-h11": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-hc-h12": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-hc-h23": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-hc-h24": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-lb-loose": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-lb-normal": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-lb-strict": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-m0-bgn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-m0-ungegn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-ms-metric": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-ms-uksystem": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-ms-ussystem": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-arab": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-arabext": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-armn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-armnlow": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-beng": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-cakm": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-deva": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-ethi": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-fullwide": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-geor": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-grek": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-greklow": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-gujr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-guru": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-hanidec": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-hans": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-hansfin": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-hant": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-hantfin": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-hebr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-java": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-jpan": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-jpanfin": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-khmr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-knda": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-laoo": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-latn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-mlym": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-mong": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-mtei": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-mymr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-native": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-olck": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-orya": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-roman": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-romanlow": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-taml": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-tamldec": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-telu": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-thai": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-tibt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-numbers-vaii": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-locale-type-t0-und": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-adp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-aed": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-afa": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-afn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-all": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-amd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ang": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-aoa": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-aok": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-aon": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-aor": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ara": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-arp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ars": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ats": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-aud": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-awg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-azm": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-azn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bad": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bam": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bbd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bdt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bec": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bef": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bel": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bgl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bgn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bhd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bif": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bmd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bnd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bob": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bop": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bov": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-brb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-brc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bre": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-brl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-brn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-brr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bsd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-btn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-buk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bwp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-byb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-byn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-byr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-bzd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cad": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cdf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-che": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-chf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-chw": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-clf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-clp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cnh": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cny": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cop": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cou": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-crc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-csd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-csk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cuc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cup": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cve": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-cyp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-czk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ddm": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-dem": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-djf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-dkk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-dop": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-dzd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ecs": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ecv": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-eek": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-egp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ern": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-esa": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-esb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-esp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-etb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-eur": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-fim": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-fjd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-fkp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-frf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gbp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gek": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gel": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ghc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ghs": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gip": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gmd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gnf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gns": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gqe": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-grd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gtq": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gwe": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gwp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-gyd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-hkd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-hnl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-hrd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-hrk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-htg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-huf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-idr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-iep": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ilp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ils": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-inr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-iqd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-irr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-isk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-itl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-jmd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-jod": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-jpy": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-kes": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-kgs": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-khr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-kmf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-kpw": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-krw": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-kwd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-kyd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-kzt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-lak": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-lbp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-lkr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-lrd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-lsl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ltl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ltt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-luc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-luf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-lul": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-lvl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-lvr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-lyd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mad": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-maf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mdl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mga": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mgf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mkd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mlf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mmk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mnt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mop": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mro": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mru": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mtl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mtp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mur": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mvr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mwk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mxn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mxp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mxv": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-myr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mze": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mzm": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-mzn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-nad": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ngn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-nic": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-nio": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-nlg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-nok": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-npr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-nzd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-omr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-pab": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-pei": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-pen": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-pes": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-pgk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-php": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-pkr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-pln": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-plz": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-pte": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-pyg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-qar": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-rhd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-rol": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ron": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-rsd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-rub": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-rur": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-rwf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sar": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sbd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-scr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sdd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sdg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sdp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sek": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sgd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-shp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-skk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sle": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sll": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sos": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-srd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-srg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ssp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-std": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-stn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-sur": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-svc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-syp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-szl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-thb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-tjr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-tjs": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-tmm": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-tmt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-tnd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-top": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-tpe": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-trl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-try": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ttd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-twd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-tzs": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-uah": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-uak": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ugs": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ugx": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-usd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-usn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-uss": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-uyi": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-uyp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-uyu": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-uzs": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-veb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-vef": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ves": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-vnd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-vuv": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-wst": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xaf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xag": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xau": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xba": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xbb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xbc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xbd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xcd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xcg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xdr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xeu": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xfo": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xfu": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xof": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xpd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xpf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xpt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xre": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xts": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-xxx": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-ydd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-yer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-yud": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-yum": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-yun": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-zal": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-zar": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-zmk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-zmw": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-zrn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-zrz": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-zwd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-zwg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-currency-zwl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-acceleration-g-force": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-acceleration-meter-per-square-second": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-angle-revolution": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-angle-radian": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-angle-degree": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-angle-arc-minute": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-angle-arc-second": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-square-kilometer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-hectare": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-square-meter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-square-centimeter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-square-mile": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-acre": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-square-yard": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-square-foot": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-square-inch": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-area-dunam": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-concentr-karat": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-concentr-milligram-ofglucose-per-deciliter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-concentr-millimole-per-liter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-concentr-part-per-1e6": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-concentr-percent": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-concentr-permille": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-concentr-permyriad": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-concentr-mole": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-consumption-liter-per-kilometer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-consumption-liter-per-100-kilometer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-consumption-mile-per-gallon": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-consumption-mile-per-gallon-imperial": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-petabyte": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-terabyte": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-terabit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-gigabyte": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-gigabit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-megabyte": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-megabit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-kilobyte": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-kilobit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-byte": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-digital-bit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-century": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-decade": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-year": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-quarter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-month": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-week": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-day": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-hour": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-minute": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-second": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-millisecond": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-microsecond": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-nanosecond": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-electric-ampere": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-electric-milliampere": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-electric-ohm": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-electric-volt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-kilocalorie": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-calorie": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-foodcalorie": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-kilojoule": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-joule": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-kilowatt-hour": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-electronvolt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-british-thermal-unit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-therm-us": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-force-pound-force": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-force-newton": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-frequency-gigahertz": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-frequency-megahertz": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-frequency-kilohertz": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-frequency-hertz": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-graphics-pixel": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-graphics-megapixel": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-graphics-pixel-per-centimeter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-graphics-pixel-per-inch": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-graphics-dot-per-centimeter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-graphics-dot-per-inch": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-graphics-dot": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-earth-radius": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-kilometer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-meter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-decimeter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-centimeter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-millimeter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-micrometer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-nanometer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-picometer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-mile": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-yard": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-foot": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-inch": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-parsec": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-light-year": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-astronomical-unit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-fathom": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-nautical-mile": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-mile-scandinavian": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-point": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-length-solar-radius": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-light-lux": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-light-candela": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-light-lumen": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-light-solar-luminosity": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-tonne": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-kilogram": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-gram": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-milligram": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-microgram": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-ton": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-pound": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-ounce": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-ounce-troy": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-carat": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-dalton": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-earth-mass": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-mass-solar-mass": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-power-gigawatt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-power-megawatt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-power-kilowatt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-power-watt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-power-milliwatt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-power-horsepower": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-millimeter-ofhg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-ofhg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-pound-force-per-square-inch": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-inch-ofhg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-bar": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-millibar": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-atmosphere": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-pascal": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-hectopascal": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-kilopascal": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-pressure-megapascal": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-speed-kilometer-per-hour": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-speed-meter-per-second": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-speed-mile-per-hour": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-speed-knot": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-speed-beaufort": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-temperature-celsius": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-temperature-fahrenheit": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-temperature-kelvin": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-torque-pound-force-foot": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-torque-newton-meter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-cubic-kilometer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-cubic-meter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-cubic-centimeter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-cubic-mile": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-cubic-yard": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-cubic-foot": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-cubic-inch": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-megaliter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-hectoliter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-liter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-deciliter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-centiliter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-milliliter": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-pint-metric": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-cup-metric": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-fluid-ounce-metric": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-acre-foot": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-bushel": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-gallon": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-gallon-imperial": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-quart": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-pint": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-cup": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-fluid-ounce": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-fluid-ounce-imperial": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-tablespoon": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-teaspoon": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-barrel": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-dessert-spoon": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-dessert-spoon-imperial": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-drop": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-dram": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-pinch": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-volume-quart-imperial": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-calorie-it": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-becquerel": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-sievert": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-energy-gray": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-force-kilogram-force": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-concentr-part-per-1e9": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-unit-duration-night": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T20:05:11Z",
+      "review_status": "verified"
     }
   },
   "next_foundation_domains": [
@@ -8848,7 +13592,7 @@
     "mathematics": 7,
     "geography": 304,
     "history": 9,
-    "language": 701,
+    "language": 1294,
     "chemistry": 8,
     "engineering": 8,
     "biology": 10,
@@ -9033,6 +13777,54 @@
       "domains": [
         "structure_aware_hierarchical_memory"
       ]
+    },
+    {
+      "checked_at": "2026-11-11T20:05:11Z",
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "record_count": 37,
+      "categories": [
+        "language"
+      ],
+      "domains": [
+        "cldr_russian_key_display_names"
+      ],
+      "dataset_manifest": "knowledge/updates/datasets/cldr49-ru-locale-technical-names.manifest.json"
+    },
+    {
+      "checked_at": "2026-11-11T20:05:11Z",
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "record_count": 89,
+      "categories": [
+        "language"
+      ],
+      "domains": [
+        "cldr_russian_type_display_names"
+      ],
+      "dataset_manifest": "knowledge/updates/datasets/cldr49-ru-locale-technical-names.manifest.json"
+    },
+    {
+      "checked_at": "2026-11-11T20:05:11Z",
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "record_count": 282,
+      "categories": [
+        "language"
+      ],
+      "domains": [
+        "cldr_russian_currency_display_names"
+      ],
+      "dataset_manifest": "knowledge/updates/datasets/cldr49-ru-locale-technical-names.manifest.json"
+    },
+    {
+      "checked_at": "2026-11-11T20:05:11Z",
+      "package": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "record_count": 185,
+      "categories": [
+        "language"
+      ],
+      "domains": [
+        "cldr_russian_unit_display_names"
+      ],
+      "dataset_manifest": "knowledge/updates/datasets/cldr49-ru-locale-technical-names.manifest.json"
     }
   ]
 }
