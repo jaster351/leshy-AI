@@ -233,6 +233,10 @@ class SelfLearningWorker:
 
             try:
                 now = time.time()
+                if self._next_autonomous_at > now:
+                    self._state = "waiting_rate_limit"
+                    self._stop.wait(min(2.0, max(0.1, self._next_autonomous_at - now)))
+                    continue
                 repository_dir = (
                     self.repository_sync.directory() / "updates"
                     if self.repository_sync is not None else self.repository_knowledge_dir
@@ -255,9 +259,20 @@ class SelfLearningWorker:
                 result = self.research.run_next(manual_only=not autonomous)
                 self._last_result = result
                 self._last_error = ""
-                if result and result.get("error"):
-                    if autonomous:
-                        self._next_autonomous_at = time.time() + self.ERROR_BACKOFF_SECONDS
+                # An empty search is not successful learning. In particular,
+                # queued live-search tasks may have no matching sources while
+                # external engines are throttling us. Back off the *worker*,
+                # including a pre-existing backlog, instead of firing the next
+                # five-provider race immediately.
+                empty_search = bool(
+                    result
+                    and not result.get("error")
+                    and "accepted_claims" in result
+                    and int(result.get("accepted_claims") or 0) == 0
+                    and int(result.get("quarantined_sources") or 0) == 0
+                )
+                if result and (result.get("error") or empty_search):
+                    self._next_autonomous_at = time.time() + self.ERROR_BACKOFF_SECONDS
                     self._state = "backoff"
                 else:
                     if autonomous:
