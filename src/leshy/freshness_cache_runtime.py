@@ -94,7 +94,7 @@ def install_freshness_cache_runtime() -> None:
             owner_id,
             rows,
             search_plan=plan,
-        lookup_query=lookup_query,
+            lookup_query=lookup_query,
         )
         fresh = list(plan.get("fresh_dynamic") or [])
         if fresh:
