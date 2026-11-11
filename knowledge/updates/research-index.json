@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T18:03:19Z",
+  "updated_at": "2026-11-11T19:01:06Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-11T18:03:19Z",
-    "previous_issue_at": "2026-11-11T17:13:42Z",
+    "searched_at": "2026-11-11T19:01:06Z",
+    "previous_issue_at": "2026-11-11T18:03:19Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "arXiv:2610.41056"
+      "arXiv:2611.13946"
     ],
-    "note": "Впервые включён релевантный препринт от 29 октября, ранее отсутствовавший в истории. Это дополнение покрытия, не новая публикация после прошлого выпуска; значимых новых версий после прошлого выпуска в просмотренных первоисточниках не подтверждено."
+    "note": "Впервые включён препринт от 10 ноября, обнаруженный в свежем списке cs.AI. Это дополнение покрытия, а не новая версия после прошлого выпуска."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -145,6 +145,21 @@
       "dataset_url": null,
       "inclusion_reason": "first_time_coverage_of_recent_relevant_preprint",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "arXiv:2611.13946",
+      "version": "v1",
+      "first_published_at": "2026-11-10T11:33:05Z",
+      "version_published_at": "2026-11-10T11:33:05Z",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "publication_status": "preprint",
+      "url": "https://arxiv.org/abs/2611.13946",
+      "package": "knowledge/updates/2026-11-12/0000-treeagent-memory-research.jsonl",
+      "record_id": "treeagent-structure-aware-hierarchical-memory",
+      "code_url": "https://github.com/ZJU-LLM-Safety/TreeAgent",
+      "dataset_url": "https://github.com/ZJU-LLM-Safety/TreeAgent/tree/7adab60e8930a0b574602d74857ffbc77f531ccf/data",
+      "inclusion_reason": "first_time_coverage_of_relevant_new_submission",
+      "new_since_previous_issue": false
     }
   ],
   "issues": [
@@ -204,26 +219,37 @@
         "arXiv:2610.41056"
       ],
       "note": "Впервые включён релевантный препринт от 29 октября, ранее отсутствовавший в истории. Это дополнение покрытия, не новая публикация после прошлого выпуска; значимых новых версий после прошлого выпуска в просмотренных первоисточниках не подтверждено."
+    },
+    {
+      "searched_at": "2026-11-11T19:01:06Z",
+      "previous_issue_at": "2026-11-11T18:03:19Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "arXiv:2611.13946"
+      ],
+      "note": "Впервые включён препринт от 10 ноября, обнаруженный в свежем списке cs.AI. Это дополнение покрытия, а не новая версия после прошлого выпуска."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-11T18:03:19Z",
-    "incremental_since": "2026-11-11T17:13:42Z",
+    "completed_at": "2026-11-11T19:01:06Z",
+    "incremental_since": "2026-11-11T18:03:19Z",
     "additional_lookback_start": "2026-10-12",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
     "first_time_coverage_ids": [
-      "arXiv:2610.41056"
+      "arXiv:2611.13946"
     ],
     "query_topics": [
-      "LLM-agent memory, RAG provenance, poisoning, rollback and source verification",
+      "LLM-agent memory, provenance, poisoning, rollback and RAG verification",
       "new and replaced cs.AI/cs.IR submissions"
     ],
     "opened_primary_urls": [
       "https://arxiv.org/list/cs.AI/new",
       "https://arxiv.org/list/cs.IR/new",
-      "https://arxiv.org/abs/2610.41056"
+      "https://arxiv.org/abs/2611.13946",
+      "https://arxiv.org/html/2611.13946v1",
+      "https://github.com/ZJU-LLM-Safety/TreeAgent"
     ],
-    "note": "Для включённой работы удалось проверить только первичный абстракт и метаданные arXiv; численные детали вне абстракта не утверждаются."
+    "note": "Проверены препринт, полный HTML и публичный репозиторий авторов; независимая репликация не выполнялась."
   },
   "pending_primary_reviews": [
     {

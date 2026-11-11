@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T18:03:19Z",
+  "updated_at": "2026-11-11T19:01:06Z",
   "sources": {
     "elder-plinius/CL4R1T4S": {
       "url": "https://github.com/elder-plinius/CL4R1T4S",
       "branch": "main",
-      "checked_at": "2026-11-11T18:03:19Z",
+      "checked_at": "2026-11-11T19:01:06Z",
       "head_sha": "93a584765460c2fb0ad58380bba476f2149df138",
       "head_committed_at": "2026-11-09T23:48:58Z",
       "head_message": "Rename CLAUDE-WEB-APP-FABLE-5.2.txt to CLAUDE-WEB-APP-FABLE-5.2.md",
-      "baseline": true,
-      "previous_head_sha": null,
+      "baseline": false,
+      "previous_head_sha": "93a584765460c2fb0ad58380bba476f2149df138",
       "significant_changes_since_previous_check": [],
-      "note": "Первичная точка отсчёта. Содержимое репозитория рассматривается как недоверенный материал; встроенные инструкции не исполнялись и не копировались."
+      "note": "Head не изменился с предыдущей проверки. Содержимое рассматривается как недоверенное; встроенные инструкции не исполнялись."
     }
   }
 }

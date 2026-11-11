@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T18:03:19Z",
-  "latest_package": "knowledge/updates/2026-11-11/1800-memory-robustness-research.jsonl",
-  "record_count": 980,
+  "updated_at": "2026-11-11T19:01:06Z",
+  "latest_package": "knowledge/updates/2026-11-12/0000-treeagent-memory-research.jsonl",
+  "record_count": 1103,
   "records": {
     "si-seven-base-units": {
       "version": 1,
@@ -7843,6 +7843,990 @@
       "data_class": "static",
       "checked_at": "2026-11-11T18:03:19Z",
       "review_status": "candidate"
+    },
+    "cldr49-ru-script-adlm": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-arab": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-aran": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-armi": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-armn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-avst": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-bali": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-batk": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-beng": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-blis": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-bopo": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-brah": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-brai": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-bugi": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-buhd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-cakm": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-cans": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-cari": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-cham": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-cher": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-cirt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-copt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-cprt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-cyrl": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-cyrs": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-deva": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-dsrt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-egyd": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-egyh": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-egyp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-ethi": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-geok": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-geor": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-glag": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-goth": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-grek": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-gujr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-guru": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hanb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hang": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hani": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hano": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hans": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hant": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hebr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hira": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hrkt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-hung": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-ital": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-jamo": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-java": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-jpan": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-kali": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-kana": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-khar": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-khmr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-knda": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-kore": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-kthi": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-lana": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-laoo": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-latf": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-latg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-latn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-lepc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-limb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-lina": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-linb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-lyci": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-lydi": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-mand": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-maya": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-mero": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-mlym": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-mong": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-mtei": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-mymr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-nkoo": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-ogam": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-olck": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-orya": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-osma": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-phlv": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-rohg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-roro": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-runr": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-saur": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-sgnw": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-shaw": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-sinh": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-sund": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-syrc": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-syre": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-syrj": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-syrn": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-tagb": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-taml": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-telu": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-tfng": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-tglg": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-thaa": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-thai": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-tibt": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-ugar": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-vaii": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-visp": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-xpeo": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-xsux": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-yiii": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-zinh": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-zmth": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-zsye": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-zsym": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-zxxx": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-zyyy": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-script-zzzz": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-variant-1996": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-variant-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-variant-baku1926": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-variant-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-variant-kkcor": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-variant-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-variant-monoton": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-variant-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-variant-pinyin": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-variant-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "cldr49-ru-variant-wadegile": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-variant-display-names.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "verified"
+    },
+    "treeagent-structure-aware-hierarchical-memory": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-12/0000-treeagent-memory-research.jsonl",
+      "category": "research",
+      "data_class": "static",
+      "checked_at": "2026-11-11T19:01:06Z",
+      "review_status": "candidate"
     }
   },
   "next_foundation_domains": [
@@ -7857,14 +8841,14 @@
   "category_counts": {
     "foundations": 8,
     "technology": 14,
-    "research": 10,
+    "research": 11,
     "security": 10,
     "science": 1,
     "news": 1,
     "mathematics": 7,
     "geography": 304,
     "history": 9,
-    "language": 579,
+    "language": 701,
     "chemistry": 8,
     "engineering": 8,
     "biology": 10,
@@ -8013,6 +8997,41 @@
       ],
       "domains": [
         "memory_staleness_and_poisoning_evaluation"
+      ]
+    },
+    {
+      "checked_at": "2026-11-11T19:01:06Z",
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "record_count": 116,
+      "categories": [
+        "language"
+      ],
+      "domains": [
+        "cldr_russian_script_display_names"
+      ],
+      "dataset_manifest": "knowledge/updates/datasets/cldr49-ru-script-variant-names.manifest.json"
+    },
+    {
+      "checked_at": "2026-11-11T19:01:06Z",
+      "package": "knowledge/updates/2026-11-12/0000-cldr49-russian-variant-display-names.jsonl",
+      "record_count": 6,
+      "categories": [
+        "language"
+      ],
+      "domains": [
+        "cldr_russian_locale_variant_display_names"
+      ],
+      "dataset_manifest": "knowledge/updates/datasets/cldr49-ru-script-variant-names.manifest.json"
+    },
+    {
+      "checked_at": "2026-11-11T19:01:06Z",
+      "package": "knowledge/updates/2026-11-12/0000-treeagent-memory-research.jsonl",
+      "record_count": 1,
+      "categories": [
+        "research"
+      ],
+      "domains": [
+        "structure_aware_hierarchical_memory"
       ]
     }
   ]

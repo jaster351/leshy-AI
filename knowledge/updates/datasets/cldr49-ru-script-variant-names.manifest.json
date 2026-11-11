@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "dataset_id": "unicode-cldr-49-ru-script-variant-names",
+  "title": "Русские отображаемые названия кодов письменностей и вариантов локали Unicode CLDR 49",
+  "source": {
+    "repository": "unicode-org/cldr",
+    "tag": "release-49",
+    "path": "common/main/ru.xml",
+    "url": "https://github.com/unicode-org/cldr/blob/release-49/common/main/ru.xml",
+    "published_at": "2026-10-21T22:13:30Z",
+    "checked_at": "2026-11-11T19:01:06Z",
+    "bytes": 975269,
+    "checksum": {
+      "algorithm": "git_blob_sha1",
+      "value": "0307a700b08204fa8f0df18934b1c6f5ee30689c"
+    }
+  },
+  "license": {
+    "spdx": "Unicode-3.0",
+    "url": "https://github.com/unicode-org/cldr/blob/release-49/LICENSE",
+    "bytes": 3193,
+    "checksum": {
+      "algorithm": "git_blob_sha1",
+      "value": "b4132054a5d2b95b6f1a4c8b511a211086023e55"
+    }
+  },
+  "selection": {
+    "description": "Все прямые элементы script и variant, единственный атрибут которых — type; записи с draft, alt, menu и другими вариантными атрибутами исключены.",
+    "raw_source_elements": 201,
+    "excluded_nonbase_attributes": 79,
+    "sections": [
+      {
+        "xpath": "localeDisplayNames/scripts/script",
+        "records": 116,
+        "complete_for_selection": true,
+        "excluded_nonbase_attributes": 52
+      },
+      {
+        "xpath": "localeDisplayNames/variants/variant",
+        "records": 6,
+        "complete_for_selection": true,
+        "excluded_nonbase_attributes": 27
+      }
+    ],
+    "deduplication_key": "dataset_section + type",
+    "missing_values_policy": "Отсутствующие значения не превращаются в пустую строку или ноль."
+  },
+  "outputs": [
+    {
+      "path": "knowledge/updates/2026-11-12/0000-cldr49-russian-script-display-names.jsonl",
+      "records": 116,
+      "bytes": 202944
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0000-cldr49-russian-variant-display-names.jsonl",
+      "records": 6,
+      "bytes": 10454
+    }
+  ],
+  "generator": "knowledge/updates/tools/generate_cldr49_ru_script_variant_names.py",
+  "generated_at": "2026-11-11T19:01:06Z",
+  "cursor": {
+    "completed_sections": [
+      "scripts",
+      "variants"
+    ],
+    "next_candidate_sections": [
+      "keys",
+      "types"
+    ],
+    "note": "Выбранные базовые подписи обработаны полностью. 79 значений с дополнительными атрибутами оставлены за пределами verified-набора."
+  },
+  "deduplication_audit": {
+    "raw_source_elements": 201,
+    "excluded_nonbase_attributes": 79,
+    "eligible_candidates": 123,
+    "exact_id_duplicates": 0,
+    "exact_claim_duplicates": 0,
+    "canonical_key_duplicates": 0,
+    "semantic_duplicates": 0,
+    "new_unique_records": 123,
+    "updated_versions": 0,
+    "retracted_versions": 0
+  },
+  "validation": {
+    "unique_ids": 122,
+    "duplicate_keys": 0,
+    "max_file_bytes": 2097152,
+    "all_output_files_under_limit": true
+  }
+}
