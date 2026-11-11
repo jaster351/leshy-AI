@@ -234,7 +234,9 @@ class ChromiumSearch:
                         page.wait_for_timeout(1400)
                         title = page.title()
                         body = page.locator("body").inner_text(timeout=2_000)
-                        if _is_challenge(title, body, None):
+                        if _is_challenge(title, body, None) or (
+                            status in (403, 429) and not _collect_links(page, self.engine, 1)
+                        ):
                             stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                             _status(state="needs_human_verification", last_challenge_at=stamp)
                             with _STATUS_LOCK:
