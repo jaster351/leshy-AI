@@ -164,7 +164,10 @@ class BrowserUseAdapter:
                 "РЕЖИМ ТОЛЬКО ЧТЕНИЯ: можно искать, открывать URL, прокручивать, сравнивать и извлекать данные. "
                 "Инструменты click/input/send_keys/select_dropdown/JS/file I/O технически отключены. "
                 "Нельзя входить в аккаунт, менять данные, добавлять товар в корзину, отправлять формы, "
-                "бронировать, публиковать, оформлять заказ или выполнять финансовое действие."
+                "бронировать, публиковать, оформлять заказ или выполнять финансовое действие. "
+                "После чтения обязательно верни содержательный итог: название страницы, краткое "
+                "резюме и ключевые факты. Не ограничивайся фразой об успешном открытии. "
+                "Если текст не удалось получить, прямо сообщи об этом."
             )
         if action.risk is BrowserRisk.MUTATE:
             return common + (
@@ -183,6 +186,25 @@ class BrowserUseAdapter:
             f"резюме: {summary}. Не меняй сумму, валюту, получателя, количество или дополнительные услуги. "
             "При любом отличии остановись без оплаты."
         )
+
+    @staticmethod
+    def _result_for_user(
+        action: BrowserAction, final: Any, hosts: tuple[str, ...]
+    ) -> BrowserActionResult:
+        """Вернуть пользователю результат браузера, а не служебную квитанцию."""
+        content = str(final or "").strip()
+        data = {"result": content, "allowed_hosts": list(hosts), "url": action.url}
+        if not content or (action.risk is BrowserRisk.READ and len(content) < 60):
+            return BrowserActionResult(
+                "failed",
+                "Браузер завершил работу, но не вернул содержимое страницы или полезный итог.",
+                data,
+            )
+        if action.risk is BrowserRisk.READ:
+            visible = f"Результат просмотра {action.url}:\n{content[:3500]}"
+        else:
+            visible = content[:3500]
+        return BrowserActionResult("ok", visible, data)
 
     async def _run(self, action: BrowserAction) -> BrowserActionResult:
         from browser_use import Agent, Browser
@@ -261,18 +283,17 @@ class BrowserUseAdapter:
                 max_steps=min(self.max_steps, int(action.arguments.get("max_steps", self.max_steps)))
             )
             final = history.final_result() if hasattr(history, "final_result") else str(history)
+            response = self._result_for_user(action, final, hosts)
             event(
                 "browser_agent_browser_use_completed",
                 hosts=list(hosts),
                 risk=action.risk.value,
                 action=action.name,
                 isolated_profile=profile_dir != self.profile_dir,
+                result_status=response.status,
+                result_chars=len(str(final or "")),
             )
-            return BrowserActionResult(
-                "ok",
-                "Browser Use завершил браузерную задачу.",
-                {"result": str(final or ""), "allowed_hosts": list(hosts)},
-            )
+            return response
         finally:
             try:
                 close = getattr(browser, "stop", None) or getattr(browser, "close", None)
@@ -296,12 +317,19 @@ class BrowserUseAdapter:
             "read", action.url, BrowserRisk.READ, dict(action.arguments), action.description
         ))
         if result.status == "ok":
+            content = str(result.data.get("visible_text") or "").strip()
+            url = str(result.data.get("url") or action.url)
+            if len(content) < 60:
+                return BrowserActionResult(
+                    "failed", "Резервный браузер открыл страницу, но не получил достаточно текста.",
+                    {"url": url, "fallback": "playwright"},
+                )
             event("browser_agent_read_fallback_ok", action=action.name, cause=cause[:180])
-            return BrowserActionResult("ok", "Страница прочитана через Playwright (резервный режим).", {
-                "result": str(result.data.get("visible_text") or ""),
-                "url": str(result.data.get("url") or action.url),
-                "fallback": "playwright",
-            })
+            return BrowserActionResult(
+                "ok",
+                f"Текст страницы {url}:\n{content[:3500]}",
+                {"result": content, "url": url, "fallback": "playwright"},
+            )
         return result
 
     def execute(self, action: BrowserAction) -> BrowserActionResult:
