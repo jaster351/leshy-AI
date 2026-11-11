@@ -239,7 +239,7 @@ class FastTelegramBridge(RichTelegramBridge):
         # A caption such as "Это памятник Курчатову в Челябинске"
         # is a direct user-provided lesson for this image.
         caption = str(message.get("caption") or "").strip()[:2000]
-        if outcome == "success" and caption:
+        if caption:
             try:
                 correction = parse_photo_correction(caption, photo_context=True)
                 evidence = recent.teaching_context(chat_id, user_id) if recent is not None else None
