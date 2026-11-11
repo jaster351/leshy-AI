@@ -68,10 +68,16 @@ def parse_photo_correction(text: str, *, photo_context: bool) -> tuple[str, str]
     value = " ".join(str(text or "").split()).strip()[:400]
     if not photo_context or not value or _PRIVATE.search(value):
         return None
-    if value.startswith("/"):
+    if value.startswith("/") or "?" in value or re.search(
+        r"(?iu)\\b(?:наверное|кажется|возможно|может\\s+быть|похоже)\\b", value,
+    ):
         return None
     taught = bool(_TEACHING.match(value))
     city_match = _CITY.search(value)
+    # After a geolocation discussion, "в Челябинске" is an explicit
+    # correction too, even when sent as a short follow-up clue.
+    if city_match and re.match(r"(?iu)^\\s*(?:в\\s+|город(?:е)?\\s+|находится\\s+в\\s+|расположен\\s+в\\s+)", value):
+        taught = True
     # A city mentioned after 'в' is not part of a monument's proper name.
     landmark_match = _LANDMARK.search(value[:city_match.start()] if city_match else value)
     if landmark_match and city_match:
