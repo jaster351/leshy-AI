@@ -311,8 +311,8 @@ class FastTelegramBridge(RichTelegramBridge):
             digest = str((learning_context or {}).get("digest") or "")
             geo_active = bool((learning_context or {}).get("geo_active"))
             explicit_full_example = bool(re.search(
-                r"(?iu)\\b(?:памятник|монумент|скульптура|собор|музей|"
-                r"башня|площадь|мост)\\b.*\\bв\\s+[А-ЯЁ]",
+                r"(?iu)\b(?:памятник|монумент|скульптура|собор|музей|"
+                r"башня|площадь|мост)\b.*\bв\s+[А-ЯЁ]",
                 text,
             ))
             correction = parse_photo_correction(
@@ -331,14 +331,32 @@ class FastTelegramBridge(RichTelegramBridge):
                             "telegram_photo_location_taught",
                             landmark_provided=bool(landmark), city_provided=bool(city),
                         )
-                        self._send(
-                            chat_id,
+                        confirmation = (
                             "Запомнил Ваше уточнение к фотографии"
                             + (f": {landmark}" if landmark else "")
                             + (f" — {city}" if city else "")
                             + ". В следующий раз использую его при поиске места, "
-                              "а не буду выдавать догадку за факт.",
+                              "а не буду выдавать догадку за факт."
                         )
+                        self._send_answer(
+                            chat_id, confirmation,
+                            reply_to_message_id=int(message_id) if message_id else None,
+                        )
+                        try:
+                            sid = self.app._ensure_session(
+                                f"telegram:{user_id}", f"telegram:{chat_id}:{user_id}",
+                            )
+                            from .storage import utcnow
+                            with self.app.storage.connection() as conn:
+                                conn.execute(
+                                    "INSERT INTO messages(session_id,role,content,created_at) "
+                                    "VALUES(?,?,?,?)",
+                                    (sid, "user", text[:2000], utcnow()),
+                                )
+                            self.app._save_assistant(sid, confirmation)
+                        except Exception as history_exc:
+                            problem("telegram_photo_location_history_failed", type(history_exc).__name__)
+                        self._social.mark_leshy_answered(message)
                         return
                 except Exception as exc:
                     problem("telegram_photo_location_learning_failed", type(exc).__name__)
