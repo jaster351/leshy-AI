@@ -66,6 +66,85 @@ def search_provider_status() -> dict:
         }
 
 
+
+# A search endpoint can return valid URLs for an entirely different topic.
+# Check the subject before declaring a provider successful (or learning from it).
+_SEARCH_FILLER = frozenset("""
+расскажи скажи подскажи объясни поясни найди покажи пожалуйста
+когда сколько дней осталось осталось какой какая какое какие как где кто почему
+будет выйдет выходит выпустят выпустит дата даты выход выхода релиз релиза
+последние последний последняя новые новая новый новое сейчас сегодня завтра
+информация информации узнать нужно хочу можно про нас мне тебя это этот этой
+эти о об от для по с со на в во из к ко у за и или что ли не
+tell show explain find please when how many days left remaining
+release released date dates latest news new now today tomorrow
+what who where why which about the this that with from for and
+are is was will can do does of in on to me you
+""".split())
+
+
+def _search_words(value: str) -> list[str]:
+    text = str(value or "").casefold().replace("ё", "е")
+    # Official release titles sometimes spell the franchise and number out.
+    text = re.sub(r"\bgrand\s+theft\s+auto\b", "gta", text)
+    text = re.sub(r"\bgta\s+vi\b", "gta 6", text)
+    text = re.sub(r"\bgta6\b", "gta 6", text)
+    return re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+
+
+def _topic_words(query: str) -> list[str]:
+    return [
+        word for word in _search_words(query)
+        if word not in _SEARCH_FILLER and (len(word) >= 3 or word.isdecimal())
+    ]
+
+
+def _focused_rss_query(query: str) -> str:
+    """Remove conversational filler for RSS, preserving the concrete subject."""
+    if "site:" in query.lower() or "://" in query:
+        return query
+    all_words = _search_words(query)
+    topic = _topic_words(query)
+    if not (topic and len(topic) <= 8 and len(all_words) - len(topic) >= 2):
+        return query
+    focused = " ".join(topic)
+    if re.search(r"(?i)\b(выйдет|выходит|выпустят|релиз|release|released)\b", query):
+        focused += " дата выхода"
+    return focused
+
+
+def _relevant_search_results(query: str, values: list[SearchResult]) -> list[SearchResult]:
+    """Conservative lexical topic gate; never trust an unrelated RSS success.
+
+    Works across languages without introducing an LLM or a network call.
+    An ambiguous query without substantive terms remains unfiltered.
+    """
+    topic = _topic_words(query)
+    names = [word for word in topic if any(ch.isalpha() for ch in word)]
+    if not names:
+        return values
+    numbers = [word for word in topic if word.isdecimal()]
+    # A version/part number can distinguish entirely different releases.
+    required_number = numbers[0] if len(numbers) == 1 else None
+
+    def matches(word: str, found: set[str]) -> bool:
+        if word in found:
+            return True
+        if any("а" <= ch <= "я" for ch in word):
+            stem = word[:5] if len(word) >= 7 else word[:4] if len(word) >= 5 else word
+            return any(candidate.startswith(stem) for candidate in found)
+        return False
+
+    filtered: list[SearchResult] = []
+    for item in values:
+        found = set(_search_words(item.title + " " + item.snippet))
+        if not any(matches(word, found) for word in names):
+            continue
+        if required_number is not None and required_number not in found:
+            continue
+        filtered.append(item)
+    return filtered
+
 class _NoRedirects(request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -151,16 +230,20 @@ class RacingSearch(FallbackSearch):
 
         def worker(provider, name: str) -> None:
             try:
-                values = provider.search(cleaned, limit=limit)
+                provider_query = _focused_rss_query(cleaned) if isinstance(provider, BingRssSearch) else cleaned
+                values = provider.search(provider_query, limit=limit)
                 valid = [
                     item for item in (values or [])
                     if isinstance(item, SearchResult)
                     and parse.urlsplit(item.url).scheme in {"https", "http"}
                     and parse.urlsplit(item.url).hostname
                 ]
-                outcome = "success" if valid else "empty"
+                relevant = _relevant_search_results(cleaned, valid)
+                if valid and not relevant:
+                    event("search_parallel_irrelevant_results", provider=name, discarded=len(valid))
+                outcome = "success" if relevant else "empty"
                 _bump(outcome, name)
-                outcomes.put((outcome, name, valid[:limit]))
+                outcomes.put((outcome, name, relevant[:limit]))
             except Exception:
                 _bump("error", name)
                 outcomes.put(("error", name, None))
