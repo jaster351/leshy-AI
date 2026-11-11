@@ -331,6 +331,28 @@ class FastTelegramBridge(RichTelegramBridge):
             learning_context = recent_photos.teaching_context(chat_id, user_id)
             digest = str((learning_context or {}).get("digest") or "")
             geo_active = bool((learning_context or {}).get("geo_active"))
+            if digest and re.fullmatch(
+                r"(?iu)\s*(?:забудь|удали)\s+(?:эту\s+фотографию|это\s+фото|"
+                r"этот\s+снимок|это\s+место|этот\s+пример)\s*[.!]?\s*",
+                text,
+            ):
+                try:
+                    deleted = PhotoLocationMemory(self.app.storage).forget(
+                        owner_id=f"telegram:{user_id}", image_sha256=digest,
+                    )
+                    message_text = (
+                        "Удалил сохранённую привязку места к этой фотографии."
+                        if deleted else "К этой фотографии нет сохранённой привязки места."
+                    )
+                    self._send_answer(
+                        chat_id, message_text,
+                        reply_to_message_id=int(message_id) if message_id else None,
+                    )
+                    event("telegram_photo_location_forget", found=deleted)
+                    self._social.mark_leshy_answered(message)
+                    return
+                except Exception as exc:
+                    problem("telegram_photo_location_forget_failed", type(exc).__name__)
             explicit_full_example = bool(re.search(
                 r"(?iu)\b(?:памятник|монумент|скульптура|собор|музей|"
                 r"башня|площадь|мост)\b.*\bв\s+[А-ЯЁ]",
