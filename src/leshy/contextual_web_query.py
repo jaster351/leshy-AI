@@ -34,7 +34,12 @@ def url_search_query(message: str) -> str | None:
     # Параметры вроде ?id=1%27 и HTTPS-префикс не являются поисковой темой.
     path = unquote(parts.path)
     words = [word.lower() for word in _WORD.sub(" ", path.replace("-", " ")).split()]
-    words = [word for word in words if word not in _IGNORE and len(word) >= 2]
+    words = [
+        word for word in words
+        if word not in _IGNORE and len(word) >= 2
+        and not (len(word) >= 10 and any(c.isdigit() for c in word)
+                 and any(c.isalpha() for c in word))
+    ]
     suffix = " ".join(words[-18:])[:180]
     return f"site:{host} {suffix}".strip() if suffix else f"site:{host}"
 
