@@ -1,14 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T22:03:38Z",
+  "updated_at": "2026-11-11T23:00:06Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-11T22:03:38Z",
-    "previous_issue_at": "2026-11-11T21:04:30Z",
+    "searched_at": "2026-11-11T23:00:06Z",
+    "previous_issue_at": "2026-11-11T22:03:38Z",
     "discovery_lookback_days": 30,
-    "newly_included_ids": [
-      "doi:10.18653/2026.emnlp-main.2359"
-    ],
-    "note": "Впервые проверена релевантная публикация EMNLP 2026 о последовательном black-box poisoning Agentic RAG. Препринт впервые опубликован 1 июля, v2 — 28 августа; это дополнение покрытия, а не новая работа последнего часа."
+    "newly_included_ids": [],
+    "note": "Свежие списки cs.AI/cs.IR и целевой поиск по памяти, provenance, отравлению и управляемому забыванию проверены; после предыдущего выпуска значимых новых работ или существенных редакций не подтверждено. Уже рассмотренные идентификаторы не повторены."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -272,29 +270,31 @@
         "doi:10.18653/2026.emnlp-main.2359"
       ],
       "note": "Впервые проверена релевантная публикация EMNLP 2026 о последовательном black-box poisoning Agentic RAG. Препринт впервые опубликован 1 июля, v2 — 28 августа; это дополнение покрытия, а не новая работа последнего часа."
+    },
+    {
+      "searched_at": "2026-11-11T23:00:06Z",
+      "previous_issue_at": "2026-11-11T22:03:38Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [],
+      "note": "Свежие списки cs.AI/cs.IR и целевой поиск по памяти, provenance, отравлению и управляемому забыванию проверены; после предыдущего выпуска значимых новых работ или существенных редакций не подтверждено. Уже рассмотренные идентификаторы не повторены."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-11T22:03:38Z",
-    "incremental_since": "2026-11-11T21:04:30Z",
+    "completed_at": "2026-11-11T23:00:06Z",
+    "incremental_since": "2026-11-11T22:03:38Z",
     "additional_lookback_start": "2026-10-13",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
-    "first_time_coverage_ids": [
-      "doi:10.18653/2026.emnlp-main.2359"
-    ],
+    "first_time_coverage_ids": [],
     "query_topics": [
-      "LLM-agent memory provenance poisoning RAG updates November 12 2026",
-      "agentic RAG sequential poisoning black-box",
+      "LLM agent memory provenance poisoning RAG updates November 2026",
+      "agent memory poisoning provenance ranking unlearning",
       "new and replaced cs.AI/cs.IR submissions"
     ],
     "opened_primary_urls": [
       "https://arxiv.org/list/cs.AI/new",
-      "https://arxiv.org/list/cs.IR/new",
-      "https://aclanthology.org/2026.emnlp-main.2359/",
-      "https://aclanthology.org/2026.emnlp-main.2359.pdf",
-      "https://arxiv.org/abs/2607.00422"
+      "https://arxiv.org/list/cs.IR/new"
     ],
-    "note": "Новых работ после прошлого выпуска не подтверждено; KidnapRAG включён как впервые покрытая релевантная публикация из 30-дневного окна материалов сборника."
+    "note": "После выпуска 22:03:38Z подтверждённых значимых новых публикаций или существенных версий не найдено; старые и уже рассмотренные работы исключены."
   },
   "pending_primary_reviews": [
     {
