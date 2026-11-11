@@ -86,7 +86,7 @@ def install_freshness_cache_runtime() -> None:
             plan["freshness_satisfied"] = False
         return plan
 
-    def build_context(self, message, owner_id, rows, *, search_plan=None):
+    def build_context(self, message, owner_id, rows, *, search_plan=None, lookup_query=None):
         plan = search_plan or self._search_plan(message)
         messages, sources, attempted = _ORIGINAL_BUILD_CONTEXT(
             self,
@@ -94,6 +94,7 @@ def install_freshness_cache_runtime() -> None:
             owner_id,
             rows,
             search_plan=plan,
+        lookup_query=lookup_query,
         )
         fresh = list(plan.get("fresh_dynamic") or [])
         if fresh:
