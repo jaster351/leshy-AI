@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T20:05:11Z",
+  "updated_at": "2026-11-11T21:04:30Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-11T20:05:11Z",
-    "previous_issue_at": "2026-11-11T19:01:06Z",
+    "searched_at": "2026-11-11T21:04:30Z",
+    "previous_issue_at": "2026-11-11T20:05:11Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [],
-    "note": "В свежих списках cs.AI/cs.IR и целевом поиске не подтверждены значимые новые работы или существенные редакции после прошлого выпуска. Уже рассмотренные работы не повторены."
+    "note": "Свежий список cs.AI от 11 ноября и целевой поиск проверены; после прошлого выпуска значимых новых работ или существенных редакций не подтверждено. Уже рассмотренные идентификаторы не повторены."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -233,11 +233,18 @@
       "discovery_lookback_days": 30,
       "newly_included_ids": [],
       "note": "В свежих списках cs.AI/cs.IR и целевом поиске не подтверждены значимые новые работы или существенные редакции после прошлого выпуска. Уже рассмотренные работы не повторены."
+    },
+    {
+      "searched_at": "2026-11-11T21:04:30Z",
+      "previous_issue_at": "2026-11-11T20:05:11Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [],
+      "note": "Свежий список cs.AI от 11 ноября и целевой поиск проверены; после прошлого выпуска значимых новых работ или существенных редакций не подтверждено. Уже рассмотренные идентификаторы не повторены."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-11T20:05:11Z",
-    "incremental_since": "2026-11-11T19:01:06Z",
+    "completed_at": "2026-11-11T21:04:30Z",
+    "incremental_since": "2026-11-11T20:05:11Z",
     "additional_lookback_start": "2026-10-13",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
     "first_time_coverage_ids": [],
@@ -249,7 +256,7 @@
       "https://arxiv.org/list/cs.AI/new",
       "https://arxiv.org/list/cs.IR/new"
     ],
-    "note": "Поиск возвращал уже учтённые идентификаторы; повторов в выпуске нет."
+    "note": "Поиск не дал нового материала, удовлетворяющего критериям; старые работы не повторены."
   },
   "pending_primary_reviews": [
     {
