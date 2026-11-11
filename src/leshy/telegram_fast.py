@@ -11,6 +11,8 @@ from .diagnostics import event, problem
 from .realtime_chat import RealtimeChatManager
 from .telegram_vision import (LocalTelegramVision, image_attachment, VisionUnavailable, VisionNotConfigured, TelegramImageError)
 from .telegram_vision_context import RecentTelegramPhotos
+from .photo_geolocation import is_photo_geolocation_request
+from .photo_location_memory import PhotoLocationMemory, parse_photo_correction
 from .telegram_rich import TelegramBridge as RichTelegramBridge, telegram_html_chunks
 
 
@@ -206,8 +208,20 @@ class FastTelegramBridge(RichTelegramBridge):
 
     def _handle_vision_message(self, message: dict, *, chat_id, user_id: str, message_id) -> None:
         """Раздельный vision-маршрут, сохраняющий Telegram owner и Reply."""
+        owner_id = f"telegram:{user_id}"
+        recent = getattr(self, "_recent_photos", None)
+        geo_question = is_photo_geolocation_request(str(message.get("caption") or ""))
+
+        def remember_digest(value: str) -> None:
+            if recent is not None:
+                recent.record_evidence(
+                    chat_id, user_id, image_sha256=value, geo_active=geo_question,
+                )
+
         try:
-            answer = LocalTelegramVision(self).describe(message)
+            answer = LocalTelegramVision(self).describe(
+                message, owner_id=owner_id, on_fingerprint=remember_digest,
+            )
             outcome = "success"
         except VisionNotConfigured as exc:
             answer = str(exc)
@@ -221,7 +235,6 @@ class FastTelegramBridge(RichTelegramBridge):
             answer = "Не удалось обработать изображение локальной vision-моделью. Проверьте её доступность."
             outcome = "unexpected"
         self._send_answer(chat_id, answer, reply_to_message_id=int(message_id) if message_id else None)
-        owner_id = f"telegram:{user_id}"
         session_id = f"telegram:{chat_id}:{user_id}"
         try:
             sid = self.app._ensure_session(owner_id, session_id)
@@ -291,6 +304,44 @@ class FastTelegramBridge(RichTelegramBridge):
                     last_photo, chat_id=chat_id, user_id=user_id, message_id=message_id,
                 )
                 return
+        # User corrections after a photo are first-class learning input.
+        # Never learn from assistant guesses or unrelated group messages.
+        if text:
+            learning_context = recent_photos.teaching_context(chat_id, user_id)
+            digest = str((learning_context or {}).get("digest") or "")
+            geo_active = bool((learning_context or {}).get("geo_active"))
+            explicit_full_example = bool(re.search(
+                r"(?iu)\\b(?:памятник|монумент|скульптура|собор|музей|"
+                r"башня|площадь|мост)\\b.*\\bв\\s+[А-ЯЁ]",
+                text,
+            ))
+            correction = parse_photo_correction(
+                text, photo_context=bool(digest and (geo_active or explicit_full_example)),
+            )
+            if correction is not None:
+                landmark, city = correction
+                try:
+                    memory = PhotoLocationMemory(self.app.storage)
+                    if memory.remember(
+                        owner_id=f"telegram:{user_id}", image_sha256=digest,
+                        landmark=landmark, city=city,
+                    ):
+                        recent_photos.record_evidence(chat_id, user_id, geo_active=True)
+                        event(
+                            "telegram_photo_location_taught",
+                            landmark_provided=bool(landmark), city_provided=bool(city),
+                        )
+                        self._send(
+                            chat_id,
+                            "Запомнил Ваше уточнение к фотографии"
+                            + (f": {landmark}" if landmark else "")
+                            + (f" — {city}" if city else "")
+                            + ". В следующий раз использую его при поиске места, "
+                              "а не буду выдавать догадку за факт.",
+                        )
+                        return
+                except Exception as exc:
+                    problem("telegram_photo_location_learning_failed", type(exc).__name__)
         text = self._resolve_message_text(message, chat_id=chat_id, user_id=user_id)
         if not text:
             return
