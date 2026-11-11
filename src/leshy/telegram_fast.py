@@ -440,6 +440,9 @@ class FastTelegramBridge(RichTelegramBridge):
         if self._bot_id is None:
             self._refresh_bot_identity()
         while not self._stop.is_set():
+            if not self._cluster_can_poll():
+                self._stop.wait(1.0)
+                continue
             try:
                 query = parse.urlencode({"timeout": 10, "offset": self._offset, "allowed_updates": json.dumps(["message", "callback_query"])})
                 result = self._api("getUpdates?" + query, timeout=15) or []
@@ -460,6 +463,7 @@ class FastTelegramBridge(RichTelegramBridge):
                             problem("telegram_queue_full", "Очередь Telegram переполнена")
                 if queued:
                     self._queue.join()
+                self._committed_offset = max(self._committed_offset, self._offset)
                 self._last_error = ""
                 backoff = 0.5
                 conflict_backoff = 30.0
