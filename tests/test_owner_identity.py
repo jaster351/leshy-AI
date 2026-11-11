@@ -49,8 +49,8 @@ class OwnerIdentityTests(unittest.TestCase):
         result = service.consume_telegram_link(
             link["code"],
             "500",
-            username="mikhail",
-            first_name="Михаил",
+            username="example_owner",
+            first_name="Владелец",
         )
         self.assertEqual(result["mode"], "linked")
         self.assertEqual(service.resolve_telegram("500"), owner_id)
