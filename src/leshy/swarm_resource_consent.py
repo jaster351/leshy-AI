@@ -1,8 +1,8 @@
-"""Fail-closed resource-sharing authorisation for optional Leshy swarm workloads.
+"""Политика доступа к ресурсам роя: при сомнении запрещать выполнение.
 
-This module is a reusable enforcement primitive, not yet connected to all runtime
-entry points. Call authorize_resource_task before scheduling ANY external task,
-and require a separate local confirmation for actions affecting the OS or files.
+Это переиспользуемая проверка. Её ещё необходимо встроить во все рабочие
+маршруты. Перед внешним заданием нужно вызвать authorize_resource_task;
+действия с ОС и файлами требуют отдельного локального подтверждения.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class ResourceScope(str, Enum):
 
 @dataclass(frozen=True)
 class SwarmConsent:
-    """Locally issued explicit authorization; never inferred from a download."""
+    """Явное локальное разрешение, которое нельзя выводить из факта скачивания."""
     local_owner_confirmed: bool
     enabled: bool
     agreement_revision: str
@@ -64,10 +64,10 @@ def authorize_resource_task(
     current_revision: str,
     now: Optional[datetime] = None,
 ) -> tuple[bool, str]:
-    """Return an auditable preflight decision, rejecting unknown/untrusted work.
+    """Проверить допустимость задания до исполнения; неизвестное запрещать.
 
-    Identity verification must come from the authenticated transport, never a
-    task-supplied claim. Caller must enforce agreed quotas during execution.
+    Подлинность узла проверяет транспорт, а не само заявление внутри задания.
+    Исполнитель дополнительно обязан соблюдать квоты во время работы.
     """
     if consent is None or not consent.enabled or not consent.local_owner_confirmed:
         return False, "explicit_owner_consent_required"
