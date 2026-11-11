@@ -18,6 +18,7 @@ from .diagnostics import event, problem
 from .llm import ChatMessage
 from .storage import utcnow
 from .os_control_guard import OSControlGate, DISABLED
+from .action_safety_guard import check_external_action
 
 
 @dataclass(slots=True)
@@ -167,6 +168,8 @@ class OperatingSystemController:
         generation = None
         try:
             self._authorize_owner(owner_id)
+            # Независимый запрет действует даже при пользовательском подтверждении.
+            check_external_action(action, args)
             generation = self._gate.begin()
             self._local.generation = generation
             if action == "system_status":
