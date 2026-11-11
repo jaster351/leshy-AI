@@ -8,7 +8,7 @@ from leshy.swarm_consent_store import SwarmConsentStore
 from leshy.swarm_resource_consent import ResourceScope, ResourceTask, authorize_resource_task
 
 ACK = "РАЗРЕШАЮ ИСПОЛЬЗОВАНИЕ РЕСУРСОВ"
-REV = "2026-11-11.9"
+REV = "2026-11-11.10"
 
 
 def limits(cpu=20):
