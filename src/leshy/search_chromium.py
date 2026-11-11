@@ -280,8 +280,9 @@ def interactive_verify(*, engine: str = "bing", brain_dir: str | Path | None = N
                 name = _engine(engine)
                 page.goto(_ENGINE_URLS[name].split("?", 1)[0], wait_until="domcontentloaded")
                 print(
-                    "Открыт отдельный браузер Лешего. Если сайт показывает CAPTCHA, "
-                    "решите её самостоятельно в этом окне. Не входите в личные аккаунты: "
+                    "Открыт отдельный браузер Лешего. Выполните тестовый поиск. "
+                    "Если сайт показывает CAPTCHA, решите её самостоятельно в этом окне. "
+                    "Не входите в личные аккаунты: "
                     "этот профиль предназначен только для анонимного поиска.",
                     flush=True,
                 )
@@ -296,8 +297,10 @@ def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Проверка CAPTCHA в отдельном профиле браузера Лешего")
     parser.add_argument("--verify", choices=tuple(_ENGINE_URLS), required=True)
+    parser.add_argument("--brain-dir", default=None,
+                        help="Корень LeshyBrain действующей установки, если нужен явный путь")
     args = parser.parse_args()
-    interactive_verify(engine=args.verify)
+    interactive_verify(engine=args.verify, brain_dir=args.brain_dir)
 
 
 if __name__ == "__main__":
