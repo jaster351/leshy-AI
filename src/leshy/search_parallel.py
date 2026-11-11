@@ -165,9 +165,12 @@ def _focused_rss_query(query: str) -> str:
         stamp = datetime.now().astimezone().strftime("%Y-%m-%d")
         if _is_tech_news_query(query):
             return f"IT технологии новости {stamp}"
-        return f"главные новости {stamp}" if not any(
-            word not in _SEARCH_FILLER for word in _search_words(query)
-        ) else query
+        topic = _topic_words(query)
+        if any(any(ch.isalpha() for ch in word) for word in topic):
+            return " ".join(topic[:8]) + " новости"
+        # General news without a named subject; keep a fresh date, not the
+        # whole conversational sentence that frequently confuses RSS search.
+        return f"главные новости {stamp}" if not topic else query
     all_words = _search_words(query)
     topic = _topic_words(query)
     if not (topic and len(topic) <= 8 and len(all_words) - len(topic) >= 2):
@@ -192,9 +195,9 @@ def _relevant_search_results(query: str, values: list[SearchResult]) -> list[Sea
         # Article headlines may discuss companies or products without ever
         # saying the word "technology"; avoid false no-results for IT news.
         return [item for item in values if _tech_news_hit(item)]
-    if _is_news_query(query):
-        # Category-wide news has no mandatory named entity to match. Search
-        # provider still needs a real URL; news intent alone is not a subject.
+    if _is_news_query(query) and not _topic_words(query):
+        # General news has no concrete entity to match. If the user named
+        # a game/company/city, continue to the topic gate below instead.
         return values
     topic = _topic_words(query)
     names = [word for word in topic if any(ch.isalpha() for ch in word)]
