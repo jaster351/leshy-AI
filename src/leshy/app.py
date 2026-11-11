@@ -25,6 +25,7 @@ from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_explicit_web_request, is_offline_creative_request
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .self_learning import SelfLearningWorker
+from .knowledge_repository_sync import KnowledgeRepositorySync
 from .storage import Storage, utcnow
 from .version import VERSION
 from .verified_clock import current_clock_context
@@ -66,6 +67,10 @@ class LeshyApp:
         self.self_learning = SelfLearningWorker(
             self.storage, self.learning, self.research,
             repository_knowledge_dir=self.settings.install_root / "knowledge" / "updates",
+            repository_sync=KnowledgeRepositorySync(
+                self.settings.brain_dir / "repository_knowledge",
+                self.settings.install_root / "knowledge",
+            ),
         )
         self.telegram = None
         event(
@@ -580,3 +585,4 @@ class LeshyApp:
 
 
 __all__ = ["LeshyApp", "LLMUnavailable"]
+

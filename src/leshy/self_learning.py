@@ -32,7 +32,7 @@ class SelfLearningWorker:
     ERROR_BACKOFF_SECONDS = 90.0
     STOP_JOIN_TIMEOUT_SECONDS = 5.0
 
-    def __init__(self, storage: Storage, learning_control, research_engine, *, repository_knowledge_dir: Path | None = None):
+    def __init__(self, storage: Storage, learning_control, research_engine, *, repository_knowledge_dir: Path | None = None, repository_sync=None):
         self.storage = storage
         self.learning_control = learning_control
         self.research = research_engine
@@ -50,12 +50,16 @@ class SelfLearningWorker:
         self._state = "stopped"
         self._next_autonomous_at = 0.0
         self.repository_knowledge_dir = repository_knowledge_dir
+        self.repository_sync = repository_sync
+        self._last_repository_import_dir: Path | None = None
         self._next_repository_import_at = 0.0
         self._repository_knowledge_status: dict = {"state": "not_scanned"}
 
     def start(self) -> None:
         # Явные пользовательские учебные задачи и подписки должны работать даже
         # при выключенной автономной инициативе.
+        if self.repository_sync is not None:
+            self.repository_sync.start()
         self.material_learning.start()
         self.social_watch.start()
         if self._thread and self._thread.is_alive():
@@ -74,6 +78,8 @@ class SelfLearningWorker:
         безопасным и идемпотентным.
         """
         self._stop.set()
+        if self.repository_sync is not None:
+            self.repository_sync.stop()
         self.material_learning.stop()
         self.social_watch.stop()
         current = threading.current_thread()
@@ -130,6 +136,7 @@ class SelfLearningWorker:
             "material_learning_worker": self.material_learning.status(),
             "social_watch": self.social_watch.status(),
             "repository_knowledge": dict(self._repository_knowledge_status),
+            "repository_sync": self.repository_sync.status() if self.repository_sync is not None else {"state": "not_configured"},
         }
 
     def queue_topic(self, query: str, reason: str = "тема пользователя") -> int:
@@ -226,9 +233,16 @@ class SelfLearningWorker:
 
             try:
                 now = time.time()
-                if autonomous and self.repository_knowledge_dir is not None and now >= self._next_repository_import_at:
+                repository_dir = (
+                    self.repository_sync.directory() / "updates"
+                    if self.repository_sync is not None else self.repository_knowledge_dir
+                )
+                if autonomous and repository_dir is not None and (
+                    now >= self._next_repository_import_at or repository_dir != self._last_repository_import_dir
+                ):
                     from .repository_knowledge import import_directory
-                    self._repository_knowledge_status = import_directory(self.research.knowledge, self.repository_knowledge_dir)
+                    self._repository_knowledge_status = import_directory(self.research.knowledge, repository_dir)
+                    self._last_repository_import_dir = repository_dir
                     self._next_repository_import_at = now + (90.0 if self._repository_knowledge_status.get("errors") else 3600.0)
                 if autonomous and not self._has_queued():
                     if self._next_autonomous_at > now:
@@ -255,3 +269,4 @@ class SelfLearningWorker:
                 self._state = "error"
                 self._next_autonomous_at = time.time() + self.ERROR_BACKOFF_SECONDS
                 self._stop.wait(15.0)
+
