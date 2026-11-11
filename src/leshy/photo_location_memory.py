@@ -35,8 +35,8 @@ _CITY = re.compile(
     r"([А-ЯЁ][а-яё\-]+(?:[\s-][А-ЯЁ][а-яё\-]+){0,2})"
 )
 _CITY_DIRECT = re.compile(
-    r"(?iu)^\s*(?:нет[,!.:\s]+|неверно[,!.:\s]+|это\s+)?"
-    r"(?:город\s+)?([А-ЯЁ][а-яё\-]+)\s*[.!]?\s*$"
+    r"(?iu)^\s*(?:(?:нет|неверно|неправильно)[,!.:\s]+)?"
+    r"(?:это\s+)?(?:город\s+)?([А-ЯЁ][а-яё\-]+)\s*[.!]?\s*$"
 )
 _STOP_WORDS = frozenset({
     "памятник", "монумент", "скульптура", "бюст", "статуя", "собор",
@@ -71,8 +71,9 @@ def parse_photo_correction(text: str, *, photo_context: bool) -> tuple[str, str]
     if value.startswith("/"):
         return None
     taught = bool(_TEACHING.match(value))
-    landmark_match = _LANDMARK.search(value)
     city_match = _CITY.search(value)
+    # A city mentioned after 'в' is not part of a monument's proper name.
+    landmark_match = _LANDMARK.search(value[:city_match.start()] if city_match else value)
     if landmark_match and city_match:
         taught = True  # Explicit complete factual association.
     if not taught:
