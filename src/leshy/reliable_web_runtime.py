@@ -261,7 +261,7 @@ def install_reliable_web_runtime(app_class, app=None) -> None:
             owner_id,
             rows,
             search_plan=plan,
-        lookup_query=lookup_query,
+            lookup_query=lookup_query,
         )
         reason = str(plan.get("reason") or "")
         explicit = reason == "явный запрос интернет-поиска"
