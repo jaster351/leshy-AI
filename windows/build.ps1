@@ -25,6 +25,75 @@ $liveRoot = Join-Path $repoRoot 'dist\Leshy'
 $liveExe = Join-Path $liveRoot 'Leshy.exe'
 $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 
+# Diagnostic output is a single rotating file beside existing build logs.
+$script:profileFile = Join-Path $autoRoot 'logs\build-performance-latest.log'
+$script:profileStageFile = Join-Path $autoRoot 'profile-stage.tmp'
+$script:profileJob = $null
+$script:profileActive = $false
+$script:profileStage = ''
+$script:profileWatch = $null
+$script:profileTotal = [Diagnostics.Stopwatch]::StartNew()
+
+function Log-BuildProfile([string]$Entry) {
+  if (-not $script:profileActive) { return }
+  $line = (Get-Date).ToString('o') + ' ' + $Entry
+  for ($i = 0; $i -lt 3; $i++) {
+    try { Add-Content -LiteralPath $script:profileFile -Value $line -Encoding UTF8 -ErrorAction Stop; break }
+    catch { Start-Sleep -Milliseconds 80 }
+  }
+}
+function Build-Stage([string]$Name) {
+  if ($script:profileWatch) {
+    $script:profileWatch.Stop()
+    Log-BuildProfile "STAGE_END name=$($script:profileStage) seconds=$([math]::Round($script:profileWatch.Elapsed.TotalSeconds,2))"
+  }
+  $script:profileStage = $Name
+  $script:profileWatch = [Diagnostics.Stopwatch]::StartNew()
+  if ($script:profileActive) {
+    try { Set-Content -LiteralPath $script:profileStageFile -Value $Name -Encoding ASCII -ErrorAction Stop } catch { }
+    Log-BuildProfile "STAGE_START name=$Name"
+  }
+}
+try {
+  New-Item -Path (Join-Path $autoRoot 'logs') -ItemType Directory -Force -ErrorAction Stop | Out-Null
+  # Always truncate at the start of the next run, including failed previous builds.
+  Set-Content -LiteralPath $script:profileFile -Value "LESHY BUILD PROFILE started=$((Get-Date).ToString('o')) version=$version machine=$env:COMPUTERNAME" -Encoding UTF8 -ErrorAction Stop
+  $script:profileActive = $true
+  try {
+    $hw = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+    Log-BuildProfile "HARDWARE cpu=$($hw.Name.Trim()) cores=$($hw.NumberOfCores) threads=$($hw.NumberOfLogicalProcessors)"
+    foreach ($dev in @(Get-CimInstance Win32_DiskDrive -ErrorAction Stop)) {
+      Log-BuildProfile "HARDWARE disk=$($dev.Model) interface=$($dev.InterfaceType) sizeGB=$([math]::Round([double]$dev.Size / 1GB,0))"
+    }
+  } catch { Log-BuildProfile "HARDWARE_UNAVAILABLE reason=$($_.Exception.Message)" }
+  $script:profileJob = Start-Job -ArgumentList $script:profileFile,$script:profileStageFile,([Environment]::ProcessorCount) -ScriptBlock {
+    param($Log,$StagePath,$CpuCount)
+    while ($true) {
+      try {
+        $cpu = @(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -ErrorAction Stop)
+        $all = $cpu | Where-Object Name -eq '_Total' | Select-Object -First 1
+        $cores = @($cpu | Where-Object { $_.Name -match '^\d+(,\d+)?$' } | Sort-Object PercentProcessorTime -Descending | Select-Object -First 4 | ForEach-Object { "$($_.Name):$($_.PercentProcessorTime)%" }) -join ','
+        $disk = Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk -Filter "Name='_Total'" -ErrorAction Stop
+        $mem = Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory -ErrorAction Stop
+        $tasks = @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -ErrorAction Stop | Where-Object { $_.Name -match '^(python|pyinstaller|iscc|msmpeng|powershell|pwsh|cmd|git|cl|link|ninja)(#\d+)?$' } | Sort-Object PercentProcessorTime -Descending | Select-Object -First 7)
+        $summary = @($tasks | ForEach-Object { "$($_.Name):cpu=$([math]::Round([double]$_.PercentProcessorTime / [math]::Max(1,$CpuCount),1))%:ram=$([math]::Round([double]$_.WorkingSet / 1MB,0))MB" }) -join ','
+        $stage = if (Test-Path -LiteralPath $StagePath) { [string](Get-Content -LiteralPath $StagePath -TotalCount 1 -ErrorAction SilentlyContinue) } else { 'startup' }
+        $mbps = [math]::Round([double]$disk.DiskBytesPersec / 1MB,2)
+        $latency = [math]::Round([double]$disk.AvgDisksecPerTransfer * 1000,2)
+        $row = "{0} SAMPLE stage={1} cpuPercent={2} hotLogical=[{3}] diskBusyPercent={4} diskMBps={5} diskLatencyMs={6} freeRAM_MB={7} pageReadsSec={8} process=[{9}]" -f (Get-Date).ToString('o'),$stage,$all.PercentProcessorTime,$cores,$disk.PercentDiskTime,$mbps,$latency,$mem.AvailableMBytes,$mem.PageReadsPersec,$summary
+        Add-Content -LiteralPath $Log -Value $row -Encoding UTF8 -ErrorAction Stop
+      } catch {
+        try { Add-Content -LiteralPath $Log -Value "$((Get-Date).ToString('o')) SAMPLE_UNAVAILABLE $($_.Exception.Message)" -Encoding UTF8 -ErrorAction SilentlyContinue } catch { }
+      }
+      Start-Sleep -Seconds 5
+    }
+  } -ErrorAction Stop
+  Log-BuildProfile 'PROFILER_STARTED interval=5s'
+} catch { Write-Warning "Build profiler failed to start (build unaffected): $($_.Exception.Message)" }
+$script:buildOK = $false
+try {
+Build-Stage 'preflight'
+
 # When AutoBuilder launches this script it owns live deployment/rollback itself.
 # Direct/manual build.ps1 runs publish immediately to dist\Leshy.
 if (-not $StageOnly) {
@@ -44,6 +113,7 @@ if (-not $StageOnly) {
   } catch { }
 }
 
+Build-Stage 'pip-dependencies'
 python -m pip install --upgrade pip
 python -m pip install -e "."
 python -m pip install "pyinstaller>=6.11,<7"
@@ -56,9 +126,11 @@ python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://
 # .autobuild is disposable compiler workspace only. Finished output is published
 # to dist\Leshy either here (manual build) or by AutoBuilder after it creates its
 # rollback backup (StageOnly/AutoBuilder mode).
+Build-Stage 'workspace-preparation'
 Remove-Item -Recurse -Force $packageDist, $packageWork, $smokePackageRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
 
+Build-Stage 'pyinstaller'
 python -m PyInstaller --noconfirm --clean --onedir --console `
   --name Leshy `
   --paths src `
@@ -89,6 +161,7 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
 # Public knowledge is data beside the executable; private LeshyBrain is not copied.
+Build-Stage 'knowledge-copy'
 Copy-Item -LiteralPath (Join-Path $repoRoot 'knowledge') -Destination $packageRoot -Recurse -Force
 
 $packageExe = Join-Path $packageRoot 'Leshy.exe'
@@ -192,6 +265,7 @@ function Invoke-FrozenSmokeTest {
 
 # Quality gate is run against a disposable copy of the actual PyInstaller package.
 # Existence of Leshy.exe alone is not considered a successful build.
+Build-Stage 'frozen-smoke-test'
 Invoke-FrozenSmokeTest -SourcePackageRoot $packageRoot -SmokePackageRoot $smokePackageRoot
 
 function Get-LiveProcesses {
@@ -283,12 +357,14 @@ function Publish-LiveProgram {
 #   dist\Leshy\...      compiled runnable program
 #   dist\LeshySetup-*   installer
 # LeshyBrain is persistent user data and is never removed during publication.
+Build-Stage 'publish-or-stage'
 if (-not $StageOnly) {
   Publish-LiveProgram
 } else {
   Write-Host 'STAGE ONLY: AutoBuilder will publish the package to dist\Leshy after creating its rollback backup.'
 }
 
+Build-Stage 'inno-setup'
 $isccPath = $null
 $cmd = Get-Command iscc.exe -ErrorAction SilentlyContinue
 if ($cmd) { $isccPath = $cmd.Source }
@@ -319,3 +395,21 @@ Write-Host "READY SETUP:   $installer"
 Write-Host "BROWSER:       system Edge/Chrome/Chromium; no browser bundled"
 Write-Host "DATA SAFE:     $brainRoot is preserved during live publication."
 Write-Host 'AUTO TESTS:    frozen /v1/status + /v1/chat passed before installer creation.'
+$script:buildOK = $true
+} finally {
+  try {
+    if ($script:profileWatch) {
+      $script:profileWatch.Stop()
+      $stageEnd = if ($script:buildOK) { 'END' } else { 'FAILED' }
+      Log-BuildProfile "STAGE_$stageEnd name=$($script:profileStage) seconds=$([math]::Round($script:profileWatch.Elapsed.TotalSeconds,2))"
+    }
+    $script:profileTotal.Stop()
+    $status = if ($script:buildOK) { 'SUCCESS' } else { 'FAILED_OR_INTERRUPTED' }
+    Log-BuildProfile "BUILD_RESULT outcome=$status totalSeconds=$([math]::Round($script:profileTotal.Elapsed.TotalSeconds,2))"
+    if ($script:profileJob) {
+      Stop-Job -Job $script:profileJob -ErrorAction SilentlyContinue
+      Remove-Job -Job $script:profileJob -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Item -LiteralPath $script:profileStageFile -Force -ErrorAction SilentlyContinue
+  } catch { }
+}
