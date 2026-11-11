@@ -112,17 +112,20 @@ def find_catalog_matches(directory: Path | str, query: str, *, limit: int = 4) -
 
 
 def load_relevant_catalog_knowledge(knowledge, directory: Path | str, query: str,
-                                    *, enabled: bool, limit: int = 4) -> list[dict]:
+                                    *, enabled, limit: int = 4) -> list[dict]:
     """Import only relevant records as candidates when self-learning is ON.
 
-    This supplements the existing hourly import; it never bypasses the learning
-    switch or upgrades a repository's 'verified' label to local trusted status.
+    The toggle may change during a lengthy lookup; check again before each write.
+    This supplements hourly import without promoting curator labels to trusted.
     """
-    if not enabled:
+    is_enabled = enabled if callable(enabled) else lambda: bool(enabled)
+    if not is_enabled():
         return []
     hits = find_catalog_matches(directory, query, limit=limit)
     out: list[dict] = []
     for hit in hits:
+        if not is_enabled():
+            break
         record = hit["record"]
         import_record(knowledge, record, package_path=hit["package"])
         out.append({
