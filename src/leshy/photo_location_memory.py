@@ -150,6 +150,18 @@ class PhotoLocationMemory:
             )
         return True
 
+    def forget(self, *, owner_id: str, image_sha256: str) -> bool:
+        """Remove one user's labelled example; cannot affect another owner."""
+        if not owner_id or not _DIGEST.fullmatch(image_sha256):
+            return False
+        with self.storage.connection() as conn:
+            deleted = conn.execute(
+                "DELETE FROM photo_location_lessons "
+                "WHERE owner_id=? AND image_sha256=?",
+                (owner_id, image_sha256),
+            ).rowcount
+        return bool(deleted)
+
     def exact(self, *, owner_id: str, image_sha256: str) -> dict[str, str] | None:
         if not owner_id or not _DIGEST.fullmatch(image_sha256):
             return None
