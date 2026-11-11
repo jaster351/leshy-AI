@@ -233,7 +233,7 @@ class RacingSearch(FallbackSearch):
         _bump("unavailable")
         event(
             "search_parallel_exhausted",
-            attempted=launched, finished=failures,
+            attempted=launched, finished=finished,
             elapsed_ms=int((time.monotonic() - started) * 1000),
         )
         raise SearchUnavailable("Независимые поисковые источники не ответили вовремя или не нашли результатов")
