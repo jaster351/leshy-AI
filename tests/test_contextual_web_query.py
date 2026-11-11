@@ -58,9 +58,10 @@ class ContextualWebQueryTests(unittest.TestCase):
         query = "site:www.rockstargames.com grand theft auto vi november 19 2026"
         rows = [
             {"title": "HTTPS — Википедия", "snippet": "HTTP Secure", "url": "https://wikipedia.org/wiki/HTTPS"},
+            {"title": "Grand Theft Auto VI release", "snippet": "launch November 19 2026", "url": "https://example.com/news/gta-vi"},
             {"title": "Grand Theft Auto VI release", "snippet": "launch November 19 2026", "url": "https://www.rockstargames.com/ru/newswire/article/abc/grand-theft-auto-vi"},
         ]
-        self.assertEqual(relevant_url_search_results(query, rows), [rows[1]])
+        self.assertEqual(relevant_url_search_results(query, rows), [rows[2]])
 
 
 if __name__ == "__main__":
