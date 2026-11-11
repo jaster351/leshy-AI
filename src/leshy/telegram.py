@@ -140,6 +140,8 @@ class TelegramBridge:
         # повторять при каждом запросе статуса из нескольких вкладок.
         self._token_load_error_key: tuple[str, int, int] | None = None
         self._offset = 0
+        self._committed_offset = 0
+        self._cluster_vote_error = ""
         self._social = TelegramSocialPolicy()
         self._bot_id: int | None = None
         self._bot_username = ""
@@ -263,6 +265,11 @@ class TelegramBridge:
             "reply_to_each_message": True,
             "reply_target_priority": True,
             "backlog_before_ack": True,
+            "cluster_telegram_election": (
+                getattr(self.app, "distributed_cluster", None).telegram_election_status()
+                if callable(getattr(getattr(self.app, "distributed_cluster", None), "telegram_election_status", None))
+                else {}
+            ),
             "privacy_mode_note": "Для чтения обычных сообщений группы без @упоминания Privacy Mode бота должен быть отключён в Telegram.",
         }
 
@@ -576,12 +583,39 @@ class TelegramBridge:
             finally:
                 self._queue.task_done()
 
+    def _cluster_can_poll(self) -> bool:
+        """Only the voted owner calls Telegram getUpdates; every Web stays online."""
+        cluster = getattr(self.app, "distributed_cluster", None)
+        decision = getattr(cluster, "telegram_poll_decision", None)
+        if not callable(decision):
+            return True
+        try:
+            token = self._token()
+            if not token:
+                return False
+            allowed, acknowledged = decision(token, acknowledged_offset=self._committed_offset)
+            # The former leader advertised only updates processed by its worker.
+            self._offset = max(self._offset, int(acknowledged))
+            self._committed_offset = max(self._committed_offset, int(acknowledged))
+            self._cluster_vote_error = ""
+            return bool(allowed)
+        except Exception as exc:
+            # Fail closed rather than starting a competing poller on a broken vote.
+            reason = type(exc).__name__
+            if reason != self._cluster_vote_error:
+                self._cluster_vote_error = reason
+                problem("telegram_cluster_vote_failed", reason)
+            return False
+
     def _run(self) -> None:
         backoff = 0.5
         conflict_backoff = 30.0  # Другой экземпляр уже опрашивает этот bot token.
         if self._bot_id is None:
             self._refresh_bot_identity()
         while not self._stop.is_set():
+            if not self._cluster_can_poll():
+                self._stop.wait(1.0)
+                continue
             try:
                 query = parse.urlencode(
                     {"timeout": 10, "offset": self._offset, "allowed_updates": json.dumps(["message"])}
@@ -602,6 +636,7 @@ class TelegramBridge:
                 # аварийном выключении между получением и ответом.
                 if queued:
                     self._queue.join()
+                self._committed_offset = max(self._committed_offset, self._offset)
                 self._last_error = ""
                 backoff = 0.5
                 conflict_backoff = 30.0
