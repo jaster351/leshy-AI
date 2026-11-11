@@ -31,6 +31,18 @@ class ExternalActionGuardTests(unittest.TestCase):
             "content": "Исследование: DDoS и методы предотвращения.",
         }).allowed)
 
+    def test_risky_read_manifest_action_still_requires_approval(self):
+        from leshy.tools_gateway import ToolApprovalRequired
+        manifest = ToolManifest(
+            tool_id="sample", title="Пример", transport="stdio",
+            permissions=(ToolPermission.READ,),
+        )
+        gateway = McpToolsGateway(SimpleNamespace(get=lambda name: manifest))
+        with patch.object(gateway, "_call") as effect:
+            with self.assertRaises(ToolApprovalRequired):
+                gateway.call("sample", "execute", {"command": "перевести деньги"})
+            effect.assert_not_called()
+
     def test_mcp_approved_does_not_override_prohibition(self):
         manifest = ToolManifest(
             tool_id="sample", title="Пример", transport="stdio",
