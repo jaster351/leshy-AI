@@ -24,7 +24,7 @@ from .llm import ChatMessage
 _DISCOVERY_PORT = 38765
 _DISCOVERY_MAGIC = "leshy-cluster-v1"
 _MAX_DISCOVERY_PACKET = 24_000
-_ALLOWED_REMOTE_KINDS = {"agent.prompt", "knowledge.search", "graph.search", "cluster.ping"}
+_ALLOWED_REMOTE_KINDS = {"agent.prompt", "knowledge.search", "graph.search", "cluster.ping", "web.search"}
 
 
 def _canonical(value: dict[str, Any]) -> bytes:
@@ -669,6 +669,36 @@ class DistributedClusterRuntime:
                     raise RuntimeError("Knowledge Graph на этом узле не инициализирован")
                 query = str(task.payload.get("query") or "")
                 payload = {"items": [item.public() for item in graph.search(task.owner_id, query, limit=8)]}
+            elif task.kind == "web.search":
+                # Authenticated remote query: use ONLY local search providers.
+                # Never bounce the request to yet another cluster node.
+                from .search_parallel import ClusterPeerSearch, RacingSearch
+                query = " ".join(str(task.payload.get("query") or "").split()).strip()[:400]
+                if not query:
+                    raise ValueError("Пустая поисковая задача")
+                limit = max(1, min(int(task.payload.get("limit") or 5), 10))
+                provider = self.app.research.search_provider
+                if isinstance(provider, RacingSearch):
+                    providers = [
+                        item for item in provider.providers
+                        if not isinstance(item, ClusterPeerSearch)
+                    ]
+                    if not providers:
+                        raise RuntimeError("Локальные поисковые провайдеры не настроены")
+                    local_search = RacingSearch(
+                        *providers, deadline_seconds=5.0, hedge_delay_seconds=0.0,
+                    )
+                    values = local_search.search(query, limit=limit)
+                elif isinstance(provider, ClusterPeerSearch):
+                    raise RuntimeError("Локальный поисковый провайдер отсутствует")
+                else:
+                    values = provider.search(query, limit=limit)
+                payload = {"items": [
+                    {"title": item.title[:500], "url": item.url, "snippet": item.snippet[:1600]}
+                    for item in values[:limit]
+                    if str(item.url).startswith(("https://", "http://"))
+                ]}
+                event("cluster_web_search_served", count=len(payload["items"]))
             elif task.kind == "agent.prompt":
                 system = str(task.payload.get("system") or "Ты подагент Лешего. Не выдумывай факты.")
                 prompt = str(task.payload.get("prompt") or "").strip()
