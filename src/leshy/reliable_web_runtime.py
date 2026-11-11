@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import os
 from html.parser import HTMLParser
 import re
 import time
@@ -11,6 +12,7 @@ from .diagnostics import event, problem
 from .llm import ChatMessage
 from .research import DdgsSearch, FallbackSearch, SearchResult, SearxngSearch
 from .search_parallel import BingRssSearch, RacingSearch
+from .search_chromium import ChromiumSearch
 from .research_policy import research_reason
 from .realtime_chat import RealtimeChatManager
 from .storage import utcnow
@@ -144,11 +146,11 @@ _ORIGINAL_PENDING_SESSIONS = None
 
 
 def _configure_app_search(app) -> None:
-    """Run independent providers simultaneously, bounded by 8s.
+    """Prefer real isolated Chromium, hedge against its temporary failure.
 
-    Earlier SearXNG -> DDG HTML -> DDGS ran sequentially. One slow
-    search site could consume the entire interactive 12-second budget
-    without giving the other sites any opportunity.
+    The search provider's normal user agent and cookies belong to the real
+    Chromium session. After a short delay, independent HTTP providers become
+    available, even when Chromium meets a CAPTCHA or cannot start.
     """
     provider = getattr(getattr(app, "research", None), "search_provider", None)
     if provider is not None and not bool(getattr(provider, "_leshy_reliable_web", False)):
@@ -173,13 +175,28 @@ def _configure_app_search(app) -> None:
             DdgsSearch(timeout=3, backends=("google", "mojeek", "yandex"))
             for item in original if isinstance(item, DdgsSearch)
         ]
-        combined = RacingSearch(*fast, *slow, deadline_seconds=8.0)
+        chromium_enabled = str(os.getenv("LESHY_CHROMIUM_SEARCH_ENABLED", "1")).strip().lower() not in {
+            "0", "false", "off", "no",
+        }
+        if chromium_enabled:
+            try:
+                fast.insert(0, ChromiumSearch(
+                    brain_dir=getattr(getattr(app, "settings", None), "brain_dir", None)
+                ))
+            except ValueError as exc:
+                problem("chromium_search_config_invalid", type(exc).__name__)
+        combined = RacingSearch(
+            *fast, *slow, deadline_seconds=8.0,
+            hedge_delay_seconds=1.4 if chromium_enabled and isinstance(fast[0], ChromiumSearch) else 0.0,
+        )
         setattr(combined, "_leshy_reliable_web", True)
         app.research.search_provider = combined
         event(
             "reliable_web_search_ready",
             providers=" || ".join(type(item).__name__ for item in combined.providers),
             parallel=True,
+            preferred="ChromiumSearch" if chromium_enabled else "HTTP-only",
+            hedge_delay_seconds=combined.hedge_delay_seconds,
             deadline_seconds=8.0,
         )
     # Recovery должен работать только с сообщениями, существовавшими до старта
