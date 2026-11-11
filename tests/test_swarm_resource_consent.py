@@ -13,7 +13,7 @@ def consent(**overrides):
     values = dict(
         local_owner_confirmed=True,
         enabled=True,
-        agreement_revision="2026-11-11.8",
+        agreement_revision="2026-11-11.9",
         granted_at=NOW - timedelta(minutes=1),
         expires_at=NOW + timedelta(minutes=30),
         scopes=frozenset({ResourceScope.CPU}),
@@ -23,7 +23,7 @@ def consent(**overrides):
     return SwarmConsent(**values)
 
 
-def decide(c, task=None, revision="2026-11-11.8"):
+def decide(c, task=None, revision="2026-11-11.9"):
     return authorize_resource_task(
         c,
         task if task is not None else ResourceTask(
