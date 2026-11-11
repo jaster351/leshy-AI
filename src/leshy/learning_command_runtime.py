@@ -144,12 +144,13 @@ def install_explicit_learning_routing(app_class) -> None:
         started = time.monotonic()
         try:
             sid, _rows = self._save_user_and_history(value, owner, session_id)
-            yield StreamEvent("start", {"request_id": rid, "session_id": sid, "learning_command": True})
-            yield StreamEvent("activity", {
-                "kind": "learning",
-                "phase": "queued",
-                "text": "Добавляю в обучение…",
-            })
+            yield StreamEvent("start", {"request_id": rid, "session_id": sid, "learning_command": not report_requested})
+            if not report_requested:
+                yield StreamEvent("activity", {
+                    "kind": "learning",
+                    "phase": "queued",
+                    "text": "Добавляю в обучение…",
+                })
             if cancel.is_set():
                 yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True, "learning_command": True})
                 return
@@ -169,14 +170,14 @@ def install_explicit_learning_routing(app_class) -> None:
                     yield StreamEvent("delta", {"text": chunk})
             if not report_requested:
                 event(
-                "explicit_learning_command_queued",
-                request_id=rid,
-                session_id=sid,
-                owner_id=owner,
-                learning_enabled=bool(result.get("learning_enabled")),
-                research_tasks=len(result.get("research_task_ids") or []),
-                material_jobs=len(result.get("material_jobs") or []),
-            )
+                    "explicit_learning_command_queued",
+                    request_id=rid,
+                    session_id=sid,
+                    owner_id=owner,
+                    learning_enabled=bool(result.get("learning_enabled")),
+                    research_tasks=len(result.get("research_task_ids") or []),
+                    material_jobs=len(result.get("material_jobs") or []),
+                )
             yield StreamEvent("done", {
                 "request_id": rid,
                 "session_id": sid,
@@ -208,14 +209,15 @@ def install_explicit_learning_routing(app_class) -> None:
             result = execute_explicit_learning(self, owner, value)
         answer = str(result.get("answer") or "")
         created_at = self._save_assistant(sid, answer)
-        event(
-            "explicit_learning_command_queued",
-            session_id=sid,
-            owner_id=owner,
-            learning_enabled=bool(result.get("learning_enabled")),
-            research_tasks=len(result.get("research_task_ids") or []),
-            material_jobs=len(result.get("material_jobs") or []),
-        )
+        if not report_requested:
+            event(
+                "explicit_learning_command_queued",
+                session_id=sid,
+                owner_id=owner,
+                learning_enabled=bool(result.get("learning_enabled")),
+                research_tasks=len(result.get("research_task_ids") or []),
+                material_jobs=len(result.get("material_jobs") or []),
+            )
         return {"session_id": sid, "answer": answer, "created_at": created_at, "sources": [], "learning": result}
 
     RealtimeChatManager.stream = stream
