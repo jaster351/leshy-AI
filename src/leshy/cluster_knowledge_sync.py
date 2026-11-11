@@ -12,6 +12,7 @@ from hashlib import sha256
 import hmac
 import ipaddress
 import json
+import re
 import threading
 import time
 from urllib import parse, request
@@ -52,6 +53,23 @@ def _public_source(url: str) -> bool:
             return "." in host and not host.endswith((".internal", ".lan", ".localhost"))
     except (ValueError, TypeError):
         return False
+
+# Не заменяет анализ всех персональных данных: блокирует только очевидные
+# секреты/контакты до отправки в общую базу знаний доверенных узлов.
+_SENSITIVE_PATTERNS = (
+    re.compile(r"(?<![\\w.+-])[\\w.+-]+@[\\w.-]+\\.[a-zA-Z]{2,}(?!\\w)"),
+    re.compile(r"(?i)(?:\\b(?:password|passwd|token|bearer|api[_ -]?key|secret)\\b|(?:пароль|токен|секретный[ _-]?ключ))\\s*[:=]\\s*\\S+"),
+    re.compile(r"(?<!\\w)(?:\\+7|8)[\\s(.-]*\\(?\\d{3}\\)?[\\s).-]*\\d{3}[\\s.-]*\\d{2}[\\s.-]*\\d{2}(?!\\w)"),
+)
+
+
+def _safe_public_record(*values: str) -> bool:
+    """Блокировать очевидные персональные контакты и секреты в общей записи."""
+    return all(
+        not pattern.search(str(value or ""))
+        for value in values
+        for pattern in _SENSITIVE_PATTERNS
+    )
 
 
 class _NoRedirects(request.HTTPRedirectHandler):
@@ -155,6 +173,8 @@ class KnowledgeSyncService:
                 continue
             if not 20 <= len(claim) <= _MAX_CLAIM_LENGTH or not _public_source(source):
                 continue
+            if not _safe_public_record(claim, row.get("topic"), row.get("source_title"), source):
+                continue
             if not is_fresh(row):
                 continue
             items.append({
@@ -239,6 +259,8 @@ class KnowledgeSyncService:
             source = str(row.get("source_url") or "").strip()
             topic = str(row.get("topic") or "").strip()[:500]
             if not (20 <= len(claim) <= _MAX_CLAIM_LENGTH) or not topic or not _public_source(source):
+                continue
+            if not _safe_public_record(claim, topic, row.get("source_title"), source):
                 continue
             data_class = row.get("data_class") if row.get("data_class") in {"static", "dynamic"} else "static"
             if data_class == "dynamic":
