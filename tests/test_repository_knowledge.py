@@ -173,6 +173,22 @@ class RepositoryKnowledgeTests(unittest.TestCase):
         })
         self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
 
+    def test_learning_toggle_changed_during_lookup_prevents_import(self):
+        self.write(self.record)
+        self._write_catalog_index({
+            self.record["id"]: {
+                "version": 1, "package": "knowledge/updates/batch.jsonl",
+                "review_status": "verified",
+            },
+        })
+        states = iter((True, False))
+        matches = load_relevant_catalog_knowledge(
+            self.knowledge, self.catalog, "public fact",
+            enabled=lambda: next(states), limit=4,
+        )
+        self.assertEqual(matches, [])
+        self.assertEqual(self.rows(), [])
+
     def test_lookup_requires_a_current_catalog_index(self):
         self.write(self.record)
         self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
