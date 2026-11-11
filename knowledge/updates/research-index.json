@@ -1,15 +1,13 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T15:15:33Z",
+  "updated_at": "2026-11-11T16:14:38Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-11T15:15:33Z",
-    "search_started_at": "2026-11-11T15:00:03Z",
-    "previous_issue_at": "2026-11-11T14:11:22Z",
+    "searched_at": "2026-11-11T16:14:38Z",
+    "search_started_at": "2026-11-11T16:05:44Z",
+    "previous_issue_at": "2026-11-11T15:15:33Z",
     "discovery_lookback_days": 30,
-    "newly_included_ids": [
-      "doi:10.18653/2026.groundlm-1.21"
-    ],
-    "note": "Дополнение покрытия: впервые проверена публикация сборника от 29 октября. Препринт впервые опубликован 14 мая, последняя заявленная редакция arXiv v4 — 19 июля. Новые результаты после предыдущего выпуска не установлены."
+    "newly_included_ids": [],
+    "note": "В просмотренных источниках не подтверждены значимые новые публикации или существенные редакции после предыдущего выпуска. Старые подборки не повторены."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -141,30 +139,40 @@
         "doi:10.18653/2026.groundlm-1.21"
       ],
       "note": "Дополнение покрытия: впервые проверена публикация сборника от 29 октября. Препринт впервые опубликован 14 мая, последняя заявленная редакция arXiv v4 — 19 июля. Новые результаты после предыдущего выпуска не установлены."
+    },
+    {
+      "searched_at": "2026-11-11T16:14:38Z",
+      "search_started_at": "2026-11-11T16:05:44Z",
+      "previous_issue_at": "2026-11-11T15:15:33Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [],
+      "note": "В просмотренных источниках не подтверждены значимые новые публикации или существенные редакции после предыдущего выпуска. Старые подборки не повторены."
     }
   ],
   "last_search": {
-    "started_at": "2026-11-11T15:00:03Z",
-    "completed_at": "2026-11-11T15:15:33Z",
-    "incremental_since": "2026-11-11T14:14:10Z",
+    "started_at": "2026-11-11T16:05:44Z",
+    "completed_at": "2026-11-11T16:14:38Z",
+    "incremental_since": "2026-11-11T15:18:13Z",
     "additional_lookback_start": "2026-10-12",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
-    "first_time_coverage_ids": [
-      "doi:10.18653/2026.groundlm-1.21"
-    ],
+    "first_time_coverage_ids": [],
     "queries": [
-      "LLM agent memory provenance poisoning knowledge updates research November 11 2026",
-      "RAG source verification contradiction memory rollback new research November 2026",
-      "\"FortMem\" \"Secure Stateful\" site:dl.acm.org",
-      "\"FortMem\" \"PASTP\" arxiv github",
-      "\"Does RAG Know When Retrieval Is Wrong\" arxiv github"
+      "LLM agent memory provenance poisoning reliable knowledge updates November 11 2026",
+      "RAG source verification knowledge conflict temporal updates new research November 2026",
+      "\"FortMem\" \"Ze-Ning Li\"",
+      "\"Bounded Provisional Visibility\"",
+      "\"Bounded Provisional Visibility\" arxiv github pdf"
     ],
     "opened_primary_urls": [
-      "https://aclanthology.org/2026.groundlm-1.21/",
-      "https://aclanthology.org/2026.groundlm-1.21.pdf",
-      "https://arxiv.org/abs/2605.14473"
+      "https://arxiv.org/list/cs.AI/new",
+      "https://arxiv.org/list/cs.IR/new",
+      "https://research.google/pubs/bounded-provisional-visibility-controlling-poisoning-exposure-in-continuously-ingested-rag-vector-stores/"
     ],
-    "note": "Поиск не является доказательством отсутствия иных публикаций; вторичные подборки не считались независимыми подтверждениями."
+    "failed_primary_urls": [
+      "https://doi.org/10.1145/3799682.3840872",
+      "https://arxiv.org/abs/2610.05826"
+    ],
+    "note": "Для спорных библиографических сведений вторичные страницы и зеркала не считались независимыми подтверждениями. Отсутствие находок в просмотренных источниках не доказывает отсутствие других работ."
   },
   "pending_primary_reviews": [
     {
@@ -179,8 +187,20 @@
         "https://dl.acm.org/doi/10.1145/3799682.3840872",
         "https://api.crossref.org/works/10.1145/3799682.3840872"
       ],
-      "last_attempt_at": "2026-11-11T15:15:33Z",
-      "note": "Первоисточник не удалось прочитать; метаданные не подтверждены. В подборку и импортируемые утверждения работа не включена."
+      "last_attempt_at": "2026-11-11T16:14:38Z",
+      "note": "Повторная проверка первоисточника не удалась; метаданные по-прежнему не подтверждены. В подборку и импортируемые утверждения работа не включена."
+    },
+    {
+      "reported_title": "Bounded Provisional Visibility: Controlling Poisoning Exposure in Continuously Ingested RAG Vector Stores",
+      "reported_arxiv_id": "2610.05826",
+      "reported_first_publication_date": "2026-10-05",
+      "verified_first_publication_at": null,
+      "publication_year_on_primary_page": 2026,
+      "primary_url": "https://research.google/pubs/bounded-provisional-visibility-controlling-poisoning-exposure-in-continuously-ingested-rag-vector-stores/",
+      "primary_content_available": "abstract_only",
+      "status": "pending_date_and_manuscript_verification",
+      "last_attempt_at": "2026-11-11T16:14:38Z",
+      "note": "На прочитанной странице организации указан только год; arXiv-страница недоступна. Индексированная выдача даёт другую форму имён трёх авторов. Дата, авторские варианты и редакция не согласованы; работа не включена как новое исследование и не импортируется как факт."
     }
   ]
 }

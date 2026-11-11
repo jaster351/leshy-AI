@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T15:15:33Z",
-  "latest_package": "knowledge/updates/2026-11-11/1500-language-moon-art-history-and-chrome.jsonl",
-  "record_count": 80,
+  "updated_at": "2026-11-11T16:14:38Z",
+  "latest_package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+  "record_count": 94,
   "records": {
     "si-seven-base-units": {
       "version": 1,
@@ -643,33 +643,146 @@
       "data_class": "dynamic",
       "checked_at": "2026-11-11T15:15:33Z",
       "review_status": "verified"
+    },
+    "statistics-arithmetic-sample-mean": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "mathematics",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "statistics-sample-median": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "mathematics",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "statistics-sample-mode": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "mathematics",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "geography-water-cycle-storage-flows": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "geography",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "geography-water-evaporation-condensation-precipitation": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "geography",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "geography-groundwater-aquifer-pores": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "geography",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "geography-water-cycle-energy-gravity": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "geography",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "physics-celsius-kelvin-conversion": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "physics",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "physics-temperature-interval-kelvin-celsius": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "physics",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "engineering-electric-power-versus-energy": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "engineering",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "engineering-constant-power-energy-example": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "engineering",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "security-cryptographic-hash-fixed-length": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "security",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "security-hash-collision-resistance": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "security",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
+    },
+    "security-digital-signature-integrity-origin": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "category": "security",
+      "data_class": "static",
+      "checked_at": "2026-11-11T16:14:38Z",
+      "review_status": "verified"
     }
   },
   "next_foundation_domains": [
     "world_history",
-    "mathematics_and_logic",
-    "geography",
-    "physics",
     "chemistry",
-    "engineering"
+    "engineering",
+    "mathematics_and_logic",
+    "geology",
+    "languages"
   ],
   "note": "Индекс публикаций, не подтверждение импорта или обучения весов локальной модели.",
   "category_counts": {
     "foundations": 8,
     "technology": 10,
     "research": 8,
-    "security": 7,
+    "security": 10,
     "science": 1,
     "news": 1,
-    "mathematics": 4,
-    "geography": 5,
+    "mathematics": 7,
+    "geography": 9,
     "history": 6,
     "language": 5,
     "chemistry": 5,
-    "engineering": 6,
+    "engineering": 8,
     "biology": 5,
     "astronomy": 7,
-    "culture": 2
+    "culture": 2,
+    "physics": 2
   },
   "coverage_expansions": [
     {
@@ -736,6 +849,25 @@
         "printmaking",
         "browser_vulnerability_advisories",
         "rag_knowledge_conflict_diagnostics"
+      ]
+    },
+    {
+      "checked_at": "2026-11-11T16:14:38Z",
+      "package": "knowledge/updates/2026-11-11/1600-statistics-water-temperature-energy-and-integrity.jsonl",
+      "record_count": 14,
+      "categories": [
+        "mathematics",
+        "geography",
+        "physics",
+        "engineering",
+        "security"
+      ],
+      "domains": [
+        "descriptive_statistics",
+        "hydrology",
+        "temperature_scales",
+        "power_and_energy_units",
+        "cryptographic_integrity_and_origin"
       ]
     }
   ]
