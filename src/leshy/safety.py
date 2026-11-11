@@ -35,6 +35,10 @@ class SafetyPolicy:
         ("privacy_abuse", ("деанонимизировать", "докс", "найди домашний адрес", "track private person", "doxx", "stalk")),
         ("sexual_exploitation", ("сексуальн" + " несовершеннолет", "csam", "child sexual")),
         ("self_harm_facilitation", ("как покончить с собой", "самый надежный способ самоубий", "suicide method", "how to kill myself")),
+        ("physical_harm", ("как отравить человека", "подсыпать яд", "отравить незаметно", "убить человека с помощью", "poison someone without", "how to poison a person")),
+        ("coercion_to_suicide", ("довести до самоубийства", "заставить покончить с собой", "уговорить на самоубийство", "coerce someone into suicide")),
+        ("network_attack", ("организовать ddos", "запустить ddos", "положить чужой сервер", "создать ботнет", "launch a ddos attack", "build a botnet")),
+        ("network_intrusion", ("подменить пакеты для взлома", "перехватить чужие пароли", "подслушать чужой трафик", "steal credentials by sniffing")),
     )
 
     HIGH_RISK_ACTION_MARKERS = (
@@ -52,6 +56,18 @@ class SafetyPolicy:
         "grant admin",
         "delete account",
         "transfer money",
+        "отключить защиту",
+        "изменить права доступа",
+        "удалить резервные копии",
+        "перезаписать диск",
+        "форматировать диск",
+        "удалить базу данных",
+        "передать личные данные",
+        "выключить сервер",
+        "disable firewall",
+        "wipe disk",
+        "drop database",
+        "change permissions",
     )
 
     def evaluate_text(self, text: str) -> SafetyDecision:
