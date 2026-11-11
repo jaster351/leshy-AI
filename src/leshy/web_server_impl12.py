@@ -73,8 +73,8 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             if parse.urlsplit(self.path).path == "/v1/swarm/resource-consent":
-                # Remote clients and installations without a configured API token
-                # cannot grant potentially costly resource permissions.
+                # Удалённые клиенты и установки без настроенного API-токена
+                # не могут разрешить расход вычислительных ресурсов.
                 try:
                     loopback = ipaddress.ip_address(self.client_address[0]).is_loopback
                 except (AttributeError, ValueError, IndexError, TypeError):
