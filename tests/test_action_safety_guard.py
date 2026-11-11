@@ -14,6 +14,10 @@ class ExternalActionGuardTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             check_external_action("powershell", {"command": "запусти ddos на чужом сайте"})
 
+    def test_nested_mcp_arguments_rejected(self):
+        with self.assertRaises(PermissionError):
+            check_external_action("invoke", {"params": {"command": "ddos"}})
+
     def test_harm_to_person_rejected(self):
         with self.assertRaises(PermissionError):
             check_external_action("run", {"command": "отравить человека"})
