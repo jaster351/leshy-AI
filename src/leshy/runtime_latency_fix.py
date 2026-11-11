@@ -216,13 +216,14 @@ def install_runtime_latency_fixes(app=None) -> None:
             plan["reason"] = ""
         return plan
 
-    def build_context(self, message, owner_id, rows, *, search_plan=None):
+    def build_context(self, message, owner_id, rows, *, search_plan=None, lookup_query=None):
         messages, sources, attempted = _ORIGINAL_BUILD_CONTEXT(
             self,
             message,
             owner_id,
             rows,
             search_plan=search_plan,
+            lookup_query=lookup_query,
         )
         compacted = compact_realtime_messages(messages)
         return compacted, sources, attempted
