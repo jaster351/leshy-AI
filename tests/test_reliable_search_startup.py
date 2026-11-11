@@ -8,6 +8,7 @@ from leshy.reliable_web_runtime import (
     DuckDuckGoHtmlSearch, _configure_app_search,
 )
 from leshy.search_parallel import BingRssSearch, RacingSearch
+from leshy.search_chromium import ChromiumSearch
 from leshy.research import (
     DdgsSearch, FallbackSearch, SearchResult, SearchUnavailable, SearxngSearch,
 )
@@ -28,7 +29,7 @@ class ReliableSearchStartupTests(TestCase):
         _configure_app_search(app)
         self.assertEqual(
             [type(item).__name__ for item in app.research.search_provider.providers],
-            ["SearxngSearch", "DuckDuckGoHtmlSearch", "BingRssSearch", "DdgsSearch"],
+            ["ChromiumSearch", "SearxngSearch", "DuckDuckGoHtmlSearch", "BingRssSearch", "DdgsSearch"],
         )
 
     def test_configuration_is_idempotent(self):
@@ -38,6 +39,10 @@ class ReliableSearchStartupTests(TestCase):
         _configure_app_search(app)
         self.assertIs(app.research.search_provider, first)
         self.assertIsInstance(first, RacingSearch)
+        self.assertEqual(first.hedge_delay_seconds, 1.4)
+        self.assertEqual(
+            sum(isinstance(item, ChromiumSearch) for item in first.providers), 1,
+        )
         self.assertEqual(
             sum(isinstance(item, DuckDuckGoHtmlSearch) for item in first.providers), 1,
         )
@@ -54,6 +59,7 @@ class ReliableSearchStartupTests(TestCase):
             "Latest Python documentation.",
         )]
         with (
+            patch.object(ChromiumSearch, "search", return_value=[]),
             patch.object(
                 SearxngSearch, "search",
                 side_effect=SearchUnavailable("WinError 10061: connection refused"),
@@ -81,7 +87,7 @@ class ReliableSearchStartupTests(TestCase):
         _configure_app_search(app)
         self.assertEqual(
             [type(item).__name__ for item in app.research.search_provider.providers],
-            ["CustomProvider", "DuckDuckGoHtmlSearch", "BingRssSearch", "DdgsSearch"],
+            ["ChromiumSearch", "CustomProvider", "DuckDuckGoHtmlSearch", "BingRssSearch", "DdgsSearch"],
         )
 
 
