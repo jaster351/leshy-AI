@@ -289,7 +289,7 @@ def install_freshness_memory_runtime(app=None) -> None:
                     plan["reason"] = "локальные данные устарели"
             return plan
 
-        def build_context(self, message, owner_id, rows, *, search_plan=None):
+        def build_context(self, message, owner_id, rows, *, search_plan=None, lookup_query=None):
             plan = search_plan or self._search_plan(message)
             messages, sources, attempted = _ORIGINAL_BUILD_CONTEXT(
                 self,
@@ -297,6 +297,7 @@ def install_freshness_memory_runtime(app=None) -> None:
                 owner_id,
                 rows,
                 search_plan=plan,
+                lookup_query=lookup_query,
             )
             stale = list(plan.get("stale") or [])
             if stale and not sources:
