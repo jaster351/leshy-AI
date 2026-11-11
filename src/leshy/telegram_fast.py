@@ -236,6 +236,27 @@ class FastTelegramBridge(RichTelegramBridge):
             outcome = "unexpected"
         self._send_answer(chat_id, answer, reply_to_message_id=int(message_id) if message_id else None)
         session_id = f"telegram:{chat_id}:{user_id}"
+        # A caption such as "Это памятник Курчатову в Челябинске"
+        # is a direct user-provided lesson for this image.
+        caption = str(message.get("caption") or "").strip()[:2000]
+        if outcome == "success" and caption:
+            try:
+                correction = parse_photo_correction(caption, photo_context=True)
+                evidence = recent.teaching_context(chat_id, user_id) if recent is not None else None
+                digest = str((evidence or {}).get("digest") or "")
+                if correction and digest:
+                    landmark, city = correction
+                    if PhotoLocationMemory(self.app.storage).remember(
+                        owner_id=owner_id, image_sha256=digest,
+                        landmark=landmark, city=city,
+                    ):
+                        event(
+                            "telegram_photo_location_taught",
+                            landmark_provided=bool(landmark), city_provided=bool(city),
+                            channel="caption",
+                        )
+            except Exception as learning_exc:
+                problem("telegram_photo_location_caption_learning_failed", type(learning_exc).__name__)
         try:
             sid = self.app._ensure_session(owner_id, session_id)
             from .storage import utcnow
