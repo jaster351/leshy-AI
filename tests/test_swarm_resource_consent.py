@@ -24,7 +24,7 @@ def consent(**overrides):
 
 def decide(c, task=None, revision="2026-11-11.7"):
     return authorize_resource_task(
-        c, task or ResourceTask("authenticated_swarm_peer", ResourceScope.CPU, 10),
+        c, task or ResourceTask("authenticated_swarm_peer", ResourceScope.CPU, 10, peer_identity_verified=True),
         current_revision=revision, now=NOW,
     )
 
@@ -47,10 +47,15 @@ def test_untrusted_and_risky_tasks_denied():
         {"is_destructive": True},
         {"is_network_attack": True},
     ):
-        assert decide(consent(), ResourceTask("authenticated_swarm_peer", ResourceScope.CPU, 10, **flags))[0] is False
+        assert decide(consent(), ResourceTask("authenticated_swarm_peer", ResourceScope.CPU, 10, peer_identity_verified=True, **flags))[0] is False
 
 
 def test_resource_limits_enforced():
-    assert decide(consent(), ResourceTask("authenticated_swarm_peer", ResourceScope.CPU, 26))[0] is False
-    assert decide(consent(), ResourceTask("authenticated_swarm_peer", ResourceScope.GPU, 1))[0] is False
+    assert decide(consent(), ResourceTask("authenticated_swarm_peer", ResourceScope.CPU, 26, peer_identity_verified=True))[0] is False
+    assert decide(consent(), ResourceTask("authenticated_swarm_peer", ResourceScope.GPU, 1, peer_identity_verified=True))[0] is False
     assert decide(consent())[0] is True
+
+
+def test_peer_claim_is_not_proof_of_identity():
+    task = ResourceTask("authenticated_swarm_peer", ResourceScope.CPU, 10)
+    assert decide(consent(), task) == (False, "peer_identity_not_verified")
