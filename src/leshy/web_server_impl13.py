@@ -8,6 +8,8 @@ from urllib import parse
 
 from . import web_server_impl12 as previous
 from .search_challenge_handoff import BROKER
+from .search_challenge_telegram import send_challenge_photo
+from .diagnostics import problem
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
 
@@ -90,14 +92,24 @@ def make_handler(app, telegram, settings, model_catalog):
         base = os.getenv("LESHY_PUBLIC_URL", "").strip().rstrip("/")
         route = "/browser-challenge#" + ticket.ticket
         where = base + route if base.startswith(("http://", "https://")) else route
-        telegram._send_answer(
-            chat_id,
-            "Для поискового браузера Лешего требуется подтверждение.\n"
-            "Поисковик: " + ticket.engine + "\n"
-            "Откройте страницу проверки: " + where + "\n"
-            "После решения Леший автоматически продолжит исходный поиск. "
-            "Ссылка действительна 10 минут.",
-        )
+        sent_photo = False
+        try:
+            send_challenge_photo(telegram, chat_id, ticket.screenshot, ticket.engine, where)
+            sent_photo = True
+        except Exception as exc:
+            # Never include the secret ticket, bot token or screenshot in logs.
+            problem("search_captcha_telegram_photo_failed", type(exc).__name__)
+        if not sent_photo or not where.startswith("https://"):
+            # Text fallback when photo API fails, or when the admin has not
+            # configured a public HTTPS URL for the inline keyboard button.
+            telegram._send_answer(
+                chat_id,
+                "Для поискового браузера Лешего требуется подтверждение.\n"
+                "Поисковик: " + ticket.engine + "\n"
+                "Откройте страницу проверки: " + where + "\n"
+                "После решения Леший автоматически продолжит исходный поиск. "
+                "Ссылка действительна 10 минут.",
+            )
 
     BROKER.set_notifier(notify)
 
