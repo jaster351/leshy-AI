@@ -322,7 +322,7 @@ class RacingSearch(FallbackSearch):
 
         def worker(provider, name: str) -> None:
             try:
-                provider_query = _focused_rss_query(cleaned) if isinstance(provider, BingRssSearch) or _is_tech_news_query(cleaned) else cleaned
+                provider_query = _focused_rss_query(cleaned) if isinstance(provider, BingRssSearch) or _is_news_query(cleaned) else cleaned
                 values = provider.search(provider_query, limit=limit)
                 valid = [
                     item for item in (values or [])
@@ -336,7 +336,9 @@ class RacingSearch(FallbackSearch):
                 outcome = "success" if relevant else "empty"
                 _bump(outcome, name)
                 outcomes.put((outcome, name, relevant[:limit]))
-            except Exception:
+            except Exception as exc:
+                # No raw URLs, user queries or exception messages in diagnostics.
+                event("search_parallel_provider_failed", provider=name, error_type=type(exc).__name__)
                 _bump("error", name)
                 outcomes.put(("error", name, None))
             finally:
