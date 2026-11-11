@@ -77,15 +77,18 @@ def relevant_url_search_results(query: str, results: list[dict]) -> list[dict]:
     """Удалить случайные результаты о HTTPS вместо темы предоставленного URL."""
     if not str(query).lower().startswith("site:"):
         return results
+    host = query.split(" ", 1)[0][5:].lower().removeprefix("www.").strip(".")
     terms = re.findall(r"[\w]+", query.split(" ", 1)[-1].lower())
     topic = [term for term in terms if len(term) >= 4 and term not in _IGNORE]
-    if not topic:
-        return results
     selected = []
     for item in results:
+        url = str(item.get("url") or "")
+        found = (urlsplit(url).hostname or "").lower().removeprefix("www.").strip(".")
+        if not found or not (found == host or found.endswith("." + host)):
+            continue
         combined = " ".join(str(item.get(key) or "") for key in ("title", "snippet", "url")).lower()
         matched = sum(term in combined for term in set(topic))
-        if matched >= min(2, len(set(topic))):
+        if not topic or matched >= min(2, len(set(topic))):
             selected.append(item)
     return selected
 
