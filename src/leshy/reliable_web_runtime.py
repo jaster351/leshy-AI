@@ -11,7 +11,7 @@ from urllib import parse, request
 from .diagnostics import event, problem
 from .llm import ChatMessage
 from .research import DdgsSearch, FallbackSearch, SearchResult, SearxngSearch
-from .search_parallel import BingRssSearch, RacingSearch
+from .search_parallel import BingRssSearch, ClusterPeerSearch, RacingSearch
 from .search_chromium import ChromiumSearch
 from .research_policy import research_reason
 from .realtime_chat import RealtimeChatManager
@@ -185,8 +185,10 @@ def _configure_app_search(app) -> None:
                 ))
             except ValueError as exc:
                 problem("chromium_search_config_invalid", type(exc).__name__)
+        # Optional authenticated LAN peer joins the independent source race.
+        # Without an enabled cluster it returns immediately with no network I/O.
         combined = RacingSearch(
-            *fast, *slow, deadline_seconds=8.0,
+            *fast, *slow, ClusterPeerSearch(app), deadline_seconds=8.0,
             hedge_delay_seconds=1.4 if chromium_enabled and isinstance(fast[0], ChromiumSearch) else 0.0,
         )
         setattr(combined, "_leshy_reliable_web", True)
