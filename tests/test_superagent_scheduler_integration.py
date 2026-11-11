@@ -24,7 +24,7 @@ class SuperAgentSchedulerIntegrationTests(unittest.TestCase):
                 observed.append(scheduler.status()["active"])
                 return ticket["id"]
 
-        original_class = integration.SuperAgentService
+        original_method = FakeService._execute
         original_installed = integration._INSTALLED
         original_execute = integration._ORIGINAL_EXECUTE
         try:
@@ -40,7 +40,7 @@ class SuperAgentSchedulerIntegrationTests(unittest.TestCase):
                 self.assertIsNone(scheduler.status()["active"])
                 self.assertEqual(scheduler.status()["queue_depth"], 0)
         finally:
-            FakeService._execute = original_class._execute if original_class is not FakeService else FakeService._execute
+            FakeService._execute = original_method
             integration._INSTALLED = original_installed
             integration._ORIGINAL_EXECUTE = original_execute
 
