@@ -10,6 +10,8 @@ from typing import Iterator
 from .diagnostics import event
 
 
+_SCHEDULER_INIT_LOCK = threading.RLock()
+
 PRIORITY_WEB = 100
 PRIORITY_TELEGRAM = 70
 PRIORITY_SYSTEM = 60
@@ -189,11 +191,10 @@ def get_inference_scheduler(app) -> InferenceScheduler:
     current = getattr(app, "inference_scheduler", None)
     if isinstance(current, InferenceScheduler):
         return current
-    lock = getattr(app, "_inference_scheduler_init_lock", None)
-    if lock is None:
-        lock = threading.RLock()
-        setattr(app, "_inference_scheduler_init_lock", lock)
-    with lock:
+    # Глобальная блокировка нужна именно при первом вызове: создание
+    # app._inference_scheduler_init_lock без синхронизации допускает гонку,
+    # при которой два потока создают разные scheduler для одного app.
+    with _SCHEDULER_INIT_LOCK:
         current = getattr(app, "inference_scheduler", None)
         if isinstance(current, InferenceScheduler):
             return current
