@@ -45,6 +45,8 @@ class RecentTelegramPhotos:
         self.limit = max(1, int(limit))
         self._lock = threading.RLock()
         self._entries: OrderedDict[tuple[str, str], tuple[float, dict]] = OrderedDict()
+        # Ephemeral photo context only. Persisted lessons contain NO image bytes.
+        self._geo: dict[tuple[str, str], dict] = {}
 
     def remember(self, chat_id: int | str, sender_id: str, message: dict) -> bool:
         attachment = image_attachment(message)
@@ -63,10 +65,12 @@ class RecentTelegramPhotos:
         now = time.monotonic()
         with self._lock:
             self._entries[key] = (now, photo)
+            self._geo.pop(key, None)  # A new image replaces the previous reference.
             self._entries.move_to_end(key)
             self._prune(now)
             while len(self._entries) > self.limit:
-                self._entries.popitem(last=False)
+                removed, _ = self._entries.popitem(last=False)
+                self._geo.pop(removed, None)
         return True
 
     def recall(self, chat_id: int | str, sender_id: str, question: str) -> dict | None:
@@ -83,11 +87,36 @@ class RecentTelegramPhotos:
             # Give the current question to vision; do not reuse old caption.
             return {**stored[1], "caption": question}
 
+    def record_evidence(
+        self, chat_id: int | str, sender_id: str, *,
+        image_sha256: str = "", geo_active: bool = False,
+    ) -> None:
+        """Record only SHA-256 of the image, never its content or metadata."""
+        key = (str(chat_id), str(sender_id))
+        with self._lock:
+            self._prune(time.monotonic())
+            if key not in self._entries:
+                return
+            entry = self._geo.setdefault(key, {})
+            if image_sha256:
+                entry["digest"] = str(image_sha256)[:64]
+            if geo_active:
+                entry["geo_active"] = True
+
+    def teaching_context(self, chat_id: int | str, sender_id: str) -> dict | None:
+        key = (str(chat_id), str(sender_id))
+        with self._lock:
+            self._prune(time.monotonic())
+            if key not in self._entries:
+                return None
+            return dict(self._geo.get(key, {}))
+
     def _prune(self, now: float) -> None:
         expired = [key for key, (seen, _) in self._entries.items()
                    if now - seen > self.ttl_seconds]
         for key in expired:
             self._entries.pop(key, None)
+            self._geo.pop(key, None)
 
 
 __all__ = ["RecentTelegramPhotos", "refers_to_recent_photo"]
