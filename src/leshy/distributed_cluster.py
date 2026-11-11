@@ -110,6 +110,8 @@ class LanPeerDiscovery:
         self.identity = identity
         self.port = int(port)
         self._peers: dict[str, ClusterNode] = {}
+        self._telegram_local: dict[str, Any] = {}
+        self._telegram_remote: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -130,6 +132,25 @@ class LanPeerDiscovery:
                 self._last_accepted_at = self._last_packet_at
             if detail:
                 self._last_error = detail[:200]
+
+    def set_telegram_vote(self, bot_key: str, vote: str, acknowledged_offset: int) -> None:
+        """Publish a vote and processed Telegram offset inside signed LAN beacons."""
+        with self._lock:
+            self._telegram_local = {
+                "bot": str(bot_key)[:24], "vote": str(vote)[:64],
+                "ack": max(0, int(acknowledged_offset)),
+            }
+
+    def telegram_peer_votes(self, bot_key: str, *, max_age_seconds: float = 17.0) -> dict[str, dict[str, Any]]:
+        """Only signed, recently received announcements for the same bot."""
+        cutoff = time.time() - max_age_seconds
+        with self._lock:
+            return {
+                node_id: dict(info)
+                for node_id, info in self._telegram_remote.items()
+                if info.get("bot") == bot_key and float(info.get("seen") or 0) >= cutoff
+                and node_id in self._peers
+            }
 
     def diagnostics(self) -> dict[str, Any]:
         with self._lock:
@@ -164,6 +185,9 @@ class LanPeerDiscovery:
             "cluster_id": self.identity.cluster_id,
             "node": asdict(node),
         }
+        with self._lock:
+            if self._telegram_local:
+                payload["telegram"] = dict(self._telegram_local)
         signature = _hmac(self.identity.secret, _canonical(payload))
         packet = _canonical({**payload, "signature": signature})
         if len(packet) > _MAX_DISCOVERY_PACKET:
@@ -184,6 +208,7 @@ class LanPeerDiscovery:
             stale = [key for key, value in self._peers.items() if now - value.last_seen > 60.0]
             for key in stale:
                 self._peers.pop(key, None)
+                self._telegram_remote.pop(key, None)
             return list(self._peers.values())
 
     def _accept_packet(self, raw: bytes, source_ip: str = "") -> None:
@@ -228,8 +253,25 @@ class LanPeerDiscovery:
             )
             if not peer.endpoint.startswith(("http://", "https://")):
                 return
+            role = data.get("telegram")
             with self._lock:
                 self._peers[peer.node_id] = peer
+                if isinstance(role, dict):
+                    bot = str(role.get("bot") or "")
+                    vote = str(role.get("vote") or "")
+                    if (
+                        len(bot) == 24 and all(ch in "0123456789abcdef" for ch in bot)
+                        and vote and len(vote) <= 64
+                    ):
+                        self._telegram_remote[peer.node_id] = {
+                            "bot": bot, "vote": vote,
+                            "ack": max(0, min(int(role.get("ack") or 0), 2**63 - 1)),
+                            "seen": time.time(),
+                        }
+                    else:
+                        self._telegram_remote.pop(peer.node_id, None)
+                else:
+                    self._telegram_remote.pop(peer.node_id, None)
             self._record("accepted")
         except Exception:
             self._record("invalid_packet")
@@ -340,7 +382,89 @@ class DistributedClusterRuntime:
         self._autodiscovery_configured = autodiscovery_enabled(app.storage)
         self._console_nodes: tuple[str, ...] | None = None
         self._console_notice = ""
+        self._telegram_lock = threading.RLock()
+        self._telegram_bot_key = ""
+        self._telegram_members: tuple[str, ...] = ()
+        self._telegram_candidate = ""
+        self._telegram_candidate_since = time.monotonic()
+        self._telegram_role = ""
+        self._telegram_acked = 0
+        self._telegram_election_summary: dict[str, Any] = {}
         self.orchestrator.discovery = self.discovery if self._autodiscovery_configured else None
+
+    def telegram_poll_decision(self, token: str, *, acknowledged_offset: int = 0) -> tuple[bool, int]:
+        """Vote for one Telegram getUpdates owner; Web stays active everywhere.
+
+        Signed UDP advertisements carry votes and *processed* offsets, never
+        the bot token. A 20-second settle period exceeds a previous long poll.
+        Two-node network partitions cannot guarantee consensus without a third
+        witness; Telegram 409 remains an external conflict detector.
+        """
+        bot_key = hmac.new(
+            self.identity.secret, b"telegram:" + token.encode("utf-8"), "sha256"
+        ).hexdigest()[:24]
+        now = time.monotonic()
+        node_id = self.identity.node_id
+        with self._telegram_lock:
+            if bot_key != self._telegram_bot_key:
+                self._telegram_bot_key = bot_key
+                self._telegram_members = ()
+                self._telegram_candidate = ""
+                self._telegram_candidate_since = now
+                self._telegram_role = ""
+                self._telegram_acked = 0
+            self._telegram_acked = max(self._telegram_acked, max(0, int(acknowledged_offset)))
+            discovery_enabled = (
+                self._autodiscovery_configured
+                and bool(self.discovery._thread and self.discovery._thread.is_alive())
+            )
+            remote = self.discovery.telegram_peer_votes(bot_key) if discovery_enabled else {}
+            for peer in remote.values():
+                self._telegram_acked = max(self._telegram_acked, int(peer.get("ack") or 0))
+            members = tuple(sorted((node_id, *remote.keys())))
+            candidate = members[0]
+            if members != self._telegram_members or candidate != self._telegram_candidate:
+                self._telegram_members = members
+                self._telegram_candidate = candidate
+                self._telegram_candidate_since = now
+            self.discovery.set_telegram_vote(bot_key, candidate, self._telegram_acked)
+            votes = 1 + sum(peer.get("vote") == candidate for peer in remote.values())
+            quorum = len(members) // 2 + 1
+            agreed = votes >= quorum
+            # A newly elected poller must wait for the previous long poll
+            # to finish. The old owner yields on its next iteration.
+            settled = now - self._telegram_candidate_since >= 20.0
+            can_poll = (
+                not discovery_enabled
+                or (candidate == node_id and agreed and settled)
+            )
+            role = (
+                "standalone" if not discovery_enabled else
+                "leader" if can_poll else
+                "candidate" if candidate == node_id else "standby"
+            )
+            if role != self._telegram_role:
+                self._telegram_role = role
+                event(
+                    "telegram_cluster_role_changed", role=role,
+                    leader_node_id=candidate, voters=votes,
+                    members=len(members), quorum=quorum,
+                )
+                print(
+                    f"[Леший {VERSION}] Telegram: {role} | "
+                    f"избранный узел {candidate[:12]} | голосов {votes}/{len(members)}",
+                    flush=True,
+                )
+            self._telegram_election_summary = {
+                "role": role, "leader_node_id": candidate,
+                "participants": len(members), "votes": votes,
+                "quorum": quorum, "settled": settled,
+            }
+            return can_poll, self._telegram_acked
+
+    def telegram_election_status(self) -> dict[str, Any]:
+        with self._telegram_lock:
+            return dict(self._telegram_election_summary)
 
     def _models(self) -> tuple[str, ...]:
         values: list[str] = []
@@ -658,6 +782,7 @@ class DistributedClusterRuntime:
             "monetization": False,
             "proof_of_work": False,
             "purpose": "полезные вычисления Лешего",
+            "telegram_election": self.telegram_election_status(),
         })
         return value
 
