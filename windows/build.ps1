@@ -26,7 +26,8 @@ $liveExe = Join-Path $liveRoot 'Leshy.exe'
 $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 
 # Diagnostic output is a single rotating file beside existing build logs.
-$script:profileFile = Join-Path $brainRoot 'logs\build-performance-latest.log'
+$script:profileFile = Join-Path $autoRoot 'logs\build-performance-latest.log'
+$script:profileMirrorFile = Join-Path $brainRoot 'logs\build-performance-latest.log'
 $script:profileStageFile = Join-Path $autoRoot 'profile-stage.tmp'
 $script:profileJob = $null
 $script:profileActive = $false
@@ -55,9 +56,12 @@ function Build-Stage([string]$Name) {
   }
 }
 try {
+  New-Item -Path (Join-Path $autoRoot 'logs') -ItemType Directory -Force -ErrorAction Stop | Out-Null
   New-Item -Path (Join-Path $brainRoot 'logs') -ItemType Directory -Force -ErrorAction Stop | Out-Null
   # Always truncate at the start of the next run, including failed previous builds.
   Set-Content -LiteralPath $script:profileFile -Value "LESHY BUILD PROFILE started=$((Get-Date).ToString('o')) version=$version machine=$env:COMPUTERNAME" -Encoding UTF8 -ErrorAction Stop
+  # Reset user-facing copy at the start; populate it from the complete local log at the end.
+  Copy-Item -LiteralPath $script:profileFile -Destination $script:profileMirrorFile -Force -ErrorAction Stop
   $script:profileActive = $true
   try {
     $hw = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
@@ -411,5 +415,12 @@ $script:buildOK = $true
       Remove-Job -Job $script:profileJob -Force -ErrorAction SilentlyContinue
     }
     Remove-Item -LiteralPath $script:profileStageFile -Force -ErrorAction SilentlyContinue
+    # Publish the full profile after background sampling stops. Live data can be
+    # rotated/cleared by the application while a build is running.
+    if ($script:profileActive) {
+      try {
+        Copy-Item -LiteralPath $script:profileFile -Destination $script:profileMirrorFile -Force -ErrorAction Stop
+      } catch { Write-Warning "Could not publish full build profile into LeshyBrain logs: $($_.Exception.Message)" }
+    }
   } catch { }
 }
