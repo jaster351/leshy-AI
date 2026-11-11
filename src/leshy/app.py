@@ -267,7 +267,7 @@ class LeshyApp:
                 self.knowledge,
                 self.self_learning.repository_sync.directory() / "updates",
                 message,
-                enabled=self.learning.is_enabled(),
+                enabled=self.learning.is_enabled,
                 limit=4,
             )
         except Exception as exc:
