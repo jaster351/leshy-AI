@@ -1,12 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T21:04:30Z",
+  "updated_at": "2026-11-11T22:03:38Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-11T21:04:30Z",
-    "previous_issue_at": "2026-11-11T20:05:11Z",
+    "searched_at": "2026-11-11T22:03:38Z",
+    "previous_issue_at": "2026-11-11T21:04:30Z",
     "discovery_lookback_days": 30,
-    "newly_included_ids": [],
-    "note": "Свежий список cs.AI от 11 ноября и целевой поиск проверены; после прошлого выпуска значимых новых работ или существенных редакций не подтверждено. Уже рассмотренные идентификаторы не повторены."
+    "newly_included_ids": [
+      "doi:10.18653/2026.emnlp-main.2359"
+    ],
+    "note": "Впервые проверена релевантная публикация EMNLP 2026 о последовательном black-box poisoning Agentic RAG. Препринт впервые опубликован 1 июля, v2 — 28 августа; это дополнение покрытия, а не новая работа последнего часа."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -158,6 +160,27 @@
       "dataset_url": "https://github.com/ZJU-LLM-Safety/TreeAgent/tree/7adab60e8930a0b574602d74857ffbc77f531ccf/data",
       "inclusion_reason": "first_time_coverage_of_relevant_new_submission",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "doi:10.18653/2026.emnlp-main.2359",
+      "aliases": [
+        "arXiv:2607.00422"
+      ],
+      "version": null,
+      "source_edition": "EMNLP 2026 publisher PDF; arXiv latest verified version v2",
+      "first_published_at": "2026-07-01T04:32:17Z",
+      "publisher_publication_date": "2026-10",
+      "version_published_at": null,
+      "latest_preprint_version": "v2",
+      "latest_preprint_revision_at": "2026-08-28T04:35:25Z",
+      "checked_at": "2026-11-11T22:03:38Z",
+      "publication_status": "peer_reviewed_conference_proceedings",
+      "url": "https://aclanthology.org/2026.emnlp-main.2359/",
+      "package": "knowledge/updates/2026-11-12/0300-kidnaprag-agentic-rag-poisoning.jsonl",
+      "record_id": "kidnaprag-sequential-agentic-rag-poisoning",
+      "code_url": "https://github.com/chanwoochoi316/KidnapRAG",
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
+      "new_since_previous_issue": false
     }
   ],
   "issues": [
@@ -240,23 +263,38 @@
       "discovery_lookback_days": 30,
       "newly_included_ids": [],
       "note": "Свежий список cs.AI от 11 ноября и целевой поиск проверены; после прошлого выпуска значимых новых работ или существенных редакций не подтверждено. Уже рассмотренные идентификаторы не повторены."
+    },
+    {
+      "searched_at": "2026-11-11T22:03:38Z",
+      "previous_issue_at": "2026-11-11T21:04:30Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "doi:10.18653/2026.emnlp-main.2359"
+      ],
+      "note": "Впервые проверена релевантная публикация EMNLP 2026 о последовательном black-box poisoning Agentic RAG. Препринт впервые опубликован 1 июля, v2 — 28 августа; это дополнение покрытия, а не новая работа последнего часа."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-11T21:04:30Z",
-    "incremental_since": "2026-11-11T20:05:11Z",
+    "completed_at": "2026-11-11T22:03:38Z",
+    "incremental_since": "2026-11-11T21:04:30Z",
     "additional_lookback_start": "2026-10-13",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
-    "first_time_coverage_ids": [],
+    "first_time_coverage_ids": [
+      "doi:10.18653/2026.emnlp-main.2359"
+    ],
     "query_topics": [
       "LLM-agent memory provenance poisoning RAG updates November 12 2026",
+      "agentic RAG sequential poisoning black-box",
       "new and replaced cs.AI/cs.IR submissions"
     ],
     "opened_primary_urls": [
       "https://arxiv.org/list/cs.AI/new",
-      "https://arxiv.org/list/cs.IR/new"
+      "https://arxiv.org/list/cs.IR/new",
+      "https://aclanthology.org/2026.emnlp-main.2359/",
+      "https://aclanthology.org/2026.emnlp-main.2359.pdf",
+      "https://arxiv.org/abs/2607.00422"
     ],
-    "note": "Поиск не дал нового материала, удовлетворяющего критериям; старые работы не повторены."
+    "note": "Новых работ после прошлого выпуска не подтверждено; KidnapRAG включён как впервые покрытая релевантная публикация из 30-дневного окна материалов сборника."
   },
   "pending_primary_reviews": [
     {
