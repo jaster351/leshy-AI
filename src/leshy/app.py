@@ -63,7 +63,10 @@ class LeshyApp:
         self.model_downloader = ModelDownloader(self.model_path)
         self.accelerator_runtime = LlamaCppRuntimeManager(self.settings.brain_dir)
         self.llm = self._build_llm()
-        self.self_learning = SelfLearningWorker(self.storage, self.learning, self.research)
+        self.self_learning = SelfLearningWorker(
+            self.storage, self.learning, self.research,
+            repository_knowledge_dir=self.settings.install_root / "knowledge" / "updates",
+        )
         self.telegram = None
         event(
             "app_ready",

@@ -88,6 +88,9 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
 
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
+# Public knowledge is data beside the executable; private LeshyBrain is not copied.
+Copy-Item -LiteralPath (Join-Path $repoRoot 'knowledge') -Destination $packageRoot -Recurse -Force
+
 $packageExe = Join-Path $packageRoot 'Leshy.exe'
 if (-not (Test-Path -LiteralPath $packageExe)) { throw "PyInstaller did not create $packageExe" }
 

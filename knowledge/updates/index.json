@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-11T12:43:37Z",
+  "latest_package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+  "record_count": 25,
+  "records": {
+    "si-seven-base-units": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "foundations",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "si-speed-of-light": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "foundations",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "si-planck-constant": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "foundations",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "si-avogadro-constant": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "foundations",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "si-boltzmann-constant": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "foundations",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "si-elementary-charge": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "foundations",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "dna-canonical-bases": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "foundations",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "dna-complementary-pairing": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "foundations",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "sqlite-embedded-database": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "python-sqlite-placeholders": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "python-sqlite-thread-affinity": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "sqlite-wal-reader-writer": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "sqlite-wal-network-filesystem": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "sqlite-wal-checkpoint": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "sqlite-online-backup": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "rag-parametric-nonparametric": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "research",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "helm-validity-metadata": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "research",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "candidate"
+    },
+    "memory-rollback-recurrence": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "research",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "candidate"
+    },
+    "memorydojo-multisession-poisoning": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "research",
+      "data_class": "static",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "candidate"
+    },
+    "cve-2026-102895": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "security",
+      "data_class": "dynamic",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "cve-2026-116779": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "security",
+      "data_class": "dynamic",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "cve-2026-123158": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "security",
+      "data_class": "dynamic",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "cve-2026-123218": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "security",
+      "data_class": "dynamic",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "verified"
+    },
+    "cms-parton-wake-announcement-20261029": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "science",
+      "data_class": "dynamic",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "candidate"
+    },
+    "lisa-exoplanet-method-news-20261110": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
+      "category": "news",
+      "data_class": "dynamic",
+      "checked_at": "2026-11-11T12:43:37Z",
+      "review_status": "candidate"
+    }
+  },
+  "next_foundation_domains": [
+    "mathematics_and_logic",
+    "history",
+    "geography",
+    "languages",
+    "chemistry",
+    "engineering"
+  ],
+  "note": "Индекс публикаций, не подтверждение импорта или обучения весов локальной модели."
+}

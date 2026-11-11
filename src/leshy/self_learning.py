@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import threading
 import time
 
@@ -31,7 +32,7 @@ class SelfLearningWorker:
     ERROR_BACKOFF_SECONDS = 90.0
     STOP_JOIN_TIMEOUT_SECONDS = 5.0
 
-    def __init__(self, storage: Storage, learning_control, research_engine):
+    def __init__(self, storage: Storage, learning_control, research_engine, *, repository_knowledge_dir: Path | None = None):
         self.storage = storage
         self.learning_control = learning_control
         self.research = research_engine
@@ -48,6 +49,9 @@ class SelfLearningWorker:
         self._last_result: dict | None = None
         self._state = "stopped"
         self._next_autonomous_at = 0.0
+        self.repository_knowledge_dir = repository_knowledge_dir
+        self._next_repository_import_at = 0.0
+        self._repository_knowledge_status: dict = {"state": "not_scanned"}
 
     def start(self) -> None:
         # Явные пользовательские учебные задачи и подписки должны работать даже
@@ -125,6 +129,7 @@ class SelfLearningWorker:
             "human_learning": self.human_learning.status(),
             "material_learning_worker": self.material_learning.status(),
             "social_watch": self.social_watch.status(),
+            "repository_knowledge": dict(self._repository_knowledge_status),
         }
 
     def queue_topic(self, query: str, reason: str = "тема пользователя") -> int:
@@ -221,6 +226,10 @@ class SelfLearningWorker:
 
             try:
                 now = time.time()
+                if autonomous and self.repository_knowledge_dir is not None and now >= self._next_repository_import_at:
+                    from .repository_knowledge import import_directory
+                    self._repository_knowledge_status = import_directory(self.research.knowledge, self.repository_knowledge_dir)
+                    self._next_repository_import_at = now + (90.0 if self._repository_knowledge_status.get("errors") else 3600.0)
                 if autonomous and not self._has_queued():
                     if self._next_autonomous_at > now:
                         self._state = "waiting_rate_limit"

@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import copy
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+from leshy.knowledge import KnowledgeBase
+from leshy.repository_knowledge import import_directory
+from leshy.storage import Storage, utcnow
+
+
+class RepositoryKnowledgeTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.catalog = self.root / "catalog"
+        self.catalog.mkdir()
+        self.knowledge = KnowledgeBase(Storage(self.root / "brain.sqlite3"))
+        self.record = {
+            "schema_version": 1, "id": "example-fact", "version": 1,
+            "topic": "public fact", "claim": "A sourced public statement.",
+            "category": "foundations", "data_class": "static",
+            "checked_at": utcnow(), "ttl_seconds": None, "review_status": "verified",
+            "sources": [{"url": "https://docs.python.org/3/", "title": "Python docs", "source_family": "python"}],
+        }
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def write(self, *records, name="batch.jsonl"):
+        (self.catalog / name).write_text(
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in records), encoding="utf-8",
+        )
+
+    def rows(self):
+        with self.knowledge.storage.connection() as conn:
+            return [dict(row) for row in conn.execute("SELECT * FROM knowledge ORDER BY id")]
+
+    def test_verified_file_label_does_not_promote_and_repeat_is_idempotent(self):
+        self.write(self.record)
+        self.assertEqual(import_directory(self.knowledge, self.catalog)["imported"], 1)
+        self.assertEqual(import_directory(self.knowledge, self.catalog)["skipped"], 1)
+        self.assertEqual(len(self.rows()), 1)
+        self.assertEqual(self.rows()[0]["status"], "candidate")
+        with self.knowledge.storage.connection() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM research_tasks").fetchone()[0], 1)
+
+    def test_invalid_later_line_prevents_partial_file_import(self):
+        invalid = copy.deepcopy(self.record)
+        invalid["id"] = "invalid-fact"
+        invalid["sources"][0]["url"] = "https://127.0.0.1/private"
+        self.write(self.record, invalid)
+        result = import_directory(self.knowledge, self.catalog)
+        self.assertTrue(result["errors"])
+        self.assertEqual(self.rows(), [])
+
+    def test_revision_retires_old_fact_without_deleting_history(self):
+        self.write(self.record)
+        import_directory(self.knowledge, self.catalog)
+        corrected = {**self.record, "version": 2, "claim": "A corrected sourced statement."}
+        self.write(corrected)
+        import_directory(self.knowledge, self.catalog)
+        self.assertEqual([row["status"] for row in self.rows()], ["stale", "candidate"])
+        self.write(self.record)
+        self.assertEqual(import_directory(self.knowledge, self.catalog)["skipped"], 1)
+        self.assertEqual([row["status"] for row in self.rows()], ["stale", "candidate"])
+
+    def test_same_revision_with_changed_content_is_rejected(self):
+        self.write(self.record)
+        import_directory(self.knowledge, self.catalog)
+        self.write({**self.record, "claim": "Silently changed text."})
+        self.assertTrue(import_directory(self.knowledge, self.catalog)["errors"])
+        self.assertEqual(self.rows()[0]["claim"], self.record["claim"])
+
+    def test_retraction_only_affects_records_owned_by_this_importer(self):
+        self.knowledge.add_candidate(topic=self.record["topic"], claim=self.record["claim"],
+                                     source_url=self.record["sources"][0]["url"])
+        self.write(self.record)
+        import_directory(self.knowledge, self.catalog)
+        self.write({**self.record, "version": 2, "review_status": "retracted"})
+        import_directory(self.knowledge, self.catalog)
+        self.assertEqual(self.rows()[0]["status"], "candidate")
+
+    def test_retracted_owned_record_can_return_as_a_new_candidate_revision(self):
+        self.write(self.record)
+        import_directory(self.knowledge, self.catalog)
+        self.write({**self.record, "version": 2, "review_status": "retracted"})
+        import_directory(self.knowledge, self.catalog)
+        self.assertEqual(self.rows()[0]["status"], "rejected")
+        self.write({**self.record, "version": 3})
+        import_directory(self.knowledge, self.catalog)
+        self.assertEqual(self.rows()[0]["status"], "candidate")
+
+    def test_expired_dynamic_data_is_not_refreshed_by_import(self):
+        old = {**self.record, "data_class": "dynamic", "checked_at": "2020-01-01T00:00:00Z", "ttl_seconds": 60}
+        self.write(old)
+        import_directory(self.knowledge, self.catalog)
+        self.assertEqual(self.rows()[0]["checked_at"], old["checked_at"])
+        self.assertEqual(self.knowledge.search_candidates("public fact"), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
