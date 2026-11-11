@@ -165,12 +165,20 @@ def _focused_rss_query(query: str) -> str:
         stamp = datetime.now().astimezone().strftime("%Y-%m-%d")
         if _is_tech_news_query(query):
             return f"IT технологии новости {stamp}"
-        topic = _topic_words(query)
-        if any(any(ch.isalpha() for ch in word) for word in topic):
-            return " ".join(topic[:8]) + " новости"
-        # General news without a named subject; keep a fresh date, not the
-        # whole conversational sentence that frequently confuses RSS search.
-        return f"главные новости {stamp}" if not topic else query
+        # Temporal grounding may have appended an ISO date and a month:
+        # "какие новости? 2026-11-12 12 ноября 2026" is still general news.
+        months = frozenset((
+            "января", "февраля", "марта", "апреля", "мая", "июня",
+            "июля", "августа", "сентября", "октября", "ноября", "декабря",
+        ))
+        topic = [
+            word for word in _topic_words(query)
+            if word not in months
+            and not word.isdecimal()
+            and not word.startswith(("новост", "latest", "today"))
+            and word not in {"главные", "главная", "главное", "мир", "мире", "мировые", "события", "нового"}
+        ]
+        return (" ".join(topic[:5]) + f" новости {stamp}") if topic else f"главные новости {stamp}"
     all_words = _search_words(query)
     topic = _topic_words(query)
     if not (topic and len(topic) <= 8 and len(all_words) - len(topic) >= 2):
