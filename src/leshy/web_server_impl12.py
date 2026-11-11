@@ -3,12 +3,15 @@ from __future__ import annotations
 """Кластерная репликация знаний поверх существующей LAN HMAC-аутентификации."""
 
 from http import HTTPStatus
+import ipaddress
+import os
 from urllib import parse
 
 from . import web_server_impl11 as previous
 from .cluster_knowledge_sync import KnowledgeSyncService
 from .diagnostics import problem
 from .swarm_membership import SwarmMembership
+from .swarm_consent_store import SwarmConsentStore
 from .search_parallel import search_provider_status
 from .search_chromium import chromium_search_status
 
@@ -44,6 +47,8 @@ def make_handler(app, telegram, settings, model_catalog):
         app.stop_background = stop_with_swarm
         swarm.start()
 
+    consent_store = SwarmConsentStore(app.storage)
+
     class Handler(Parent):
         def do_GET(self):
             if parse.urlsplit(self.path).path == "/v1/search/providers":
@@ -52,10 +57,14 @@ def make_handler(app, telegram, settings, model_catalog):
                 return self._json(HTTPStatus.OK, {
                     **search_provider_status(), "chromium": chromium_search_status(),
                 })
+            if parse.urlsplit(self.path).path == "/v1/swarm/resource-consent":
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                return self._json(HTTPStatus.OK, consent_store.status())
             if parse.urlsplit(self.path).path == "/v1/swarm/status":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
-                return self._json(HTTPStatus.OK, swarm.status())
+                return self._json(HTTPStatus.OK, {**swarm.status(), "resource_consent": consent_store.status()})
             if parse.urlsplit(self.path).path == "/v1/cluster/knowledge-sync/status":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
@@ -63,6 +72,36 @@ def make_handler(app, telegram, settings, model_catalog):
             return super().do_GET()
 
         def do_POST(self):
+            if parse.urlsplit(self.path).path == "/v1/swarm/resource-consent":
+                # Remote clients and installations without a configured API token
+                # cannot grant potentially costly resource permissions.
+                try:
+                    loopback = ipaddress.ip_address(self.client_address[0]).is_loopback
+                except (AttributeError, ValueError, IndexError, TypeError):
+                    loopback = False
+                token = os.getenv("LESHY_API_TOKEN", "").strip()
+                valid_token = bool(token) and self.headers.get("Authorization", "") == f"Bearer {token}"
+                if not (loopback and valid_token):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Разрешение на ресурсы доступно только локально с API token",
+                    })
+                if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется application/json"})
+                try:
+                    body = self._body()
+                    if body.get("action") == "revoke":
+                        return self._json(HTTPStatus.OK, consent_store.revoke())
+                    if body.get("action") != "grant":
+                        raise ValueError("action должен быть grant или revoke")
+                    return self._json(HTTPStatus.OK, consent_store.grant(
+                        confirmation=body.get("confirmation", ""),
+                        agreement_revision=body.get("agreement_revision", ""),
+                        scopes=body.get("scopes", []),
+                        limits=body.get("limits", {}),
+                        duration_seconds=body.get("duration_seconds", 0),
+                    ))
+                except (ValueError, AttributeError, TypeError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             if parse.urlsplit(self.path).path == "/v1/swarm/settings":
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
