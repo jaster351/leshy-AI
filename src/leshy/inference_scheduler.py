@@ -10,6 +10,8 @@ from typing import Iterator
 from .diagnostics import event
 
 
+_SCHEDULER_INIT_LOCK = threading.RLock()
+
 PRIORITY_WEB = 100
 PRIORITY_TELEGRAM = 70
 PRIORITY_SYSTEM = 60
@@ -24,6 +26,7 @@ class _Waiter:
     source: str
     queued_at: float
     granted: bool = False
+    granted_at: float | None = None
 
 
 class InferenceScheduler:
@@ -88,18 +91,25 @@ class InferenceScheduler:
                 queue_depth=len(self._waiters),
                 active_source=self._active.source if self._active else "",
             )
+            # Только наблюдаемость: активный backend не вытесняется.
+            if self._active is not None and self._active.priority < waiter.priority:
+                event(
+                    "inference_priority_inversion",
+                    waiting_source=waiter.source,
+                    waiting_priority=waiter.priority,
+                    active_source=self._active.source,
+                    active_priority=self._active.priority,
+                    active_held_ms=int((time.monotonic() - (self._active.granted_at if self._active.granted_at is not None else self._active.queued_at)) * 1000),
+                )
             while True:
                 if cancel_event is not None and cancel_event.is_set():
                     self._waiters = [item for item in self._waiters if item is not waiter]
                     self._condition.notify_all()
                     raise InterruptedError("LLM-запрос отменён до запуска")
-                if deadline is not None and time.monotonic() >= deadline:
-                    self._waiters = [item for item in self._waiters if item is not waiter]
-                    self._condition.notify_all()
-                    raise TimeoutError("Ожидание локальной LLM превысило допустимое время")
                 if self._active is None and self._next_waiter() is waiter:
                     self._waiters.remove(waiter)
                     waiter.granted = True
+                    waiter.granted_at = time.monotonic()
                     self._active = waiter
                     event(
                         "inference_queue_granted",
@@ -109,6 +119,12 @@ class InferenceScheduler:
                         queue_depth=len(self._waiters),
                     )
                     return waiter
+                # Нулевой timeout допускает немедленный захват свободного слота.
+                # Истечение срока проверяется лишь если захват невозможен.
+                if deadline is not None and time.monotonic() >= deadline:
+                    self._waiters = [item for item in self._waiters if item is not waiter]
+                    self._condition.notify_all()
+                    raise TimeoutError("Ожидание локальной LLM превысило допустимое время")
                 wait_for = 0.1
                 if deadline is not None:
                     wait_for = max(0.01, min(wait_for, deadline - time.monotonic()))
@@ -117,13 +133,15 @@ class InferenceScheduler:
     def release(self, waiter: _Waiter) -> None:
         with self._condition:
             if self._active is waiter:
-                held_ms = int((time.monotonic() - waiter.queued_at) * 1000)
+                now = time.monotonic()
+                held_ms = int((now - (waiter.granted_at if waiter.granted_at is not None else waiter.queued_at)) * 1000)
                 self._active = None
                 event(
                     "inference_queue_released",
                     source=waiter.source,
                     priority=waiter.priority,
-                    total_ms=held_ms,
+                    total_ms=int((now - waiter.queued_at) * 1000),
+                    held_ms=held_ms,
                     queue_depth=len(self._waiters),
                 )
             self._condition.notify_all()
@@ -155,6 +173,7 @@ class InferenceScheduler:
                 "active": None if self._active is None else {
                     "source": self._active.source,
                     "priority": self._active.priority,
+                    "held_ms": int((time.monotonic() - (self._active.granted_at if self._active.granted_at is not None else self._active.queued_at)) * 1000),
                 },
                 "waiting": [
                     {
@@ -172,11 +191,10 @@ def get_inference_scheduler(app) -> InferenceScheduler:
     current = getattr(app, "inference_scheduler", None)
     if isinstance(current, InferenceScheduler):
         return current
-    lock = getattr(app, "_inference_scheduler_init_lock", None)
-    if lock is None:
-        lock = threading.RLock()
-        setattr(app, "_inference_scheduler_init_lock", lock)
-    with lock:
+    # Глобальная блокировка нужна именно при первом вызове: создание
+    # app._inference_scheduler_init_lock без синхронизации допускает гонку,
+    # при которой два потока создают разные scheduler для одного app.
+    with _SCHEDULER_INIT_LOCK:
         current = getattr(app, "inference_scheduler", None)
         if isinstance(current, InferenceScheduler):
             return current
