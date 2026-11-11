@@ -63,6 +63,26 @@ class InferenceTimeoutRecoveryTests(unittest.TestCase):
         self.assertEqual(scheduler.status()["queue_depth"], 0)
         self.assertIsNone(scheduler.status()["active"])
 
+    def test_pre_cancelled_waiter_never_steals_active_slot(self):
+        scheduler = InferenceScheduler()
+        active = scheduler.acquire(source="background-active", priority=PRIORITY_BACKGROUND)
+        cancelled = threading.Event()
+        cancelled.set()
+        try:
+            with self.assertRaises(InterruptedError):
+                scheduler.acquire(
+                    source="web-already-cancelled",
+                    priority=PRIORITY_WEB,
+                    cancel_event=cancelled,
+                    timeout=0.5,
+                )
+            state = scheduler.status()
+            self.assertEqual(state["active"]["source"], "background-active")
+            self.assertEqual(state["queue_depth"], 0)
+        finally:
+            scheduler.release(active)
+        self.assertIsNone(scheduler.status()["active"])
+
     def test_stale_release_cannot_unlock_another_active_owner(self):
         scheduler = InferenceScheduler()
         first = scheduler.acquire(source="first", priority=PRIORITY_BACKGROUND)
