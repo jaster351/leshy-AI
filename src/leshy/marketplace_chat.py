@@ -9,13 +9,14 @@ def install_marketplace_chat_bridge() -> None:
     if getattr(original, "_leshy_marketplace_bridge", False):
         return
 
-    def wrapped(self, message, owner_id, rows, *, search_plan=None):
+    def wrapped(self, message, owner_id, rows, *, search_plan=None, lookup_query=None):
         messages, sources, search_attempted = original(
             self,
             message,
             owner_id,
             rows,
             search_plan=search_plan,
+            lookup_query=lookup_query,
         )
         marketplace = getattr(self.app, "marketplace", None)
         if marketplace is None:
