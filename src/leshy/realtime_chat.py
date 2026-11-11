@@ -13,7 +13,7 @@ from .llm import ChatMessage
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
-from .verified_clock import current_clock_context
+from .verified_clock import current_clock_context, grounded_countdown_answer
 from .source_reading import read_supplied_source, supplied_public_url
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
 
@@ -521,6 +521,13 @@ class RealtimeChatManager:
 
             answer = "".join(answer_parts).strip()
             stopped = cancel.is_set()
+            if not stopped and search_attempted and sources:
+                # For an explicit countdown, calculate days from source dates
+                # and the OS clock rather than trusting model arithmetic.
+                grounded = grounded_countdown_answer(message, sources)
+                if grounded is not None:
+                    answer = grounded
+                    event("chat_countdown_grounded", request_id=rid, source_count=len(sources))
             if not stopped and search_attempted and not (is_casual_checkin(message) or is_local_dialogue_request(message)) and self.app._answer_needs_research(answer):
                 event("chat_stream_web_refusal_detected", request_id=rid, source_count=len(sources))
                 if sources:
