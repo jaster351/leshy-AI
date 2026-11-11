@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-11T13:11:53Z",
+  "last_successful_issue": {
+    "searched_at": "2026-11-11T13:11:53Z",
+    "discovery_lookback_days": 30,
+    "note": "Поиск после предыдущего выпуска; дополнительно проверены ранее не включённые работы за 30 дней. Дата обнаружения не означает дату публикации или доказанную задержку индексации.",
+    "newly_included_ids": [
+      "arXiv:2611.14320",
+      "arXiv:2611.14326"
+    ],
+    "prior_run_started_at": "2026-11-11T12:11:06.900423+00:00",
+    "previous_issue_cutoff_known": false
+  },
+  "previous_issue_from_owner": {
+    "date": "2026-11-11",
+    "search_period": "2026-10-12/2026-11-11",
+    "note": "Библиографические идентификаторы из истории владельца; в этом файле не утверждается их повторная проверка.",
+    "reviewed": [
+      {
+        "id": "arXiv:2608.10502",
+        "version": "v2"
+      },
+      {
+        "id": "arXiv:2610.28987",
+        "version": null
+      },
+      {
+        "id": "arXiv:2611.09721",
+        "version": "v1"
+      },
+      {
+        "id": "arXiv:2610.21731",
+        "version": null
+      },
+      {
+        "id": "doi:10.18653/2026.emnlp-main.721"
+      },
+      {
+        "id": "doi:10.18653/2026.aacl-long.88"
+      },
+      {
+        "id": "doi:10.18653/2026.groundlm-1.54"
+      },
+      {
+        "id": "doi:10.18653/2026.emnlp-main.1194"
+      },
+      {
+        "id": "doi:10.18653/2026.realm-1.46"
+      }
+    ]
+  },
+  "reviewed": [
+    {
+      "id": "arXiv:2611.14320",
+      "version": "v1",
+      "first_published_at": "2026-11-10T16:46:59Z",
+      "version_published_at": "2026-11-10T16:46:59Z",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "publication_status": "preprint_under_review",
+      "url": "https://arxiv.org/abs/2611.14320",
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "record_id": "wikitrace-source-linked-memory-v1",
+      "code_url": "https://github.com/yukyeongleee/wikitrace"
+    },
+    {
+      "id": "arXiv:2611.14326",
+      "version": "v1",
+      "first_published_at": "2026-11-10T16:52:25Z",
+      "version_published_at": "2026-11-10T16:52:25Z",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "publication_status": "preprint",
+      "url": "https://arxiv.org/abs/2611.14326",
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "record_id": "fgse-falsification-gate-v1",
+      "code_url": null
+    }
+  ]
+}

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T12:43:37Z",
-  "latest_package": "knowledge/updates/2026-11-11/general-foundations-and-current-events.jsonl",
-  "record_count": 25,
+  "updated_at": "2026-11-11T13:11:53Z",
+  "latest_package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+  "record_count": 45,
   "records": {
     "si-seven-base-units": {
       "version": 1,
@@ -203,15 +203,213 @@
       "data_class": "dynamic",
       "checked_at": "2026-11-11T12:43:37Z",
       "review_status": "candidate"
+    },
+    "probability-conditional-definition": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "mathematics",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "probability-general-multiplication-rule": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "mathematics",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "probability-general-addition-rule": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "mathematics",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "probability-independent-versus-disjoint": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "mathematics",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "geography-latitude-range": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "geography",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "geography-longitude-meridians": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "geography",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "geography-earth-oblate-shape": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "geography",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "geography-geoid-reference-surface": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "geography",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "geography-date-line-versus-antimeridian": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "geography",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "history-us-declaration-1776": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "history",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "history-us-constitution-signing-1787": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "history",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "history-us-bill-of-rights-first-ten": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "history",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "history-gutenberg-bible-regional-scope": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "history",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "linguistics-phoneme-contrast": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "language",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "unicode-utf8-variable-width-ascii": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "unicode-nfc-nfd-normalization": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "unicode-nfkc-compatibility-loss": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "technology",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "security-least-privilege-definition": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "security",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "verified"
+    },
+    "wikitrace-source-linked-memory-v1": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "research",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "candidate"
+    },
+    "fgse-falsification-gate-v1": {
+      "version": 1,
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "category": "research",
+      "data_class": "static",
+      "checked_at": "2026-11-11T13:11:53Z",
+      "review_status": "candidate"
     }
   },
   "next_foundation_domains": [
-    "mathematics_and_logic",
-    "history",
-    "geography",
-    "languages",
     "chemistry",
-    "engineering"
+    "engineering",
+    "world_history",
+    "languages",
+    "biology",
+    "physics_and_astronomy"
   ],
-  "note": "Индекс публикаций, не подтверждение импорта или обучения весов локальной модели."
+  "note": "Индекс публикаций, не подтверждение импорта или обучения весов локальной модели.",
+  "category_counts": {
+    "foundations": 8,
+    "technology": 10,
+    "research": 6,
+    "security": 5,
+    "science": 1,
+    "news": 1,
+    "mathematics": 4,
+    "geography": 5,
+    "history": 4,
+    "language": 1
+  },
+  "coverage_expansions": [
+    {
+      "checked_at": "2026-11-11T13:11:53Z",
+      "package": "knowledge/updates/2026-11-11/1300-foundations-and-memory-research.jsonl",
+      "record_count": 20,
+      "categories": [
+        "mathematics",
+        "geography",
+        "history",
+        "language",
+        "technology",
+        "security",
+        "research"
+      ],
+      "domains": [
+        "probability",
+        "physical_geography",
+        "documentary_history",
+        "printing_history",
+        "phonology",
+        "text_encoding",
+        "security_engineering",
+        "agent_memory_research"
+      ]
+    }
+  ]
 }
