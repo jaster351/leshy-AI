@@ -984,7 +984,7 @@ class NetworkBlockingChecker:
             observations = [item for item in result.remote if item.port == port]
             if not observations:
                 lines.append(
-                    f"Check-Host TCP/{port} ({ {22: 'SSH', 80: 'HTTP', 443: 'HTTPS', 3389: 'RDP'}[port] }): "
+                    f"Check-Host TCP/{port} ({ {22: 'SSH', 80: 'HTTP', 443: 'HTTPS', 3389: 'RDP'}[port]}): "
                     "нет результатов по российским и зарубежным узлам"
                 )
                 continue
