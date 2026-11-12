@@ -117,6 +117,13 @@ if (-not $StageOnly) {
   } catch { }
 }
 
+# Validate syntax and imports before expensive pip upgrades or PyInstaller.
+Build-Stage 'local-module-preflight'
+python windows/check-frozen-bundle.py source
+if ($LASTEXITCODE -ne 0) {
+  throw "Python source syntax/import preflight failed. PyInstaller was not started."
+}
+
 Build-Stage 'pip-dependencies'
 python -m pip install --upgrade pip
 python -m pip install -e "."
@@ -133,12 +140,6 @@ python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://
 Build-Stage 'workspace-preparation'
 Remove-Item -Recurse -Force $packageDist, $packageWork, $smokePackageRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
-
-Build-Stage 'local-module-preflight'
-python windows/check-frozen-bundle.py source
-if ($LASTEXITCODE -ne 0) {
-  throw "Required source modules are missing or shadowed on this machine. See BUILD PREFLIGHT FAILED above; PyInstaller was not started."
-}
 
 Build-Stage 'pyinstaller'
 python -m PyInstaller --noconfirm --clean --onedir --console `
