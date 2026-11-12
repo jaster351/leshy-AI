@@ -185,7 +185,7 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCOD
 # copying gigabytes into the smoke test directory.
 Build-Stage 'frozen-manifest-preflight'
 $pyzManifest = Join-Path $packageWork 'Leshy\PYZ-00.toc'
-python windows/check-frozen-bundle.py archive $pyzManifest
+python windows/check-frozen-bundle.py archive $pyzManifest $packageRoot
 if ($LASTEXITCODE -ne 0) {
   throw "Frozen package lacks required modules. See PYINSTALLER MANIFEST errors above."
 }
