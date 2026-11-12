@@ -74,8 +74,9 @@ class OsFingerprintTests(unittest.TestCase):
             calls.append("local")
             return local
 
-        def collect(_target, _ports, **_kwargs):
+        def collect(_target, _ports, **kwargs):
             calls.append("fingerprint")
+            self.assertTrue(kwargs["include_web"])
             return fingerprint
 
         def remote(_target):
@@ -92,11 +93,50 @@ class OsFingerprintTests(unittest.TestCase):
             patch.object(checker, "_cheburcheck", return_value=CheburcheckEvidence(ok=False)),
             patch.object(checker, "_chebur_probe", return_value=CheburProbeSummary(ok=False)),
         ):
-            result = checker.check("1.1.1.1")
+            result = checker.check("1.1.1.1", include_web=True)
         self.assertEqual(result.os_fingerprint["confidence"], "отсутствует")
         self.assertIn(443, [item.port for item in result.local])
         self.assertIn("TCP/443", checker.format(result))
         self.assertEqual(len(result.tool_receipts), 3)
+
+
+    def test_server_probe_skips_http_ports_by_default(self):
+        from leshy.network_service_fingerprint import collect_service_fingerprint
+
+        requests = []
+
+        def fake_probe(_target, port, _timeout):
+            requests.append(port)
+            return row(port, "refused")
+
+        with (
+            patch("leshy.network_service_fingerprint._public_dns", return_value=True),
+            patch("leshy.network_service_fingerprint._probe_port", side_effect=fake_probe),
+        ):
+            report = collect_service_fingerprint(
+                "1.1.1.1", [row(22, "refused"), row(3389, "refused")]
+            )
+        self.assertEqual(requests, [445])
+        self.assertEqual([r["port"] for r in report["ports"]], [22, 445, 3389])
+
+    def test_explicit_web_probe_checks_http_and_https(self):
+        from leshy.network_service_fingerprint import collect_service_fingerprint
+
+        requests = []
+
+        def fake_probe(_target, port, _timeout):
+            requests.append(port)
+            return row(port, "refused")
+
+        with (
+            patch("leshy.network_service_fingerprint._public_dns", return_value=True),
+            patch("leshy.network_service_fingerprint._probe_port", side_effect=fake_probe),
+        ):
+            collect_service_fingerprint(
+                "1.1.1.1", [row(22, "refused"), row(3389, "refused")],
+                include_web=True,
+            )
+        self.assertEqual(set(requests), {80, 443, 445})
 
 
 if __name__ == "__main__":
