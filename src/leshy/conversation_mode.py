@@ -149,18 +149,26 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
     if not previous:
         return ConversationMode("personal", "default")
     latest = previous[0]
-    if any(marker in latest for marker in _PERSONAL):
+    if any(marker in latest for marker in _PERSONAL) and not _is_work_content(latest):
         return ConversationMode("personal", "prior_personal")
-    if _edit(text) and _starts_support(latest):
-        return ConversationMode("support_draft", "ticket_revision")
-    if _edit(text) and len(previous) >= 2 and _starts_support(previous[1]) and (
-        _edit(latest) or _starts_support(latest)
-    ):
-        return ConversationMode("support_draft", "ticket_revision")
-    if any(cue in text for cue in _CONTINUATION) and (
-        _is_work_content(latest) or any(cue in latest for cue in _WORK_EXPLICIT)
-    ):
-        return ConversationMode("work", "technical_followup")
+
+    # A few consecutive style-edit requests still belong to the same ticket.
+    # One unrelated message breaks the sequence; never revive an old ticket.
+    if _edit(text):
+        for old in previous:
+            if _starts_support(old):
+                return ConversationMode("support_draft", "ticket_revision")
+            if not _edit(old):
+                break
+
+    # Short status/continuation messages can follow several technical turns.
+    # A casual topic change stops inheriting that context.
+    if any(cue in text for cue in _CONTINUATION):
+        for old in previous:
+            if _is_work_content(old):
+                return ConversationMode("work", "technical_followup")
+            if not any(cue in old for cue in _CONTINUATION):
+                break
     return ConversationMode("personal", "default")
 
 
