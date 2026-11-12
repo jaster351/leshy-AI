@@ -148,6 +148,17 @@ def main() -> None:
     os.environ["LESHY_HOST"] = args.host
     os.environ["LESHY_PORT"] = str(args.port)
 
+    # Owner's previously downloaded encrypted bundle is picked up automatically.
+    # The private key never ships in Git/EXE and is stored using Windows DPAPI.
+    # Smoke builds must never import local secrets into their disposable package.
+    if os.getenv("LESHY_SUPPORT_BOOTSTRAP", "1").strip().lower() not in {"0", "false", "off"}:
+        try:
+            from leshy.private_support_bootstrap import bootstrap_private_support
+            if bootstrap_private_support(install_root, brain_root):
+                print("Private support reference: ready (local encrypted profile).")
+        except Exception as exc:
+            print("Private support reference unavailable: " + type(exc).__name__, file=sys.stderr)
+
     _cleanup_stale_llama_servers(brain_root)
     _start_llama_watchdog(brain_root)
 
