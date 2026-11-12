@@ -171,6 +171,13 @@ class GitHubRepositoryEvidence:
             self._cache_at = time.monotonic()
             return snapshot, False
 
+    def status(self) -> dict[str, Any]:
+        """Дешёвая проверка последнего успешного снимка без сетевого обращения."""
+        with self._lock:
+            fresh = self._cache is not None and time.monotonic() - self._cache_at < self.ttl_seconds
+            return {"recent_verified": fresh,
+                    "checked_at": str(self._cache.get("checked_at") or "") if fresh and self._cache else ""}
+
     def answer(self, message: str) -> dict[str, Any] | None:
         if not is_leshy_repository_audit_request(message):
             return None
@@ -180,9 +187,11 @@ class GitHubRepositoryEvidence:
         ]
         try:
             snapshot, cached = self._snapshot()
-        except GitHubEvidenceUnavailable as exc:
+        except Exception as exc:
+            # Ошибки транспорта, неожиданные схемы и ошибки адаптера не должны
+            # приводить к ответу модели без фактических данных.
             receipt = self.receipts.record("github.repository_audit", "error",
-                                           {"repo": REPO, "error_type": str(exc)[:80]})
+                                           {"repo": REPO, "error_type": type(exc).__name__})
             return {
                 "answer": "Не удалось получить полные данные из GitHub API. "
                           "Сейчас я не могу подтвердить количество вопросов, "
