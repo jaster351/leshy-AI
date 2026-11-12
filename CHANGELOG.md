@@ -1,3 +1,9 @@
+## 12.11.2026 — исправление синтаксиса тестов Telegram Vision и ранней проверки сборки
+
+- После устранения ошибки в сети быстрый preflight обнаружил следующую причину остановки: в `tests/test_telegram_vision.py` русские тексты JSON были записаны как не-ASCII байтовые литералы `b'...'` (две фикстуры). Исправлено формированием JSON через `json.dumps(..., ensure_ascii=False).encode("utf-8")`, не меняя поведение клиентской обработки изображений.
+- `windows/check-frozen-bundle.py source` теперь сообщает все синтаксические ошибки Python в `src`, `tests`, `windows` сразу. Полная сборка PyInstaller запускается только после успешного preflight.
+- Изменения внесены в `main`; успешная последующая сборка Windows пользователем пока не подтверждена.
+
 ## 12.11.2026 — устранён SyntaxError в модуле диагностики сети
 
 - Исправлен генератор в `network_blocking_runtime._matches()`: отсутствовало `for marker`, из-за чего исходник не компилировался, PyInstaller не включал `leshy.network_blocking_runtime` и frozen EXE завершался до `/v1/status`.
