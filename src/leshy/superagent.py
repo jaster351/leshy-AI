@@ -16,6 +16,7 @@ from .cognitive_rollback import CognitiveArtifactRollback
 from .cognitive_tools import CognitiveReadExecutor, parse_tool_request
 from .parallel_tool_scheduler import ParallelPlanError
 from .superagent_parallel import parse_parallel_read_request, run_superagent_parallel_reads
+from .superagent_ticket_pool import ParallelTicketPool
 from .cognitive_journal import CognitiveStepJournal
 from .cognitive_lease import SuperAgentProcessLease
 from .diagnostics import event, problem
@@ -146,6 +147,7 @@ class SuperAgentService:
         self._cognitive_reads = CognitiveReadExecutor(app)
         self.poll_seconds = max(0.5, min(float(os.getenv("LESHY_SUPERAGENT_POLL_SECONDS", "2")), 30.0))
         self.max_attempts = max(1, min(int(os.getenv("LESHY_SUPERAGENT_MAX_ATTEMPTS", "3")), 8))
+        self.max_parallel_tickets = max(1, min(int(os.getenv("LESHY_SUPERAGENT_MAX_WORKERS", "8")), 8))
         self._ensure_schema()
         self._journal = CognitiveStepJournal(self.storage)
         # Тестовый/встроенный Runtime может не иметь settings: сохраняем
@@ -443,12 +445,19 @@ class SuperAgentService:
             )
         return rejected
 
-    def _next_due(self) -> dict[str, Any] | None:
+    def _next_due(self, exclude_ids: frozenset[str] = frozenset()) -> dict[str, Any] | None:
+        # A background ticket may have been submitted but not yet claimed in
+        # SQLite by its worker. Excluding in-flight IDs prevents double
+        # submission while allowing the next independent queued ticket.
+        sql = "SELECT * FROM superagent_tickets WHERE state='queued' AND next_run_epoch<=? "
+        values: list[Any] = [time.time()]
+        excluded = tuple(sorted(str(item) for item in exclude_ids))
+        if excluded:
+            sql += "AND id NOT IN (" + ",".join("?" for _ in excluded) + ") "
+            values.extend(excluded)
+        sql += "ORDER BY created_at LIMIT 1"
         with self.storage.connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM superagent_tickets WHERE state='queued' AND next_run_epoch<=? ORDER BY created_at LIMIT 1",
-                (time.time(),),
-            ).fetchone()
+            row = conn.execute(sql, values).fetchone()
         return dict(row) if row else None
 
     def _inputs(self, ticket_id: str) -> list[dict[str, str]]:
@@ -785,29 +794,38 @@ class SuperAgentService:
 
     def _run(self) -> None:
         try:
-            while not self._stop.is_set():
-                ticket = None
-                try:
-                    if not self._activate():
-                        # Пассивный процесс не трогает working-assignments.
-                        self._wake.wait(self.poll_seconds)
-                        self._wake.clear()
-                        continue
-                    # После захвата lock выполняем отложенную доставку
-                    # результатов восстановленных файлов.
-                    for ticket_id in self._artifact_recovery.get("ticket_ids", []):
-                        if self._stop.is_set():
-                            break
-                        self._deliver(ticket_id)
-                    self._artifact_recovery["ticket_ids"] = []
-                    ticket = self._next_due()
-                    if ticket is not None and not self._stop.is_set():
-                        self._run_ticket(ticket)
-                        continue
-                except Exception as exc:
-                    problem("superagent_loop_failed", str(exc), ticket_id=str((ticket or {}).get("id") or ""))
-                self._wake.wait(self.poll_seconds)
-                self._wake.clear()
+            # The leader owns the pool, and retains the process lease until
+            # every in-flight assignment finishes on shutdown. Local LLM
+            # generation is still serialized by the inference scheduler.
+            with ParallelTicketPool(self.max_parallel_tickets) as pool:
+                while not self._stop.is_set():
+                    try:
+                        if not self._activate():
+                            # A follower never executes tickets or recovers
+                            # another process's active assignments.
+                            self._wake.wait(self.poll_seconds)
+                            self._wake.clear()
+                            continue
+                        for ticket_id in self._artifact_recovery.get("ticket_ids", []):
+                            if self._stop.is_set():
+                                break
+                            self._deliver(ticket_id)
+                        self._artifact_recovery["ticket_ids"] = []
+
+                        for ticket_id, exc in pool.reap():
+                            problem("superagent_parallel_assignment_failed",
+                                    type(exc).__name__, ticket_id=ticket_id)
+                        assigned = pool.fill(
+                            self._next_due, self._run_ticket,
+                            stopped=self._stop.is_set,
+                        )
+                        if assigned:
+                            event("superagent_parallel_tickets_dispatched",
+                                  count=assigned, active=len(pool.active_ids))
+                    except Exception as exc:
+                        problem("superagent_loop_failed", str(exc))
+                    self._wake.wait(self.poll_seconds)
+                    self._wake.clear()
         finally:
             self._lease.release()
             event("superagent_process_leadership_released")
