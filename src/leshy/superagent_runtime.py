@@ -8,6 +8,7 @@ from .module_settings import module_enabled
 from .realtime_chat import RealtimeChatManager, StreamEvent
 from .storage import utcnow
 from .superagent import SuperAgentIntent, SuperAgentService, format_ticket, parse_superagent_intent
+from .superagent_plan_commands import execute_plan_command
 
 
 _INSTALLED = False
@@ -64,6 +65,8 @@ def _save_user(app, message: str, owner_id: str, session_id: str | None) -> str:
 
 
 def _execute(service: SuperAgentService, intent: SuperAgentIntent, owner_id: str, session_id: str) -> str:
+    if intent.action.startswith("plan_"):
+        return execute_plan_command(service, intent.action, intent.ticket_id, owner_id, intent.argument)
     if intent.action == "create":
         ticket = service.create(owner_id, session_id, intent.argument)
         return (

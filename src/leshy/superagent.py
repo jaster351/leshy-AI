@@ -17,6 +17,7 @@ from .cognitive_tools import CognitiveReadExecutor, parse_tool_request
 from .parallel_tool_scheduler import ParallelPlanError
 from .superagent_parallel import parse_parallel_read_request, run_superagent_parallel_reads
 from .superagent_ticket_pool import ParallelTicketPool
+from .superagent_plan_bridge import SuperAgentPlanBridge
 from .cognitive_journal import CognitiveStepJournal
 from .cognitive_lease import SuperAgentProcessLease
 from .diagnostics import event, problem
@@ -115,6 +116,14 @@ def parse_superagent_intent(text: str) -> SuperAgentIntent | None:
         }[artifact_match.group(1).lower()]
         return SuperAgentIntent(action, ticket_id=artifact_match.group(2))
 
+    plan_create = re.fullmatch(r"plan\s+create\s+(SA-[A-Za-z0-9-]+)\s+(.+)", body, re.IGNORECASE | re.DOTALL)
+    if plan_create:
+        return SuperAgentIntent("plan_create", argument=plan_create.group(2).strip(),
+                                ticket_id=plan_create.group(1))
+    plan_action = re.fullmatch(r"plan\s+(status|pause|resume|cancel)\s+(SA-[A-Za-z0-9-]+)",
+                               body, re.IGNORECASE)
+    if plan_action:
+        return SuperAgentIntent("plan_" + plan_action.group(1).lower(), ticket_id=plan_action.group(2))
     match = re.match(r"^(?:status|статус)\s+([A-Za-z0-9-]+)\s*$", body, re.IGNORECASE)
     if match:
         return SuperAgentIntent("status", ticket_id=match.group(1))
@@ -150,6 +159,7 @@ class SuperAgentService:
         self.max_parallel_tickets = max(1, min(int(os.getenv("LESHY_SUPERAGENT_MAX_WORKERS", "8")), 8))
         self._ensure_schema()
         self._journal = CognitiveStepJournal(self.storage)
+        self.plans = SuperAgentPlanBridge(self)
         # Тестовый/встроенный Runtime может не иметь settings: сохраняем
         # безопасный каталог рядом с БД, не создавая его без подтверждения.
         settings = getattr(app, "settings", None)
@@ -347,6 +357,11 @@ class SuperAgentService:
                 "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome='stopped' WHERE ticket_id=? AND state='running'",
                 (now, ticket_id),
             )
+        # Keep a linked durable plan from scheduling steps after Stop.
+        try:
+            self.plans.control(ticket_id, owner_id, "cancel")
+        except KeyError:
+            pass  # Legacy tickets may not have a durable plan.
         event("superagent_ticket_stopped", ticket_id=ticket_id)
         return self.get(ticket_id, owner_id=owner_id)
 
