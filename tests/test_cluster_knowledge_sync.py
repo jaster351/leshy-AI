@@ -126,5 +126,24 @@ class KnowledgeSyncTests(unittest.TestCase):
         self.assertEqual(self.sync_b._import_page(page), 0)
 
 
+    def test_cursor_read_failure_is_logged_without_exception_message(self):
+        from unittest.mock import patch
+
+        peer = SimpleNamespace(node_id="peer-123", endpoint="http://192.168.1.5:8765")
+        self.cluster_a.orchestrator = SimpleNamespace(peers=lambda: [peer])
+        calls = iter((False, True))
+        self.sync_a._stop.wait = lambda _: next(calls)
+        with patch("leshy.cluster_knowledge_sync.module_enabled", return_value=True), \
+             patch.object(self.sync_a, "_cursor_for", side_effect=ValueError("secret-token-in-exception")), \
+             patch("leshy.cluster_knowledge_sync.problem") as report:
+            self.sync_a._run()
+        self.assertEqual(self.sync_a.status()["last_error"], "ValueError (read_cursor)")
+        self.assertNotIn("secret-token", str(self.sync_a.status()))
+        report.assert_any_call(
+            "cluster_knowledge_sync_failed", "ValueError",
+            peer="peer-123", stage="read_cursor", reason_type="", errno=None,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
