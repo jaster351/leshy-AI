@@ -164,6 +164,8 @@ _EXPLICIT = (
     "/support", "/поддержка", "ответь клиенту", "ответь на вопрос клиента",
     "напиши ответ клиенту", "составь ответ клиенту", "переформулируй ответ клиенту",
     "вопрос клиента", "сообщение клиента", "обращение клиента",
+    "ответ клиенту", "клиент пишет", "как сотрудник поддержки",
+    "как сотрудник техподдержки", "подготовь ответ",
 )
 _CLOUD_MARKERS = (
     "cloud4box", "cloud4box.ru", "cloud4box.com", "contell.ru",
@@ -192,6 +194,8 @@ def is_support_draft_request(message: str, rows: Iterable[Any] = ()) -> bool:
     text = _normal(message)
     if any(cue in text for cue in _EXPLICIT + _CLOUD_MARKERS):
         return True
+    if "наименование в панели" in text and "обработчик" in text:
+        return True
     if ("здравствуйте" in text or "добрый день" in text) and (
         ("vps" in text or "выделенн" in text or "хостинг" in text)
         and any(s in text for s in ("у вас", "ваш", "подскажите"))
@@ -201,13 +205,13 @@ def is_support_draft_request(message: str, rows: Iterable[Any] = ()) -> bool:
         return False
     # The current message has already been appended to the newest-first history.
     recent = []
-    for row in list(rows)[:6]:
+    for row in list(rows)[:12]:
         role, content = _row_text(row)
         if role == "user" and _normal(content) == text:
             continue
         if role == "user":
             recent.append(_normal(content))
-        if len(recent) >= 2:
+        if len(recent) >= 4:
             break
     return any(any(cue in old for cue in _EXPLICIT + _CLOUD_MARKERS) for old in recent)
 
