@@ -78,8 +78,8 @@ def _present(item: dict[str, Any], *, archived: bool = False) -> dict[str, Any]:
         "archived": archived,
         "created_at": str(item.get("created_at") or ""),
         "updated_at": str(item.get("updated_at") or ""),
-        "can_stop": state in _STOP_STATES,
-        "can_retry": state in _RETRY_STATES,
+        "can_stop": state in _STOP_STATES and not archived,
+        "can_retry": state in _RETRY_STATES and not archived,
         "can_answer": state == "waiting" and not archived,
         "can_close": not archived,
         "can_restore": archived,
@@ -93,7 +93,15 @@ def list_tickets(service: Any, owner_id: str, *, limit: int = 50, archived: bool
 
 def ticket_details(service: Any, owner_id: str, ticket_id: str) -> dict[str, Any]:
     item = service.get(ticket_id, owner_id=owner_id)
-    result = _present(item)
+    archived = False
+    if getattr(service, "storage", None) is not None:
+        with _archive_connection(service) as conn:
+            conn.execute(_ARCHIVE_SCHEMA)
+            archived = conn.execute(
+                "SELECT 1 FROM superagent_dashboard_archive WHERE ticket_id=? AND owner_id=?",
+                (ticket_id, owner_id),
+            ).fetchone() is not None
+    result = _present(item, archived=archived)
     # The owner is verified above, before reading private message history.
     history = service._inputs(ticket_id) if hasattr(service, "_inputs") else []
     result["conversation"] = [
