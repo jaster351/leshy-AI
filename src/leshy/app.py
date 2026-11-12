@@ -397,6 +397,7 @@ class LeshyApp:
         # assistant personality. Technical work is not automatically a letter
         # to a customer; only support drafts use the guarded reply pipeline.
         mode = resolve_conversation_mode(message, rows)
+        event("conversation_mode_decided", mode=mode.kind, reason=mode.reason, session_id=sid)
         if mode.kind == "support_draft":
             answer = draft_support_reply(
                 self.llm.chat, message, rows, brain_dir=self.settings.brain_dir,
