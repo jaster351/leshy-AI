@@ -14,7 +14,7 @@ from .config import Settings
 from .capability_registry import CapabilityRegistry, is_self_capability_question
 from .github_facts import GitHubRepositoryEvidence
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
-from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply
+from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply, work_reference_context
 from .conversation_mode import resolve_conversation_mode, mode_instruction
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
@@ -491,6 +491,10 @@ class LeshyApp:
         interaction_instruction = mode_instruction(mode.kind)
         if interaction_instruction:
             context.append(ChatMessage("system", interaction_instruction))
+        if mode.kind == "work":
+            private_work = work_reference_context(message, self.settings.brain_dir)
+            if private_work:
+                context.append(ChatMessage("system", private_work))
         support_rules = support_draft_context(message, rows, brain_dir=self.settings.brain_dir)
         if support_rules:
             context.append(ChatMessage("system", support_rules))
