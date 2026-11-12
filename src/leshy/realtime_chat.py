@@ -619,7 +619,7 @@ class RealtimeChatManager:
             # Если live-search не нашёл подтверждённых источников или упал,
             # НЕ передаём текущие данные LLM: иначе она выдумает дату/цену.
             # Такой отказ быстрый и прозрачный, обычные чаты не затронуты.
-            if search_attempted and not sources:
+            if search_attempted and not sources and not support_draft_context(message, rows):
                 marker = "Текущий веб-поиск временно не выполнен:"
                 failure = next(
                     (
