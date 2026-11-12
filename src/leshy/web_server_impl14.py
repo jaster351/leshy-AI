@@ -51,9 +51,12 @@ def make_handler(app, telegram, settings, model_catalog):
                     problem("superagent_dashboard_page_bootstrap_failed", type(exc).__name__)
                     new_cookie = None
                     data = _runtime_html(settings).decode("utf-8")
-                marker = '<script src="/superagent-dashboard.js"></script>'
-                if marker not in data:
-                    data = data.replace("</body>", marker + "\n</body>")
+                for marker in (
+                    '<script src="/admin-dashboard.js"></script>',
+                    '<script src="/superagent-dashboard.js"></script>',
+                ):
+                    if marker not in data:
+                        data = data.replace("</body>", marker + "\n</body>")
                 encoded = data.encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -65,6 +68,11 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.end_headers()
                 self.wfile.write(encoded)
                 return
+            if parsed.path == "/admin-dashboard.js":
+                try:
+                    return self._send_asset("admin-dashboard.js", "application/javascript; charset=utf-8")
+                except FileNotFoundError:
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Панель управления не найдена"})
             if parsed.path == "/superagent-dashboard.js":
                 try:
                     return self._send_asset("superagent-dashboard.js", "application/javascript; charset=utf-8")
