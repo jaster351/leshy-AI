@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T09:55:57Z",
+  "updated_at": "2026-11-12T11:04:30Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T09:55:57Z",
-    "previous_issue_at": "2026-11-12T09:00:00Z",
+    "searched_at": "2026-11-12T11:04:30Z",
+    "previous_issue_at": "2026-11-12T09:55:57Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "arXiv:2610.07309"
+      "doi:10.18653/2026.findings-emnlp.1312"
     ],
-    "note": "Свежие списки arXiv cs.AI/cs.IR от 11 ноября и целевой поиск проверены. Новых публикаций после выпуска 09:00Z не найдено; впервые включён ранее не покрытый препринт от 5 октября о проверке допустимости извлечённой памяти, с открытым кодом и доказательствами."
+    "note": "Свежие списки и целевой поиск после прошлого выпуска не выявили новой публикации последнего часа. Впервые включена ранее не покрытая рецензированная работа Findings of EMNLP 2026 о query-only memory injection с открытым экспериментальным репозиторием."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -335,6 +335,23 @@
       "dataset_url": "https://github.com/ziwang11112/right-memory-wrong-context/tree/main/data",
       "inclusion_reason": "first_time_coverage_of_relevant_recent_preprint",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "doi:10.18653/2026.findings-emnlp.1312",
+      "version": null,
+      "source_edition": "Findings of EMNLP 2026 publisher PDF",
+      "first_published_at": null,
+      "publisher_publication_date": "2026-10-24",
+      "version_published_at": null,
+      "checked_at": "2026-11-12T11:04:30Z",
+      "publication_status": "peer_reviewed_findings_proceedings",
+      "url": "https://aclanthology.org/2026.findings-emnlp.1312/",
+      "package": "knowledge/updates/2026-11-12/1600-amia-query-only-memory-injection-research.jsonl",
+      "record_id": "amia-query-efficient-memory-injection-findings-emnlp-2026",
+      "code_url": "https://github.com/TrustAIRLab/AMIA",
+      "dataset_url": "https://github.com/TrustAIRLab/AMIA/tree/main/data",
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
+      "new_since_previous_issue": false
     }
   ],
   "issues": [
@@ -507,27 +524,37 @@
         "arXiv:2610.07309"
       ],
       "note": "Свежие списки arXiv cs.AI/cs.IR от 11 ноября и целевой поиск проверены. Новых публикаций после выпуска 09:00Z не найдено; впервые включён ранее не покрытый препринт от 5 октября о проверке допустимости извлечённой памяти, с открытым кодом и доказательствами."
+    },
+    {
+      "searched_at": "2026-11-12T11:04:30Z",
+      "previous_issue_at": "2026-11-12T09:55:57Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "doi:10.18653/2026.findings-emnlp.1312"
+      ],
+      "note": "Свежие списки и целевой поиск после прошлого выпуска не выявили новой публикации последнего часа. Впервые включена ранее не покрытая рецензированная работа Findings of EMNLP 2026 о query-only memory injection с открытым экспериментальным репозиторием."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-12T09:55:57Z",
-    "incremental_since": "2026-11-12T09:00:00Z",
+    "completed_at": "2026-11-12T11:04:30Z",
+    "incremental_since": "2026-11-12T09:55:57Z",
     "additional_lookback_start": "2026-10-13",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
     "first_time_coverage_ids": [
-      "arXiv:2610.07309"
+      "doi:10.18653/2026.findings-emnlp.1312"
     ],
     "query_topics": [
-      "LLM agent memory provenance citation verification poisoning November 2026",
-      "retrieval admissibility agent memory",
-      "ACL Anthology agent long-term memory provenance verification poisoning",
-      "OpenReview persistent memory poisoning rollback"
+      "LLM agent long-term memory provenance poisoning retrieval verification November 2026",
+      "RAG knowledge update poisoning agent memory",
+      "ACL Anthology memory agent provenance rollback poisoning",
+      "OpenReview LLM agent memory security provenance"
     ],
     "opened_primary_urls": [
-      "https://arxiv.org/abs/2610.07309",
-      "https://github.com/ziwang11112/right-memory-wrong-context"
+      "https://aclanthology.org/2026.findings-emnlp.1312/",
+      "https://aclanthology.org/2026.findings-emnlp.1312.pdf",
+      "https://github.com/TrustAIRLab/AMIA"
     ],
-    "note": "Новых публикаций или существенных версий после выпуска 09:00Z не подтверждено; впервые проверена ранее не включённая работа arXiv:2610.07309v1."
+    "note": "Новых публикаций после выпуска 09:55:57Z не подтверждено; впервые полностью проверена и включена ранее не покрытая работа AMIA из Findings of EMNLP 2026."
   },
   "pending_primary_reviews": [
     {
