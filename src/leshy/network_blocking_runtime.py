@@ -173,11 +173,29 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
             "tspu_block" in (row.get("verdicts") or [])
             for row in observations if isinstance(row, dict)
         )
+        port_lines = []
+        for port in (22, 3389):
+            direct = next(
+                (row.get("status") for row in metadata.get("local") or []
+                 if isinstance(row, dict) and row.get("port") == port),
+                "нет измерения",
+            )
+            rows = [
+                row for row in remote if isinstance(row, dict) and row.get("port") == port
+            ]
+            ru = [row for row in rows if str(row.get("country_code") or "").lower() == "ru"]
+            abroad = [row for row in rows if row not in ru]
+            port_lines.append(
+                f"TCP/{port}: локально {direct}; Check-Host РФ: "
+                f"{sum(row.get('status') == 'connected' for row in ru)}/{len(ru)} подключений, "
+                f"{sum(row.get('status') == 'timeout' for row in ru)} timeout; "
+                f"зарубежные: {sum(row.get('status') == 'connected' for row in abroad)}/{len(abroad)}."
+            )
         return (
             f"IP-адрес {target}: блокировка ТСПУ подтверждена по 3/3 признакам.\n"
-            f"Порт TCP/{ports}: прямое подключение — timeout.\n"
-            f"Check-Host РФ: {ru_timeouts} timeout из {len(russian)} проверенных узлов на этом порту.\n"
-            f"Cheburcheck: tspu_block ({blocked_probes}/{len(observations)} сканеров); "
+            + "\n".join(port_lines) + "\n"
+            + f"Совпадение на TCP/{ports}: РФ {ru_timeouts} timeout из {len(russian)} проверок.\n"
+            + f"Cheburcheck: tspu_block ({blocked_probes}/{len(observations)} сканеров); "
             "проверка завершена."
         )
     if (
