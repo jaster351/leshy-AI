@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 import threading
 import time
 import uuid
@@ -41,9 +42,14 @@ class ClusterNode:
                 continue
             try:
                 minimum = float(item.split("=", 1)[1])
+                available = float(self.memory_available_gb)
             except (TypeError, ValueError):
-                continue
-            if self.memory_available_gb and self.memory_available_gb < minimum:
+                return False
+            # Unknown/NaN RAM must never satisfy an explicit requirement.
+            if (
+                not math.isfinite(minimum) or minimum <= 0
+                or not math.isfinite(available) or available < minimum
+            ):
                 return False
         if task.model and self.models and task.model not in self.models:
             return False
@@ -271,6 +277,8 @@ class ClusterOrchestrator:
     def _choose_executor_locked(self, task: ClusterTask) -> ClusterNode:
         candidates = [node for node in self._peers.values() if node.supports(task)]
         if not candidates:
+            if task.requirements or task.model or task.mode == MODEL_PARALLEL_MODE:
+                raise RuntimeError("Нет доступного узла, удовлетворяющего требованиям задачи")
             return self.local_node
         # An idle compatible node takes precedence over another node's busy inference slot.
         # This prevents a fast GPU from becoming the destination for every parallel task.
