@@ -44,8 +44,8 @@ def source_preflight(root: Path) -> None:
     if errors:
         raise RuntimeError(
             f"Invalid Python syntax in {len(errors)} source(s):\n"
-            + "\\n".join(errors)
-            + "\\nCorrect all reported files before building."
+            + "\n".join(errors)
+            + "\nCorrect all reported files before building."
         )
     print(f"BUILD PREFLIGHT OK: {verified} Python sources parsed.")
 
