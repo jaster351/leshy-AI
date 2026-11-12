@@ -38,6 +38,12 @@ def _tokens(text: str) -> set[str]:
     }
 
 
+def _canonical_memory(text: str) -> str:
+    """Group equivalent spelling and punctuation of the same stored fact."""
+    words = re.sub(r"[^\w\s]+", " ", str(text or "").casefold().replace("ё", "е"))
+    return " ".join(words.split())
+
+
 def _parse_time(value: str) -> float:
     try:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
@@ -114,15 +120,28 @@ class IntelligentMemoryEngine:
         if not self.looks_durable(value) or self.contains_secret(value):
             return None
 
-        fingerprint = sha256(f"{owner_id}\0{value.lower()}".encode("utf-8")).hexdigest()
+        owner = str(owner_id or "")[:200]
+        canonical = _canonical_memory(value)
+        fingerprint = sha256((owner + "\\0" + canonical).encode("utf-8")).hexdigest()
         with self.storage.connection() as conn:
-            row = conn.execute("SELECT id FROM memories WHERE fingerprint=?", (fingerprint,)).fetchone()
+            row = conn.execute(
+                "SELECT id FROM memories WHERE fingerprint=? AND owner_id=?",
+                (fingerprint, owner),
+            ).fetchone()
             if row:
                 return int(row["id"])
+            # Existing records may use legacy fingerprints; don't duplicate them.
+            previous = conn.execute(
+                "SELECT id,content FROM memories WHERE owner_id=? AND kind='auto_preference' "
+                "ORDER BY id DESC LIMIT 500", (owner,),
+            ).fetchall()
+            for item in previous:
+                if _canonical_memory(str(item["content"] or "")) == canonical:
+                    return int(item["id"])
             cur = conn.execute(
                 "INSERT INTO memories(owner_id,kind,content,importance,source,created_at,expires_at,fingerprint) VALUES(?,?,?,?,?,?,?,?)",
                 (
-                    str(owner_id or "")[:200],
+                    owner,
                     "auto_preference",
                     value,
                     0.72,
@@ -145,11 +164,11 @@ class IntelligentMemoryEngine:
         with self.storage.connection() as conn:
             rows = conn.execute(
                 """
-                SELECT id,kind,content,importance,source,created_at
+                SELECT id,kind,content,importance,source,created_at,expires_at
                 FROM memories
                 WHERE owner_id=?
                 ORDER BY importance DESC,id DESC
-                LIMIT 300
+                LIMIT 1000
                 """,
                 (str(owner_id or "")[:200],),
             ).fetchall()
@@ -157,6 +176,11 @@ class IntelligentMemoryEngine:
         now = datetime.now(timezone.utc).timestamp()
         matches: list[MemoryMatch] = []
         for row in rows:
+            expiry = str(row["expires_at"] or "").strip()
+            if expiry:
+                expiry_ts = _parse_time(expiry)
+                if not expiry_ts or expiry_ts <= now:
+                    continue
             content = str(row["content"] or "")
             item_tokens = _tokens(content)
             if query_tokens and item_tokens:
@@ -182,11 +206,31 @@ class IntelligentMemoryEngine:
             ))
 
         matches.sort(key=lambda item: (-item.score, -item.importance, -item.memory_id))
-        return matches[: max(1, min(int(limit), 30))]
+        selected: list[MemoryMatch] = []
+        seen: set[str] = set()
+        for item in matches:
+            key = _canonical_memory(item.content)
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(item)
+            if len(selected) >= max(1, min(int(limit), 30)):
+                break
+        return selected
+
+    def _auto_learning_enabled(self) -> bool:
+        # Reading existing memories is always permitted; auto-save is optional.
+        with self.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key='idle_learning_enabled'"
+            ).fetchone()
+        return bool(row and str(row["value"]).strip().lower() in
+                    {"1", "true", "yes", "on"})
 
     def context(self, owner_id: str, query: str, *, limit: int = 8) -> str:
         try:
-            self.capture_if_useful(owner_id, query)
+            if self._auto_learning_enabled():
+                self.capture_if_useful(owner_id, query)
             matches = self.retrieve(owner_id, query, limit=limit)
         except Exception as exc:
             problem("intelligent_memory_context_failed", str(exc), owner_id=str(owner_id or "")[:200])
