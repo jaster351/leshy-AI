@@ -36,7 +36,7 @@ def _stored_path(storage: Any, owner_id: str) -> str:
 def get_credential_folder(storage: Any, owner_id: str) -> dict[str, Any]:
     """Return only the configured directory, never file contents or secrets."""
     value = _stored_path(storage, owner_id)
-    available = bool(value) and Path(value).is_dir()
+    available = bool(value) and Path(value).is_dir() and not Path(value).is_symlink()
     return {
         "path": value,
         "configured": bool(value),
@@ -99,8 +99,12 @@ def find_credential_file(storage: Any, owner_id: str, filename: str) -> Path:
     configured = _stored_path(storage, owner_id)
     if not configured:
         raise PermissionError("Сначала укажите папку в настройках SuperAgent")
-    root = Path(configured).resolve(strict=True)
-    if not root.is_dir():
+    configured_root = Path(configured)
+    # Do not follow a swapped symlink after the owner saved the original folder.
+    if configured_root.is_symlink():
+        raise PermissionError("Папка была заменена ссылкой; настройте её заново")
+    root = configured_root.resolve(strict=True)
+    if root != configured_root or not root.is_dir():
         raise FileNotFoundError("Папка учётных данных больше не доступна")
     found: list[Path] = []
     inspected = 0
