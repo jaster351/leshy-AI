@@ -82,6 +82,61 @@ class SuperAgentCognitiveLoopTests(unittest.TestCase):
         service._ticket_working = lambda ticket_id: True
         return service
 
+    def test_remote_os_probe_requires_explicit_permission(self):
+        service = self.service([
+            '{"status":"ready","result":"Сетевой тест не запускался","question":""}'
+        ])
+        service.storage = Mock()
+        with patch("leshy.superagent.module_enabled", return_value=False), \
+             patch("leshy.superagent.probe_remote_os") as probe:
+            service._execute({
+                "id": "SA-test",
+                "request_text": "Проверь сервер 10.20.30.40",
+                "attempt": 0,
+            })
+        probe.assert_not_called()
+
+    def test_remote_os_probe_automatically_uses_user_ip(self):
+        service = self.service([
+            '{"status":"ready","result":"Проверены сетевые признаки сервера","question":""}'
+        ])
+        service.storage = Mock()
+        service._journal = Mock()
+        observation = {
+            "host": "10.20.30.40", "os_family": "unknown",
+            "confidence": "unknown", "verified": False,
+            "tcp": {"22": "open"}, "udp": {"137": "no_response"}, "signals": [],
+        }
+        with patch("leshy.superagent.module_enabled", return_value=True), \
+             patch("leshy.superagent.probe_remote_os", return_value=observation) as probe:
+            state, report, _, _ = service._execute({
+                "id": "SA-test",
+                "request_text": "Проверь сервер 10.20.30.40",
+                "attempt": 0,
+            })
+        self.assertEqual(state, "ready")
+        self.assertIn("сетевые", report)
+        probe.assert_called_once_with("10.20.30.40")
+        self.assertEqual(service._journal.begin.call_args.args[3], "network.os_fingerprint")
+        self.assertEqual(service._journal.finish.call_args.kwargs["status"], "success")
+        self.assertIn("10.20.30.40", str(service.app.llm.chat.call_args))
+
+    def test_remote_os_probe_rechecks_permission_after_network(self):
+        service = self.service([
+            '{"status":"ready","result":"ОС установлена","question":""}'
+        ])
+        service.storage = Mock()
+        service._journal = Mock()
+        with patch("leshy.superagent.module_enabled", side_effect=[True, False]), \
+             patch("leshy.superagent.probe_remote_os", return_value={"os_family": "Linux"}) as probe:
+            service._execute({
+                "id": "SA-test",
+                "request_text": "Проверь сервер 10.20.30.40",
+                "attempt": 0,
+            })
+        probe.assert_called_once()
+        self.assertEqual(service._journal.finish.call_args.kwargs["status"], "failed")
+
     def test_install_request_cannot_finish_on_text_only(self):
         service = self.service([
             '{"status":"ready","result":"План найден: скачайте программу с сайта","question":""}',
