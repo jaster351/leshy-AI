@@ -149,6 +149,10 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --hidden-import leshy.network_blocking_module `
   --hidden-import leshy.provider_support `
   --hidden-import leshy.private_support_bootstrap `
+  --add-data "src/leshy/network_blocking_module.py;leshy" `
+  --add-data "src/leshy/network_blocking_runtime.py;leshy" `
+  --add-data "src/leshy/provider_support.py;leshy" `
+  --add-data "src/leshy/private_support_bootstrap.py;leshy" `
   --distpath $packageDist `
   --workpath $packageWork `
   --collect-all llama_cpp `
