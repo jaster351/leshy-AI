@@ -124,7 +124,21 @@ class BrowserAgent:
             return True
         return any(host == allowed or host.endswith("." + allowed) for allowed in self.allowed_hosts)
 
+    def execute_approved(self, action: BrowserAction, *, broker: Any, approval_id: str,
+                         owner_id: str, session_id: str) -> BrowserActionResult:
+        """Execute only the exact action atomically consumed from the trusted broker.
+
+        A caller-supplied action is never authoritative: a mismatch consumes no grant.
+        No approval token or verified flag is accepted from tool/model arguments.
+        """
+        verified_action = broker.consume_matching(owner_id, approval_id, action, session_id=session_id)
+        return self._execute(verified_action, verified=True)
+
     def execute(self, action: BrowserAction, *, approved: bool = False) -> BrowserActionResult:
+        return self._execute(action, verified=False, legacy_approved=approved)
+
+    def _execute(self, action: BrowserAction, *, verified: bool,
+                 legacy_approved: bool = False) -> BrowserActionResult:
         # Маркер подтверждения является внутренним: не доверять значению,
         # поступившему через arguments от модели, инструмента или API.
         # READ также не должен передавать поддельное подтверждение адаптерам.
@@ -135,11 +149,15 @@ class BrowserAgent:
             event("browser_agent_blocked_host", url=action.url, action=action.name)
             return BrowserActionResult("blocked", "Домен не разрешён политикой Browser Agent.")
 
-        if action.risk is not BrowserRisk.READ:
-            # Без серверного одноразового grant legacy approved=True нельзя считать согласием.
+        if action.risk is not BrowserRisk.READ and not verified:
             event("browser_agent_approval_required", action=action.name, risk=action.risk.value,
-                  url=action.url, legacy_approved_ignored=bool(approved))
+                  url=action.url, legacy_approved_ignored=bool(legacy_approved))
             raise ApprovalRequired(action)
+        if verified and action.risk is BrowserRisk.READ:
+            raise ValueError("READ actions cannot consume an approval")
+        if verified:
+            arguments["_approval_verified"] = True
+            action = replace(action, arguments=arguments)
 
         for adapter in self.adapters:
             try:
@@ -149,7 +167,19 @@ class BrowserAgent:
                 result = adapter.execute(action)
             except Exception as exc:
                 event("browser_agent_adapter_failed", adapter=getattr(adapter, "adapter_id", "unknown"), action=action.name, error=str(exc))
+                if action.risk is not BrowserRisk.READ:
+                    # The adapter may have committed the side effect before raising.
+                    # Never replay an approved write through another adapter.
+                    return BrowserActionResult("uncertain", "Результат действия неизвестен; автоматический повтор запрещён.")
                 continue
+            if action.risk is not BrowserRisk.READ:
+                # An adapter may have committed before reporting a transport error.
+                if result.status in {"unavailable", "unsupported", "timeout", "error"}:
+                    event("browser_agent_write_uncertain", adapter=adapter.adapter_id,
+                          action=action.name, status=result.status)
+                    return BrowserActionResult(
+                        "uncertain", "Результат действия неизвестен; автоматический повтор запрещён.")
+                return result
             if result.status not in {"unavailable", "unsupported"}:
                 return result
 

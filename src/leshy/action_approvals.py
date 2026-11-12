@@ -129,6 +129,37 @@ class ApprovalBroker:
             self._items.pop(item.approval_id, None)
         event("approval_denied", approval_id=item.approval_id, action=item.action.name, risk=item.action.risk.value)
 
+    def peek_action(self, owner_id: str, approval_id: str, *, session_id: str) -> BrowserAction:
+        """Return a detached snapshot; actual authorization happens on consume_matching."""
+        owner = _require_owner(owner_id)
+        sid = _require_session(session_id)
+        with self._lock:
+            self._purge()
+            item = self._items.get(str(approval_id))
+            if item is None or item.owner_id != owner or item.session_id != sid:
+                raise KeyError("Approval не найден или истёк")
+            return deepcopy(item.action)
+
+    def consume_matching(self, owner_id: str, approval_id: str, action: BrowserAction,
+                         *, session_id: str) -> BrowserAction:
+        """Atomically consume an approval only for its exact action and owner/session.
+
+        Keep the lock through comparison and removal to prevent concurrent replay.
+        A mismatch leaves the pending approval untouched.
+        """
+        owner = _require_owner(owner_id)
+        sid = _require_session(session_id)
+        with self._lock:
+            self._purge()
+            item = self._items.get(str(approval_id))
+            if (item is None or item.owner_id != owner or item.session_id != sid
+                    or item.action != action):
+                raise KeyError("Approval не найден или действие изменено")
+            self._items.pop(item.approval_id, None)
+        event("approval_consumed", approval_id=item.approval_id,
+              action=item.action.name, risk=item.action.risk.value)
+        return deepcopy(item.action)
+
     def consume(self, owner_id: str, approval_id: str, *, session_id: str | None = None) -> BrowserAction:
         owner = _require_owner(owner_id)
         with self._lock:

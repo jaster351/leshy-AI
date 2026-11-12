@@ -312,8 +312,12 @@ class BrowserPlatform:
         if not approved:
             self.approvals.deny(owner_id, approval_id, session_id=session_id)
             return BrowserActionResult("cancelled", "Действие отменено пользователем.")
-        action = self.approvals.consume(owner_id, approval_id, session_id=session_id)
-        result = self.agent.execute(action, approved=True)
+        # Resolve against the broker's own immutable action. No caller-supplied
+        # approved=True flag can bypass the gate; consume is atomic and one-time.
+        action = self.approvals.peek_action(owner_id, approval_id, session_id=session_id)
+        result = self.agent.execute_approved(action, broker=self.approvals,
+                                             approval_id=approval_id, owner_id=owner_id,
+                                             session_id=session_id)
         event(
             "browser_platform_approved_action_finished",
             approval_id=approval_id,
