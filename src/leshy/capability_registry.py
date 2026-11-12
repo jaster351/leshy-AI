@@ -91,6 +91,16 @@ class CapabilityRegistry:
     def _runtime(probe: str, status: dict[str, Any], app: Any) -> tuple[str, str]:
         if probe == "catalog":
             return "ready", "Каталог установлен и прочитан"
+        if probe == "github_audit":
+            handler = getattr(app, "github_facts", None) if app is not None else None
+            if callable(getattr(handler, "status", None)):
+                try:
+                    state = handler.status()
+                    if state.get("recent_verified"):
+                        return "ready", "GitHub API недавно вернул полный снимок"
+                except Exception:
+                    pass
+            return "not_checked", "Для актуальных данных нужен успешный запрос GitHub API"
         if app is None:
             return "not_checked", "Runtime не подключён"
         if probe == "model_ready":
