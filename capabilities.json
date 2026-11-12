@@ -100,6 +100,13 @@
       "implementation": "implemented",
       "probe": "catalog",
       "description": "Реестр возможностей, проверка runtime и резервная история в CHANGELOG."
+    },
+    {
+      "id": "logs",
+      "title": "Диагностика и журнал ошибок",
+      "implementation": "implemented",
+      "probe": "not_checked",
+      "description": "Локальные runtime и problem логи; состояние и полнота записи зависят от узла."
     }
   ]
 }
