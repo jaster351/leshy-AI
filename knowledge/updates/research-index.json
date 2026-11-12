@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T01:57:32Z",
+  "updated_at": "2026-11-12T02:57:14Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T01:57:32Z",
-    "previous_issue_at": "2026-11-12T00:56:14Z",
+    "searched_at": "2026-11-12T02:57:14Z",
+    "previous_issue_at": "2026-11-12T01:57:32Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [],
-    "note": "Свежие списки cs.AI/cs.IR и целевой поиск по памяти, provenance, poisoning, отзыву и откату проверены; новых значимых работ или существенных редакций после прошлого выпуска не подтверждено. MemoryDojo не повторён."
+    "note": "Свежие списки arXiv cs.AI/cs.IR от 11 ноября и целевой поиск по памяти, provenance, poisoning, отзыву и откату проверены; новых значимых работ или существенных редакций после прошлого выпуска не подтверждено. Уже рассмотренные работы не повторены."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -298,6 +298,13 @@
       "discovery_lookback_days": 30,
       "newly_included_ids": [],
       "note": "Свежие списки cs.AI/cs.IR и целевой поиск по памяти, provenance, poisoning, отзыву и откату проверены; новых значимых работ или существенных редакций после прошлого выпуска не подтверждено. MemoryDojo не повторён."
+    },
+    {
+      "searched_at": "2026-11-12T02:57:14Z",
+      "previous_issue_at": "2026-11-12T01:57:32Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [],
+      "note": "Свежие списки arXiv cs.AI/cs.IR от 11 ноября и целевой поиск по памяти, provenance, poisoning, отзыву и откату проверены; новых значимых работ или существенных редакций после прошлого выпуска не подтверждено. Уже рассмотренные работы не повторены."
     }
   ],
   "last_search": {
