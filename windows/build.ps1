@@ -134,6 +134,12 @@ Build-Stage 'workspace-preparation'
 Remove-Item -Recurse -Force $packageDist, $packageWork, $smokePackageRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
 
+Build-Stage 'local-module-preflight'
+python windows/check-frozen-bundle.py source
+if ($LASTEXITCODE -ne 0) {
+  throw "Required source modules are missing or shadowed on this machine. See BUILD PREFLIGHT FAILED above; PyInstaller was not started."
+}
+
 Build-Stage 'pyinstaller'
 python -m PyInstaller --noconfirm --clean --onedir --console `
   --name Leshy `
@@ -169,6 +175,16 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   windows/launcher.py
 
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
+
+# A successful PyInstaller exit code alone does not prove required modules
+# are present in the frozen Python archive. Check its actual manifest before
+# copying gigabytes into the smoke test directory.
+Build-Stage 'frozen-manifest-preflight'
+$pyzManifest = Join-Path $packageWork 'Leshy\PYZ-00.toc'
+python windows/check-frozen-bundle.py archive $pyzManifest
+if ($LASTEXITCODE -ne 0) {
+  throw "Frozen package lacks required modules. See PYINSTALLER MANIFEST errors above."
+}
 
 # Explicitly required runtime files must be recognized by the PyInstaller analyzer.
 # PyInstaller can report a missing hidden import as a warning and still exit 0.
