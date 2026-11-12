@@ -15,6 +15,7 @@ from .capability_registry import CapabilityRegistry, is_self_capability_question
 from .github_facts import GitHubRepositoryEvidence
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply
+from .conversation_mode import resolve_conversation_mode, mode_instruction
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
@@ -392,9 +393,11 @@ class LeshyApp:
                 (sid,),
             ).fetchall()
 
-        # Support requests are document drafting, never an ordinary chat with
-        # the assistant persona and never a web search on a customer's ticket.
-        if is_support_draft_request(message, rows):
+        # Detect intent within this owner's current session, not by clock or
+        # assistant personality. Technical work is not automatically a letter
+        # to a customer; only support drafts use the guarded reply pipeline.
+        mode = resolve_conversation_mode(message, rows)
+        if mode.kind == "support_draft":
             answer = draft_support_reply(
                 self.llm.chat, message, rows, brain_dir=self.settings.brain_dir,
             )
@@ -485,6 +488,9 @@ class LeshyApp:
                 "или об устаревших шаблонах. Напиши готовый текст локально.",
             )
         context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
+        interaction_instruction = mode_instruction(mode.kind)
+        if interaction_instruction:
+            context.append(ChatMessage("system", interaction_instruction))
         support_rules = support_draft_context(message, rows, brain_dir=self.settings.brain_dir)
         if support_rules:
             context.append(ChatMessage("system", support_rules))
