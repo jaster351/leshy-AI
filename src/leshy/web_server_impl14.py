@@ -13,6 +13,7 @@ from .diagnostics import problem
 from .module_settings import module_enabled
 from .web_server_impl11 import _runtime_html
 from .superagent_dashboard import execute_action, list_tickets, ticket_details
+from .superagent_credential_settings import get_credential_folder, set_credential_folder
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
 
@@ -21,7 +22,7 @@ def make_handler(app, telegram, settings, model_catalog):
     Parent = _PREVIOUS_MAKE_HANDLER(app, telegram, settings, model_catalog)
 
     class Handler(Parent):
-        def _dashboard_context(self):
+        def _settings_owner(self):
             if not self._authorized():
                 self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется авторизация API"})
                 return None
@@ -29,6 +30,12 @@ def make_handler(app, telegram, settings, model_catalog):
             owner = owner_getter() if callable(owner_getter) else ""
             if not owner or owner == "web:local":
                 self._json(HTTPStatus.UNAUTHORIZED, {"error": "Откройте сайт с действующей Web-сессией"})
+                return None
+            return owner
+
+        def _dashboard_context(self):
+            owner = self._settings_owner()
+            if owner is None:
                 return None
             if not module_enabled(app.storage, "superagent"):
                 self._json(HTTPStatus.CONFLICT, {"error": "Включите SuperAgent в настройках модулей"})
@@ -54,6 +61,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 for marker in (
                     '<script src="/admin-dashboard.js"></script>',
                     '<script src="/superagent-dashboard.js"></script>',
+                    '<script src="/superagent-credential-folder.js"></script>',
                 ):
                     if marker not in data:
                         data = data.replace("</body>", marker + "\n</body>")
@@ -78,6 +86,20 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._send_asset("superagent-dashboard.js", "application/javascript; charset=utf-8")
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": "Панель SuperAgent не найдена"})
+            if parsed.path == "/superagent-credential-folder.js":
+                try:
+                    return self._send_asset("superagent-credential-folder.js", "application/javascript; charset=utf-8")
+                except FileNotFoundError:
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Настройки SuperAgent не найдены"})
+            if parsed.path == "/v1/superagent/credential-folder":
+                owner = self._settings_owner()
+                if owner is None:
+                    return None
+                try:
+                    return self._json(HTTPStatus.OK, get_credential_folder(app.storage, owner))
+                except Exception as exc:
+                    problem("superagent_credential_folder_get_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось прочитать настройку папки"})
             if parsed.path != "/v1/superagent/tasks":
                 return super().do_GET()
             context = self._dashboard_context()
@@ -102,7 +124,29 @@ def make_handler(app, telegram, settings, model_catalog):
                 return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось получить задания"})
 
         def do_POST(self):
-            if parse.urlsplit(self.path).path != "/v1/superagent/task":
+            path = parse.urlsplit(self.path).path
+            if path == "/v1/superagent/credential-folder":
+                owner = self._settings_owner()
+                if owner is None:
+                    return None
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Недопустимый источник запроса"})
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Чужой источник запроса"})
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется JSON"})
+                try:
+                    payload = self._body()
+                    if not isinstance(payload, dict) or set(payload) != {"path"}:
+                        raise ValueError("Требуется только поле path")
+                    return self._json(HTTPStatus.OK, set_credential_folder(app.storage, owner, payload["path"]))
+                except (ValueError, PermissionError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                except Exception as exc:
+                    problem("superagent_credential_folder_set_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить настройку"})
+            if path != "/v1/superagent/task":
                 return super().do_POST()
             context = self._dashboard_context()
             if context is None:
