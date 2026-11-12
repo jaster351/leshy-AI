@@ -168,6 +168,11 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCOD
 Build-Stage 'knowledge-copy'
 Copy-Item -LiteralPath (Join-Path $repoRoot 'knowledge') -Destination $packageRoot -Recurse -Force
 
+# Machine-readable self-knowledge and a separate human-readable history backup.
+foreach ($name in @('capabilities.json', 'CHANGELOG.md')) {
+  Copy-Item -LiteralPath (Join-Path $repoRoot $name) -Destination (Join-Path $packageRoot $name) -Force -ErrorAction Stop
+}
+
 $packageExe = Join-Path $packageRoot 'Leshy.exe'
 if (-not (Test-Path -LiteralPath $packageExe)) { throw "PyInstaller did not create $packageExe" }
 
