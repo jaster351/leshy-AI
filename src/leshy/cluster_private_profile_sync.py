@@ -200,6 +200,8 @@ class ClusterPrivateProfileSync:
             )
 
     def invite(self, owner_id: str) -> dict:
+        if not module_enabled(self.storage, "distributed-cluster"):
+            raise PermissionError("Доверенный кластер выключен")
         owner = self._owner(owner_id)
         code = secrets.token_urlsafe(32)
         invite_id = secrets.token_hex(16)
@@ -216,6 +218,8 @@ class ClusterPrivateProfileSync:
         }
 
     def accept(self, body: dict, headers) -> dict:
+        if not module_enabled(self.storage, "distributed-cluster"):
+            raise PermissionError("Доверенный кластер выключен")
         self.cluster.verify_request(body, headers)
         node = str(headers.get("X-Leshy-Cluster-Node") or "")
         peer = self._peer(node)
@@ -241,18 +245,23 @@ class ClusterPrivateProfileSync:
         pair_id = secrets.token_hex(16)
         key = Fernet.generate_key().decode("ascii")
         with self._lock:
-            self._save_pair(pair_id, owner, remote_owner, node, peer.endpoint, key)
             with self.storage.connection() as conn:
-                conn.execute(
-                    "UPDATE cluster_private_invites SET used_at=? WHERE invite_id=? AND used_at IS NULL",
-                    (time.time(), invite_id),
-                )
+                changed = conn.execute(
+                    "UPDATE cluster_private_invites SET used_at=? WHERE invite_id=? "
+                    "AND used_at IS NULL AND expires_at>?",
+                    (time.time(), invite_id, time.time()),
+                ).rowcount
+            if changed != 1:
+                raise PermissionError("Приглашение уже использовано")
+            self._save_pair(pair_id, owner, remote_owner, node, peer.endpoint, key)
         response = {"pair_id": pair_id, "owner_id": owner,
                     "node_id": self.cluster.identity.node_id, "key": key}
         event("cluster_private_profile_paired", peer=node[:12])
         return {"payload": _cipher_for_digest(digest).encrypt(_json_bytes(response)).decode("ascii")}
 
     def join(self, owner_id: str, endpoint: str, invite_id: str, code: str) -> dict:
+        if not module_enabled(self.storage, "distributed-cluster"):
+            raise PermissionError("Доверенный кластер выключен")
         owner = self._owner(owner_id)
         endpoint = _safe_endpoint(endpoint)
         peer = next(
@@ -274,6 +283,10 @@ class ClusterPrivateProfileSync:
             raise PermissionError("Ответ сопряжения не подтверждён") from exc
         if result.get("node_id") != peer.node_id:
             raise PermissionError("Ответ получен от другого узла")
+        try:
+            Fernet(str(result["key"]).encode("ascii"))
+        except (KeyError, ValueError) as exc:
+            raise PermissionError("Недопустимый ключ сопряжения") from exc
         self._save_pair(
             str(result["pair_id"]), owner, str(result["owner_id"]),
             peer.node_id, endpoint, str(result["key"]),
@@ -404,6 +417,8 @@ class ClusterPrivateProfileSync:
                         )
 
     def receive(self, route: str, body: dict, headers) -> dict:
+        if not module_enabled(self.storage, "distributed-cluster"):
+            raise PermissionError("Доверенный кластер выключен")
         self.cluster.verify_request(body, headers)
         sender = str(headers.get("X-Leshy-Cluster-Node") or "")
         row = self._pair_row(str(body.get("pair_id") or ""), node=sender)
@@ -423,6 +438,8 @@ class ClusterPrivateProfileSync:
         return {"ok": True}
 
     def sync_once(self, owner: str, pair_id: str) -> None:
+        if not module_enabled(self.storage, "distributed-cluster"):
+            raise PermissionError("Доверенный кластер выключен")
         row = self._pair_row(pair_id, owner=owner)
         self._peer(row["remote_node_id"], row["remote_endpoint"])
         cipher = self._secret_cipher(row)
