@@ -18,9 +18,17 @@ def execute_plan_command(service: Any, action: str, ticket_id: str,
                 f"Состояние: /agent plan status {result['id']}")
     if action == "plan_status":
         result = service.plans.snapshot(ticket_id, owner_id)
-        lines = [f"План {result['id']}: {result['state']}"]
+        steps = result["steps"]
+        shown = steps[:64]  # Keep chat output bounded; never hide the total.
+        lines = [f"План {result['id']}: {result['state']} — {len(steps)} этапов"]
         lines.extend(f"- {step['id']}: {step['state']} ({step['title'][:100]})"
-                     for step in result['steps'][:64])
+                     for step in shown)
+        if len(steps) > len(shown):
+            summary: dict[str, int] = {}
+            for step in steps:
+                summary[step["state"]] = summary.get(step["state"], 0) + 1
+            counts = ", ".join(f"{state}: {count}" for state, count in sorted(summary.items()))
+            lines.append(f"Показано {len(shown)} из {len(steps)}. Все статусы: {counts}")
         return "\n".join(lines)
     controls = {"plan_pause": "pause", "plan_resume": "resume", "plan_cancel": "cancel"}
     if action in controls:
