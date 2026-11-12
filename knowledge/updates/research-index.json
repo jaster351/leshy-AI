@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T07:01:01Z",
+  "updated_at": "2026-11-12T08:02:30Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T07:01:01Z",
-    "previous_issue_at": "2026-11-12T06:05:25Z",
+    "searched_at": "2026-11-12T08:02:30Z",
+    "previous_issue_at": "2026-11-12T07:01:01Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "doi:10.18653/2026.aacl-long.246"
+      "doi:10.18653/2026.emnlp-main.423"
     ],
-    "note": "Впервые включена рецензированная публикация AACL-IJCNLP 2026 о разделении retrieval и детерминированного memory governance. Повторно найденные ранее рассмотренные работы исключены."
+    "note": "Впервые включена рецензированная публикация EMNLP 2026 о сохранении сигналов верификатора как метаданных всего жизненного цикла памяти. Это дополнение покрытия октябрьских proceedings, а не новая публикация последнего часа; повторно найденные работы исключены."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -286,6 +286,23 @@
       "dataset_url": null,
       "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "doi:10.18653/2026.emnlp-main.423",
+      "version": null,
+      "source_edition": "EMNLP 2026 publisher PDF",
+      "first_published_at": null,
+      "publisher_publication_date": "2026-10",
+      "version_published_at": null,
+      "checked_at": "2026-11-12T08:02:30Z",
+      "publication_status": "peer_reviewed_conference_proceedings",
+      "url": "https://aclanthology.org/2026.emnlp-main.423/",
+      "package": "knowledge/updates/2026-11-12/1300-memguard-verifier-lifecycle-governance-research.jsonl",
+      "record_id": "memguard-persistent-verifier-signals-emnlp2026",
+      "code_url": "https://github.com/whyyyyy123/MemGuard",
+      "dataset_url": null,
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
+      "new_since_previous_issue": false
     }
   ],
   "issues": [
@@ -431,24 +448,39 @@
         "doi:10.18653/2026.emnlp-main.2296"
       ],
       "note": "Впервые включены препринт StateGraph от 2 ноября и обзор EMNLP 2026 о безопасности памяти по жизненному циклу. Это дополнение покрытия последних 30 дней, а не публикации после прошлого выпуска; свежие списки arXiv всё ещё датированы 11 ноября."
+    },
+    {
+      "searched_at": "2026-11-12T08:02:30Z",
+      "previous_issue_at": "2026-11-12T07:01:01Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "doi:10.18653/2026.emnlp-main.423"
+      ],
+      "note": "Впервые включена рецензированная публикация EMNLP 2026 о сохранении сигналов верификатора как метаданных всего жизненного цикла памяти. Это дополнение покрытия октябрьских proceedings, а не новая публикация последнего часа; повторно найденные работы исключены."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-12T01:57:32Z",
-    "incremental_since": "2026-11-12T00:56:14Z",
+    "completed_at": "2026-11-12T08:02:30Z",
+    "incremental_since": "2026-11-12T07:01:01Z",
     "additional_lookback_start": "2026-10-13",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
-    "first_time_coverage_ids": [],
+    "first_time_coverage_ids": [
+      "doi:10.18653/2026.emnlp-main.423"
+    ],
     "query_topics": [
-      "LLM agent memory provenance poisoning RAG November 12 2026",
-      "agent memory unlearning rollback verification November 2026",
-      "ACL Anthology agent memory provenance source verification poisoning"
+      "long-term LLM agent memory provenance poisoning November 2026",
+      "RAG poisoning agent memory rollback November 2026",
+      "ACL Anthology memory governance verifier lifecycle",
+      "OpenReview agent memory poisoning provenance rollback"
     ],
     "opened_primary_urls": [
       "https://arxiv.org/list/cs.AI/new",
-      "https://arxiv.org/list/cs.IR/new"
+      "https://arxiv.org/list/cs.IR/new",
+      "https://aclanthology.org/2026.emnlp-main.423/",
+      "https://aclanthology.org/2026.emnlp-main.423.pdf",
+      "https://github.com/whyyyyy123/MemGuard"
     ],
-    "note": "Подтверждённых новых публикаций или версий после 00:56:14Z не найдено; уже рассмотренные идентификаторы исключены."
+    "note": "После предыдущего выпуска новых публикаций или существенных версий не подтверждено; впервые полностью проверена ранее не включённая рецензированная работа MemGuard из EMNLP 2026."
   },
   "pending_primary_reviews": [
     {
