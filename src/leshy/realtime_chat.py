@@ -14,7 +14,7 @@ from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .capability_registry import is_self_capability_question
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
-from .provider_support import support_draft_context
+from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
@@ -379,6 +379,54 @@ class RealtimeChatManager:
             raise ValueError("Сообщение пустое")
         if len(message) > 32000:
             raise ValueError("Сообщение слишком длинное")
+
+        # Collect and validate the complete reply BEFORE streaming it. In
+        # normal chat the persona is Leshy; in support mode the author is an
+        # employee drafting text for a customer, so no assistant identity leaks.
+        if is_support_draft_request(message):
+            rid, cancel = self._register(request_id)
+            sid = ""
+            try:
+                sid, rows = self._save_user_and_history(message, owner_id, session_id)
+                yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": []})
+                if cancel.is_set():
+                    yield StreamEvent("done", {
+                        "request_id": rid, "session_id": sid, "answer": "",
+                        "sources": [], "stopped": True,
+                    })
+                    return
+                def infer(prepared):
+                    return "".join(self._llm_stream(prepared, cancel, owner_id))
+                answer = draft_support_reply(
+                    infer, message, rows, brain_dir=self.app.settings.brain_dir,
+                )
+                if cancel.is_set():
+                    yield StreamEvent("done", {
+                        "request_id": rid, "session_id": sid, "answer": "",
+                        "sources": [], "stopped": True,
+                    })
+                    return
+                created_at = self.app._save_assistant(sid, answer)
+                event("support_stream_draft_prepared", request_id=rid, session_id=sid,
+                      answer_chars=len(answer))
+                for chunk in self._chunk_fallback(answer, 160):
+                    if cancel.is_set():
+                        break
+                    yield StreamEvent("delta", {"text": chunk})
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid,
+                    "answer": answer if not cancel.is_set() else "",
+                    "created_at": created_at, "sources": [], "stopped": bool(cancel.is_set()),
+                })
+            except Exception as exc:
+                problem("support_stream_draft_failed", type(exc).__name__, request_id=rid)
+                yield StreamEvent("error", {
+                    "request_id": rid, "session_id": sid,
+                    "error": "Не удалось подготовить ответ клиенту",
+                })
+            finally:
+                self._unregister(rid)
+            return
 
         controller = getattr(self.app, "os_control", None)
         if controller is not None and controller.is_request(message):
