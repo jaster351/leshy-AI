@@ -66,6 +66,20 @@ def _truncate_content(content: str, target_tokens: int, *, preserve_head: bool =
     return marker + value[-available:]
 
 
+def _strict_clip(content: str, target_chars: int, *, preserve_edges: bool) -> str:
+    """Emergency clip for cases where the approximate two-char/token limit fails."""
+    value = str(content)
+    cap = max(1, min(int(target_chars), len(value)))
+    if len(value) <= cap:
+        return value
+    marker = "\n[…]\n"
+    if not preserve_edges or cap <= len(marker) + 8:
+        return value[:cap] if preserve_edges else value[-cap:]
+    available = cap - len(marker)
+    head = max(1, available // 2)
+    return value[:head] + marker + value[-(available - head):]
+
+
 def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
                          reserve_tokens: int = 1024,
                          estimator: Callable[[list[ChatMessage]], int] = estimate_tokens) -> ContextBudgetResult:
@@ -117,6 +131,43 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
         if not changed:
             break
     after = estimator(kept)
+    if after > budget:
+        # The conservative Unicode estimator can assign >1 token per 2 chars.
+        # Drop nonessential turns first; always retain the system contract and
+        # most recent user request before falling back to strict character cuts.
+        latest_user = next(
+            (i for i in range(len(kept) - 1, -1, -1) if kept[i].role == "user"),
+            len(kept) - 1,
+        )
+        protected = {latest_user}
+        if kept and kept[0].role == "system":
+            protected.add(0)
+        for index in range(len(kept) - 1, -1, -1):
+            if estimator(kept) <= budget:
+                break
+            if index not in protected:
+                kept.pop(index)
+                dropped += 1
+
+        for _ in range(100):
+            if estimator(kept) <= budget:
+                break
+            # Keep reducing the longest protected block until the *actual*
+            # estimator fits, rather than trusting a fixed char/token ratio.
+            index = max(range(len(kept)), key=lambda i: len(kept[i].content))
+            current = kept[index]
+            if len(current.content) <= 1:
+                break
+            new_len = max(1, len(current.content) - max(16, len(current.content) // 3))
+            shorter = _strict_clip(
+                current.content, new_len,
+                preserve_edges=current.role in {"system", "user"},
+            )
+            if shorter == current.content:
+                break
+            kept[index] = ChatMessage(current.role, shorter)
+            truncated += 1
+        after = estimator(kept)
     return ContextBudgetResult(kept, before, after, budget, dropped, truncated)
 
 
