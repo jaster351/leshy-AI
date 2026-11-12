@@ -140,7 +140,7 @@ class GitHubRepositoryEvidence:
     """Кешируемое чтение только публичного GitHub API, без GitHub token."""
 
     def __init__(self, fetch_json: Callable[[str], list[dict]] | None = None,
-                 *, ttl_seconds: int = 300):
+                 *, ttl_seconds: int = 900):
         self.fetch_json = fetch_json or _http_json
         self.ttl_seconds = max(1, min(int(ttl_seconds), 1800))
         self._lock = threading.RLock()
