@@ -65,20 +65,10 @@ def _row_text(row: Any) -> tuple[str, str]:
 
 
 def is_support_draft_request(message: str, rows: Iterable[Any] = ()) -> bool:
-    text = _normal(message)
-    if any(cue in text for cue in _EXPLICIT):
-        return True
-    if not any(cue in text for cue in _REPLY_EDITS):
-        return False
-    recent = []
-    for row in list(rows)[:12]:
-        role, old = _row_text(row)
-        if role != "user" or _normal(old) == text:
-            continue
-        recent.append(_normal(old))
-        if len(recent) >= 4:
-            break
-    return any(any(cue in previous for cue in _EXPLICIT) for previous in recent)
+    # All front ends must agree on whether this is a customer draft rather
+    # than a technical conversation with the owner.
+    from .conversation_mode import resolve_conversation_mode
+    return resolve_conversation_mode(message, rows).kind == "support_draft"
 
 
 def relevant_support_facts(query: str, *, limit: int = 6) -> tuple[SupportFact, ...]:
