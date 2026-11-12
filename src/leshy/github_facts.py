@@ -53,7 +53,7 @@ class _NoRedirect(request.HTTPRedirectHandler):
         return None
 
 
-def is_leshy_repository_audit_request(message: str) -> bool:
+def is_leshy_repository_audit_request(message: str, history: Any = ()) -> bool:
     """Узкое правило, не перехватывающее обычные беседы о GitHub и коде."""
     text = " ".join(str(message or "").strip().split())[:1200]
     if not text or not _AUDIT_WORDS.search(text):
@@ -76,7 +76,27 @@ def is_leshy_repository_audit_request(message: str) -> bool:
         # строки вида src/leshy или docs/... не считаются адресом GitHub.
         if "github.com/" not in text.lower() and "jaster351/leshy-AI".lower() not in text.lower():
             return False
-    return bool(_OWNER_WORDS.search(text) and _REPO_WORDS.search(text))
+    explicit = bool(_OWNER_WORDS.search(text) and _REPO_WORDS.search(text))
+    if explicit:
+        return True
+    # Короткие продолжения вопроса об авторах не должны терять контекст,
+    # но контекст не должен подменять произвольные новые запросы.
+    if not re.search(
+        r"(?:не\s+ты|не\s+мой|чуж\w*|посторон\w*|кто\s+(?:ещ[её]|писал|создал)|"
+        r"что\s+написал|автор\w*|коммент\w*|сколько\s+(?:их|вопросов|issues?))",
+        text, re.IGNORECASE,
+    ):
+        return False
+    try:
+        rows = list(history)[:12]
+        return any(
+            str(row["role"]) == "user"
+            and str(row["content"]).strip() != str(message).strip()
+            and is_leshy_repository_audit_request(str(row["content"]))
+            for row in rows
+        )
+    except (TypeError, KeyError, IndexError):
+        return False
 
 
 def _login(record: Any) -> str:
@@ -178,8 +198,8 @@ class GitHubRepositoryEvidence:
             return {"recent_verified": fresh,
                     "checked_at": str(self._cache.get("checked_at") or "") if fresh and self._cache else ""}
 
-    def answer(self, message: str) -> dict[str, Any] | None:
-        if not is_leshy_repository_audit_request(message):
+    def answer(self, message: str, history: Any = ()) -> dict[str, Any] | None:
+        if not is_leshy_repository_audit_request(message, history):
             return None
         sources = [
             {"title": "GitHub Issues · Leshy", "url": "https://github.com/" + REPO + "/issues"},
