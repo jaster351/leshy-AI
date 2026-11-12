@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "dataset_id": "unicode-ucd-17.0.0-unicodedata-lines-27001-30000",
+  "title": "Свойства кодовых точек UCD 17.0.0 — строки 27001–30000 UnicodeData.txt",
+  "predecessor_manifest": "knowledge/updates/datasets/ucd17-unicodedata-lines-24001-27000.manifest.json",
+  "source": {
+    "organization": "Unicode, Inc.",
+    "version": "17.0.0",
+    "status": "final",
+    "date": "2025-08-15",
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+    "mirror_url": "https://github.com/unicode-org/unicodetools/blob/main/unicodetools/data/ucd/17.0.0/UnicodeData.txt",
+    "bytes": 2198209,
+    "lines": 40575,
+    "checksum": {
+      "algorithm": "git_blob_sha1",
+      "value": "fca68e3e154e62e49727ecf69f1df442582bfa96",
+      "scope": "byte-identical GitHub mirror blob"
+    }
+  },
+  "documentation": {
+    "url": "https://www.unicode.org/reports/tr44/tr44-36.html",
+    "version": "UAX #44 revision 36 for Unicode 17.0.0",
+    "format": "15 semicolon-delimited fields; First/Last adjacent pairs encode ranges"
+  },
+  "license": {
+    "spdx": "Unicode-3.0",
+    "url": "https://www.unicode.org/license.txt",
+    "repository_copy_url": "https://github.com/unicode-org/unicodetools/blob/main/LICENSE",
+    "git_blob_sha1": "d7e7973c2fd6f2586a8999a69dc21e39af26be0f"
+  },
+  "selection": {
+    "description": "Строки 27001–30000 UnicodeData.txt в исходном порядке; обычные строки преобразованы по одной. Пар First/Last в выбранном диапазоне нет; отсутствующие значения не превращаются в ноль.",
+    "source_line_start": 27001,
+    "source_line_end": 30000,
+    "source_code_point_start": "13D97",
+    "source_code_point_end": "16AE5",
+    "raw_source_records": 3000,
+    "individual_source_records": 3000,
+    "range_boundary_records": 0,
+    "range_records_created": 0,
+    "eligible_candidates": 3000,
+    "missing_values_policy": "Пустые поля сохраняются как null.",
+    "deduplication_key": "dataset version + code point or normalized range"
+  },
+  "outputs": [
+    {"path":"knowledge/updates/2026-11-12/1100-ucd17-unicodedata-part-01.jsonl","records":974,"bytes":1849626,"first_code_point":"13D97","last_code_point":"14164"},
+    {"path":"knowledge/updates/2026-11-12/1100-ucd17-unicodedata-part-02.jsonl","records":974,"bytes":1849698,"first_code_point":"14165","last_code_point":"14537"},
+    {"path":"knowledge/updates/2026-11-12/1100-ucd17-unicodedata-part-03.jsonl","records":974,"bytes":1849714,"first_code_point":"14538","last_code_point":"16A90"},
+    {"path":"knowledge/updates/2026-11-12/1100-ucd17-unicodedata-part-04.jsonl","records":78,"bytes":146962,"first_code_point":"16A91","last_code_point":"16AE5"}
+  ],
+  "generator": "knowledge/updates/tools/generate_ucd17_unicodedata_page.py",
+  "generated_at": "2026-11-12T06:05:25Z",
+  "deduplication_audit": {
+    "raw_source_records": 3000,
+    "individual_source_records": 3000,
+    "range_boundary_records": 0,
+    "range_records_created": 0,
+    "eligible_candidates": 3000,
+    "exact_id_duplicates": 0,
+    "exact_claim_duplicates": 0,
+    "canonical_key_duplicates": 0,
+    "semantic_duplicates": 0,
+    "updated_versions": 0,
+    "retracted_versions": 0,
+    "new_unique_records": 3000
+  },
+  "cursor": {
+    "source_line_end": 30000,
+    "last_seen_code_point": "16AE5",
+    "next_source_line": 30001,
+    "next_code_point": "16AE6",
+    "remaining_source_lines": 10575,
+    "status": "continue"
+  }
+}

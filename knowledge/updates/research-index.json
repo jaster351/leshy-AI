@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T05:00:44Z",
+  "updated_at": "2026-11-12T06:05:25Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T05:00:44Z",
-    "previous_issue_at": "2026-11-12T03:58:05Z",
+    "searched_at": "2026-11-12T06:05:25Z",
+    "previous_issue_at": "2026-11-12T05:00:44Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "arXiv:2611.02912",
-      "doi:10.18653/2026.emnlp-main.2296"
+      "doi:10.18653/2026.findings-emnlp.395",
+      "doi:10.18653/2026.realm-1.16"
     ],
-    "note": "Впервые включены препринт StateGraph от 2 ноября и обзор EMNLP 2026 о безопасности памяти по жизненному циклу. Это дополнение покрытия последних 30 дней, а не публикации после прошлого выпуска; свежие списки arXiv всё ещё датированы 11 ноября."
+    "note": "Впервые включены две рецензированные публикации последних 30 дней: атрибуция снимков долговременной памяти MEMMARK и анализ цены ошибочного query-time forgetting. Это дополнение покрытия свежих proceedings, а не публикации после прошлого часового выпуска."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -227,6 +227,40 @@
       "url": "https://aclanthology.org/2026.emnlp-main.2296/",
       "package": "knowledge/updates/2026-11-12/1000-state-revision-and-memory-governance-research.jsonl",
       "record_id": "ltm-security-lifecycle-vmg-emnlp2026",
+      "code_url": null,
+      "dataset_url": null,
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
+      "new_since_previous_issue": false
+    },
+    {
+      "id": "doi:10.18653/2026.findings-emnlp.395",
+      "version": null,
+      "source_edition": "Findings of EMNLP 2026 publisher PDF",
+      "first_published_at": null,
+      "publisher_publication_date": "2026-10",
+      "version_published_at": null,
+      "checked_at": "2026-11-12T06:05:25Z",
+      "publication_status": "peer_reviewed_findings_proceedings",
+      "url": "https://aclanthology.org/2026.findings-emnlp.395/",
+      "package": "knowledge/updates/2026-11-12/1100-memory-attribution-and-filtering-research.jsonl",
+      "record_id": "memmark-state-evolution-memory-attribution",
+      "code_url": "https://github.com/zhb0119/MemMark",
+      "dataset_url": null,
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
+      "new_since_previous_issue": false
+    },
+    {
+      "id": "doi:10.18653/2026.realm-1.16",
+      "version": null,
+      "source_edition": "REALM 2026 publisher PDF",
+      "first_published_at": null,
+      "publisher_publication_date": "2026-10-29",
+      "version_published_at": null,
+      "checked_at": "2026-11-12T06:05:25Z",
+      "publication_status": "peer_reviewed_workshop_proceedings",
+      "url": "https://aclanthology.org/2026.realm-1.16/",
+      "package": "knowledge/updates/2026-11-12/1100-memory-attribution-and-filtering-research.jsonl",
+      "record_id": "memory-filtering-false-drop-cost-realm2026",
       "code_url": null,
       "dataset_url": null,
       "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
