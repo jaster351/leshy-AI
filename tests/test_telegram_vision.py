@@ -214,7 +214,10 @@ class TelegramVisionTests(unittest.TestCase):
         class Response:
             def __enter__(self): return self
             def __exit__(self, *_): return False
-            def read(self, n=-1): return b'{"message":{"content":"На снимке белка."}}'
+            def read(self, n=-1):
+                return json.dumps(
+                    {"message": {"content": "На снимке белка."}}, ensure_ascii=False
+                ).encode("utf-8")
         class Opener:
             def open(self, req, timeout):
                 sent.append((req.full_url, json.loads(req.data), timeout))
