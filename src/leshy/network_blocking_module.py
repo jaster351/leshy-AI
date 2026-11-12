@@ -17,7 +17,8 @@ from .verified_tool_receipts import VerifiedToolReceipts, ToolReceipt
 
 
 DEFAULT_PORTS = (22, 3389)
-GEO_PORTS = (22, 80, 443, 3389)
+GEO_PORTS = (22, 3389)
+WEB_PORTS = (80, 443)
 CHEBURCHECK_ENDPOINT = "https://cheburcheck.ru/api/v1/check"
 CHEBURCHECK_PROBE_ENDPOINT = "https://cheburcheck.ru/api/v1/probe/{query_id}"
 CHECK_HOST_NODES_ENDPOINT = "https://check-host.net/nodes/hosts"
@@ -522,7 +523,7 @@ class NetworkBlockingChecker:
                 for name, meta in nodes.items()
             )
 
-    def _check_host(self, target: str) -> tuple[TcpObservation, ...]:
+    def _check_host(self, target: str, ports: tuple[int, ...] = GEO_PORTS) -> tuple[TcpObservation, ...]:
         try:
             nodes = self._select_nodes()
         except Exception as exc:
@@ -532,13 +533,13 @@ class NetworkBlockingChecker:
                     source="check-host", port=port, status="error",
                     error=f"Не удалось получить список узлов Check-Host: {type(exc).__name__}",
                 )
-                for port in GEO_PORTS
+                for port in ports
             )
         if not nodes:
             return ()
         observations: list[TcpObservation] = []
-        with ThreadPoolExecutor(max_workers=len(GEO_PORTS), thread_name_prefix="leshy-block-checkhost") as pool:
-            futures = {pool.submit(self._check_host_port, target, port, nodes): port for port in GEO_PORTS}
+        with ThreadPoolExecutor(max_workers=len(ports), thread_name_prefix="leshy-block-checkhost") as pool:
+            futures = {pool.submit(self._check_host_port, target, port, nodes): port for port in ports}
             for future in as_completed(futures):
                 observations.extend(future.result())
         return tuple(sorted(observations, key=lambda item: (item.port, item.country_code, item.node)))
@@ -564,6 +565,7 @@ class NetworkBlockingChecker:
         remote: tuple[TcpObservation, ...],
         chebur: CheburcheckEvidence,
         probe: CheburProbeSummary | None = None,
+        expected_ports: tuple[int, ...] = GEO_PORTS,
     ) -> BlockingAssessment:
         probe = probe or CheburProbeSummary(ok=False, error="Динамический probe не выполнялся")
         profile, service_ports = NetworkBlockingChecker._service_profile(local, remote)
@@ -579,17 +581,17 @@ class NetworkBlockingChecker:
             for item in probe.observations
         ) and any("ok" in item.verdicts for item in probe.observations)
 
-        ports_to_assess = tuple(dict.fromkeys((*service_ports, *GEO_PORTS)))
+        ports_to_assess = tuple(dict.fromkeys((*service_ports, *expected_ports)))
         local_timeouts = any(item.port in ports_to_assess and item.status == "timeout" for item in local)
         # Check-Host is finished only after BOTH requested ports have actual
         # node-level responses. A pending node / service failure is not "timeout".
         check_host_complete = (
             bool(remote)
-            and all(any(item.port == port and item.node for item in remote) for port in DEFAULT_PORTS)
+            and all(any(item.port == port and item.node for item in remote) for port in expected_ports)
             and all(
                 item.status != "pending"
                 and not (item.status == "error" and "Ошибка сервиса Check-Host" in item.error)
-                for item in remote if item.port in DEFAULT_PORTS
+                for item in remote if item.port in expected_ports
             )
         )
         ru_timeout_ports = {
@@ -597,7 +599,7 @@ class NetworkBlockingChecker:
             if item.country_code.lower() == "ru" and item.status == "timeout"
         } if check_host_complete else set()
         matched_ports = tuple(
-            port for port in GEO_PORTS
+            port for port in expected_ports
             if port in ru_timeout_ports
             and any(item.port == port and item.status == "timeout" for item in local)
             and any(
@@ -756,9 +758,10 @@ class NetworkBlockingChecker:
             check_host_complete=check_host_complete,
         )
 
-    def check(self, target: str) -> BlockingAssessment:
+    def check(self, target: str, *, include_web: bool = False) -> BlockingAssessment:
         normalized = self.normalize_target(target)
-        event("network_blocking_check_started", target=normalized, ports=list(GEO_PORTS))
+        expected_ports = GEO_PORTS + (WEB_PORTS if include_web else ())
+        event("network_blocking_check_started", target=normalized, ports=list(expected_ports))
 
         # Stage 1: identify *observable services*, then infer an OS with
         # explicitly limited confidence. Never equate SSH=Linux or RDP=Windows.
@@ -767,6 +770,7 @@ class NetworkBlockingChecker:
             fingerprint = collect_service_fingerprint(
                 normalized, [asdict(item) for item in initial_local],
                 timeout=min(self.local_timeout_seconds, 2.0),
+                include_web=include_web,
             )
         except Exception as exc:
             problem("network_os_fingerprint_failed", str(exc), target=normalized)
@@ -792,13 +796,16 @@ class NetworkBlockingChecker:
             return evidence, self._chebur_probe(evidence.query_id)
 
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="leshy-blocking") as pool:
-            remote_future = pool.submit(self._check_host, normalized)
+            remote_future = (
+                pool.submit(self._check_host, normalized, expected_ports)
+                if include_web else pool.submit(self._check_host, normalized)
+            )
             chebur_future = pool.submit(cheburcheck_pipeline)
             remote = remote_future.result()
             chebur, probe = chebur_future.result()
 
         result = replace(
-            self._assessment(normalized, local, remote, chebur, probe),
+            self._assessment(normalized, local, remote, chebur, probe, expected_ports),
             os_fingerprint=fingerprint,
         )
         receipts = [
@@ -872,7 +879,7 @@ class NetworkBlockingChecker:
     def _port_results(result: BlockingAssessment) -> dict[int, dict[str, Any]]:
         """Always surface both port probes and remote country results."""
         data: dict[int, dict[str, Any]] = {}
-        for port in (*GEO_PORTS, 445):
+        for port in sorted({*GEO_PORTS, 445, *(item.port for item in result.local), *(item.port for item in result.remote)}):
             local = next((item for item in result.local if item.port == port), None)
             remote = [item for item in result.remote if item.port == port]
             data[port] = {
@@ -980,7 +987,7 @@ class NetworkBlockingChecker:
         else:
             lines.append("Cheburcheck Probe: результат отсутствует")
 
-        for port in GEO_PORTS:
+        for port in sorted({*GEO_PORTS, *(item.port for item in result.remote)}):
             observations = [item for item in result.remote if item.port == port]
             if not observations:
                 lines.append(
@@ -1041,7 +1048,15 @@ class NetworkBlockingModule:
         target = str(request.metadata.get("target") or "").strip() or self.checker.extract_target(request.text)
         if not target:
             return ModuleResponse(handled=False)
-        result = self.checker.check(target)
+        lower_request = request.text.lower().replace("ё", "е")
+        include_web = (
+            "http://" in lower_request or "https://" in lower_request
+            or any(marker in lower_request for marker in (
+                "сайт", "веб", "http", "https", "website", "web-сервер",
+            ))
+            or bool(request.metadata.get("include_web"))
+        )
+        result = self.checker.check(target, include_web=include_web)
         return ModuleResponse(
             handled=True,
             text=self.checker.format(result),
@@ -1050,7 +1065,7 @@ class NetworkBlockingModule:
                 "target": result.target,
                 "profile": result.profile,
                 "service_ports": list(result.service_ports),
-                "tested_ports": sorted({item.port for item in result.local} | set(GEO_PORTS)),
+                "tested_ports": sorted({item.port for item in result.local} | {item.port for item in result.remote}),
                 "os_fingerprint": result.os_fingerprint,
                 "os_hypothesis": (
                     f"{result.os_fingerprint.get('os_family')} (уверенность: {result.os_fingerprint.get('confidence')})"
