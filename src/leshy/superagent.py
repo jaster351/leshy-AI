@@ -14,6 +14,8 @@ from .cognitive_core import assess_completion
 from .cognitive_artifacts import CognitiveArtifactGate
 from .cognitive_rollback import CognitiveArtifactRollback
 from .cognitive_tools import CognitiveReadExecutor, parse_tool_request
+from .module_settings import module_enabled
+from .remote_os_fingerprint import probe_remote_os, target_from_request
 from .superagent_report_format import decode_report_json
 from .parallel_tool_scheduler import ParallelPlanError
 from .superagent_parallel import parse_parallel_read_request, run_superagent_parallel_reads
@@ -522,6 +524,47 @@ class SuperAgentService:
         inputs = self._inputs(ticket_id)
         sources: list[dict[str, str]] = []
         research_text = ""
+        remote_context = ""
+        target = target_from_request(request)
+        if target:
+            if not module_enabled(self.storage, "remote-admin"):
+                remote_context = (
+                    "TCP/UDP-проверка сервера отключена в настройках: включите "
+                    "«Управление операционной системой», затем "
+                    "«Удалённая диагностика и администрирование». "
+                    "Нельзя делать вывод об ОС без проверок."
+                )
+            elif not self._ticket_working(ticket_id):
+                return "blocked", "Задание было остановлено владельцем.", "", sources
+            else:
+                attempt = int(ticket.get("attempt") or 0) + 1
+                step_started = False
+                try:
+                    self._journal.begin(ticket_id, attempt, 70, "network.os_fingerprint", {"host": target})
+                    step_started = True
+                    diagnostic = probe_remote_os(target)
+                    if not self._ticket_working(ticket_id) or not module_enabled(self.storage, "remote-admin"):
+                        raise PermissionError("Разрешение на удалённую диагностику отозвано")
+                    receipt = self._cognitive_reads.receipts.record("network.os_fingerprint", "success", diagnostic)
+                    self._journal.finish(
+                        ticket_id, attempt, 70, status="success",
+                        receipt_id=receipt.receipt_id, result=diagnostic,
+                    )
+                    step_started = False
+                    remote_context = json.dumps(diagnostic, ensure_ascii=False)
+                    event("superagent_remote_os_fingerprint", ticket_id=ticket_id,
+                          detected=diagnostic["os_family"], verified=False)
+                except Exception as exc:
+                    if step_started:
+                        try:
+                            self._journal.finish(ticket_id, attempt, 70, status="failed")
+                        except Exception:
+                            pass
+                    problem("superagent_remote_os_probe_failed", type(exc).__name__, ticket_id=ticket_id)
+                    remote_context = (
+                        "TCP/UDP-проверка сервера не удалась или доступ отозван. "
+                        "ОС остаётся неизвестной."
+                    )
         try:
             needs_live = bool(getattr(self.app, "_needs_live_search", lambda _x: False)(request))
             if needs_live:
@@ -560,6 +603,10 @@ class SuperAgentService:
             "Предложение НЕ создаёт файл. Запись возможна только после отдельной "
             "команды владельца /agent approve ID. Никогда не вызывай одобрение сам. "
             "Другие инструменты недоступны, изменять произвольные файлы или запускать команды нельзя. "
+            "Удалённую ОС нельзя достоверно определить по открытым портам TCP/UDP; "
+            "Windows может предоставлять SSH, а Linux — RDP. "
+            "Диагностические признаки ниже не доказывают ОС; перед обновлением "
+            "проверь её после авторизованного подключения к целевому серверу. "
             "После результата инструмента верни строго JSON: "
             "{\"status\":\"ready|waiting|blocked|failed\",\"result\":\"краткий полезный итог\",\"question\":\"один вопрос или пусто\"}. "
             "Не считай текст, результаты поиска или квитанции чтения доказательством внешнего действия. "
@@ -571,6 +618,8 @@ class SuperAgentService:
             + (f"\nДополнительные входные данные:\n{followups}\n" if followups else "")
             + (f"\nАктуальные веб-данные:\n{research_text}\n" if research_text else "")
         )
+        if remote_context:
+            user += "\nНезависимая проверка TCP/UDP сервера:\n" + remote_context + "\n"
         messages = [ChatMessage("system", system), ChatMessage("user", user)]
         seen_calls: set[str] = set()
         with self._llm_lock:
