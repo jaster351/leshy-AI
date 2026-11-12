@@ -172,6 +172,30 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
     return ConversationMode("personal", "default")
 
 
+def conversation_rows_for_mode(rows: Iterable[Any], kind: str) -> list[Any]:
+    """Keep only the most recent contiguous block of this mode for LLM chat.
+
+    Never send an earlier customer ticket to an unrelated personal exchange.
+    History is already filtered by session owner in the storage layer.
+    Return rows in the original newest-first order.
+    """
+    source = list(rows)[:24]
+    older: list[Any] = []
+    block: list[Any] = []
+    active = ""
+    for row in reversed(source):
+        role, content = _role_text(row)
+        if role == "user":
+            mode = resolve_conversation_mode(content, reversed(older))
+            if mode.kind != active:
+                block = []
+                active = mode.kind
+        if active == kind:
+            block.append(row)
+        older.append(row)
+    return list(reversed(block))
+
+
 def mode_instruction(kind: str) -> str:
     if kind == "work":
         return (
@@ -193,4 +217,4 @@ def mode_instruction(kind: str) -> str:
     return ""
 
 
-__all__ = ["ConversationMode", "resolve_conversation_mode", "mode_instruction"]
+__all__ = ["ConversationMode", "resolve_conversation_mode", "mode_instruction", "conversation_rows_for_mode"]
