@@ -308,9 +308,10 @@ class KnowledgeSyncService:
                 for peer in peers:
                     if self._stop.is_set():
                         break
-                    cursor = self._cursor_for(peer.node_id)
-                    stage = "pull"
+                    stage = "read_cursor"
                     try:
+                        cursor = self._cursor_for(peer.node_id)
+                        stage = "pull"
                         page = self._pull_peer(peer, cursor)
                         stage = "cursor"
                         next_cursor = max(0, int(page.get("cursor") or 0))
@@ -326,7 +327,7 @@ class KnowledgeSyncService:
                         if received:
                             event("cluster_knowledge_sync_imported", received=received, peer=peer.node_id[:12])
                     except Exception as exc:
-                        self._patch(state="error", last_error=type(exc).__name__ + ": " + str(exc)[:150])
+                        self._patch(state="error", last_error=type(exc).__name__ + " (" + stage + ")")
                         # Log only structured error types/codes: exception text may contain URLs or secrets.
                         reason = getattr(exc, "reason", None)
                         problem(
