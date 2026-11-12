@@ -12,6 +12,8 @@ from urllib import error, parse, request
 
 from .knowledge import KnowledgeBase
 from .storage import Storage, utcnow
+from .web_text_encoding import decode_web_text
+from .text_integrity import validate_knowledge_text
 from .version import VERSION
 
 
@@ -196,14 +198,16 @@ class SafeWebFetcher:
             raise RuntimeError(f"Не удалось загрузить {url}: {exc}") from exc
         if len(raw) > self.MAX_BYTES:
             raise ValueError("Страница превышает безопасный лимит")
-        text = raw.decode("utf-8", errors="replace")
+        text = decode_web_text(raw, content_type, html="html" in content_type)
         if "html" in content_type:
             parser = _TextExtractor()
             parser.feed(text)
             text = parser.text()
         else:
             text = html.unescape(text)
-        return " ".join(text.split())[:200_000]
+        text = " ".join(text.split())[:200_000]
+        validate_knowledge_text(text, field="fetched_page")
+        return text
 
 
 PROMPT_INJECTION_MARKERS = (
