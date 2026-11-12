@@ -48,16 +48,22 @@ class ClusterPersonalBoundaryTests(unittest.TestCase):
             self.cluster.handle_remote_task(self.task(origin="other-node"), self.headers)
         self.cluster._execute_local.assert_not_called()
 
+    def test_other_peer_cannot_claim_this_node_is_the_origin(self):
+        spoof = self.task(origin="local-node")
+        with self.assertRaises(PermissionError):
+            self.cluster.handle_remote_task(spoof, {"X-Leshy-Cluster-Node": "local-node"})
+        self.cluster._execute_local.assert_not_called()
+
     def test_public_knowledge_results_strip_sensitive_metadata(self):
         knowledge = Mock()
         knowledge.search.return_value = [
             {"topic": "private", "claim": "Home details", "source_url": "file:///home/a",
-             "metadata_json": "TOKEN-NEVER-EXPORT"},
+             "metadata_json": "TOKEN-NEVER-EXPORT", "source_type": "material-local-text"},
             {"topic": "Tech", "claim": "A public technical guide",
              "source_url": "https://example.org/reference", "source_title": "Guide",
-             "metadata_json": "SECRET-METADATA"},
+             "metadata_json": "SECRET-METADATA", "source_type": "web"},
             {"topic": "Contact", "claim": "Call support@example.org",
-             "source_url": "https://example.org/contact", "source_title": "Contact"},
+             "source_url": "https://example.org/contact", "source_title": "Contact", "source_type": "web"},
         ]
         self.cluster.app = SimpleNamespace(knowledge=knowledge)
         remote = ClusterTask.create(
