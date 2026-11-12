@@ -71,7 +71,9 @@ class TelegramVisionTests(unittest.TestCase):
         class Opener:
             def open(self, req, timeout):
                 payloads.append(json.loads(req.data))
-                return Response(b'{"choices":[{"message":{"content":"На фото тест"}}]}')
+                return Response(json.dumps({
+                    "choices": [{"message": {"content": "На фото тест"}}]
+                }, ensure_ascii=False).encode("utf-8"))
         def download(req, timeout):
             self.assertEqual(req.full_url.split("/file/bot")[0], "https://api.telegram.org")
             return Response(b"\xff\xd8\xffDATA")
