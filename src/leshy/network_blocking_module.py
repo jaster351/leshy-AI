@@ -12,10 +12,12 @@ from urllib import parse, request
 
 from .diagnostics import event, problem
 from .modules import ModuleManifest, ModuleRequest, ModuleResponse
+from .network_service_fingerprint import collect_service_fingerprint
 from .verified_tool_receipts import VerifiedToolReceipts, ToolReceipt
 
 
 DEFAULT_PORTS = (22, 3389)
+GEO_PORTS = (22, 80, 443, 3389)
 CHEBURCHECK_ENDPOINT = "https://cheburcheck.ru/api/v1/check"
 CHEBURCHECK_PROBE_ENDPOINT = "https://cheburcheck.ru/api/v1/probe/{query_id}"
 CHECK_HOST_NODES_ENDPOINT = "https://check-host.net/nodes/hosts"
@@ -96,6 +98,7 @@ class BlockingAssessment:
     signals_met: int = 0
     three_signal_confirmed: bool = False
     check_host_complete: bool = False
+    os_fingerprint: dict[str, Any] = field(default_factory=dict)
 
 
 class NetworkBlockingChecker:
@@ -529,13 +532,13 @@ class NetworkBlockingChecker:
                     source="check-host", port=port, status="error",
                     error=f"Не удалось получить список узлов Check-Host: {type(exc).__name__}",
                 )
-                for port in DEFAULT_PORTS
+                for port in GEO_PORTS
             )
         if not nodes:
             return ()
         observations: list[TcpObservation] = []
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="leshy-block-checkhost") as pool:
-            futures = {pool.submit(self._check_host_port, target, port, nodes): port for port in DEFAULT_PORTS}
+        with ThreadPoolExecutor(max_workers=len(GEO_PORTS), thread_name_prefix="leshy-block-checkhost") as pool:
+            futures = {pool.submit(self._check_host_port, target, port, nodes): port for port in GEO_PORTS}
             for future in as_completed(futures):
                 observations.extend(future.result())
         return tuple(sorted(observations, key=lambda item: (item.port, item.country_code, item.node)))
@@ -576,7 +579,7 @@ class NetworkBlockingChecker:
             for item in probe.observations
         ) and any("ok" in item.verdicts for item in probe.observations)
 
-        ports_to_assess = service_ports or DEFAULT_PORTS
+        ports_to_assess = tuple(dict.fromkeys((*service_ports, *GEO_PORTS)))
         local_timeouts = any(item.port in ports_to_assess and item.status == "timeout" for item in local)
         # Check-Host is finished only after BOTH requested ports have actual
         # node-level responses. A pending node / service failure is not "timeout".
@@ -586,7 +589,7 @@ class NetworkBlockingChecker:
             and all(
                 item.status != "pending"
                 and not (item.status == "error" and "Ошибка сервиса Check-Host" in item.error)
-                for item in remote
+                for item in remote if item.port in DEFAULT_PORTS
             )
         )
         ru_timeout_ports = {
@@ -751,25 +754,54 @@ class NetworkBlockingChecker:
 
     def check(self, target: str) -> BlockingAssessment:
         normalized = self.normalize_target(target)
-        event("network_blocking_check_started", target=normalized, ports=list(DEFAULT_PORTS))
+        event("network_blocking_check_started", target=normalized, ports=list(GEO_PORTS))
 
-        # Three independent instruments run concurrently; Cheburcheck's static
-        # lookup must finish before its own dynamic SSE check can begin.
+        # Stage 1: identify *observable services*, then infer an OS with
+        # explicitly limited confidence. Never equate SSH=Linux or RDP=Windows.
+        initial_local = self._check_local_ports(normalized)
+        try:
+            fingerprint = collect_service_fingerprint(
+                normalized, [asdict(item) for item in initial_local],
+                timeout=min(self.local_timeout_seconds, 2.0),
+            )
+        except Exception as exc:
+            problem("network_os_fingerprint_failed", str(exc), target=normalized)
+            fingerprint = {
+                "os_family": "не определена", "confidence": "отсутствует",
+                "evidence": [f"Проверка баннеров недоступна: {type(exc).__name__}"],
+                "ports": [], "completed": False,
+            }
+        extra_local = tuple(
+            TcpObservation(
+                "local", int(item["port"]), str(item["status"]),
+                latency_ms=item.get("latency_ms"),
+                error=str(item.get("detail") or "")[:180],
+            )
+            for item in fingerprint.get("ports", [])
+            if int(item.get("port") or 0) in (80, 443, 445)
+        )
+        local = tuple(sorted((*initial_local, *extra_local), key=lambda item: item.port))
+
+        # Stage 2: independent Russian/foreign vantage points + Cheburcheck.
         def cheburcheck_pipeline() -> tuple[CheburcheckEvidence, CheburProbeSummary]:
             evidence = self._cheburcheck(normalized)
             return evidence, self._chebur_probe(evidence.query_id)
 
-        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="leshy-blocking") as pool:
-            local_future = pool.submit(self._check_local_ports, normalized)
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="leshy-blocking") as pool:
             remote_future = pool.submit(self._check_host, normalized)
             chebur_future = pool.submit(cheburcheck_pipeline)
-            local = local_future.result()
             remote = remote_future.result()
             chebur, probe = chebur_future.result()
 
-        result = self._assessment(normalized, local, remote, chebur, probe)
+        result = replace(
+            self._assessment(normalized, local, remote, chebur, probe),
+            os_fingerprint=fingerprint,
+        )
         receipts = [
-            self._receipts.record("tcp.connect", "success" if local else "error", [asdict(x) for x in local]),
+            self._receipts.record(
+                "tcp.connect", "success" if local else "error",
+                {"tcp": [asdict(x) for x in local], "os_fingerprint": fingerprint},
+            ),
             self._receipts.record("cheburcheck.check", "success" if chebur.ok else "error", asdict(chebur)),
             self._receipts.record(
                 "check_host.tcp",
@@ -788,6 +820,8 @@ class NetworkBlockingChecker:
             "network_blocking_check_finished",
             target=normalized,
             profile=result.profile,
+            detected_os=fingerprint.get("os_family", ""),
+            os_confidence=fingerprint.get("confidence", ""),
             tspu_probability=result.tspu_probability,
             availability_percent=result.availability_percent,
             chebur_blocked=result.cheburcheck.blocked,
@@ -874,7 +908,12 @@ class NetworkBlockingChecker:
             f"Совпавшие признаки: {result.signals_met}/3. Полный Check-Host: {'да' if result.check_host_complete else 'нет'}.",
             f"Профиль по доступным портам (не подтверждение ОС): {result.profile}",
             "Проверка сервисов: SSH TCP/22 и RDP TCP/3389 — оба порта тестируются независимо.",
-            f"Предположение об ОС: {NetworkBlockingChecker._os_hypothesis(result.local, result.remote)[0]}",
+            (
+                f"Этап 1 — ОС по ответам служб: {result.os_fingerprint['os_family']} "
+                f"(уверенность: {result.os_fingerprint['confidence']}; не подтверждение ОС)."
+                if result.os_fingerprint
+                else f"Предположение об ОС: {NetworkBlockingChecker._os_hypothesis(result.local, result.remote)[0]}"
+            ),
         ]
         for port, label in ((22, "SSH/Linux"), (3389, "RDP/Windows")):
             item = local_by_port.get(port)
@@ -885,6 +924,22 @@ class NetworkBlockingChecker:
                 lines.append(f"Локально TCP/{port} ({label}): доступен{latency}")
             else:
                 lines.append(f"Локально TCP/{port} ({label}): {item.status}" + (f" ({item.error[:180]})" if item.error else ""))
+
+        if result.os_fingerprint:
+            for row in result.os_fingerprint.get("ports", []):
+                port = int(row.get("port") or 0)
+                if port in (22, 3389):
+                    banner = str(row.get("banner") or "")
+                    if banner:
+                        lines.append(f"Этап 1 — TCP/{port}: баннер {banner[:120]}")
+                else:
+                    lines.append(
+                        f"Этап 1 — TCP/{port} ({row.get('service') or 'TCP'}): "
+                        f"{row.get('status') or 'unknown'}"
+                        + (f"; {str(row.get('detail'))[:100]}" if row.get("detail") else "")
+                        + (f"; Server: {str(row.get('banner'))[:100]}" if row.get("banner") else "")
+                    )
+            lines.append("Обоснование ОС: " + "; ".join(result.os_fingerprint.get("evidence", [])))
 
         chebur = result.cheburcheck
         if chebur.ok:
@@ -921,7 +976,7 @@ class NetworkBlockingChecker:
         else:
             lines.append("Cheburcheck Probe: результат отсутствует")
 
-        for port in DEFAULT_PORTS:
+        for port in GEO_PORTS:
             observations = [item for item in result.remote if item.port == port]
             if not observations:
                 lines.append(
@@ -968,8 +1023,8 @@ class NetworkBlockingModule:
     manifest: ModuleManifest = field(
         default_factory=lambda: ModuleManifest(
             name="network-blocking",
-            version="0.2.0",
-            description="TCP/22+3389, Cheburcheck static+distributed Probe и Check-Host для диагностики блокировок ТСПУ",
+            version="0.3.0",
+            description="OS service fingerprint, TCP/22/80/443/3389, Cheburcheck Probe и Check-Host (РФ/зарубежье) для диагностики ТСПУ",
             priority=850,
         )
     )
@@ -991,9 +1046,17 @@ class NetworkBlockingModule:
                 "target": result.target,
                 "profile": result.profile,
                 "service_ports": list(result.service_ports),
-                "tested_ports": list(DEFAULT_PORTS),
-                "os_hypothesis": self.checker._os_hypothesis(result.local, result.remote)[0],
-                "os_hypothesis_status": self.checker._os_hypothesis(result.local, result.remote)[1],
+                "tested_ports": sorted({item.port for item in result.local} | set(GEO_PORTS)),
+                "os_fingerprint": result.os_fingerprint,
+                "os_hypothesis": (
+                    f"{result.os_fingerprint.get('os_family')} (уверенность: {result.os_fingerprint.get('confidence')})"
+                    if result.os_fingerprint
+                    else self.checker._os_hypothesis(result.local, result.remote)[0]
+                ),
+                "os_hypothesis_status": (
+                    "fingerprinted_service_hint" if result.os_fingerprint
+                    else self.checker._os_hypothesis(result.local, result.remote)[1]
+                ),
                 "port_results": self.checker._port_results(result),
                 "tspu_probability": result.tspu_probability,
                 "diagnostic_score": result.tspu_probability,
