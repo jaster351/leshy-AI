@@ -117,10 +117,26 @@ class BrowserApprovalExecutionTests(unittest.TestCase):
         result = agent.execute_approved(self.action, broker=self.broker,
                                         approval_id=grant.approval_id,
                                         owner_id="owner-a", session_id="session-a")
-        self.assertEqual(result.status, "unavailable")
+        self.assertEqual(result.status, "uncertain")
         self.assertEqual(len(first.actions), 1)
         self.assertEqual(second.actions, [])
 
+
+    def test_write_timeout_is_uncertain_without_replay(self):
+        class TimeoutAdapter(RecordingAdapter):
+            def execute(self, action):
+                self.actions.append(action)
+                return BrowserActionResult("timeout", "response lost")
+
+        first, second = TimeoutAdapter(), RecordingAdapter()
+        agent = BrowserAgent([first, second])
+        grant = self.broker.request("owner-a", self.action, session_id="session-a")
+        result = agent.execute_approved(
+            self.action, broker=self.broker, approval_id=grant.approval_id,
+            owner_id="owner-a", session_id="session-a")
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(len(first.actions), 1)
+        self.assertEqual(second.actions, [])
 
 
 if __name__ == "__main__":
