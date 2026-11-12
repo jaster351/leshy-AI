@@ -409,6 +409,7 @@ class RealtimeChatManager:
             except Exception:
                 pass
 
+        event("conversation_mode_decided", mode=mode.kind, reason=mode.reason)
         # Support drafts are buffered and validated before displaying anything
         # to Web/Telegram, unlike ordinary personal and technical conversations.
         if mode.kind == "support_draft":
