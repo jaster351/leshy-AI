@@ -4,11 +4,12 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import zlib
 from unittest.mock import patch
 from zipfile import ZipFile
 
 from cryptography.fernet import Fernet
-from leshy.private_support_bootstrap import bootstrap_private_support, support_key
+from leshy.private_support_bootstrap import bootstrap_private_support, decrypt_support_profile, support_key
 from leshy.provider_support import support_draft_context
 
 
@@ -52,6 +53,26 @@ class PrivateSupportBootstrapTests(unittest.TestCase):
                         "/support скорость", brain_dir=root / "brain"
                     )
                     self.assertNotIn("Сверить актуальный договор.", response)
+
+    def test_bundled_compressed_ciphertext_uses_only_local_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            public = root / "resources"
+            public.mkdir()
+            key = Fernet.generate_key()
+            payload = json.dumps({
+                "facts": [{"cues": ["тариф"], "text": "Договор уточняется в биллинге."}]
+            }, ensure_ascii=False).encode("utf-8")
+            ciphertext = Fernet(key).encrypt(zlib.compress(payload))
+            (public / "support_reference.enc").write_bytes(ciphertext)
+            self.assertIsNotNone(decrypt_support_profile(ciphertext, key))
+            self.assertIsNone(decrypt_support_profile(ciphertext, Fernet.generate_key()))
+            brain = root / "brain"
+            with patch.dict(os.environ, {"LESHY_SUPPORT_PROFILE_KEY": key.decode()}):
+                self.assertTrue(bootstrap_private_support(root, brain))
+                self.assertIn("Договор уточняется в биллинге.",
+                              support_draft_context("/support тариф", brain_dir=brain))
+            self.assertFalse((brain / "private" / "support.key.dpapi").exists())
 
     def test_invalid_bundle_is_not_accepted(self):
         with tempfile.TemporaryDirectory() as tmp:
