@@ -15,7 +15,7 @@ from .llm import ChatMessage
 from .capability_registry import is_self_capability_question
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply, work_reference_context
-from .conversation_mode import resolve_conversation_mode, mode_instruction
+from .conversation_mode import resolve_conversation_mode, mode_instruction, conversation_rows_for_mode
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
@@ -325,7 +325,8 @@ class RealtimeChatManager:
                 problem("chat_stream_search_failed", str(exc), query=message[:500])
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + str(exc)))
 
-        history = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
+        isolated_rows = conversation_rows_for_mode(rows, mode.kind)
+        history = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
         return context + history, sources, search_attempted
 
     def _stream_os_action(
