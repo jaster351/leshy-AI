@@ -60,6 +60,7 @@ class LeshyApp:
         self.storage = Storage(self.settings.database_path)
         self.learning = LearningControl(self.storage, self.settings.idle_learning_enabled)
         self.knowledge = KnowledgeBase(self.storage, self.settings.min_trusted_confidence)
+        self.knowledge.quarantine_corrupted()
         self.research = ResearchEngine(
             self.storage,
             self.knowledge,
