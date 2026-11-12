@@ -63,7 +63,9 @@ def decode_web_text(payload: bytes, content_type: str = "", *, html: bool = Fals
         candidates.append(("utf-16", True))
     candidates.extend((encoding, True) for encoding in declared)
     candidates.append(("utf-8-sig", True))
-    candidates.extend((encoding, False) for encoding in ("cp1251", "koi8-r"))
+    # An undeclared KOI8-R guess can turn damaged bytes into convincing nonsense.
+    # KOI8-R remains supported when explicitly announced by HTTP/meta charset.
+    candidates.append(("cp1251", False))
     tried = set()
     for encoding, declared_or_utf8 in candidates:
         if encoding.lower() in tried:
