@@ -116,7 +116,7 @@ const contextKey='leshy.ui.context';
 let sessionId=localStorage.getItem(sessionKey)||'';
 let uiMode=localStorage.getItem(uiModeKey)||(sessionId?'full':'minimal');
 let currentSection=localStorage.getItem(uiSectionKey)||'overview';
-const titles={overview:['Обзор','состояние Лешего'],chat:['Чат','диалог и история'],knowledge:['Знания','база знаний и память'],learning:['Обучение','управляемое самообучение'],tasks:['Задачи','локальный план работы'],tools:['Инструменты','подключённые возможности'],system:['Система','runtime и ускорители'],settings:['Настройки','модель, Telegram и данные'],logs:['Логи','диагностика']};
+const titles={overview:['Обзор','состояние Лешего'],chat:['Чат','диалог и история'],knowledge:['Знания','база знаний и память'],learning:['Обучение','управляемое самообучение'],tasks:['Задачи','локальный план работы'],superagent:['SuperAgent','автономные задачи и взаимодействие'],tools:['Инструменты','подключённые возможности'],system:['Система','runtime и ускорители'],settings:['Настройки','модель, Telegram и данные'],logs:['Логи','диагностика']};
 async function api(path,options={}){const res=await fetch(path,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const data=await res.json().catch(()=>({error:'Некорректный ответ сервера'}));if(!res.ok)throw new Error(data.error||('HTTP '+res.status));return data}
 function engage(save=true){document.body.classList.add('full');uiMode='full';if(save)localStorage.setItem(uiModeKey,'full')}
 function setMinimal(){document.body.classList.remove('full');uiMode='minimal';localStorage.setItem(uiModeKey,'minimal');$('contextPanel').classList.remove('open')}
