@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T00:56:14Z",
+  "updated_at": "2026-11-12T01:57:32Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T00:56:14Z",
-    "previous_issue_at": "2026-11-12T00:04:41Z",
+    "searched_at": "2026-11-12T01:57:32Z",
+    "previous_issue_at": "2026-11-12T00:56:14Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [],
-    "note": "Свежие списки cs.AI/cs.IR и целевой поиск по памяти, provenance, poisoning, откату и забыванию проверены; значимых новых работ или существенных редакций после предыдущего выпуска не подтверждено. MemoryDojo уже присутствует в истории владельца и не повторён."
+    "note": "Свежие списки cs.AI/cs.IR и целевой поиск по памяти, provenance, poisoning, отзыву и откату проверены; новых значимых работ или существенных редакций после прошлого выпуска не подтверждено. MemoryDojo не повторён."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -291,24 +291,31 @@
       "discovery_lookback_days": 30,
       "newly_included_ids": [],
       "note": "Свежие списки cs.AI/cs.IR и целевой поиск по памяти, provenance, poisoning, откату и забыванию проверены; значимых новых работ или существенных редакций после предыдущего выпуска не подтверждено. MemoryDojo уже присутствует в истории владельца и не повторён."
+    },
+    {
+      "searched_at": "2026-11-12T01:57:32Z",
+      "previous_issue_at": "2026-11-12T00:56:14Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [],
+      "note": "Свежие списки cs.AI/cs.IR и целевой поиск по памяти, provenance, poisoning, отзыву и откату проверены; новых значимых работ или существенных редакций после прошлого выпуска не подтверждено. MemoryDojo не повторён."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-12T00:56:14Z",
-    "incremental_since": "2026-11-12T00:04:41Z",
+    "completed_at": "2026-11-12T01:57:32Z",
+    "incremental_since": "2026-11-12T00:56:14Z",
     "additional_lookback_start": "2026-10-13",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
     "first_time_coverage_ids": [],
     "query_topics": [
       "LLM agent memory provenance poisoning RAG November 12 2026",
-      "agent memory forgetting rollback provenance November 2026",
-      "ACL Anthology LLM agent long-term memory poisoning provenance"
+      "agent memory unlearning rollback verification November 2026",
+      "ACL Anthology agent memory provenance source verification poisoning"
     ],
     "opened_primary_urls": [
       "https://arxiv.org/list/cs.AI/new",
       "https://arxiv.org/list/cs.IR/new"
     ],
-    "note": "Новых значимых публикаций или версий после 00:04:41Z не найдено; arXiv:2611.09721 исключён как уже рассмотренный."
+    "note": "Подтверждённых новых публикаций или версий после 00:56:14Z не найдено; уже рассмотренные идентификаторы исключены."
   },
   "pending_primary_reviews": [
     {
