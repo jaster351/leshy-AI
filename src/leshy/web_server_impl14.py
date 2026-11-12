@@ -83,7 +83,10 @@ def make_handler(app, telegram, settings, model_catalog):
                     if len(ids) != 1 or len(ids[0]) > 100:
                         raise ValueError("Некорректный идентификатор")
                     return self._json(HTTPStatus.OK, ticket_details(service, owner, ids[0]))
-                return self._json(HTTPStatus.OK, list_tickets(service, owner))
+                raw_archived = query.get("archived", ["0"])
+                if len(raw_archived) != 1 or raw_archived[0] not in {"0", "1"}:
+                    raise ValueError("Некорректный режим архива")
+                return self._json(HTTPStatus.OK, list_tickets(service, owner, archived=raw_archived[0] == "1"))
             except (KeyError, ValueError, PermissionError) as exc:
                 return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             except Exception as exc:
