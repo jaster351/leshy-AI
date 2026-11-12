@@ -8,6 +8,7 @@ from typing import Any
 from .diagnostics import recent_problems, event
 from .llm import ChatMessage
 from .storage import utcnow
+from .text_integrity import corrupted_knowledge_row
 
 
 class DashboardService:
@@ -136,10 +137,11 @@ class DashboardService:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT id,topic,claim,source_url,source_title,captured_at,verified_at,confidence,status FROM knowledge ORDER BY id DESC LIMIT ?",
+                    "SELECT id,topic,claim,source_url,source_title,captured_at,verified_at,confidence,status FROM knowledge WHERE status IN ('candidate','trusted','conflict') ORDER BY id DESC LIMIT ?",
                     (self._limit(limit, 100, 300),),
                 ).fetchall()
-        return [dict(row) for row in rows]
+        items = [dict(row) for row in rows]
+        return [item for item in items if status in {"rejected", "stale"} or not corrupted_knowledge_row(item)]
 
     def research_tasks(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.storage.connection() as conn:
