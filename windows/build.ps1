@@ -159,6 +159,7 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --collect-all pyautogui `
   --collect-all pypdf `
   --add-data "web;web" `
+  --add-data "resources;resources" `
   --add-data "VERSION;." `
   windows/launcher.py
 
