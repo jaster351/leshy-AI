@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-11-12T19:01:04.475444+00:00",
+  "source_rows": 152,
+  "knowledge_candidates": 151,
+  "research_candidates_checked": 2,
+  "new_unique_records": 151,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated_versions": 0,
+  "retracted_versions": 0,
+  "coalesced_source_rows": 1,
+  "jsonl_bytes": 267068,
+  "corpus_total": 54117,
+  "source_range": "IANA full 8-bit protocol space 0..255; unassigned range retained as one record",
+  "cursor": {
+    "last_value": 255,
+    "remaining": 0,
+    "status": "complete",
+    "next": "another structured registry/domain"
+  },
+  "research": {
+    "period": "2026-11-12 since last successful check, with indexing lookback",
+    "results": "No eligible new study confirmed. MemForm latest v2 2026-11-05; MIRAGE latest v5 2026-11-10; no later revision or substantial new-version result established, so not presented as new.",
+    "checked": [
+      "https://arxiv.org/abs/2610.14431",
+      "https://arxiv.org/abs/2512.08289"
+    ]
+  },
+  "limitations": "Whole chosen registry processed; number of useful entries determines volume. Further domains require separate source/schema/license validation; NIST SRD remains pending.",
+  "local_import": "not observed"
+}

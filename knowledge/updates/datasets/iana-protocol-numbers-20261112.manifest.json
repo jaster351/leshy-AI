@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "source": {
+    "url": "https://www.iana.org/assignments/protocol-numbers/protocol-numbers-1.csv",
+    "checked_at": "2026-11-12T18:59:31.954871+00:00",
+    "sha256": "ba37fe0a4e01e45fe172f212ade37b908f4d56bbab0be9a97423bcfb9b8271a9"
+  },
+  "snapshot": "knowledge/updates/datasets/iana-protocol-numbers-20261112.csv",
+  "source_version": "2026-03-09",
+  "license": "CC0-1.0",
+  "license_url": "https://www.iana.org/help/licensing-terms",
+  "source_records": 152,
+  "description": "All IANA IP Protocol / IPv6 Next Header numbers, preserving reserved/unassigned ranges and deprecated labels; 253 and 254 grouped because their designations and references are identical.",
+  "generator": "knowledge/updates/tools/generate_iana_protocol_numbers.py",
+  "output": {
+    "path": "knowledge/updates/2026-11-12/2358-iana-protocol-numbers.jsonl",
+    "records": 151,
+    "bytes": 267068,
+    "sha256": "e799c47488c89fd38ebf9377cac4af63f429e0c1a53445d51e8e235a080f111c"
+  },
+  "deduplication": {
+    "corpus_rows": 53966,
+    "exact_duplicates": 0,
+    "semantic_duplicates": 0,
+    "coalesced_rows": 1,
+    "method": "All published JSONL versions scanned by normalized ids/claims/canonical keys. Network-related prior claims inspected; no IP-number assignments found. 253 and 254 combined without loss."
+  },
+  "cursor": {
+    "last_value": 255,
+    "remaining": 0,
+    "status": "complete",
+    "next": "another structured registry/domain"
+  }
+}
