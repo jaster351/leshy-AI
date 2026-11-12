@@ -164,7 +164,7 @@
     };
     group('Работа',[['Обзор','overview'],['Задачи','tasks'],['SuperAgent','superagent'],['Знания и обучение','knowledge']]);
     group('Управление',[['Инструменты','tools'],['Система','system'],['Настройки','settings']]);
-    group('Быстрый доступ',[['Обучение','learning'],['Логи','logs'],['Магазин расширений','settings','marketplaceCard']]);
+    group('Быстрый доступ',[['Профиль','settings','ownerIdentityCard'],['Обучение','learning'],['Логи','logs'],['Магазин расширений','settings','marketplaceCard']]);
     return true;
   }
   function install(){
