@@ -39,5 +39,5 @@ class GenericSupportTests(unittest.TestCase):
         import inspect
         import leshy.provider_support as p
         source = inspect.getsource(p).lower()
-        self.assertNotIn("cloud4box", source)
-        self.assertNotIn("contell", source)
+        self.assertNotIn("client_ip_address=", source)
+        self.assertNotIn("api_secret=", source)
