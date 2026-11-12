@@ -209,14 +209,29 @@ class SuperAgentService:
 
     def _recover_interrupted(self) -> None:
         now = utcnow()
+        exhausted = 0
         with self.storage.connection() as conn:
-            rows = conn.execute("SELECT id FROM superagent_tickets WHERE state='working'").fetchall()
+            rows = conn.execute(
+                "SELECT id,attempt FROM superagent_tickets WHERE state='working'"
+            ).fetchall()
             for row in rows:
                 ticket_id = str(row["id"])
-                conn.execute(
-                    "UPDATE superagent_tickets SET state='queued',latest_report=?,next_run_epoch=0,updated_at=? WHERE id=?",
-                    ("Предыдущий запуск был прерван. Продолжаю после восстановления состояния.", now, ticket_id),
-                )
+                if int(row["attempt"] or 0) >= self.max_attempts:
+                    # A repeated crash must not cause an unbounded recovery
+                    # loop; a human can explicitly retry a failed task.
+                    conn.execute(
+                        "UPDATE superagent_tickets SET state='failed',latest_report=?,attention='',"
+                        "next_run_epoch=0,delivered=0,updated_at=? WHERE id=? AND state='working'",
+                        ("Лимит попыток исчерпан после прерванного запуска. "
+                         "Для нового запуска используйте /agent retry.", now, ticket_id),
+                    )
+                    exhausted += 1
+                else:
+                    conn.execute(
+                        "UPDATE superagent_tickets SET state='queued',latest_report=?,next_run_epoch=0,updated_at=? "
+                        "WHERE id=? AND state='working'",
+                        ("Предыдущий запуск был прерван. Продолжаю после восстановления состояния.", now, ticket_id),
+                    )
                 conn.execute(
                     "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome='interrupted',error='host restarted' "
                     "WHERE ticket_id=? AND state='running'",
@@ -231,7 +246,7 @@ class SuperAgentService:
                     (now, ticket_id),
                 )
         if rows:
-            event("superagent_recovered", tickets=len(rows))
+            event("superagent_recovered", tickets=len(rows), exhausted=exhausted)
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
