@@ -670,7 +670,7 @@ class DistributedClusterRuntime:
                 if task.origin_node_id != self.identity.node_id:
                     # Trusted Knowledge is NOT necessarily public. Never export
                     # private local files or unfiltered metadata to cluster peers.
-                    from .cluster_knowledge_sync import _public_source, _safe_public_record
+                    from .cluster_knowledge_sync import _public_source, _safe_public_record, _ALLOWED_SOURCE_TYPES
                     public_items = []
                     for item in rows:
                         if not isinstance(item, dict):
@@ -679,7 +679,8 @@ class DistributedClusterRuntime:
                         topic = str(item.get("topic") or "")
                         source = str(item.get("source_url") or "")
                         title = str(item.get("source_title") or "")
-                        if not (_public_source(source) and
+                        if not (item.get("source_type") in _ALLOWED_SOURCE_TYPES and
+                                _public_source(source) and
                                 _safe_public_record(claim, topic, title, source)):
                             continue
                         public_items.append({
