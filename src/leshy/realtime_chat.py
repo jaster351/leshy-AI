@@ -384,6 +384,53 @@ class RealtimeChatManager:
             )
             return
 
+        # Для сведений об авторах Issues/PR используем только полный GitHub API,
+        # без генерации имён и количества токенами LLM.
+        from .github_facts import is_leshy_repository_audit_request
+        if is_leshy_repository_audit_request(message):
+            rid, cancel = self._register(request_id)
+            sid = ""
+            try:
+                sid, _rows = self._save_user_and_history(message, owner_id, session_id)
+                yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": []})
+                if cancel.is_set():
+                    yield StreamEvent("done", {"request_id": rid, "session_id": sid,
+                                               "answer": "", "sources": [], "stopped": True})
+                    return
+                yield StreamEvent("activity", {
+                    "kind": "web_search", "phase": "searching",
+                    "text": "Получаю фактические сведения из GitHub API…",
+                })
+                github = self.app.github_facts.answer(message)
+                if github is None:
+                    raise RuntimeError("GitHub audit intent unexpectedly missing")
+                if cancel.is_set():
+                    yield StreamEvent("done", {"request_id": rid, "session_id": sid,
+                                               "answer": "", "sources": [], "stopped": True})
+                    return
+                answer = str(github["answer"])
+                sources = list(github["sources"])
+                timestamp = self.app._save_assistant(sid, answer)
+                event("chat_stream_github_facts", request_id=rid,
+                      verified=bool(github["verified"]), receipt_id=github["receipt_id"])
+                for chunk in self._chunk_fallback(answer, 160):
+                    if cancel.is_set():
+                        break
+                    yield StreamEvent("delta", {"text": chunk})
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid,
+                    "answer": answer if not cancel.is_set() else "",
+                    "created_at": timestamp, "sources": sources,
+                    "stopped": bool(cancel.is_set()),
+                })
+            except Exception as exc:
+                problem("chat_stream_github_facts_failed", type(exc).__name__, request_id=rid)
+                yield StreamEvent("error", {"request_id": rid, "session_id": sid,
+                    "error": "Не удалось проверить сведения GitHub"})
+            finally:
+                self._unregister(rid)
+            return
+
         # Мгновенный проверяемый ответ на дату/время; погода через API.
         # Обычные беседы и их быстрый streaming не затрагиваются.
         from .verified_clock import clock_answer, checked_clock_answer
