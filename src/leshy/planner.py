@@ -84,6 +84,7 @@ class Planner:
         )
         messages = [ChatMessage("system", control), *history]
         execution_context = ToolExecutionContext(owner_id=owner_id, session_id=session_id)
+        seen_tool_calls: set[str] = set()
 
         # Детерминированный preflight: для свежих данных и пробела знаний решение
         # искать в интернете принимает не LLM, а политика приложения.
@@ -105,22 +106,35 @@ class Planner:
                 return raw
 
             name = str(decision.get("tool", ""))
-            args = decision.get("arguments") if isinstance(decision.get("arguments"), dict) else {}
+            args = decision.get("arguments", {})
+            if not name or not isinstance(args, dict):
+                return "Некорректный запрос инструмента: требуется имя и объект arguments."
+            signature = json.dumps([name, args], ensure_ascii=False, sort_keys=True)
+            if signature in seen_tool_calls:
+                return (
+                    f"Повторяющийся вызов инструмента «{name}» остановлен. "
+                    "Результат предыдущего выполнения нельзя повторно считать новым действием."
+                )
+            seen_tool_calls.add(signature)
             try:
                 result = self.tools.execute(name, args, context=execution_context)
             except Exception as exc:
                 result = json.dumps({"error": str(exc)}, ensure_ascii=False)
-
-            messages.append(ChatMessage("assistant", json.dumps(decision, ensure_ascii=False)))
-            messages.append(ChatMessage("tool", f"Результат {name}: {result}"))
-
+            # The approval status must be checked on the COMPLETE response,
+            # before bounding text passed back to the model.
             try:
                 parsed_result = json.loads(result)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError):
                 parsed_result = None
             if isinstance(parsed_result, dict) and parsed_result.get("status") == "approval_required":
                 approval_id = parsed_result.get("approval_id")
                 return f"Действие требует подтверждения человека и пока не выполнено. Запрос подтверждения: {approval_id}."
+
+            messages.append(ChatMessage("assistant", json.dumps(decision, ensure_ascii=False)))
+            visible_result = result[:16000]
+            if len(result) > 16000:
+                visible_result += "\n[…вывод инструмента сокращён до 16000 символов…]"
+            messages.append(ChatMessage("tool", f"Результат {name}: {visible_result}"))
 
         messages.append(ChatMessage("system", "Лимит инструментальных шагов исчерпан. Верни финальный ответ без вызова инструментов."))
         raw = self.llm.chat(messages)
