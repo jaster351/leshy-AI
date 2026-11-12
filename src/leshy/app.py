@@ -393,7 +393,7 @@ class LeshyApp:
 
         # Вопросы о числе авторов/комментариев канонического GitHub-репозитория
         # получают только полные данные REST API. Никогда не угадываем авторов LLM.
-        github = self.github_facts.answer(message)
+        github = self.github_facts.answer(message, rows)
         if github is not None:
             event("chat_github_facts", verified=bool(github["verified"]),
                   receipt_id=github["receipt_id"], session_id=sid)
