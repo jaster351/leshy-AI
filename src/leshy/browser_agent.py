@@ -167,7 +167,14 @@ class BrowserAgent:
                 result = adapter.execute(action)
             except Exception as exc:
                 event("browser_agent_adapter_failed", adapter=getattr(adapter, "adapter_id", "unknown"), action=action.name, error=str(exc))
+                if action.risk is not BrowserRisk.READ:
+                    # The adapter may have committed the side effect before raising.
+                    # Never replay an approved write through another adapter.
+                    return BrowserActionResult("uncertain", "Результат действия неизвестен; автоматический повтор запрещён.")
                 continue
+            if action.risk is not BrowserRisk.READ:
+                # Even an 'unavailable' response cannot prove that no side effect occurred.
+                return result
             if result.status not in {"unavailable", "unsupported"}:
                 return result
 
