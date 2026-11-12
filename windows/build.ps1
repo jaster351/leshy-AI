@@ -138,6 +138,10 @@ Build-Stage 'pyinstaller'
 python -m PyInstaller --noconfirm --clean --onedir --console `
   --name Leshy `
   --paths src `
+  --hidden-import leshy.network_blocking_runtime `
+  --hidden-import leshy.network_blocking_module `
+  --hidden-import leshy.provider_support `
+  --hidden-import leshy.private_support_bootstrap `
   --distpath $packageDist `
   --workpath $packageWork `
   --collect-all llama_cpp `
@@ -164,6 +168,18 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   windows/launcher.py
 
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
+
+# Explicitly required runtime files must be recognized by the PyInstaller analyzer.
+# PyInstaller can report a missing hidden import as a warning and still exit 0.
+$warningsFile = Join-Path $packageWork 'Leshy\warn-Leshy.txt'
+if (Test-Path -LiteralPath $warningsFile) {
+  $packagingWarnings = Get-Content -LiteralPath $warningsFile -Raw
+  foreach ($module in @('leshy.network_blocking_runtime', 'leshy.network_blocking_module', 'leshy.provider_support', 'leshy.private_support_bootstrap')) {
+    if ($packagingWarnings -match [regex]::Escape("missing module named $module")) {
+      throw "PyInstaller excluded required runtime module $module. Examine $warningsFile"
+    }
+  }
+}
 
 # Public knowledge is data beside the executable; private LeshyBrain is not copied.
 Build-Stage 'knowledge-copy'
