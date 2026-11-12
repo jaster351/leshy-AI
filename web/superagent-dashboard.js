@@ -189,7 +189,7 @@
   }
   function install() {
     if ($('saDashboard')) return;
-    const pane = $('pane-tasks');
+    const pane = $('pane-superagent') || $('pane-tasks');
     if (!pane) return;
     const css = element('style'); css.textContent = styles; document.head.append(css);
     const panel = element('section', 'sa-dashboard'); panel.id = 'saDashboard';
@@ -249,9 +249,9 @@
   else install();
   // Refresh when opening the Tasks page, and while it is actively visible.
   document.addEventListener('click', event => {
-    if (event.target.closest('[data-section="tasks"], [data-start="tasks"]')) setTimeout(refresh, 100);
+    if (event.target.closest('[data-section="tasks"], [data-start="tasks"], [data-admin-route="superagent"]')) setTimeout(refresh, 100);
   });
   setInterval(() => {
-    if (document.visibilityState === 'visible' && $('pane-tasks')?.classList.contains('active') && !pending) refresh();
+    if (document.visibilityState === 'visible' && ($('pane-superagent')?.classList.contains('active') || $('pane-tasks')?.classList.contains('active')) && !pending) refresh();
   }, 15000);
 })();
