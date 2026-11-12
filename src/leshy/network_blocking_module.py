@@ -604,6 +604,9 @@ class NetworkBlockingChecker:
             + int(bool(official_tspu))
         )
         three_signal_confirmed = bool(matched_ports) and check_host_complete and bool(official_tspu)
+        if signals_met == 3 and not matched_ports:
+            # Local and Russian timeouts refer to different ports: not 3/3.
+            signals_met = 2
         completed_remote = tuple(
             item for item in remote
             if item.port in ports_to_assess and item.status in {"connected", "timeout", "refused"}
