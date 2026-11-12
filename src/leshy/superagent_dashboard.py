@@ -67,20 +67,22 @@ _PLAN_ACTIONS = {"plan_pause": "pause", "plan_resume": "resume", "plan_cancel": 
 
 def _present(item: dict[str, Any], *, archived: bool = False) -> dict[str, Any]:
     state = str(item.get("state") or "")
+    legacy_question = state == "ready" and bool(str(item.get("attention") or "").strip())
+    display_state = "waiting" if legacy_question else state
     return {
         "id": str(item.get("id") or ""),
         "title": str(item.get("title") or "")[:500],
-        "state": state,
-        "state_label": _STATE_LABELS.get(state, state or "Неизвестно"),
+        "state": display_state,
+        "state_label": _STATE_LABELS.get(display_state, display_state or "Неизвестно"),
         "attempt": int(item.get("attempt") or 0),
         "latest_report": str(item.get("latest_report") or "")[:3000],
-        "attention": str(item.get("attention") or "")[:2000] if state == "waiting" else "",
+        "attention": str(item.get("attention") or "")[:2000] if display_state == "waiting" else "",
         "archived": archived,
         "created_at": str(item.get("created_at") or ""),
         "updated_at": str(item.get("updated_at") or ""),
         "can_stop": state in _STOP_STATES and not archived,
-        "can_retry": state in _RETRY_STATES and not archived,
-        "can_answer": state == "waiting" and not archived,
+        "can_retry": (state in _RETRY_STATES or legacy_question) and not archived,
+        "can_answer": display_state == "waiting" and not archived,
         "can_close": not archived,
         "can_restore": archived,
     }
@@ -162,11 +164,11 @@ def execute_action(service: Any, owner_id: str, payload: dict[str, Any]) -> dict
             raise ValueError("Это задание уже завершено или остановлено")
         return {"task": _present(service.stop_ticket(ticket_id, owner_id))}
     if action == "retry":
-        if state not in _RETRY_STATES:
+        if state not in _RETRY_STATES and not (state == "ready" and bool(str(ticket.get("attention") or "").strip())):
             raise ValueError("Повтор доступен только после ошибки или ожидания")
         return {"task": _present(service.retry(ticket_id, owner_id))}
     if action == "answer":
-        if state != "waiting":
+        if state != "waiting" and not (state == "ready" and bool(str(ticket.get("attention") or "").strip())):
             raise ValueError("Задание не ожидает ответа")
         value = payload.get("text")
         if not isinstance(value, str) or not value.strip() or len(value) > 12000:

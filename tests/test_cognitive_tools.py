@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from leshy.cognitive_tools import CognitiveReadExecutor, parse_tool_request
 from leshy.superagent import SuperAgentService
@@ -45,6 +45,19 @@ class CognitiveReadExecutorTests(unittest.TestCase):
         self.assertIsNotNone(parse_tool_request(
             '{"action":"tool","tool":"runtime.version","arguments":{}}'))
 
+    def test_local_runtime_platform_has_verified_scope(self):
+        with patch("leshy.cognitive_tools.platform.system", return_value="Windows"), \
+             patch("leshy.cognitive_tools.platform.release", return_value="11"), \
+             patch("leshy.cognitive_tools.platform.machine", return_value="AMD64"):
+            result = self.executor.execute("runtime.platform", {}, ticket_id="SA-test")
+        self.assertEqual(result["result"]["scope"], "leshy_host")
+        self.assertEqual(result["result"]["system"], "Windows")
+        self.assertNotIn("hostname", result["result"])
+        self.assertTrue(self.executor.receipts.verify(
+            result["receipt_id"], tool="runtime.platform")["verified"])
+        with self.assertRaises(ValueError):
+            self.executor.execute("runtime.platform", {"host": "remote"}, ticket_id="SA-test")
+
     def test_version_tool_needs_no_context_or_arguments(self):
         result = self.executor.execute("runtime.version", {}, ticket_id="SA-test")
         self.assertRegex(result["result"]["version"], r"^\d+\.\d+\.\d+$")
@@ -68,6 +81,27 @@ class SuperAgentCognitiveLoopTests(unittest.TestCase):
         # These unit cases intentionally bypass the persisted ticket lifecycle.
         service._ticket_working = lambda ticket_id: True
         return service
+
+    def test_install_request_cannot_finish_on_text_only(self):
+        service = self.service([
+            '{"status":"ready","result":"План найден: скачайте программу с сайта","question":""}',
+        ])
+        state, report, _, _ = service._execute({
+            "id": "SA-test",
+            "request_text": "Установить Paint.NET на компьютер, способ определить самостоятельно",
+        })
+        self.assertEqual(state, "blocked")
+        self.assertIn("не подтверждено", report)
+
+    def test_ready_with_question_is_not_completed(self):
+        service = self.service([
+            '{"status":"ready","result":"Нужно уточнить ОС","question":"Какая операционная система?"}',
+        ])
+        state, _, question, _ = service._execute({
+            "id": "SA-test", "request_text": "Объясни варианты"
+        })
+        self.assertEqual(state, "waiting")
+        self.assertIn("операционная система", question)
 
     def test_tool_execution_then_text_answer(self):
         service = self.service([

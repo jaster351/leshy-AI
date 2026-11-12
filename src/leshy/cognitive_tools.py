@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import platform
 from typing import Any
 
 from .diagnostics import event
@@ -14,7 +15,7 @@ from .verified_tool_receipts import VerifiedToolReceipts
 from .version import VERSION
 
 
-_TOOL_NAMES = ("knowledge.search", "runtime.version")
+_TOOL_NAMES = ("knowledge.search", "runtime.version", "runtime.platform")
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(\{.*\})\s*```\s*$", re.IGNORECASE | re.DOTALL)
 
 
@@ -54,6 +55,16 @@ class CognitiveReadExecutor:
             if arguments:
                 raise ValueError("runtime.version не принимает аргументы")
             result: dict[str, Any] = {"version": VERSION}
+        elif tool == "runtime.platform":
+            if arguments:
+                raise ValueError("runtime.platform не принимает аргументы")
+            # Only the OS of the Leshy process; NOT the browser or a remote PC.
+            result = {
+                "system": platform.system()[:80],
+                "release": platform.release()[:120],
+                "architecture": platform.machine()[:80],
+                "scope": "leshy_host",
+            }
         else:
             query = " ".join(str(arguments.get("query") or "").split())
             if not (3 <= len(query) <= 300):

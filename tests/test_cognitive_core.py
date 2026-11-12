@@ -9,6 +9,8 @@ class CognitiveCoreEvidenceTests(unittest.TestCase):
     def test_external_operations_require_executor_evidence(self):
         for task in (
             "Установи программу на сервер",
+            "Установить на компьютер Paint.NET, способы достижения цели определить самостоятельно",
+            "Поставить на компьютер программу",
             "Влей исправление в main",
             "Создай файл конфигурации",
             "Исправь ошибки в коде Лешего",

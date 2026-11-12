@@ -88,6 +88,21 @@ class DashboardTests(unittest.TestCase):
         result = execute_action(self.service, "web:alice", {"action":"answer", "id":"SA-123", "text":"Да"})
         self.assertEqual(result["task"]["state"], "queued")
 
+    def test_legacy_ready_with_question_is_answerable_not_completed(self):
+        original = self.service.tasks["SA-123"]
+        original["state"] = "ready"
+        original["attention"] = "Какая операционная система?"
+        original["latest_report"] = "Требуется уточнение ОС"
+        presented = list_tickets(self.service, "web:alice")["tasks"][0]
+        self.assertEqual(presented["state"], "waiting")
+        self.assertTrue(presented["can_answer"])
+        self.assertTrue(presented["can_retry"])
+        self.assertIn("операционная система", presented["attention"])
+        result = execute_action(self.service, "web:alice", {
+            "action": "answer", "id": "SA-123", "text": "Windows 11"
+        })
+        self.assertEqual(result["task"]["state"], "queued")
+
     def test_create_explicit_scope_and_validation(self):
         with self.assertRaises(ValueError):
             execute_action(self.service, "web:alice", {"action":"create", "text":"  "})
