@@ -39,7 +39,11 @@ class CapabilityRegistry:
 
     def _catalog(self) -> tuple[list[dict[str, str]], str]:
         try:
-            data = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+            # Тестовые и переносимые установки могут иметь отдельный install_root.
+            # В исходной среде используем каталог из установленного пакета.
+            bundled = Path(__file__).resolve().parents[2] / "capabilities.json"
+            source = self.catalog_path if self.catalog_path.is_file() else bundled
+            data = json.loads(source.read_text(encoding="utf-8"))
             if not isinstance(data, dict) or data.get("schema_version") != 1:
                 raise ValueError("invalid schema")
             raw = data.get("features")
@@ -117,7 +121,7 @@ class CapabilityRegistry:
                 with app.storage.connection() as conn:
                     conn.execute("SELECT 1").fetchone()
                 return "ready", "Локальная SQLite доступна"
-            except (OSError, RuntimeError, ValueError, AttributeError):
+            except Exception:
                 return "unavailable", "Не удалось подтвердить доступность SQLite"
         # Проверка DNS, браузера, сети или VLM самим наличием файла не производится.
         return "not_checked", "Для подтверждения нужен реальный вызов инструмента"
