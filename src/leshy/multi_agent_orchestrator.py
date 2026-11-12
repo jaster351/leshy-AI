@@ -200,31 +200,61 @@ class MultiAgentOrchestrator:
         if len(nodes) < 2:
             return [self._local_role(role, task, context, priority=priority) for role in self.roles]
 
-        assignments = [(role, nodes[index % len(nodes)]) for index, role in enumerate(self.roles)]
+        # One request lane per physical node. Independent nodes execute in
+        # parallel, while each node receives only one inference at a time.
+        # A task's source and owner/session remain bound to the original call.
+        unique_nodes = list({node.node_id: node for node in nodes}.values())
+        if len(unique_nodes) < 2:
+            return [self._local_role(role, task, context, priority=priority) for role in self.roles]
+        lanes: dict[str, tuple[Any, list[AgentRole]]] = {
+            node.node_id: (node, []) for node in unique_nodes
+        }
+        for index, role in enumerate(self.roles):
+            lanes[unique_nodes[index % len(unique_nodes)].node_id][1].append(role)
+
+        def run_lane(node, roles: list[AgentRole]) -> list[AgentReport]:
+            results: list[AgentReport] = []
+            for role in roles:
+                try:
+                    results.append(self._cluster_role(
+                        cluster, node, role, task, context,
+                        owner_id=owner_id, session_id=session_id,
+                        request_id=request_id, priority=priority,
+                    ))
+                except Exception as exc:
+                    problem("multi_agent_role_dispatch_failed", str(exc),
+                            role=role.name, node_id=node.node_id)
+                    results.append(AgentReport(
+                        role=role.name, node_id=node.node_id,
+                        answer="", ok=False, error=str(exc),
+                    ))
+            return results
+
         reports: list[AgentReport] = []
-        with ThreadPoolExecutor(max_workers=min(len(assignments), len(nodes), 8), thread_name_prefix="leshy-subagent") as pool:
+        with ThreadPoolExecutor(
+            max_workers=min(len(lanes), 8), thread_name_prefix="leshy-agent-node"
+        ) as pool:
             futures = {
-                pool.submit(
-                    self._cluster_role,
-                    cluster,
-                    node,
-                    role,
-                    task,
-                    context,
-                    owner_id=owner_id,
-                    session_id=session_id,
-                    request_id=request_id,
-                    priority=priority,
-                ): role.name
-                for role, node in assignments
+                pool.submit(run_lane, node, roles): (node.node_id, roles)
+                for node, roles in lanes.values()
+                if roles
             }
             for future in as_completed(futures):
                 try:
-                    reports.append(future.result())
+                    reports.extend(future.result())
                 except Exception as exc:
-                    reports.append(AgentReport(role=futures[future], node_id="unknown", answer="", ok=False, error=str(exc)))
+                    node_id, roles = futures[future]
+                    problem("multi_agent_node_lane_failed", str(exc), node_id=node_id)
+                    reports.extend(
+                        AgentReport(role=role.name, node_id=node_id,
+                                    answer="", ok=False, error=str(exc))
+                        for role in roles
+                    )
         order = {role.name: index for index, role in enumerate(self.roles)}
         reports.sort(key=lambda item: order.get(item.role, 999))
+        event("multi_agent_lanes_finished", request_id=request_id,
+              lanes=len(futures), roles=len(reports),
+              failed=sum(not report.ok for report in reports))
         return reports
 
     def run(
