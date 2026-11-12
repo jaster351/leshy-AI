@@ -101,11 +101,11 @@ def _private_facts(query: str, brain_dir: Path | str | None) -> tuple[str, ...]:
     try:
         if path.stat().st_size > 196608:
             return ()
-        from cryptography.fernet import Fernet
+        from cryptography.fernet import Fernet, InvalidToken
         value = json.loads(Fernet(key.encode("ascii")).decrypt(path.read_bytes()).decode("utf-8"))
         if not isinstance(value, dict) or not isinstance(value.get("facts"), list):
             return ()
-    except (OSError, ValueError, TypeError, UnicodeError, ImportError):
+    except (OSError, ValueError, TypeError, UnicodeError, ImportError, InvalidToken):
         return ()
     matches = []
     text = _normal(query)
