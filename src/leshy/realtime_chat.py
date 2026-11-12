@@ -14,7 +14,7 @@ from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .capability_registry import is_self_capability_question
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
-from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply
+from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply, work_reference_context
 from .conversation_mode import resolve_conversation_mode, mode_instruction
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
 from .research_policy import is_casual_checkin, is_local_dialogue_request
@@ -242,6 +242,10 @@ class RealtimeChatManager:
         interaction_instruction = mode_instruction(mode.kind)
         if interaction_instruction:
             context.append(ChatMessage("system", interaction_instruction))
+        if mode.kind == "work":
+            private_work = work_reference_context(message, self.app.settings.brain_dir)
+            if private_work:
+                context.append(ChatMessage("system", private_work))
         support_rules = support_draft_context(message, rows, brain_dir=self.app.settings.brain_dir)
         if support_rules:
             context.append(ChatMessage("system", support_rules))
