@@ -137,6 +137,32 @@ class SuperAgentCognitiveLoopTests(unittest.TestCase):
         probe.assert_called_once()
         self.assertEqual(service._journal.finish.call_args.kwargs["status"], "failed")
 
+    def test_remote_os_ssh_verification_keeps_password_out_of_llm(self):
+        service = self.service([
+            '{"status":"ready","result":"Проверена ОС","question":""}'
+        ])
+        service.storage = Mock()
+        service._journal = Mock()
+        observed = {
+            "host": "10.20.30.40", "os_family": "unknown", "confidence": "unknown",
+            "verified": False, "tcp": {"22": "open"}, "udp": {"137": "no_response"},
+            "signals": [],
+        }
+        confirmed = {"host": "10.20.30.40", "os_family": "Linux",
+                     "verified": True, "method": "ssh:uname"}
+        with patch("leshy.superagent.module_enabled", return_value=True), \
+             patch("leshy.superagent.probe_remote_os", return_value=observed), \
+             patch("leshy.superagent.verify_ssh_os", return_value=confirmed) as verify:
+            service._execute({
+                "id": "SA-test", "owner_id": "web:a",
+                "request_text": "Проверь сервер 10.20.30.40: логин и пароль в файле server.txt",
+                "attempt": 0,
+            })
+        verify.assert_called_once_with(service.storage, "web:a", "10.20.30.40", "server.txt")
+        self.assertEqual(service._journal.finish.call_count, 2)
+        self.assertNotIn("password", str(service.app.llm.chat.call_args).lower())
+        self.assertIn("ssh:uname", str(service.app.llm.chat.call_args))
+
     def test_install_request_cannot_finish_on_text_only(self):
         service = self.service([
             '{"status":"ready","result":"План найден: скачайте программу с сайта","question":""}',
