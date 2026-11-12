@@ -16,6 +16,8 @@ from .search_chromium import ChromiumSearch
 from .research_policy import research_reason
 from .realtime_chat import RealtimeChatManager
 from .storage import utcnow
+from .text_integrity import corruption_reason
+from .web_text_encoding import decode_web_text
 
 
 class _DuckDuckGoHtmlParser(HTMLParser):
@@ -120,13 +122,16 @@ class DuckDuckGoHtmlSearch:
             # общий бюджет интерактивного поиска — 12 секунд.
             with request.urlopen(req, timeout=6) as response:
                 raw = response.read(1_500_000)
+                content_type = response.headers.get("Content-Type", "text/html")
         except Exception as exc:
             raise RuntimeError(f"DuckDuckGo HTML недоступен: {exc}") from exc
         parser = _DuckDuckGoHtmlParser()
-        parser.feed(raw.decode("utf-8", "replace"))
+        parser.feed(decode_web_text(raw, content_type, html=True))
         out: list[SearchResult] = []
         seen: set[str] = set()
         for item in parser.results:
+            if corruption_reason(item.get("title", "")) or corruption_reason(item.get("snippet", "")):
+                continue
             target = self._real_url(item.get("href", ""))
             if not target.startswith(("http://", "https://")) or target in seen:
                 continue
