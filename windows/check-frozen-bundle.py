@@ -21,6 +21,27 @@ REQUIRED_MODULES = (
 
 
 def source_preflight(root: Path) -> None:
+    # Parse *every* checked-in Python module before installing dependencies or
+    # spending minutes building a frozen EXE. Invalid syntax may look like
+    # "missing module" in PyInstaller's warning output.
+    verified = 0
+    for directory in ("src", "tests", "windows"):
+        base = root / directory
+        if not base.is_dir():
+            continue
+        for source_file in sorted(base.rglob("*.py")):
+            if "__pycache__" in source_file.parts:
+                continue
+            try:
+                compile(source_file.read_bytes(), str(source_file), "exec")
+            except SyntaxError as exc:
+                raise RuntimeError(
+                    f"Invalid Python syntax: {source_file}:{exc.lineno}: "
+                    f"{exc.msg}. Correct the source before building."
+                ) from exc
+            verified += 1
+    print(f"BUILD PREFLIGHT OK: {verified} Python sources parsed.")
+
     source = root / "src"
     sys.path.insert(0, str(source))
     for module in REQUIRED_MODULES:
