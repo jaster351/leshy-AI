@@ -8,6 +8,7 @@ import re
 from urllib.parse import urlparse
 
 from .storage import Storage, utcnow
+from .text_integrity import corrupted_knowledge_row, validate_knowledge_text
 
 PRIMARY_TRUSTED_HOSTS = {"docs.python.org", "learn.microsoft.com", "developer.mozilla.org", "docs.github.com"}
 ACADEMIC_TRUSTED_HOSTS = {
@@ -81,6 +82,8 @@ class KnowledgeBase:
         source_type: str = "web", metadata_json: str | dict = "{}", data_class: str = "static",
         checked_at: str | None = None, ttl_seconds: int | None = None,
     ) -> int:
+        for field, value in (("topic", topic), ("claim", claim), ("source_title", source_title or ""), ("source_url", source_url)):
+            validate_knowledge_text(value, field=field)
         if data_class not in {"static", "dynamic"}:
             raise ValueError("data_class must be 'static' or 'dynamic'")
         if data_class == "dynamic":
@@ -124,6 +127,26 @@ class KnowledgeBase:
             self.vector_index.upsert("knowledge", kid, f"{topic}\n{claim}")
         return kid
 
+    def quarantine_corrupted(self) -> int:
+        """Reject previously imported damaged records; preserve them for audit."""
+        with self.storage.connection() as conn:
+            rows = conn.execute(
+                "SELECT id,topic,claim,source_title FROM knowledge "
+                "WHERE status IN ('candidate','trusted','conflict')"
+            ).fetchall()
+            bad_ids = [int(row["id"]) for row in rows if corrupted_knowledge_row(dict(row))]
+            if bad_ids:
+                conn.executemany(
+                    "UPDATE knowledge SET status='rejected',verified_at=NULL WHERE id=?",
+                    ((record_id,) for record_id in bad_ids),
+                )
+        if bad_ids:
+            self.storage.audit(
+                "knowledge.encoding_quarantined",
+                {"count": len(bad_ids), "ids_sample": bad_ids[:25]},
+            )
+        return len(bad_ids)
+
     def counts(self) -> dict[str, int]:
         with self.storage.connection() as conn:
             rows = conn.execute("SELECT status, count(*) n FROM knowledge GROUP BY status").fetchall()
@@ -140,12 +163,13 @@ class KnowledgeBase:
     def verify_topic(self, topic: str) -> dict[str, int]:
         with self.storage.connection() as conn:
             rows = conn.execute(
-                "SELECT source_url,fingerprint,confidence FROM knowledge WHERE topic=? AND status IN ('candidate','trusted','conflict')",
+                "SELECT id,topic,claim,source_title,source_url,fingerprint,confidence FROM knowledge WHERE topic=? AND status IN ('candidate','trusted','conflict')",
                 (topic,),
             ).fetchall()
             groups = defaultdict(list)
             for row in rows:
-                groups[str(row["fingerprint"])].append(row)
+                if not corrupted_knowledge_row(dict(row)):
+                    groups[str(row["fingerprint"])].append(row)
             trusted = candidates = 0
             for fp, group in groups.items():
                 hosts = {urlparse(str(row["source_url"])).hostname for row in group if urlparse(str(row["source_url"])).hostname}
@@ -180,7 +204,7 @@ class KnowledgeBase:
             return []
         exact_ids = re.findall(r"\bCVE-\d{4}-\d{4,}\b|\bGHSA-[0-9a-z-]+\b", query, re.I)
         exact_versions = re.findall(r"(?<![0-9.])v?\d+(?:\.\d+){1,3}(?![0-9.])", str(query), re.I)
-        usable = [dict(row) for row in rows if is_fresh(dict(row))]
+        usable = [dict(row) for row in rows if is_fresh(dict(row)) and not corrupted_knowledge_row(dict(row))]
         by_id = {int(row["id"]): row for row in usable}
         scored = {}
         for row in usable:
