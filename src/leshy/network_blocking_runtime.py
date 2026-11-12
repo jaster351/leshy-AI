@@ -37,6 +37,16 @@ def _enabled(app) -> bool:
 def _matches(app, text: str) -> bool:
     if not _enabled(app):
         return False
+    # Ticket drafting is not an instruction to scan every IP in the client's quote.
+    # Explicit /support and "answer the client" take precedence over IP diagnostics.
+    value = " ".join(str(text or "").casefold().replace("ё", "е").split())
+    if value.startswith(("/support", "/поддержка")) or any(
+        marker in value for marker in (
+            "ответь клиенту", "напиши ответ клиенту", "составь ответ клиенту",
+            "сообщение клиента", "вопрос клиента",
+        )
+    ):
+        return False
     try:
         return _module(app).checker.looks_like_request(text)
     except Exception:
