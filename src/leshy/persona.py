@@ -39,7 +39,10 @@ def with_leshy_identity(messages: list[ChatMessage]) -> list[ChatMessage]:
     # as himself. Do not prepend the Leshy identity to a customer-facing reply.
     # This marker is authored only by the local support routing code.
     support_mode = any(
-        item.role == "system" and str(item.content).startswith("LESHY_SUPPORT_DRAFT_V1")
+        item.role == "system" and (
+            str(item.content).startswith("LESHY_SUPPORT_DRAFT_V1")
+            or str(item.content).startswith("/no_think\nLESHY_SUPPORT_DRAFT_V1")
+        )
         for item in items
     )
     if support_mode:
