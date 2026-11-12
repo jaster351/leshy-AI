@@ -47,7 +47,7 @@ class RemotePolicyTests(unittest.TestCase):
                     "INSERT INTO owner_identity_links VALUES(?,?,?)",
                     ("github", owner, owner + "-github-id"),
                 )
-        self.policy = RemotePermissionPolicy(self.identity)
+        self.policy = RemotePermissionPolicy(self.identity, enrollment_verifier=lambda owner, node, fp, proof: proof == 'signed-attestation')
         self.owner = self.policy.actor_from_web_cookie("session-a")
         self.other = self.policy.actor_from_web_cookie("session-b")
 
@@ -60,10 +60,10 @@ class RemotePolicyTests(unittest.TestCase):
     def test_anonymous_browser_is_not_admin(self):
         anonymous = self.policy.actor_from_web_cookie("session-c")
         with self.assertRaises(PermissionError):
-            self.policy.register_verified_node(anonymous, "server1", "x"*32, enrollment_verified=True)
+            self.policy.register_verified_node(anonymous, "server1", "x"*32, enrollment_proof='signed-attestation')
 
     def test_other_user_denied_until_explicit_grant(self):
-        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_verified=True)
+        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_proof='signed-attestation')
         with self.assertRaises(PermissionError):
             self.policy.require(self.other, "server1", "inspect", observed_fingerprint="x"*32)
         self.policy.grant(self.owner, "server1", "other", "inspect")
@@ -75,15 +75,15 @@ class RemotePolicyTests(unittest.TestCase):
             self.policy.require(self.other, "server1", "inspect", observed_fingerprint="x"*32)
 
     def test_grantee_cannot_transfer_access(self):
-        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_verified=True)
+        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_proof='signed-attestation')
         self.policy.grant(self.owner, "server1", "other", "inspect")
         with self.assertRaises(PermissionError):
             self.policy.grant(self.other, "server1", "someone", "update")
         with self.assertRaises(PermissionError):
-            self.policy.register_verified_node(self.other, "server1", "x"*32, enrollment_verified=True)
+            self.policy.register_verified_node(self.other, "server1", "x"*32, enrollment_proof='signed-attestation')
 
     def test_host_key_change_and_expiry_fail(self):
-        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_verified=True)
+        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_proof='signed-attestation')
         with self.assertRaises(PermissionError):
             self.policy.require(self.owner, "server1", "update", observed_fingerprint="y"*32)
         self.policy.grant(self.owner, "server1", "other", "inspect", ttl_seconds=1)
@@ -93,7 +93,7 @@ class RemotePolicyTests(unittest.TestCase):
             self.policy.require(self.other, "server1", "inspect", observed_fingerprint="x"*32)
 
     def test_revoked_web_session_fails_even_with_cached_actor(self):
-        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_verified=True)
+        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_proof='signed-attestation')
         with self.storage.connection() as conn:
             conn.execute("DELETE FROM owner_web_sessions WHERE owner_id='owner'")
         with self.assertRaises(PermissionError):
@@ -110,7 +110,7 @@ class RemotePolicyTests(unittest.TestCase):
                                 "inspect", observed_fingerprint="x"*32)
 
     def test_no_wildcard_capability(self):
-        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_verified=True)
+        self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_proof='signed-attestation')
         with self.assertRaises(PermissionError):
             self.policy.grant(self.owner, "server1", "other", "*")
 
