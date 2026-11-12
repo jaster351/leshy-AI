@@ -83,5 +83,45 @@ class BrowserApprovalExecutionTests(unittest.TestCase):
         self.assertEqual(self.adapter.actions, [])
 
 
+    def test_committed_action_exception_does_not_retry_second_adapter(self):
+        class CommitThenFail(RecordingAdapter):
+            adapter_id = "first"
+            def execute(self, action):
+                self.actions.append(action)
+                raise RuntimeError("connection dropped after submit")
+
+        first, second = CommitThenFail(), RecordingAdapter()
+        agent = BrowserAgent([first, second])
+        grant = self.broker.request("owner-a", self.action, session_id="session-a")
+        result = agent.execute_approved(self.action, broker=self.broker,
+                                        approval_id=grant.approval_id,
+                                        owner_id="owner-a", session_id="session-a")
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(len(first.actions), 1)
+        self.assertEqual(second.actions, [])
+        with self.assertRaises(KeyError):
+            agent.execute_approved(self.action, broker=self.broker,
+                                   approval_id=grant.approval_id,
+                                   owner_id="owner-a", session_id="session-a")
+
+    def test_unavailable_write_does_not_fall_through_to_second_adapter(self):
+        class UnavailableAfterAttempt(RecordingAdapter):
+            adapter_id = "first"
+            def execute(self, action):
+                self.actions.append(action)
+                return BrowserActionResult("unavailable", "ambiguous")
+
+        first, second = UnavailableAfterAttempt(), RecordingAdapter()
+        agent = BrowserAgent([first, second])
+        grant = self.broker.request("owner-a", self.action, session_id="session-a")
+        result = agent.execute_approved(self.action, broker=self.broker,
+                                        approval_id=grant.approval_id,
+                                        owner_id="owner-a", session_id="session-a")
+        self.assertEqual(result.status, "unavailable")
+        self.assertEqual(len(first.actions), 1)
+        self.assertEqual(second.actions, [])
+
+
+
 if __name__ == "__main__":
     unittest.main()
