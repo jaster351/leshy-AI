@@ -43,7 +43,7 @@ def _matches(app, text: str) -> bool:
     if ("наименование в панели" in value and "обработчик" in value):
         return False
     if value.startswith(("/support", "/поддержка")) or any(
-        marker in value for (
+        marker in value for marker in (
             "ответь клиенту", "напиши ответ клиенту", "составь ответ клиенту",
             "сообщение клиента", "вопрос клиента",
         )
