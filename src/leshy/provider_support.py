@@ -95,17 +95,19 @@ def _private_facts(query: str, brain_dir: Path | str | None) -> tuple[str, ...]:
     if not brain_dir:
         return ()
     path = Path(brain_dir) / "private" / "support_profile.enc"
-    key = os.getenv("LESHY_SUPPORT_PROFILE_KEY", "").strip()
-    if not key or not path.is_file() or path.is_symlink():
+    from .private_support_bootstrap import support_key
+    key = support_key(brain_dir)
+    if key is None or not path.is_file() or path.is_symlink():
         return ()
     try:
         if path.stat().st_size > 196608:
             return ()
-        from cryptography.fernet import Fernet, InvalidToken
-        value = json.loads(Fernet(key.encode("ascii")).decrypt(path.read_bytes()).decode("utf-8"))
+        from cryptography.fernet import Fernet
+        value = json.loads(Fernet(key).decrypt(path.read_bytes()).decode("utf-8"))
         if not isinstance(value, dict) or not isinstance(value.get("facts"), list):
             return ()
-    except (OSError, ValueError, TypeError, UnicodeError, ImportError, InvalidToken):
+    except Exception:
+        # Failed decryption is not evidence of policy; never expose ciphertext/key.
         return ()
     matches = []
     text = _normal(query)
