@@ -14,6 +14,7 @@ from .cognitive_core import assess_completion
 from .cognitive_artifacts import CognitiveArtifactGate
 from .cognitive_rollback import CognitiveArtifactRollback
 from .cognitive_tools import CognitiveReadExecutor, parse_tool_request
+from .superagent_report_format import decode_report_json
 from .parallel_tool_scheduler import ParallelPlanError
 from .superagent_parallel import parse_parallel_read_request, run_superagent_parallel_reads
 from .superagent_ticket_pool import ParallelTicketPool
@@ -486,14 +487,8 @@ class SuperAgentService:
     @staticmethod
     def _parse_report(text: str) -> tuple[str, str, str]:
         """Отчёт обязателен: произвольный текст/пустота не означает успех."""
-        raw = str(text or "").strip()
-        candidate = raw
-        fenced = re.fullmatch(r"```(?:json)?\s*(\{.*\})\s*```", raw, re.IGNORECASE | re.DOTALL)
-        if fenced:
-            candidate = fenced.group(1)
-        try:
-            payload = json.loads(candidate)
-        except (ValueError, TypeError):
+        payload = decode_report_json(text)
+        if payload is None:
             return "blocked", "Модель не вернула корректный JSON-отчёт; завершение задачи не подтверждено.", ""
         if not isinstance(payload, dict):
             return "blocked", "Модель вернула отчёт неверного формата.", ""
@@ -683,6 +678,44 @@ class SuperAgentService:
                     + "\nСформулируй итог по фактически полученным данным; не выдумывай действия.",
                 ))
         state, result, question = self._parse_report(response)
+        # Small local models sometimes append natural-language commentary or
+        # emit a malformed JSON final. Give exactly one *format-only* repair
+        # turn; do not grant another tool call or consider free text a success.
+        format_errors = {
+            "Модель не вернула корректный JSON-отчёт; завершение задачи не подтверждено.",
+            "Модель вернула отчёт неверного формата.",
+            "Модель не указала допустимый статус результата.",
+        }
+        if state == "blocked" and result in format_errors:
+            if not self._ticket_working(ticket_id):
+                return "blocked", "Задание было остановлено владельцем.", "", sources
+            formatting_prompt = (
+                "Исправь ТОЛЬКО формат своего последнего ответа. Верни один валидный "
+                "JSON-объект без Markdown и пояснений: "
+                '{"status":"ready|waiting|blocked|failed","result":"фактический итог",'
+                '"question":"один необходимый вопрос или пусто"}. '
+                "Не вызывай инструменты, не добавляй новых фактов и не утверждай, "
+                "что проверил файлы или логи без реального доступа. Если информации "
+                "недостаточно, выбери blocked и укажи конкретную причину."
+            )
+            repair_messages = messages + [
+                ChatMessage("assistant", str(response or "")[:4000]),
+                ChatMessage("user", formatting_prompt),
+            ]
+            with self._llm_lock:
+                repaired = self.app.llm.chat(repair_messages)
+            if not self._ticket_working(ticket_id):
+                return "blocked", "Задание было остановлено владельцем.", "", sources
+            repaired_state, repaired_result, repaired_question = self._parse_report(repaired)
+            if repaired_state == "blocked" and repaired_result in format_errors:
+                event("superagent_invalid_report_after_repair", ticket_id=ticket_id)
+                result = (
+                    "Модель дважды не смогла сформировать корректный JSON-отчёт. "
+                    "Задание не считается завершённым; нужна проверка ответа модели."
+                )
+            else:
+                state, result, question = repaired_state, repaired_result, repaired_question
+                event("superagent_report_format_repaired", ticket_id=ticket_id)
         assessment = assess_completion(request, state, result)
         if assessment.reason == "missing_mutation_receipt":
             event("cognitive_core_completion_blocked", ticket_id=ticket_id, reason=assessment.reason)
