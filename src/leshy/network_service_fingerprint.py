@@ -14,7 +14,7 @@ import time
 
 
 _SERVICE = {22: "SSH", 80: "HTTP", 443: "HTTPS", 445: "SMB", 3389: "RDP"}
-_EXTRA_PORTS = (80, 443, 445)
+_EXTRA_PORTS = (445,)
 _READ_LIMIT = 2048
 
 
@@ -124,7 +124,8 @@ def _classify(ports: list[dict]) -> tuple[str, str, list[str]]:
 
 
 def collect_service_fingerprint(
-    target: str, base_ports: list[dict], *, timeout: float = 2.0
+    target: str, base_ports: list[dict], *, timeout: float = 2.0,
+    include_web: bool = False,
 ) -> dict:
     """Run before external block checks; never return a certain OS identification."""
     timeout = max(0.5, min(float(timeout), 3.0))
@@ -139,11 +140,12 @@ def collect_service_fingerprint(
                 "evidence": ["Цель не разрешается в публичный адрес; дополнительные пробы отменены."],
                 "ports": ports, "completed": False}
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="leshy-os-fingerprint") as pool:
-        futures = {p: pool.submit(_probe_port, target, p, timeout) for p in _EXTRA_PORTS}
+        extra_ports = (*_EXTRA_PORTS, *((80, 443) if include_web else ()))
+        futures = {p: pool.submit(_probe_port, target, p, timeout) for p in extra_ports}
         ssh = (pool.submit(_ssh_banner, target, timeout)
                if any(row["port"] == 22 and row["status"] == "connected" for row in ports)
                else None)
-        ports.extend(futures[p].result() for p in _EXTRA_PORTS)
+        ports.extend(futures[p].result() for p in extra_ports)
         if ssh is not None:
             for row in ports:
                 if row["port"] == 22:
