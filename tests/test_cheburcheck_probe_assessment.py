@@ -35,9 +35,9 @@ class CheburcheckProbeAssessmentTests(unittest.TestCase):
             ),
         )
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, remote, static, probe)
-        self.assertEqual(result.tspu_probability, 55)
+        self.assertEqual(result.tspu_probability, 20)
         self.assertIn("не подтверждена", result.verdict)
-        self.assertTrue(any("tspu_block" in reason for reason in result.reasons))
+        self.assertTrue(any("предварительные" in reason for reason in result.reasons))
 
     def test_official_ok_reduces_static_list_signal(self) -> None:
         local = (
