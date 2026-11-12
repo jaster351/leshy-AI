@@ -14,6 +14,7 @@ from .config import Settings
 from .capability_registry import CapabilityRegistry, is_self_capability_question
 from .github_facts import GitHubRepositoryEvidence
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
+from .cloud4box_support import support_draft_context
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
@@ -471,6 +472,9 @@ class LeshyApp:
                 "или об устаревших шаблонах. Напиши готовый текст локально.",
             )
         context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
+        support_rules = support_draft_context(message, rows)
+        if support_rules:
+            context.append(ChatMessage("system", support_rules))
         context.append(ChatMessage("system", current_clock_context()))
         if is_self_capability_question(message):
             context.append(ChatMessage("system", self.capabilities.context_for_question(self)))
