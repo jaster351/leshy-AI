@@ -14,7 +14,7 @@ from .config import Settings
 from .capability_registry import CapabilityRegistry, is_self_capability_question
 from .github_facts import GitHubRepositoryEvidence
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
-from .provider_support import support_draft_context
+from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
@@ -391,6 +391,19 @@ class LeshyApp:
                 "SELECT role,content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 24",
                 (sid,),
             ).fetchall()
+
+        # Support requests are document drafting, never an ordinary chat with
+        # the assistant persona and never a web search on a customer's ticket.
+        if is_support_draft_request(message, rows):
+            answer = draft_support_reply(
+                self.llm.chat, message, rows, brain_dir=self.settings.brain_dir,
+            )
+            event("support_draft_prepared", session_id=sid, owner_id=owner_id,
+                  answer_chars=len(answer))
+            return {
+                "session_id": sid, "answer": answer,
+                "created_at": self._save_assistant(sid, answer), "sources": [],
+            }
 
         # Вопросы о числе авторов/комментариев канонического GitHub-репозитория
         # получают только полные данные REST API. Никогда не угадываем авторов LLM.
