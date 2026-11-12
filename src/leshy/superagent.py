@@ -368,7 +368,8 @@ class SuperAgentService:
 
     def retry(self, ticket_id: str, owner_id: str) -> dict[str, Any]:
         ticket = self.get(ticket_id, owner_id=owner_id)
-        if ticket["state"] not in {"failed", "blocked", "waiting"}:
+        legacy_question = ticket["state"] == "ready" and bool(str(ticket.get("attention") or "").strip())
+        if ticket["state"] not in {"failed", "blocked", "waiting"} and not legacy_question:
             raise ValueError("Повтор доступен только для ожидающего, заблокированного или неудачного задания")
         with self.storage.connection() as conn:
             pending = conn.execute(
@@ -387,7 +388,8 @@ class SuperAgentService:
 
     def answer(self, ticket_id: str, owner_id: str, text: str) -> dict[str, Any]:
         ticket = self.get(ticket_id, owner_id=owner_id)
-        if ticket["state"] != "waiting":
+        legacy_question = ticket["state"] == "ready" and bool(str(ticket.get("attention") or "").strip())
+        if ticket["state"] != "waiting" and not legacy_question:
             raise ValueError("Ответ принимается только для задания, ожидающего вопроса")
         value = str(text or "").strip()
         if not value:
@@ -497,6 +499,9 @@ class SuperAgentService:
             return "blocked", "Модель не указала допустимый статус результата.", ""
         result = str(payload.get("result") or payload.get("summary") or "").strip()[:12000]
         question = str(payload.get("question") or "").strip()[:1200]
+        if state == "ready" and question:
+            # An outstanding user question always contradicts a completed task.
+            return "waiting", result or "Для продолжения необходим ответ.", question
         if state == "ready" and not result:
             return "blocked", "Модель сообщила об успехе без результата; завершение не подтверждено.", ""
         return state, result, question
@@ -538,9 +543,12 @@ class SuperAgentService:
             "Ты исполнитель автономного модуля Лешего. Работай только в пределах явно выданной задачи. "
             "Не придумывай выполненные внешние действия: если у тебя нет инструмента для действия, честно укажи это. "
             "Минимизируй внимание человека: задай ровно один конкретный вопрос только если без ответа нельзя продолжить. "
-            "Если нужны локальные подтверждённые знания или номер версии, допускается запрос инструмента: "
-            "{\"action\":\"tool\",\"tool\":\"knowledge.search\",\"arguments\":{\"query\":\"... \"}} "
-            "или {\"action\":\"tool\",\"tool\":\"runtime.version\",\"arguments\":{}}. "
+            "Если нужны подтверждённые локальные знания или номер версии, запроси knowledge.search или runtime.version. "
+            "Для определения ОС узла, на котором запущен Леший, используй "
+            '{"action":"tool","tool":"runtime.platform","arguments":{}}. '
+            "Этот инструмент определяет только сервер Лешего, а не ОС браузера или чужого компьютера. "
+            "Если задача относится к компьютеру с Лешим, не спрашивай его ОС у человека; определи её инструментом. "
+            "Не называй установку программы выполненной без реальной проверяемой квитанции исполнения. "
             "Для независимых чтений можно выполнить до 24 шагов одновременно (до 8 потоков): "
             '{"action":"parallel","tasks":[{"id":"a","tool":"knowledge.search",'
             '"arguments":{"query":"..."}, "depends_on":[]}, '
