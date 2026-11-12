@@ -103,7 +103,7 @@ class SupportConsultantTests(unittest.TestCase):
         self.assertIn("Не могу подключиться по SSH", prompt)
         self.assertIn("РОВНО ОДИН готовый ответ", prompt)
         self.assertEqual(llm.calls[0][1].role, "system")
-        self.assertIn("Cloud4box", llm.calls[0][1].content)
+        self.assertIn("поставщика услуг", llm.calls[0][1].content)
         self.assertIn("не добавляй подпись", llm.calls[0][1].content)
 
     def test_identity_conflict_stops_before_diagnostics_and_llm(self):

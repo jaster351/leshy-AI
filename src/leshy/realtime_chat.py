@@ -14,7 +14,7 @@ from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .capability_registry import is_self_capability_question
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
-from .cloud4box_support import support_draft_context
+from .provider_support import support_draft_context
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
@@ -237,7 +237,7 @@ class RealtimeChatManager:
                 "готовый естественный текст, используя требования пользователя.",
             )
         context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
-        support_rules = support_draft_context(message, rows)
+        support_rules = support_draft_context(message, rows, brain_dir=self.app.settings.brain_dir)
         if support_rules:
             context.append(ChatMessage("system", support_rules))
         context.append(ChatMessage("system", current_clock_context()))
@@ -619,7 +619,7 @@ class RealtimeChatManager:
             # Если live-search не нашёл подтверждённых источников или упал,
             # НЕ передаём текущие данные LLM: иначе она выдумает дату/цену.
             # Такой отказ быстрый и прозрачный, обычные чаты не затронуты.
-            if search_attempted and not sources and not support_draft_context(message, rows):
+            if search_attempted and not sources and not support_draft_context(message, rows, brain_dir=self.app.settings.brain_dir):
                 marker = "Текущий веб-поиск временно не выполнен:"
                 failure = next(
                     (
