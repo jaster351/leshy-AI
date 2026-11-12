@@ -51,6 +51,16 @@ class GitHubFactsTests(unittest.TestCase):
             "Сколько Issues у https://github.com/example/project?"
         ))
 
+    def test_short_followup_reuses_only_recent_explicit_repository_context(self):
+        prior = [{"role": "assistant", "content": "Тут вопросы по GitHub"},
+                 {"role": "user", "content": "Леший, кто авторы Issues в твоём репозитории?"}]
+        self.assertTrue(is_leshy_repository_audit_request("А что написал не ты?", prior))
+        self.assertFalse(is_leshy_repository_audit_request("А что написал не ты?", []))
+        evidence = GitHubRepositoryEvidence(FakeGithubAPI())
+        result = evidence.answer("А что написал не ты?", prior)
+        self.assertTrue(result["verified"])
+        self.assertIn("Авторы Issues: jaster351", result["answer"])
+
     def test_author_names_and_counts_only_from_api(self):
         api = FakeGithubAPI()
         evidence = GitHubRepositoryEvidence(api)
