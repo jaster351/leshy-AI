@@ -52,6 +52,7 @@ class CheburcheckProbeAssessmentTests(unittest.TestCase):
         )
         probe = CheburProbeSummary(
             ok=True,
+            finished=True,
             online_probes=1,
             responded_probes=1,
             observations=(
