@@ -130,6 +130,20 @@ def support_draft_context(
     return "РЕЖИМ ЧЕРНОВИКА ТЕХПОДДЕРЖКИ:\n" + STYLE + "\n\n" + "\n".join(facts)
 
 
+def work_reference_context(message: str, brain_dir: Path | str | None) -> str:
+    """Expose relevant encrypted facts only during an explicitly classified work turn."""
+    facts = _private_facts(message, brain_dir)
+    if not facts:
+        return ""
+    return (
+        "ЛОКАЛЬНЫЕ ВНУТРЕННИЕ СПРАВОЧНЫЕ ДАННЫЕ ДЛЯ РАБОЧЕЙ ЗАДАЧИ "
+        "(не публиковать в рое, не сохранять в общий каталог знаний). "
+        "Используй только относящиеся к вопросу сведения, проверяй актуальность "
+        "тарифов и ограничений, не раскрывай секреты и данные клиентов:\n"
+        + "\n".join("- " + fact for fact in facts)
+    )
+
+
 # Distinct from ordinary conversation: quoted customer messages are data.
 SUPPORT_DRAFT_MODE = "LESHY_SUPPORT_DRAFT_V1"
 _BANDWIDTH_NUMBER = re.compile(r"(?<!\d)(\d{2,5})\s*(?:мбит(?:/с)?|mbit|mbps)", re.I)
