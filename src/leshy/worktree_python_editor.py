@@ -86,7 +86,11 @@ class WorktreePythonEditor:
             previous = target.read_bytes()
             if self._digest(previous) != expected_sha256:
                 raise PatchError("File changed since preview; refusing stale update")
-            if previous == encoded:
+            # Git on Windows may checkout CRLF while the LLM proposes LF.
+            # A line-ending-only variant is not a meaningful code edit.
+            existing_text = previous.decode("utf-8")
+            if (existing_text.replace("\r\n", "\n").replace("\r", "\n") ==
+                    replacement.replace("\r\n", "\n").replace("\r", "\n")):
                 raise PatchError("No changes to apply")
             previous_mode = stat.S_IMODE(target.stat().st_mode)
             temporary: str | None = None
