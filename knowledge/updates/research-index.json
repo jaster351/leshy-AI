@@ -1,12 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T02:57:14Z",
+  "updated_at": "2026-11-12T03:58:05Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T02:57:14Z",
-    "previous_issue_at": "2026-11-12T01:57:32Z",
+    "searched_at": "2026-11-12T03:58:05Z",
+    "previous_issue_at": "2026-11-12T02:57:14Z",
     "discovery_lookback_days": 30,
-    "newly_included_ids": [],
-    "note": "Свежие списки arXiv cs.AI/cs.IR от 11 ноября и целевой поиск по памяти, provenance, poisoning, отзыву и откату проверены; новых значимых работ или существенных редакций после прошлого выпуска не подтверждено. Уже рассмотренные работы не повторены."
+    "newly_included_ids": [
+      "doi:10.18653/2026.realm-1.35"
+    ],
+    "note": "Впервые включена релевантная публикация REALM 2026 от 29 октября о динамическом удержании памяти и контролируемом poisoning-тесте. Это дополнение покрытия, а не публикация после прошлого выпуска; свежие списки arXiv всё ещё датированы 11 ноября."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -179,6 +181,23 @@
       "code_url": "https://github.com/chanwoochoi316/KidnapRAG",
       "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "doi:10.18653/2026.realm-1.35",
+      "version": null,
+      "source_edition": "REALM 2026 publisher PDF; no revision number",
+      "first_published_at": null,
+      "publisher_publication_date": "2026-10-29",
+      "version_published_at": null,
+      "checked_at": "2026-11-12T03:58:05Z",
+      "publication_status": "peer_reviewed_workshop_proceedings",
+      "url": "https://aclanthology.org/2026.realm-1.35/",
+      "package": "knowledge/updates/2026-11-12/0900-weighted-memory-tree-research.jsonl",
+      "record_id": "weighted-memory-tree-retention-poisoning-realm2026",
+      "code_url": null,
+      "dataset_url": null,
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
+      "new_since_previous_issue": false
     }
   ],
   "issues": [
@@ -305,6 +324,15 @@
       "discovery_lookback_days": 30,
       "newly_included_ids": [],
       "note": "Свежие списки arXiv cs.AI/cs.IR от 11 ноября и целевой поиск по памяти, provenance, poisoning, отзыву и откату проверены; новых значимых работ или существенных редакций после прошлого выпуска не подтверждено. Уже рассмотренные работы не повторены."
+    },
+    {
+      "searched_at": "2026-11-12T03:58:05Z",
+      "previous_issue_at": "2026-11-12T02:57:14Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "doi:10.18653/2026.realm-1.35"
+      ],
+      "note": "Впервые включена релевантная публикация REALM 2026 от 29 октября о динамическом удержании памяти и контролируемом poisoning-тесте. Это дополнение покрытия, а не публикация после прошлого выпуска; свежие списки arXiv всё ещё датированы 11 ноября."
     }
   ],
   "last_search": {
