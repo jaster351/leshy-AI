@@ -45,6 +45,39 @@ class ConversationModeTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(resolve_conversation_mode(value).kind, "personal")
 
+    def test_pasted_customer_quotation_is_a_draft(self):
+        self.assertEqual(
+            resolve_conversation_mode(
+                "Добрый день! У вас на VPS ограничена скорость? Можно уточнить тариф?"
+            ).kind, "support_draft"
+        )
+
+    def test_work_status_is_not_a_personal_greeting(self):
+        self.assertEqual(resolve_conversation_mode("Как дела с Kafka?").kind, "work")
+        self.assertEqual(resolve_conversation_mode("Что по серверу?").kind, "work")
+        self.assertEqual(resolve_conversation_mode("Как дела?").kind, "personal")
+
+    def test_private_reference_in_work_turn_only(self):
+        import json
+        import os
+        from unittest.mock import patch
+        from cryptography.fernet import Fernet
+        from leshy.provider_support import work_reference_context
+        with tempfile.TemporaryDirectory() as base:
+            key = Fernet.generate_key()
+            folder = Path(base) / "private"
+            folder.mkdir()
+            data = {"facts": [{"cues": ["vps"], "text": "Сверьте условия услуги."}]}
+            (folder / "support_profile.enc").write_bytes(
+                Fernet(key).encrypt(json.dumps(data).encode("utf-8"))
+            )
+            with patch.dict(os.environ, {"LESHY_SUPPORT_PROFILE_KEY": key.decode()}):
+                self.assertIn(
+                    "Сверьте условия услуги.",
+                    work_reference_context("Проверь VPS", base),
+                )
+                self.assertEqual(work_reference_context("Как дела?", base), "")
+
     def test_followup_edits_ticket_without_manual_prefix(self):
         history = [
             {"role": "assistant", "content": "Уточните время и IP."},
