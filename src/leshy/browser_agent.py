@@ -173,7 +173,12 @@ class BrowserAgent:
                     return BrowserActionResult("uncertain", "Результат действия неизвестен; автоматический повтор запрещён.")
                 continue
             if action.risk is not BrowserRisk.READ:
-                # Even an 'unavailable' response cannot prove that no side effect occurred.
+                # An adapter may have committed before reporting a transport error.
+                if result.status in {"unavailable", "unsupported", "timeout", "error"}:
+                    event("browser_agent_write_uncertain", adapter=adapter.adapter_id,
+                          action=action.name, status=result.status)
+                    return BrowserActionResult(
+                        "uncertain", "Результат действия неизвестен; автоматический повтор запрещён.")
                 return result
             if result.status not in {"unavailable", "unsupported"}:
                 return result
