@@ -48,9 +48,10 @@ class VerifiedActor:
 class RemotePermissionPolicy:
     """Per-user, per-node authorization. Default is always deny."""
 
-    def __init__(self, identity):
+    def __init__(self, identity, *, enrollment_verifier=None):
         self.identity = identity
         self.storage = identity.storage
+        self._enrollment_verifier = enrollment_verifier
         with self.storage.connection() as conn:
             conn.executescript(_SCHEMA)
 
@@ -108,7 +109,7 @@ class RemotePermissionPolicy:
 
     def register_verified_node(
         self, actor: VerifiedActor, node_id: str, host_fingerprint: str, *,
-        enrollment_verified: bool = False,
+        enrollment_proof: str = "",
     ) -> None:
         """Register only following an independent host ownership proof.
 
@@ -118,7 +119,9 @@ class RemotePermissionPolicy:
         self._check_actor(actor)
         node = self._node(node_id)
         fingerprint = str(host_fingerprint or "").strip()
-        if not enrollment_verified or not (16 <= len(fingerprint) <= 256):
+        if (not callable(self._enrollment_verifier) or
+                not self._enrollment_verifier(actor.owner_id, node, fingerprint, enrollment_proof) or
+                not (16 <= len(fingerprint) <= 256)):
             raise PermissionError("Не подтверждены владение узлом и его подлинность")
         with self.storage.connection() as conn:
             existing = conn.execute(
