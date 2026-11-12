@@ -571,7 +571,7 @@ class LeshyApp:
             answer = cinema_no_data(cinema_plan)
             return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
 
-        if search_attempted and not sources and (not catalog_matches or force_search):
+        if search_attempted and not sources and (not catalog_matches or force_search) and not support_rules:
             answer = (
                 "Не удалось проверить актуальные сведения: поисковые источники временно недоступны. Попробуйте позже."
                 if search_error else
