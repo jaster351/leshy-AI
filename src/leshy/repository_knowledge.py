@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from .knowledge import KnowledgeBase
 from .storage import Storage, utcnow
+from .text_integrity import validate_knowledge_text
 
 SCHEMA_VERSION = 1
 META_PREFIX = "repository_knowledge.record."
@@ -31,6 +32,16 @@ def validate_record(value: object, *, now: datetime | None = None) -> dict:
     if not isinstance(value, dict) or value.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("unsupported knowledge schema")
     record = dict(value)
+    def check_text_tree(item: object, field: str = "record") -> None:
+        if isinstance(item, str):
+            validate_knowledge_text(item, field=field)
+        elif isinstance(item, dict):
+            for key, child in item.items():
+                check_text_tree(child, f"{field}.{key}")
+        elif isinstance(item, list):
+            for index, child in enumerate(item):
+                check_text_tree(child, f"{field}[{index}]")
+    check_text_tree(record)
     if not isinstance(record.get("id"), str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,159}", record["id"]):
         raise ValueError("invalid record id")
     if type(record.get("version")) is not int or record["version"] < 1:
