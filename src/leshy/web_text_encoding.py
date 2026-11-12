@@ -43,6 +43,18 @@ def decode_web_text(payload: bytes, content_type: str = "", *, html: bool = Fals
         raise TypeError("web payload must be bytes")
     if not payload:
         return ""
+    # A valid UTF-8 byte stream must never be reinterpreted as KOI8-R/CP1251
+    # just to hide a replacement glyph already present in the source.
+    if not (payload.startswith(codecs.BOM_UTF16_LE) or payload.startswith(codecs.BOM_UTF16_BE)):
+        try:
+            utf8_text = payload.decode("utf-8-sig", errors="strict")
+        except UnicodeDecodeError:
+            pass
+        else:
+            if corruption_reason(utf8_text):
+                raise UnicodeError("Источник содержит повреждённый Unicode; обучение отклонено")
+            return utf8_text
+
     declared = _declared_charsets(payload, content_type, html)
     candidates: list[tuple[str, bool]] = []
     if payload.startswith(codecs.BOM_UTF8):
