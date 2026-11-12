@@ -39,6 +39,25 @@ class AdminDashboardContractTests(unittest.TestCase):
         self.assertNotIn("356,8 TFLOPS", ui)
         self.assertNotIn("12 Активных узлов", ui)
 
+    def test_credential_folder_settings_are_owner_scoped_and_separate_from_chat(self):
+        server = (ROOT / "src/leshy/web_server_impl14.py").read_text(encoding="utf-8")
+        ui = (ROOT / "web/superagent-credential-folder.js").read_text(encoding="utf-8")
+        routes = server.split('if parsed.path == "/v1/superagent/credential-folder":')
+        self.assertEqual(len(routes), 2)
+        self.assertIn("owner = self._settings_owner()", routes[1])
+        self.assertIn("get_credential_folder(app.storage, owner)", routes[1])
+        self.assertIn('path == "/v1/superagent/credential-folder"', server)
+        self.assertIn("set_credential_folder(app.storage, owner", server)
+        self.assertIn('self.headers.get("X-Leshy-UI")', server)
+        self.assertIn('self.headers.get("Origin")', server)
+        self.assertIn('"superagent-credential-folder.js"', server)
+        self.assertIn("saCredentialFolderPath", ui)
+        self.assertIn("Сохранить", ui)
+        self.assertIn("Сбросить", ui)
+        self.assertIn("pane-settings", ui)
+        self.assertNotIn("pane-chat", ui)
+        self.assertNotIn("innerHTML", ui)
+
     def test_new_ui_does_not_replace_main_chat(self):
         ui = (ROOT / "web/admin-dashboard.js").read_text(encoding="utf-8")
         self.assertNotIn("pane-chat", ui)
