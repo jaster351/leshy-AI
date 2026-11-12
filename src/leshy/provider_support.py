@@ -95,18 +95,17 @@ def _private_facts(query: str, brain_dir: Path | str | None) -> tuple[str, ...]:
     if not brain_dir:
         return ()
     path = Path(brain_dir) / "private" / "support_profile.enc"
-    from .private_support_bootstrap import support_key
+    from .private_support_bootstrap import decrypt_support_profile, support_key
     key = support_key(brain_dir)
     if key is None or not path.is_file() or path.is_symlink():
         return ()
     try:
         if path.stat().st_size > 196608:
             return ()
-        from cryptography.fernet import Fernet
-        value = json.loads(Fernet(key).decrypt(path.read_bytes()).decode("utf-8"))
-        if not isinstance(value, dict) or not isinstance(value.get("facts"), list):
+        value = decrypt_support_profile(path.read_bytes(), key)
+        if value is None:
             return ()
-    except Exception:
+    except OSError:
         # Failed decryption is not evidence of policy; never expose ciphertext/key.
         return ()
     matches = []
