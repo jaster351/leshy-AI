@@ -99,7 +99,7 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
     confirmed = bool(re.search(
         r"(?m)^IP-адрес \S+ заблокирован ТСПУ\.",
         answer,
-    ))
+    )) or "подтверждена по 3/3 признакам" in answer
     if not (legacy or modern or confirmed):
         return None
     return answer
@@ -108,6 +108,15 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
 def _explain_saved_diagnostic(previous: str) -> str:
     """Replay previous measured results or explicitly admit missing evidence."""
     marker = previous.find("\n\nПроверка ")
+    if "подтверждена по 3/3 признакам" in previous:
+        return (
+            "Предыдущая проверка получила три согласованных признака: "
+            "тайм-аут прямого TCP, тайм-аут Check-Host из РФ на том же порту "
+            "и завершённый Cheburcheck со статусом tspu_block. "
+            "Это диагностическое подтверждение по принятой методике, "
+            "а не прямое наблюдение на оборудовании ТСПУ. "
+            "Новые проверки для этого пояснения не запускались.\n\n" + previous
+        )
     if marker >= 0 and "Запуски инструментов (ID;" in previous:
         report = previous[marker:].strip()
         return (
@@ -149,6 +158,28 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
     Legacy probability/heuristic scores are never proof, even when equal to 100.
     """
     target = str(metadata.get("target") or "").strip()
+    if target and metadata.get("blocking_attribution") == "confirmed_three_signals":
+        ports = ", ".join(str(p) for p in metadata.get("matched_ports") or [])
+        remote = metadata.get("remote") or []
+        russian = [
+            row for row in remote if isinstance(row, dict)
+            and str(row.get("country_code") or "").lower() == "ru"
+            and row.get("port") in (metadata.get("matched_ports") or [])
+        ]
+        ru_timeouts = sum(row.get("status") == "timeout" for row in russian)
+        chebur = metadata.get("chebur_probe") or {}
+        observations = chebur.get("observations") or []
+        blocked_probes = sum(
+            "tspu_block" in (row.get("verdicts") or [])
+            for row in observations if isinstance(row, dict)
+        )
+        return (
+            f"IP-адрес {target}: блокировка ТСПУ подтверждена по 3/3 признакам.\n"
+            f"Порт TCP/{ports}: прямое подключение — timeout.\n"
+            f"Check-Host РФ: {ru_timeouts} timeout из {len(russian)} проверенных узлов на этом порту.\n"
+            f"Cheburcheck: tspu_block ({blocked_probes}/{len(observations)} сканеров); "
+            "проверка завершена."
+        )
     if (
         target
         and metadata.get("blocking_attribution") == "confirmed_tspu"
@@ -183,13 +214,20 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     for url in check_host_reports:
         sources.append({"title": "Результаты Check-Host", "url": url})
     summary = _compact_answer(response.metadata)
-    if response.metadata.get("blocking_attribution") != "confirmed_tspu" or not response.metadata.get("proof_record_id") or response.metadata.get("proof_verification") != "verified":
-        # Do not hide missing or conflicting measurements from the operator.
+    is_three_signal = response.metadata.get("blocking_attribution") == "confirmed_three_signals"
+    if not is_three_signal and (
+        response.metadata.get("blocking_attribution") != "confirmed_tspu"
+        or not response.metadata.get("proof_record_id")
+        or response.metadata.get("proof_verification") != "verified"
+    ):
+        # The complete diagnostic report remains visible when no full conclusion is possible.
         summary += "\n\n" + response.text
     response.metadata["copyable_conclusion"] = (
-        summary if response.metadata.get("blocking_attribution") == "confirmed_tspu"
-        and response.metadata.get("proof_verification") == "verified"
-        and response.metadata.get("proof_record_id") else ""
+        summary if is_three_signal or (
+            response.metadata.get("blocking_attribution") == "confirmed_tspu"
+            and response.metadata.get("proof_verification") == "verified"
+            and response.metadata.get("proof_record_id")
+        ) else ""
     )
     return summary, sources, response.metadata
 
