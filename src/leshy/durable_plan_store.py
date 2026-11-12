@@ -5,6 +5,7 @@ Plan content stays scoped to the owner; no LLM or network work occurs here.
 """
 from __future__ import annotations
 
+from collections import deque
 from contextlib import contextmanager
 import json
 from pathlib import Path
@@ -16,7 +17,6 @@ from typing import Any
 
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
-_MAX_STEPS = 64
 
 
 class PlanError(ValueError):
@@ -24,8 +24,8 @@ class PlanError(ValueError):
 
 
 def _validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if not isinstance(steps, list) or not 1 <= len(steps) <= _MAX_STEPS:
-        raise PlanError("Plan must contain 1–64 steps")
+    if not isinstance(steps, list) or not steps:
+        raise PlanError("Plan must contain at least one step")
     normalized: list[dict[str, Any]] = []
     ids: set[str] = set()
     for step in steps:
@@ -37,7 +37,7 @@ def _validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
             raise PlanError("Invalid or duplicate step ID")
         if not isinstance(title, str) or not 1 <= len(title.strip()) <= 300:
             raise PlanError("Invalid step title")
-        if not isinstance(deps, list) or len(deps) > _MAX_STEPS or not all(isinstance(d, str) for d in deps):
+        if not isinstance(deps, list) or not all(isinstance(d, str) for d in deps):
             raise PlanError("Invalid dependencies")
         if len(deps) != len(set(deps)):
             raise PlanError("Duplicate dependency")
@@ -46,17 +46,27 @@ def _validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
             raise PlanError("max_attempts must be 1–8")
         ids.add(ident)
         normalized.append({"id": ident, "title": title.strip(), "depends_on": deps, "max_attempts": attempts})
-    remaining = {s["id"]: set(s["depends_on"]) for s in normalized}
-    if any(name not in remaining for deps in remaining.values() for name in deps):
-        raise PlanError("Unknown dependency")
-    while remaining:
-        ready = {name for name, deps in remaining.items() if not deps}
-        if not ready:
-            raise PlanError("Circular dependencies")
-        for name in ready:
-            del remaining[name]
-        for deps in remaining.values():
-            deps.difference_update(ready)
+    # O(steps + dependencies), not quadratic rescans for long DAGs.
+    # Batch sizes are constrained at execution by available workers/resources,
+    # not by a hard-coded limit on the number of planned steps.
+    indegree = {step["id"]: len(step["depends_on"]) for step in normalized}
+    children: dict[str, list[str]] = {ident: [] for ident in indegree}
+    for step in normalized:
+        for dep in step["depends_on"]:
+            if dep not in indegree:
+                raise PlanError("Unknown dependency")
+            children[dep].append(step["id"])
+    ready = deque(ident for ident, count in indegree.items() if count == 0)
+    visited = 0
+    while ready:
+        ident = ready.popleft()
+        visited += 1
+        for child in children[ident]:
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                ready.append(child)
+    if visited != len(normalized):
+        raise PlanError("Circular dependencies")
     return normalized
 
 
@@ -137,7 +147,7 @@ class DurablePlanStore:
 
     def claim(self, plan_id: str, owner_id: str, *, limit: int = 4,
               lease_seconds: int = 90, now: float | None = None) -> list[dict[str, Any]]:
-        if not 1 <= limit <= 8 or not 1 <= lease_seconds <= 3600:
+        if type(limit) is not int or limit < 1 or type(lease_seconds) is not int or not 1 <= lease_seconds <= 3600:
             raise PlanError("Invalid claim limits")
         clock = time.time() if now is None else float(now)
         with self._connection() as db:
