@@ -35,6 +35,21 @@ def with_leshy_identity(messages: list[ChatMessage]) -> list[ChatMessage]:
     Порядок несистемной истории не меняется.
     """
     items = list(messages)
+    # A support draft is a third-person document, not the assistant speaking
+    # as himself. Do not prepend the Leshy identity to a customer-facing reply.
+    # This marker is authored only by the local support routing code.
+    support_mode = any(
+        item.role == "system" and str(item.content).startswith("LESHY_SUPPORT_DRAFT_V1")
+        for item in items
+    )
+    if support_mode:
+        systems = [
+            str(item.content).strip() for item in items
+            if item.role == "system" and str(item.content).strip()
+        ]
+        dialogue = [item for item in items if item.role != "system"]
+        return [ChatMessage("system", "/no_think\n" + "\n\n".join(systems)), *dialogue]
+
     latest_user = next((str(item.content) for item in reversed(items) if item.role == "user"), "")
     temporal = temporal_system_instruction(latest_user)
     # Put the live clock immediately after /no_think so context truncation
