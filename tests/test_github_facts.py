@@ -60,7 +60,7 @@ class GitHubFactsTests(unittest.TestCase):
         self.assertIn("jaster351 — 2", result["answer"])
         self.assertIn("Pull Requests: 1", result["answer"])
         self.assertNotIn("michal", result["answer"])
-        self.assertIn("Других аккаунтов", result["answer"])
+        self.assertIn("других аккаунтов", result["answer"])
         self.assertNotIn("непроверенные", result["answer"])
         self.assertTrue(evidence.receipts.verify(result["receipt_id"])["verified"])
         self.assertEqual(len(api.calls), 3)
