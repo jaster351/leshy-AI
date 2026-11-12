@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 import json
@@ -84,6 +85,37 @@ class ToolRegistry:
             path = root / "tools" / "registry.json"
         self.path = Path(path).expanduser()
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.RLock()
+
+    @contextmanager
+    def _mutation_lock(self):
+        """Serialize read-modify-write across instances and OS processes.
+
+        The lock file is permanent: deleting it allows two processes to lock
+        different inodes. Data publication itself stays atomic via os.replace.
+        """
+        with self._write_lock:
+            fd = os.open(str(self.path) + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"0")
+                os.lseek(fd, 0, os.SEEK_SET)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    if os.name == "nt":
+                        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                    else:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
 
     def _read(self) -> dict[str, ToolManifest]:
         if not self.path.is_file():
@@ -132,39 +164,42 @@ class ToolRegistry:
             local_http = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
             if parsed.scheme != "https" and not local_http:
                 raise ValueError("Удалённый MCP URL должен использовать HTTPS")
-        items = self._read()
-        items[manifest.tool_id] = manifest
-        self._write(items)
+        with self._mutation_lock():
+            items = self._read()
+            items[manifest.tool_id] = manifest
+            self._write(items)
         event("tools_registry_registered", tool_id=manifest.tool_id, permissions=[x.value for x in manifest.permissions])
         return manifest
 
     def set_enabled(self, tool_id: str, enabled: bool) -> ToolManifest:
-        items = self._read()
-        current = items.get(str(tool_id).strip())
-        if current is None:
-            raise KeyError(f"Инструмент не установлен: {tool_id}")
-        updated = ToolManifest(
-            tool_id=current.tool_id,
-            title=current.title,
-            transport=current.transport,
-            command=current.command,
-            args=current.args,
-            url=current.url,
-            permissions=current.permissions,
-            source=current.source,
-            enabled=bool(enabled),
-            env=current.env,
-        )
-        items[updated.tool_id] = updated
-        self._write(items)
+        with self._mutation_lock():
+            items = self._read()
+            current = items.get(str(tool_id).strip())
+            if current is None:
+                raise KeyError(f"Инструмент не установлен: {tool_id}")
+            updated = ToolManifest(
+                tool_id=current.tool_id,
+                title=current.title,
+                transport=current.transport,
+                command=current.command,
+                args=current.args,
+                url=current.url,
+                permissions=current.permissions,
+                source=current.source,
+                enabled=bool(enabled),
+                env=current.env,
+            )
+            items[updated.tool_id] = updated
+            self._write(items)
         event("tools_registry_toggled", tool_id=updated.tool_id, enabled=updated.enabled)
         return updated
 
     def remove(self, tool_id: str) -> None:
-        items = self._read()
-        if str(tool_id).strip() in items:
-            del items[str(tool_id).strip()]
-            self._write(items)
+        with self._mutation_lock():
+            items = self._read()
+            if str(tool_id).strip() in items:
+                del items[str(tool_id).strip()]
+                self._write(items)
             event("tools_registry_removed", tool_id=str(tool_id).strip())
 
 
