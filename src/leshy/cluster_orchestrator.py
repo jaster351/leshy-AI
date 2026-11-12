@@ -51,7 +51,7 @@ class ClusterNode:
                 or not math.isfinite(available) or available < minimum
             ):
                 return False
-        if task.model and self.models and task.model not in self.models:
+        if task.model and task.model not in self.models:
             return False
         if task.mode == MODEL_PARALLEL_MODE and task.model and task.model not in self.models:
             return False
