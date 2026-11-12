@@ -314,10 +314,6 @@ class BrowserPlatform:
             return BrowserActionResult("cancelled", "Действие отменено пользователем.")
         # Resolve against the broker's own immutable action. No caller-supplied
         # approved=True flag can bypass the gate; consume is atomic and one-time.
-        pending = next((item for item in self.approvals.list(owner_id, session_id=session_id)
-                        if item["approval_id"] == approval_id), None)
-        if pending is None:
-            raise KeyError("Approval не найден или истёк")
         action = self.approvals.peek_action(owner_id, approval_id, session_id=session_id)
         result = self.agent.execute_approved(action, broker=self.approvals,
                                              approval_id=approval_id, owner_id=owner_id,
