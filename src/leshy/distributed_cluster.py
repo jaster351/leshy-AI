@@ -663,7 +663,29 @@ class DistributedClusterRuntime:
                 payload = {"status": "ok", "node_id": self.identity.node_id}
             elif task.kind == "knowledge.search":
                 query = str(task.payload.get("query") or "")
-                payload = {"items": self.app.knowledge.search(query, trusted_only=True, limit=8)}
+                rows = self.app.knowledge.search(query, trusted_only=True, limit=8)
+                if task.origin_node_id != self.identity.node_id:
+                    # Trusted Knowledge is NOT necessarily public. Never export
+                    # private local files or unfiltered metadata to cluster peers.
+                    from .cluster_knowledge_sync import _public_source, _safe_public_record
+                    public_items = []
+                    for item in rows:
+                        if not isinstance(item, dict):
+                            continue
+                        claim = str(item.get("claim") or "")
+                        topic = str(item.get("topic") or "")
+                        source = str(item.get("source_url") or "")
+                        title = str(item.get("source_title") or "")
+                        if not (_public_source(source) and
+                                _safe_public_record(claim, topic, title, source)):
+                            continue
+                        public_items.append({
+                            "topic": topic[:500], "claim": claim[:1600],
+                            "source_url": source[:1500], "source_title": title[:400],
+                        })
+                    payload = {"items": public_items}
+                else:
+                    payload = {"items": rows}
             elif task.kind == "graph.search":
                 graph = getattr(self.app, "knowledge_graph", None)
                 if graph is None:
