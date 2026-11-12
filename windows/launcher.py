@@ -13,6 +13,50 @@ _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 _STARTUP_THROTTLE_SECONDS = 60
 
 
+def _install_frozen_critical_modules() -> None:
+    """Recover critical runtime imports from explicitly packaged source files.
+
+    PyInstaller may omit a module from PYZ even though the source is present
+    and the application imports it. The extra source files are public
+    application code only; no local secrets or company profiles are bundled.
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    import importlib
+    import importlib.util
+
+    root = Path(getattr(sys, "_MEIPASS", "")).resolve() / "leshy"
+    critical = (
+        "leshy.network_blocking_module",
+        "leshy.network_blocking_runtime",
+        "leshy.provider_support",
+        "leshy.private_support_bootstrap",
+    )
+    for name in critical:
+        try:
+            importlib.import_module(name)
+            continue
+        except ModuleNotFoundError as exc:
+            if exc.name != name:
+                raise
+        fallback = root / (name.rsplit(".", 1)[-1] + ".py")
+        if not fallback.is_file():
+            raise ModuleNotFoundError(
+                "Missing frozen Python module and source fallback: " + name,
+                name=name,
+            )
+        spec = importlib.util.spec_from_file_location(name, fallback)
+        if spec is None or spec.loader is None:
+            raise ImportError("Invalid frozen source fallback: " + name)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(name, None)
+            raise
+
+
 def _install_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -161,6 +205,10 @@ def main() -> None:
 
     _cleanup_stale_llama_servers(brain_root)
     _start_llama_watchdog(brain_root)
+
+    # Prepare import fallbacks before web_server_impl7 imports the TCP/TSPU
+    # module. Do not silently disable diagnostics on packaging failures.
+    _install_frozen_critical_modules()
 
     from leshy.diagnostic_publisher import DiagnosticPublisher
     from leshy.web_server import serve
