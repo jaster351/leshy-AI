@@ -7,7 +7,9 @@ import unittest
 
 from leshy.app import LeshyApp
 from leshy.config import Settings
-from leshy.conversation_mode import resolve_conversation_mode, mode_instruction
+from leshy.conversation_mode import (
+    resolve_conversation_mode, mode_instruction, conversation_rows_for_mode,
+)
 from leshy.realtime_chat import RealtimeChatManager
 
 
@@ -110,6 +112,27 @@ class ConversationModeTests(unittest.TestCase):
         ]
         self.assertEqual(resolve_conversation_mode("И что дальше?", history).kind, "work")
         self.assertEqual(resolve_conversation_mode("Как дела?", history).kind, "personal")
+
+    def test_personal_history_does_not_include_prior_customer_ticket(self):
+        rows = [
+            {"role": "user", "content": "Давай просто поговорим"},
+            {"role": "assistant", "content": "Мы проверим Вашу услугу."},
+            {"role": "user", "content": "/support Клиент: не работает SSH"},
+        ]
+        only_personal = conversation_rows_for_mode(rows, "personal")
+        self.assertEqual(len(only_personal), 1)
+        self.assertIn("просто поговорим", only_personal[0]["content"])
+
+    def test_several_work_followups_keep_work_mode(self):
+        rows = [
+            {"role": "user", "content": "А теперь?"},
+            {"role": "assistant", "content": "Следующий шаг"},
+            {"role": "user", "content": "И что дальше?"},
+            {"role": "assistant", "content": "Проверить логи"},
+            {"role": "user", "content": "Проверь ошибки Kafka на сервере"},
+        ]
+        self.assertEqual(resolve_conversation_mode("А теперь?", rows).kind, "work")
+        self.assertEqual(len(conversation_rows_for_mode(rows, "work")), 5)
 
     def test_user_sessions_are_isolated_in_routing(self):
         # Mode depends entirely on supplied same-session rows.
