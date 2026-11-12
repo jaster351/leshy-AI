@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T08:02:30Z",
+  "updated_at": "2026-11-12T09:00:00Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T08:02:30Z",
-    "previous_issue_at": "2026-11-12T07:01:01Z",
+    "searched_at": "2026-11-12T09:00:00Z",
+    "previous_issue_at": "2026-11-12T08:02:30Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "doi:10.18653/2026.emnlp-main.423"
+      "arXiv:2606.12703"
     ],
-    "note": "Впервые включена рецензированная публикация EMNLP 2026 о сохранении сигналов верификатора как метаданных всего жизненного цикла памяти. Это дополнение покрытия октябрьских proceedings, а не новая публикация последнего часа; повторно найденные работы исключены."
+    "note": "Впервые включён значимый препринт SMSR от 10 июня о сертифицируемой защите от runtime memory poisoning. Это дополнение покрытия, а не новая публикация последнего часа; повторно найденные работы исключены."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -303,6 +303,23 @@
       "dataset_url": null,
       "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "arXiv:2606.12703",
+      "version": "v1",
+      "source_edition": "arXiv v1 full text",
+      "first_published_at": "2026-06-10T21:45:52Z",
+      "publisher_publication_date": null,
+      "version_published_at": "2026-06-10T21:45:52Z",
+      "checked_at": "2026-11-12T09:00:00Z",
+      "publication_status": "preprint_not_peer_reviewed",
+      "url": "https://arxiv.org/abs/2606.12703v1",
+      "package": "knowledge/updates/2026-11-12/1400-smsr-certified-runtime-memory-poisoning-research.jsonl",
+      "record_id": "smsr-certified-runtime-memory-poisoning-2606-12703",
+      "code_url": null,
+      "dataset_url": null,
+      "inclusion_reason": "first_time_coverage_of_significant_relevant_preprint",
+      "new_since_previous_issue": false
     }
   ],
   "issues": [
@@ -457,30 +474,37 @@
         "doi:10.18653/2026.emnlp-main.423"
       ],
       "note": "Впервые включена рецензированная публикация EMNLP 2026 о сохранении сигналов верификатора как метаданных всего жизненного цикла памяти. Это дополнение покрытия октябрьских proceedings, а не новая публикация последнего часа; повторно найденные работы исключены."
+    },
+    {
+      "searched_at": "2026-11-12T09:00:00Z",
+      "previous_issue_at": "2026-11-12T08:02:30Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "arXiv:2606.12703"
+      ],
+      "note": "Впервые включён значимый препринт SMSR от 10 июня о сертифицируемой защите от runtime memory poisoning. Это дополнение покрытия, а не новая публикация последнего часа; повторно найденные работы исключены."
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-12T08:02:30Z",
-    "incremental_since": "2026-11-12T07:01:01Z",
+    "completed_at": "2026-11-12T09:00:00Z",
+    "incremental_since": "2026-11-12T08:02:30Z",
     "additional_lookback_start": "2026-10-13",
     "new_publications_or_significant_versions_after_previous_issue_found": [],
     "first_time_coverage_ids": [
-      "doi:10.18653/2026.emnlp-main.423"
+      "arXiv:2606.12703"
     ],
     "query_topics": [
-      "long-term LLM agent memory provenance poisoning November 2026",
-      "RAG poisoning agent memory rollback November 2026",
-      "ACL Anthology memory governance verifier lifecycle",
-      "OpenReview agent memory poisoning provenance rollback"
+      "LLM agent memory poisoning provenance rollback November 2026",
+      "RAG poisoning agent memory verification forgetting",
+      "ACL Anthology memory governance provenance",
+      "OpenReview long-term agent memory security"
     ],
     "opened_primary_urls": [
-      "https://arxiv.org/list/cs.AI/new",
-      "https://arxiv.org/list/cs.IR/new",
-      "https://aclanthology.org/2026.emnlp-main.423/",
-      "https://aclanthology.org/2026.emnlp-main.423.pdf",
-      "https://github.com/whyyyyy123/MemGuard"
+      "https://arxiv.org/abs/2606.12703v1",
+      "https://arxiv.org/pdf/2606.12703v1",
+      "https://export.arxiv.org/api/query?id_list=2606.12703"
     ],
-    "note": "После предыдущего выпуска новых публикаций или существенных версий не подтверждено; впервые полностью проверена ранее не включённая рецензированная работа MemGuard из EMNLP 2026."
+    "note": "Новых публикаций или существенных версий после выпуска 08:02:30Z не подтверждено; впервые полностью проверен ранее не включённый препринт SMSR v1."
   },
   "pending_primary_reviews": [
     {
