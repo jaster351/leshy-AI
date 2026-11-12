@@ -15,7 +15,7 @@ from .capability_registry import CapabilityRegistry, is_self_capability_question
 from .github_facts import GitHubRepositoryEvidence
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply, work_reference_context
-from .conversation_mode import resolve_conversation_mode, mode_instruction
+from .conversation_mode import resolve_conversation_mode, mode_instruction, conversation_rows_for_mode
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
@@ -608,7 +608,8 @@ class LeshyApp:
                 "created_at": self._save_assistant(sid, answer), "sources": [],
             }
 
-        history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(rows)]
+        isolated_rows = conversation_rows_for_mode(rows, mode.kind)
+        history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
         messages = context + history_messages
         event("chat_generation_started", session_id=sid, owner_id=owner_id, context_messages=len(messages))
         try:
