@@ -336,9 +336,12 @@ class ClusterPrivateProfileSync:
                       else self.cluster.identity.node_id)
             values.append({"key": key, "value_json": raw, "updated_at": stamp,
                            "source_node": source})
+        name_version = versions.get("__profile_name__") or {}
+        name_stamp = str(profile["updated_at"]) if profile else ""
+        name_source = (name_version.get("source_node") if name_version.get("stamp") == name_stamp
+                       else self.cluster.identity.node_id)
         display = {"display_name": str(profile["display_name"] or "")[:200],
-                   "updated_at": str(profile["updated_at"]),
-                   "source_node": self.cluster.identity.node_id} if profile else {}
+                   "updated_at": name_stamp, "source_node": name_source} if profile else {}
         return {"version": 1, "profile": display, "preferences": values}
 
     def _apply(self, owner: str, doc: dict) -> None:
@@ -379,8 +382,26 @@ class ClusterPrivateProfileSync:
                     "source_node=excluded.source_node,stamp=excluded.stamp",
                     (owner, key, source, stamp),
                 )
-            # Profile display_name is intentionally excluded until a dedicated
-            # revision and conflict-safe editable profile surface is available.
+            profile = doc.get("profile")
+            if isinstance(profile, dict):
+                name = profile.get("display_name")
+                stamp = _valid_stamp(profile.get("updated_at"))
+                source = str(profile.get("source_node") or "")
+                if isinstance(name, str) and len(name) <= 200 and stamp and 1 <= len(source) <= 128:
+                    current = conn.execute(
+                        "SELECT updated_at FROM owner_profiles WHERE id=?", (owner,)
+                    ).fetchone()
+                    if current is not None and str(current["updated_at"]) < stamp:
+                        conn.execute(
+                            "UPDATE owner_profiles SET display_name=?,updated_at=? WHERE id=?",
+                            (name, stamp, owner),
+                        )
+                        conn.execute(
+                            "INSERT INTO cluster_private_versions(owner_id,item_key,source_node,stamp) "
+                            "VALUES(?,?,?,?) ON CONFLICT(owner_id,item_key) DO UPDATE SET "
+                            "source_node=excluded.source_node,stamp=excluded.stamp",
+                            (owner, "__profile_name__", source, stamp),
+                        )
 
     def receive(self, route: str, body: dict, headers) -> dict:
         self.cluster.verify_request(body, headers)
