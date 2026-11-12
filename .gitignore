@@ -8,3 +8,5 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+**/private/support_profile.enc
+**/private/support_profile.key
