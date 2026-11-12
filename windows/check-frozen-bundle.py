@@ -25,6 +25,7 @@ def source_preflight(root: Path) -> None:
     # spending minutes building a frozen EXE. Invalid syntax may look like
     # "missing module" in PyInstaller's warning output.
     verified = 0
+    errors: list[str] = []
     for directory in ("src", "tests", "windows"):
         base = root / directory
         if not base.is_dir():
@@ -34,12 +35,18 @@ def source_preflight(root: Path) -> None:
                 continue
             try:
                 compile(source_file.read_bytes(), str(source_file), "exec")
-            except SyntaxError as exc:
-                raise RuntimeError(
-                    f"Invalid Python syntax: {source_file}:{exc.lineno}: "
-                    f"{exc.msg}. Correct the source before building."
-                ) from exc
+            except (SyntaxError, UnicodeError) as exc:
+                line = getattr(exc, "lineno", None)
+                message = getattr(exc, "msg", str(exc))
+                errors.append(f"{source_file}:{line}: {message}")
+                continue
             verified += 1
+    if errors:
+        raise RuntimeError(
+            f"Invalid Python syntax in {len(errors)} source(s):\n"
+            + "\\n".join(errors)
+            + "\\nCorrect all reported files before building."
+        )
     print(f"BUILD PREFLIGHT OK: {verified} Python sources parsed.")
 
     source = root / "src"
