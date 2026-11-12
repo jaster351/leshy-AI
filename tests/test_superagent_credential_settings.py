@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import sqlite3
+import os
 import unittest
 
 from leshy.storage import Storage
@@ -29,9 +29,12 @@ class CredentialFolderTests(unittest.TestCase):
         self.assertEqual(data["scope"], "leshy_host")
         self.assertFalse(get_credential_folder(self.storage, "web:b")["configured"])
         with self.storage.connection() as conn:
-            self.assertNotIn("SECRET_DO_NOT_LOG", repr(conn.execute("SELECT * FROM meta").fetchall()))
-            events = conn.execute("SELECT payload_json FROM audit_log").fetchall()
-        self.assertNotIn(str(self.directory), repr([row["payload_json"] for row in events]))
+            meta_values = [row["value"] for row in conn.execute("SELECT value FROM meta").fetchall()]
+            self.assertIn(str(self.directory.resolve()), meta_values)
+            self.assertNotIn("SECRET_DO_NOT_LOG", " ".join(meta_values))
+            events = [row["payload_json"] for row in conn.execute("SELECT payload_json FROM audit_log").fetchall()]
+        self.assertNotIn(str(self.directory), " ".join(events))
+        self.assertNotIn("SECRET_DO_NOT_LOG", " ".join(events))
 
     def test_lookup_restricts_path_and_ambiguous_names(self):
         set_credential_folder(self.storage, "web:a", str(self.directory))
@@ -45,6 +48,34 @@ class CredentialFolderTests(unittest.TestCase):
         duplicate.mkdir()
         (duplicate / "account.txt").write_text("another", encoding="utf-8")
         with self.assertRaises(ValueError):
+            find_credential_file(self.storage, "web:a", "account.txt")
+
+    def test_nested_symlink_outside_selected_folder_is_ignored(self):
+        outside = self.home / "outside"
+        outside.mkdir()
+        (outside / "external.txt").write_text("password=TOP_SECRET", encoding="utf-8")
+        link = self.directory / "outside_link"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Directory symlinks unavailable on this system")
+        set_credential_folder(self.storage, "web:a", str(self.directory))
+        with self.assertRaises(FileNotFoundError):
+            find_credential_file(self.storage, "web:a", "external.txt")
+
+    def test_replaced_root_link_is_refused(self):
+        set_credential_folder(self.storage, "web:a", str(self.directory))
+        replacement = self.home / "replacement"
+        replacement.mkdir()
+        original = self.home / "original-allowed"
+        self.directory.rename(original)
+        try:
+            self.directory.symlink_to(replacement, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            original.rename(self.directory)
+            self.skipTest("Directory symlinks unavailable on this system")
+        self.assertFalse(get_credential_folder(self.storage, "web:a")["available"])
+        with self.assertRaises(PermissionError):
             find_credential_file(self.storage, "web:a", "account.txt")
 
     def test_missing_folder_and_clear(self):
