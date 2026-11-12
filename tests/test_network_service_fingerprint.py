@@ -79,7 +79,8 @@ class OsFingerprintTests(unittest.TestCase):
             self.assertTrue(kwargs["include_web"])
             return fingerprint
 
-        def remote(_target):
+        def remote(_target, ports):
+            self.assertEqual(ports, (22, 3389, 80, 443))
             self.assertEqual(calls[:2], ["local", "fingerprint"])
             return (
                 TcpObservation("check-host", 443, "timeout", country_code="ru", node="ru1"),
