@@ -323,7 +323,15 @@ class KnowledgeSyncService:
                             event("cluster_knowledge_sync_imported", received=received, peer=peer.node_id[:12])
                     except Exception as exc:
                         self._patch(state="error", last_error=type(exc).__name__ + ": " + str(exc)[:150])
-                        problem("cluster_knowledge_sync_failed", type(exc).__name__, peer=peer.node_id[:12])
+                        # Log only structured error types/codes: exception text may contain URLs or secrets.
+                        reason = getattr(exc, "reason", None)
+                        problem(
+                            "cluster_knowledge_sync_failed",
+                            type(exc).__name__,
+                            peer=peer.node_id[:12],
+                            reason_type=type(reason).__name__ if reason is not None else "",
+                            errno=getattr(reason, "errno", None) if isinstance(getattr(reason, "errno", None), int) else None,
+                        )
                 if total:
                     self._patch(received_total=self.status()["received_total"] + total)
             except Exception as exc:
