@@ -138,6 +138,7 @@ Build-Stage 'pyinstaller'
 python -m PyInstaller --noconfirm --clean --onedir --console `
   --name Leshy `
   --paths src `
+  --collect-submodules leshy `
   --hidden-import leshy.network_blocking_runtime `
   --hidden-import leshy.network_blocking_module `
   --hidden-import leshy.provider_support `
@@ -259,6 +260,7 @@ function Invoke-FrozenSmokeTest {
     $status = $null
     do {
       if ($process.HasExited) {
+        $process.Refresh()
         # Preserve the actual exception instead of reporting only exit code 1.
         $stderrTail = @()
         if (Test-Path -LiteralPath $smokeStderr) {
