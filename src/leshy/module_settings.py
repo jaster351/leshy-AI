@@ -102,6 +102,13 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         default_enabled=True,
     ),
     ModuleSettingDefinition(
+        name="remote-admin",
+        title="Удалённая диагностика и администрирование",
+        description="Разрешение SuperAgent проверять один явно указанный IP сервера по TCP/UDP. Не предоставляет доступ к паролям, SSH-командам или изменению сервера.",
+        default_enabled=False,
+        dependencies=("os-control",),
+    ),
+    ModuleSettingDefinition(
         name="superagent",
         title="SuperAgent",
         description="Автономные фоновые задания по схеме Trigger → Mandate → Ticket → Assignment → Report: состояние переживает перезапуск, временные ошибки повторяются, а к человеку возвращаются только результат или один блокирующий вопрос.",
