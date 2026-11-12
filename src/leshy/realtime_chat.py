@@ -13,6 +13,7 @@ from .cinema_research import cinema_query, cinema_instruction, cinema_search, ci
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .capability_registry import is_self_capability_question
+from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
@@ -234,6 +235,7 @@ class RealtimeChatManager:
                 "устаревшие шаблоны базы как на причину отказа: сразу напиши "
                 "готовый естественный текст, используя требования пользователя.",
             )
+        context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
         context.append(ChatMessage("system", current_clock_context()))
         if is_self_capability_question(message):
             context.append(ChatMessage("system", self.app.capabilities.context_for_question(self.app)))
