@@ -94,9 +94,9 @@
       host.append(element('strong', 'sa-help', 'План · ' + plan.state));
       (plan.steps || []).forEach(step => host.append(element('p', 'sa-meta', `${step.title} — ${step.state}`)));
       const group = element('div', 'sa-controls');
-      if (plan.state === 'active') group.append(makeButton('Пауза плана', () => perform({ action: 'plan_pause', id: taskId }), false));
-      if (plan.state === 'paused') group.append(makeButton('Продолжить план', () => perform({ action: 'plan_resume', id: taskId }), false));
-      if (['active', 'paused'].includes(plan.state)) group.append(makeButton('Отменить план', () => perform({ action: 'plan_cancel', id: taskId }), false, 'sa-danger'));
+      if (!detail.archived && plan.state === 'active') group.append(makeButton('Пауза плана', () => perform({ action: 'plan_pause', id: taskId }), false));
+      if (!detail.archived && plan.state === 'paused') group.append(makeButton('Продолжить план', () => perform({ action: 'plan_resume', id: taskId }), false));
+      if (!detail.archived && ['active', 'paused'].includes(plan.state)) group.append(makeButton('Отменить план', () => perform({ action: 'plan_cancel', id: taskId }), false, 'sa-danger'));
       host.append(group);
       host.append(element('p', 'sa-help', 'План сохраняет последовательность этапов; сам по себе не запускает их автоматическое выполнение.'));
     } else if (!['ready', 'failed', 'stopped'].includes(detail.state)) {
