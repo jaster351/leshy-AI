@@ -218,12 +218,14 @@ def _clean_reply(raw: str) -> str:
     value = finalize_model_output(str(raw or "")).strip()
     value = re.sub(r"(?is)^\s*(?:готовый ответ(?: клиенту)?|вариант ответа|ответ клиенту)\s*[:—-]\s*", "", value)
     value = re.sub(r"(?im)^\s*(?:добрый день|здравствуйте|приветствую)[!.,\s]*", "", value).strip()
-    value = re.sub(r"(?im)^\s*я\s*[-—]\s*леший[.!]?\s*", "", value).strip()
+    value = re.sub(r"(?im)^\s*я\s*[-—]\s*(?:\*\*)?леший(?:\*\*)?[.!]?\s*", "", value).strip()
     return value.strip().strip('"').strip()
 
 
 def _acceptable(value: str) -> bool:
-    if not value or len(value) > 900 or _BAD_REPLY.search(value):
+    # Markdown bold must not hide "Я — **Леший**" from the gate.
+    plain = re.sub(r"[*_`]", "", value)
+    if not value or len(value) > 900 or _BAD_REPLY.search(plain):
         return False
     if re.search(r"(?im)^\s*[-*•]\s", value):
         return False
