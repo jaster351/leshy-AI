@@ -122,6 +122,16 @@ class HttpRoutingTests(unittest.TestCase):
         h2.do_GET()
         self.assertEqual(h2.result[0], 200)
 
+    def test_archive_listing_mode_and_invalid_filter(self):
+        archived = self.Handler(path='/v1/superagent/tasks?archived=1', owner='web:alice')
+        archived.do_GET()
+        self.assertEqual(archived.result[0], 200)
+        self.assertEqual(archived.result[1]['tasks'], [])
+
+        invalid = self.Handler(path='/v1/superagent/tasks?archived=unknown', owner='web:alice')
+        invalid.do_GET()
+        self.assertEqual(invalid.result[0], 400)
+
     def test_root_preserves_session_cookie_and_injects_panel(self):
         h = self.Handler(path='/', owner='web:alice')
         h.do_GET()
