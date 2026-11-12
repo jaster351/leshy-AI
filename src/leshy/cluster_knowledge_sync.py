@@ -309,10 +309,14 @@ class KnowledgeSyncService:
                     if self._stop.is_set():
                         break
                     cursor = self._cursor_for(peer.node_id)
+                    stage = "pull"
                     try:
                         page = self._pull_peer(peer, cursor)
+                        stage = "cursor"
                         next_cursor = max(0, int(page.get("cursor") or 0))
+                        stage = "import"
                         received = self._import_page(page)
+                        stage = "save_cursor"
                         self._save_cursor(peer.node_id, next_cursor)
                         total += received
                         self._patch(
@@ -329,6 +333,7 @@ class KnowledgeSyncService:
                             "cluster_knowledge_sync_failed",
                             type(exc).__name__,
                             peer=peer.node_id[:12],
+                            stage=stage,
                             reason_type=type(reason).__name__ if reason is not None else "",
                             errno=getattr(reason, "errno", None) if isinstance(getattr(reason, "errno", None), int) else None,
                         )
