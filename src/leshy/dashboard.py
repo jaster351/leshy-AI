@@ -225,15 +225,16 @@ class DashboardService:
         return dict(updated)
 
     def capabilities(self) -> list[dict[str, Any]]:
-        status = self.app.status()
+        # Сохраняем старые поля ready/detail для Web UI.
+        # Не объявляем модуль работающим, пока runtime этого не подтвердил.
+        records = self.app.capabilities.snapshot(self.app)["features"]
         return [
-            {"id": "chat", "title": "Локальный чат", "ready": bool(status.get("model_ready")), "detail": "Локальная LLM через адаптивный runtime"},
-            {"id": "search", "title": "Интернет-поиск", "ready": True, "detail": "Live search + сохранение candidate-знаний"},
-            {"id": "memory", "title": "Долговременная память", "ready": True, "detail": "Изолированная память пользователя в SQLite"},
-            {"id": "learning", "title": "Самообучение", "ready": True, "detail": "Управляемый research → candidate → verification → trusted"},
-            {"id": "telegram", "title": "Telegram", "ready": bool((status.get("telegram") or {}).get("configured")), "detail": "Long polling, адресные ответы и история сообщений"},
-            {"id": "tasks", "title": "Задачи", "ready": True, "detail": "Локальный список задач с состояниями и приоритетом"},
-            {"id": "logs", "title": "Диагностика", "ready": True, "detail": "Санитизированные runtime/problem логи"},
+            {
+                **entry,
+                "ready": entry["readiness"] == "ready",
+                "detail": entry["readiness_detail"],
+            }
+            for entry in records
         ]
 
     def logs(self, limit: int = 120) -> dict[str, Any]:
