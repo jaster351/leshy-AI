@@ -40,8 +40,10 @@ def _matches(app, text: str) -> bool:
     # Ticket drafting is not an instruction to scan every IP in the client's quote.
     # Explicit /support and "answer the client" take precedence over IP diagnostics.
     value = " ".join(str(text or "").casefold().replace("ё", "е").split())
+    if ("наименование в панели" in value and "обработчик" in value):
+        return False
     if value.startswith(("/support", "/поддержка")) or any(
-        marker in value for marker in (
+        marker in value for (
             "ответь клиенту", "напиши ответ клиенту", "составь ответ клиенту",
             "сообщение клиента", "вопрос клиента",
         )
