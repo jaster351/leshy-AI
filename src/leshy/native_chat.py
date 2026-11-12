@@ -70,7 +70,15 @@ class NativeGGUFLLM:
         return self._model
 
     def chat(self, messages: Iterable[ChatMessage]) -> str:
-        prepared = _normalize_system_messages([ChatMessage("system", _SYSTEM_PROMPT), *[m for m in messages if m.role in {"user", "assistant", "system"}]])
+        items = [m for m in messages if m.role in {"user", "assistant", "system"}]
+        # A customer-facing support draft must not inherit the assistant's
+        # general "Ты Леший" identity, which causes self-introductions.
+        support_mode = any(
+            m.role == "system" and "LESHY_SUPPORT_DRAFT_V1" in str(m.content)
+            for m in items
+        )
+        prefix = [] if support_mode else [ChatMessage("system", _SYSTEM_PROMPT)]
+        prepared = _normalize_system_messages(prefix + items)
         payload = [{"role": m.role, "content": m.content} for m in prepared]
         with self._lock:
             model = self._load()
