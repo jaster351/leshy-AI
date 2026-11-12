@@ -16,6 +16,7 @@ from .cognitive_rollback import CognitiveArtifactRollback
 from .cognitive_tools import CognitiveReadExecutor, parse_tool_request
 from .module_settings import module_enabled
 from .remote_os_fingerprint import probe_remote_os, target_from_request
+from .ssh_os_verifier import credential_file_from_request, verify_ssh_os
 from .superagent_report_format import decode_report_json
 from .parallel_tool_scheduler import ParallelPlanError
 from .superagent_parallel import parse_parallel_read_request, run_superagent_parallel_reads
@@ -554,6 +555,37 @@ class SuperAgentService:
                     remote_context = json.dumps(diagnostic, ensure_ascii=False)
                     event("superagent_remote_os_fingerprint", ticket_id=ticket_id,
                           detected=diagnostic["os_family"], verified=False)
+                    credential_name = credential_file_from_request(request)
+                    if credential_name and diagnostic["tcp"]["22"] == "open":
+                        ssh_step_started = False
+                        try:
+                            self._journal.begin(ticket_id, attempt, 71, "ssh.os_verify",
+                                                {"host": target, "filename": credential_name})
+                            ssh_step_started = True
+                            ssh_result = verify_ssh_os(
+                                self.storage, str(ticket["owner_id"]), target, credential_name
+                            )
+                            if not self._ticket_working(ticket_id) or not module_enabled(self.storage, "remote-admin"):
+                                raise PermissionError("Разрешение на удалённую диагностику отозвано")
+                            ssh_receipt = self._cognitive_reads.receipts.record("ssh.os_verify", "success", ssh_result)
+                            self._journal.finish(ticket_id, attempt, 71, status="success",
+                                                 receipt_id=ssh_receipt.receipt_id, result=ssh_result)
+                            ssh_step_started = False
+                            remote_context += "\nПодтверждение через SSH: " + json.dumps(ssh_result, ensure_ascii=False)
+                            event("superagent_remote_os_verified", ticket_id=ticket_id,
+                                  verified=ssh_result["verified"])
+                        except Exception as ssh_exc:
+                            if ssh_step_started:
+                                try:
+                                    self._journal.finish(ticket_id, attempt, 71, status="failed")
+                                except Exception:
+                                    pass
+                            problem("superagent_ssh_os_verify_failed", type(ssh_exc).__name__, ticket_id=ticket_id)
+                            remote_context += (
+                                "\nSSH-проверка ОС не завершена. Проверьте файл доступа, "
+                                "ключ сервера в known_hosts и доступность SSH. "
+                                "Нельзя считать предварительный вывод TCP/UDP подтверждённой ОС."
+                            )
                 except Exception as exc:
                     if step_started:
                         try:
