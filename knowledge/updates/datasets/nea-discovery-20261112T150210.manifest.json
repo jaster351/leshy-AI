@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "source": {
+    "url": "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=select+pl_name%2Chostname%2Cdiscoverymethod%2Cdisc_year%2Cdisc_facility%2Cpl_controv_flag%2Csoltype%2Crowupdate%2Cpl_pubdate%2Creleasedate%2Cpl_refname+from+ps+where+default_flag%3D1+order+by+pl_name&format=csv",
+    "query": "select pl_name,hostname,discoverymethod,disc_year,disc_facility,pl_controv_flag,soltype,rowupdate,pl_pubdate,releasedate,pl_refname from ps where default_flag=1 order by pl_name",
+    "checked_at": "2026-11-12T15:02:10.455034+00:00",
+    "sha256": "ddc7c4ac29a00846b6bf30898ec70b5dcb1c7ae4ef8dc470930c0699fa892fe0",
+    "bytes": 1664405
+  },
+  "snapshot": "knowledge/updates/datasets/nea-discovery-20261112T150210.csv",
+  "source_records": 6470,
+  "license": {
+    "spdx": null,
+    "terms": "Public archive data reusable for research with appropriate acknowledgement; no blanket CC0 declaration. Only factual catalogue metadata, no paper text.",
+    "urls": [
+      "https://exoplanetarchive.ipac.caltech.edu/docs/faq.html",
+      "https://exoplanetarchive.ipac.caltech.edu/docs/acknowledge.html"
+    ]
+  },
+  "acknowledgement": "NASA Exoplanet Archive data and services are credited to Caltech, operating under NASA contract within the Exoplanet Exploration Program. Original references are retained in every record.",
+  "documentation": "https://exoplanetarchive.ipac.caltech.edu/docs/API_PS_columns.html",
+  "generator": "knowledge/updates/tools/generate_nea_discovery_snapshot.py",
+  "scope": "Discovery metadata and archive dispositions only; no physical parameters. This replaces unpublished preparation, not existing published versions.",
+  "outputs": [
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-01.jsonl",
+      "records": 622,
+      "bytes": 1897591,
+      "sha256": "873d9ea9e9f89ce0cc2f6a184add0f8143f2c46e7a4c2e2778b0df31d98b9e4b"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-02.jsonl",
+      "records": 618,
+      "bytes": 1897970,
+      "sha256": "cfd00ff85a1805319a32b7684fc4b8a0b14b842a0ee00242942b228c8c94412b"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-03.jsonl",
+      "records": 628,
+      "bytes": 1897264,
+      "sha256": "aa287a4de0cc78ee960e1446ceae01f56daeda3dc459670ffd276cc8984eaef8"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-04.jsonl",
+      "records": 623,
+      "bytes": 1897501,
+      "sha256": "11957bc23306b8a2452b9b812b97f3164cfcecb89c2d0ea454bc41c7e163f133"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-05.jsonl",
+      "records": 625,
+      "bytes": 1899892,
+      "sha256": "10f05fb8fa58b9b102ac2993ec6e8a0dbdf18a83b94f330f62645bb386d8f5fd"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-06.jsonl",
+      "records": 624,
+      "bytes": 1898342,
+      "sha256": "824d5430c6f4b2fc95437953291c41c3d3ec3802713a4697da95c4903dce952e"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-07.jsonl",
+      "records": 626,
+      "bytes": 1898457,
+      "sha256": "dc27c8fe791e7b2d7b34a0e952053dea34ab5596a59410046f6ec75528d8da25"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-08.jsonl",
+      "records": 625,
+      "bytes": 1898500,
+      "sha256": "7d56eb13ad7599a217d4734c37993d3660723d3d40a2f47fad522bdfb480cc1f"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-09.jsonl",
+      "records": 613,
+      "bytes": 1897011,
+      "sha256": "bc658dea82ce82242d741ad94cd7cd61253e7dabf1beb23a4eac4e9071cfc7c5"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-10.jsonl",
+      "records": 615,
+      "bytes": 1898998,
+      "sha256": "bb064302d905e6d8f329271657a2640b5f2e24f58e4290369a2d0150939fbd36"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2000-nea-discovery-part-11.jsonl",
+      "records": 251,
+      "bytes": 762039,
+      "sha256": "ec064613e1c29eb7f77b8db74c7ba68b9ea00f94efd68e125505499add52b888"
+    }
+  ],
+  "record_status_counts": {
+    "verified": 6339,
+    "candidate": 131
+  },
+  "deduplication": {
+    "all_published_rows_scanned": 47496,
+    "normalized_id_duplicates": 0,
+    "normalized_claim_duplicates": 0,
+    "canonical_key_duplicates": 0,
+    "semantic_duplicates": 0,
+    "semantic_review": "All prior exoplanet-related records inspected, including astronomy and non-astronomy categories; only a general LISA methods news item exists, with no catalogue-object discovery assertions. One cohesive record per unique archive planet name."
+  },
+  "cursor": {
+    "last_source_row": 6471,
+    "last_entity": "xi Aql b",
+    "remaining": 0,
+    "status": "complete for selected discovery fields",
+    "next": "another domain; physical parameters require new qualified source extraction"
+  }
+}

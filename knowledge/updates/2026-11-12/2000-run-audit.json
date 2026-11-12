@@ -1,0 +1,20 @@
+{
+  "checked_at": "2026-11-12T15:03:57.029315+00:00",
+  "new_unique_records": 6470,
+  "data_candidates": 6470,
+  "research_candidates": 2,
+  "research_exact_duplicates": 2,
+  "data_exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated_versions": 0,
+  "retracted_versions": 0,
+  "jsonl_bytes": 19743565,
+  "catalogue_record_count": 53966,
+  "research": "Fresh searches since 2026-11-12T14:04Z with indexing lookback: WikiTrace 2611.14320v1 and FGSE 2611.14326v1 opened, already present, no new versions. Other older search hits not presented as new.",
+  "source_manifest": "knowledge/updates/datasets/nea-discovery-20261112T150210.manifest.json",
+  "source_range": "all 6470 default PS rows ordered by pl_name",
+  "correction": "Unpublished previous batch discarded: rowupdate is not published_at; soltype and controversy retained; unqualified physical parameters omitted.",
+  "remaining": "No unprocessed rows for selected fields. Physics parameters need uncertainties, limits and mass provenance; NIST SRD usage verification remains pending.",
+  "local_import": "not observed",
+  "validation": "JSON/JSONL and importer schema functions inspected/executed in isolation; no app import, build or autotest"
+}
