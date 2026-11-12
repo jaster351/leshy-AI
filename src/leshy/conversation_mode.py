@@ -101,10 +101,10 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
     # Explicit boundary always takes priority over old chat context.
     if any(text.startswith(cue) for cue in ("/chat", "/общение", "не по работе")):
         return ConversationMode("personal", "explicit_personal")
-    if any(cue in text for cue in _PERSONAL):
-        return ConversationMode("personal", "personal_intent")
     if _starts_support(text):
         return ConversationMode("support_draft", "customer_message")
+    if any(cue in text for cue in _PERSONAL):
+        return ConversationMode("personal", "personal_intent")
     if text.startswith(("/work", "/работа")):
         return ConversationMode("work", "explicit_work")
     if _is_work_content(text):
