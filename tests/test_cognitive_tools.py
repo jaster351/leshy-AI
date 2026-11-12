@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from leshy.cognitive_tools import CognitiveReadExecutor, parse_tool_request
 from leshy.superagent import SuperAgentService
