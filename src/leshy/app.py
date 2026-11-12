@@ -12,6 +12,7 @@ from .accelerator_runtime import LlamaCppRuntimeManager, LlamaServerLLM
 from .adaptive_backend import AdaptiveLLM
 from .config import Settings
 from .capability_registry import CapabilityRegistry, is_self_capability_question
+from .github_facts import GitHubRepositoryEvidence
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
@@ -51,6 +52,7 @@ class LeshyApp:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or Settings.from_env()
         self.capabilities = CapabilityRegistry(self.settings.install_root)
+        self.github_facts = GitHubRepositoryEvidence()
         configure_diagnostics(self.settings.brain_dir, VERSION)
         self.storage = Storage(self.settings.database_path)
         self.learning = LearningControl(self.storage, self.settings.idle_learning_enabled)
@@ -387,6 +389,19 @@ class LeshyApp:
                 "SELECT role,content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 24",
                 (sid,),
             ).fetchall()
+
+        # Вопросы о числе авторов/комментариев канонического GitHub-репозитория
+        # получают только полные данные REST API. Никогда не угадываем авторов LLM.
+        github = self.github_facts.answer(message)
+        if github is not None:
+            event("chat_github_facts", verified=bool(github["verified"]),
+                  receipt_id=github["receipt_id"], session_id=sid)
+            answer = str(github["answer"])
+            return {
+                "session_id": sid, "answer": answer,
+                "created_at": self._save_assistant(sid, answer),
+                "sources": github["sources"],
+            }
 
         # Дата/время и погода — проверяемые инструменты, а не прогноз LLM.
         # Ничего не меняем в обычном диалоге и его скорости.
