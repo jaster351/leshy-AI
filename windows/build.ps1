@@ -218,26 +218,42 @@ function Invoke-FrozenSmokeTest {
   $oldEmbeddings = $env:LESHY_EMBEDDINGS_ENABLED
   $oldHeadless = $env:LESHY_BROWSER_HEADLESS
   $oldToken = $env:LESHY_API_TOKEN
+  $oldSupportBootstrap = $env:LESHY_SUPPORT_BOOTSTRAP
   $process = $null
+  $smokeStdout = Join-Path $autoRoot 'logs\frozen-smoke.stdout.log'
+  $smokeStderr = Join-Path $autoRoot 'logs\frozen-smoke.stderr.log'
+  Remove-Item -LiteralPath $smokeStdout, $smokeStderr -Force -ErrorAction SilentlyContinue
 
   try {
     $env:LESHY_LLM_BACKEND = 'echo'
     $env:LESHY_EMBEDDINGS_ENABLED = '0'
     $env:LESHY_BROWSER_HEADLESS = '1'
     $env:LESHY_API_TOKEN = ''
+    $env:LESHY_SUPPORT_BOOTSTRAP = '0'
 
     Write-Host "FROZEN SMOKE: starting $executable on $baseUrl"
     $process = Start-Process -FilePath $executable -ArgumentList @(
       '--host', '127.0.0.1',
       '--port', [string]$port,
       '--no-browser'
-    ) -PassThru -WindowStyle Hidden
+    ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
 
     $deadline = (Get-Date).AddSeconds(60)
     $status = $null
     do {
       if ($process.HasExited) {
-        throw "Frozen Leshy exited before /v1/status became ready (exit code $($process.ExitCode))"
+        # Preserve the actual exception instead of reporting only exit code 1.
+        $stderrTail = @()
+        if (Test-Path -LiteralPath $smokeStderr) {
+          $stderrTail = @(Get-Content -LiteralPath $smokeStderr -Tail 60 -ErrorAction SilentlyContinue)
+        }
+        $stdoutTail = @()
+        if (Test-Path -LiteralPath $smokeStdout) {
+          $stdoutTail = @(Get-Content -LiteralPath $smokeStdout -Tail 15 -ErrorAction SilentlyContinue)
+        }
+        $details = (($stderrTail + $stdoutTail) -join [Environment]::NewLine).Trim()
+        if ($details.Length -gt 6000) { $details = $details.Substring($details.Length - 6000) }
+        throw "Frozen Leshy exited before /v1/status became ready (exit code $($process.ExitCode)). Logs: $smokeStderr ; $smokeStdout $details"
       }
       try {
         $status = Invoke-RestMethod -Uri "$baseUrl/v1/status" -Method Get -TimeoutSec 5
@@ -268,6 +284,7 @@ function Invoke-FrozenSmokeTest {
     if ($null -eq $oldEmbeddings) { Remove-Item Env:LESHY_EMBEDDINGS_ENABLED -ErrorAction SilentlyContinue } else { $env:LESHY_EMBEDDINGS_ENABLED = $oldEmbeddings }
     if ($null -eq $oldHeadless) { Remove-Item Env:LESHY_BROWSER_HEADLESS -ErrorAction SilentlyContinue } else { $env:LESHY_BROWSER_HEADLESS = $oldHeadless }
     if ($null -eq $oldToken) { Remove-Item Env:LESHY_API_TOKEN -ErrorAction SilentlyContinue } else { $env:LESHY_API_TOKEN = $oldToken }
+    if ($null -eq $oldSupportBootstrap) { Remove-Item Env:LESHY_SUPPORT_BOOTSTRAP -ErrorAction SilentlyContinue } else { $env:LESHY_SUPPORT_BOOTSTRAP = $oldSupportBootstrap }
     Remove-Item -LiteralPath $SmokePackageRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
