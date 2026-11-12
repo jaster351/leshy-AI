@@ -12,6 +12,8 @@ from .accelerator_runtime import LlamaCppRuntimeManager, LlamaServerLLM
 from .adaptive_backend import AdaptiveLLM
 from .config import Settings
 from .capability_registry import CapabilityRegistry, is_self_capability_question
+from .github_facts import GitHubRepositoryEvidence
+from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
@@ -51,6 +53,7 @@ class LeshyApp:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or Settings.from_env()
         self.capabilities = CapabilityRegistry(self.settings.install_root)
+        self.github_facts = GitHubRepositoryEvidence()
         configure_diagnostics(self.settings.brain_dir, VERSION)
         self.storage = Storage(self.settings.database_path)
         self.learning = LearningControl(self.storage, self.settings.idle_learning_enabled)
@@ -388,6 +391,19 @@ class LeshyApp:
                 (sid,),
             ).fetchall()
 
+        # Вопросы о числе авторов/комментариев канонического GitHub-репозитория
+        # получают только полные данные REST API. Никогда не угадываем авторов LLM.
+        github = self.github_facts.answer(message, rows)
+        if github is not None:
+            event("chat_github_facts", verified=bool(github["verified"]),
+                  receipt_id=github["receipt_id"], session_id=sid)
+            answer = str(github["answer"])
+            return {
+                "session_id": sid, "answer": answer,
+                "created_at": self._save_assistant(sid, answer),
+                "sources": github["sources"],
+            }
+
         # Дата/время и погода — проверяемые инструменты, а не прогноз LLM.
         # Ничего не меняем в обычном диалоге и его скорости.
         from .verified_clock import checked_clock_answer
@@ -454,6 +470,7 @@ class LeshyApp:
                 "Интернет-поиск здесь НЕ выполнялся. Не говори об итогах веб-поиска "
                 "или об устаревших шаблонах. Напиши готовый текст локально.",
             )
+        context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
         context.append(ChatMessage("system", current_clock_context()))
         if is_self_capability_question(message):
             context.append(ChatMessage("system", self.capabilities.context_for_question(self)))

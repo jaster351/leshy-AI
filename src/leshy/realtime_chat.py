@@ -13,6 +13,7 @@ from .cinema_research import cinema_query, cinema_instruction, cinema_search, ci
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
 from .capability_registry import is_self_capability_question
+from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
@@ -234,6 +235,7 @@ class RealtimeChatManager:
                 "устаревшие шаблоны базы как на причину отказа: сразу напиши "
                 "готовый естественный текст, используя требования пользователя.",
             )
+        context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
         context.append(ChatMessage("system", current_clock_context()))
         if is_self_capability_question(message):
             context.append(ChatMessage("system", self.app.capabilities.context_for_question(self.app)))
@@ -384,6 +386,53 @@ class RealtimeChatManager:
             )
             return
 
+        # Для сведений об авторах Issues/PR используем только полный GitHub API,
+        # без генерации имён и количества токенами LLM.
+        from .github_facts import is_leshy_repository_audit_request
+        if is_leshy_repository_audit_request(message):
+            rid, cancel = self._register(request_id)
+            sid = ""
+            try:
+                sid, _rows = self._save_user_and_history(message, owner_id, session_id)
+                yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": []})
+                if cancel.is_set():
+                    yield StreamEvent("done", {"request_id": rid, "session_id": sid,
+                                               "answer": "", "sources": [], "stopped": True})
+                    return
+                yield StreamEvent("activity", {
+                    "kind": "web_search", "phase": "searching",
+                    "text": "Получаю фактические сведения из GitHub API…",
+                })
+                github = self.app.github_facts.answer(message)
+                if github is None:
+                    raise RuntimeError("GitHub audit intent unexpectedly missing")
+                if cancel.is_set():
+                    yield StreamEvent("done", {"request_id": rid, "session_id": sid,
+                                               "answer": "", "sources": [], "stopped": True})
+                    return
+                answer = str(github["answer"])
+                sources = list(github["sources"])
+                timestamp = self.app._save_assistant(sid, answer)
+                event("chat_stream_github_facts", request_id=rid,
+                      verified=bool(github["verified"]), receipt_id=github["receipt_id"])
+                for chunk in self._chunk_fallback(answer, 160):
+                    if cancel.is_set():
+                        break
+                    yield StreamEvent("delta", {"text": chunk})
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid,
+                    "answer": answer if not cancel.is_set() else "",
+                    "created_at": timestamp, "sources": sources,
+                    "stopped": bool(cancel.is_set()),
+                })
+            except Exception as exc:
+                problem("chat_stream_github_facts_failed", type(exc).__name__, request_id=rid)
+                yield StreamEvent("error", {"request_id": rid, "session_id": sid,
+                    "error": "Не удалось проверить сведения GitHub"})
+            finally:
+                self._unregister(rid)
+            return
+
         # Мгновенный проверяемый ответ на дату/время; погода через API.
         # Обычные беседы и их быстрый streaming не затрагиваются.
         from .verified_clock import clock_answer, checked_clock_answer
@@ -477,6 +526,37 @@ class RealtimeChatManager:
             if cancel.is_set():
                 yield StreamEvent("start", {"request_id": rid, "session_id": sid})
                 yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
+                return
+            # Короткие уточнения вроде «А что написал не ты?» должны
+            # продолжать подтверждённую проверку GitHub, а не фантазировать.
+            if is_leshy_repository_audit_request(message, rows):
+                yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": []})
+                yield StreamEvent("activity", {
+                    "kind": "web_search", "phase": "searching",
+                    "text": "Проверяю авторов через GitHub API…",
+                })
+                github = self.app.github_facts.answer(message, rows)
+                if github is None:
+                    raise RuntimeError("GitHub follow-up intent unexpectedly missing")
+                if cancel.is_set():
+                    yield StreamEvent("done", {"request_id": rid, "session_id": sid,
+                                               "answer": "", "sources": [], "stopped": True})
+                    return
+                answer = str(github["answer"])
+                sources = list(github["sources"])
+                saved_at = self.app._save_assistant(sid, answer)
+                event("chat_stream_github_facts_followup", request_id=rid,
+                      verified=bool(github["verified"]), receipt_id=github["receipt_id"])
+                for chunk in self._chunk_fallback(answer, 160):
+                    if cancel.is_set():
+                        break
+                    yield StreamEvent("delta", {"text": chunk})
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid,
+                    "answer": answer if not cancel.is_set() else "",
+                    "created_at": saved_at, "sources": sources,
+                    "stopped": bool(cancel.is_set()),
+                })
                 return
             lookup_query, force_search = contextual_search_query(message, rows)
             plan = self._search_plan(lookup_query)

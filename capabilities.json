@@ -107,6 +107,13 @@
       "implementation": "implemented",
       "probe": "not_checked",
       "description": "Локальные runtime и problem логи; состояние и полнота записи зависят от узла."
+    },
+    {
+      "id": "github_facts",
+      "title": "Проверка авторов и количества GitHub Issues/PR",
+      "implementation": "partial",
+      "probe": "github_audit",
+      "description": "Для репозитория Лешего считает записи и авторов только по полному ответу GitHub REST API; при сетевой ошибке не угадывает."
     }
   ]
 }
