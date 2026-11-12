@@ -44,7 +44,7 @@ class FakeLLM:
 
     def chat(self, messages):
         self.calls.append(messages)
-        return "1. Основной ответ\n2. Короткий ответ\n3. Осторожный ответ"
+        return "Уточните, пожалуйста, время сбоя. Для проверки потребуется ID услуги."
 
 
 class SupportConsultantTests(unittest.TestCase):
@@ -102,9 +102,11 @@ class SupportConsultantTests(unittest.TestCase):
         self.assertIn("TCP/22: тайм-аут", prompt)
         self.assertIn("Не могу подключиться по SSH", prompt)
         self.assertIn("РОВНО ОДИН готовый ответ", prompt)
-        self.assertEqual(llm.calls[0][1].role, "system")
+        self.assertEqual(llm.calls[0][0].role, "system")
+        self.assertIn("LESHY_SUPPORT_DRAFT_V1", llm.calls[0][0].content)
         self.assertIn("поставщика услуг", llm.calls[0][1].content)
         self.assertIn("не добавляй подпись", llm.calls[0][1].content)
+        self.assertEqual(response.text, "Уточните, пожалуйста, время сбоя. Для проверки потребуется ID услуги.")
 
     def test_identity_conflict_stops_before_diagnostics_and_llm(self):
         source = FakeSource(self._context(client_id="99"))
