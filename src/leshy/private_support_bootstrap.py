@@ -11,7 +11,8 @@ from ctypes import wintypes
 import json
 import os
 from pathlib import Path
-import shutil
+import sys
+import zlib
 import zipfile
 
 
@@ -19,6 +20,8 @@ _ARCHIVE_PREFIX = "Local-Support-Profile"
 _PROFILE = "support_profile.enc"
 _KEY = "support_profile.key"
 _DPAPI_FILE = "support.key.dpapi"
+_BUNDLED_PROFILE = "support_reference.enc"
+_KEY_DOWNLOAD = "Leshy-Support-Key.key"
 
 
 class _Blob(ctypes.Structure):
@@ -82,16 +85,83 @@ def support_key(brain_dir: Path | str) -> bytes | None:
         return None
 
 
-def _profile_valid(ciphertext: bytes, key: bytes) -> bool:
+def decrypt_support_profile(ciphertext: bytes, key: bytes) -> dict | None:
+    """Authenticated Fernet decrypt; accepts both original JSON and zipped JSON.
+
+    Bound the expanded size so a modified public ciphertext cannot exhaust RAM.
+    """
     try:
         from cryptography.fernet import Fernet
-        clear = Fernet(key).decrypt(ciphertext)
-        payload = json.loads(clear.decode("utf-8"))
-        return isinstance(payload, dict) and isinstance(payload.get("facts"), list)
-    except (ImportError, UnicodeError, ValueError):
-        return False
+        if len(ciphertext) > 196608:
+            return None
+        raw = Fernet(key).decrypt(ciphertext.strip())
+        if not raw.startswith(b"{"):
+            decoder = zlib.decompressobj()
+            raw = decoder.decompress(raw, 131072)
+            if not decoder.eof or decoder.unconsumed_tail:
+                return None
+        if len(raw) > 131072:
+            return None
+        value = json.loads(raw.decode("utf-8"))
+        return value if isinstance(value, dict) and isinstance(value.get("facts"), list) else None
     except Exception:
+        return None
+
+
+def _profile_valid(ciphertext: bytes, key: bytes) -> bool:
+    return decrypt_support_profile(ciphertext, key) is not None
+
+
+def _bundled_ciphertext(install_root: Path) -> bytes:
+    """PyInstaller --onedir data lives under sys._MEIPASS, not exe directory."""
+    paths = [install_root / "resources" / _BUNDLED_PROFILE]
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        paths.insert(0, Path(base) / "resources" / _BUNDLED_PROFILE)
+    for file in paths:
+        try:
+            if file.is_file() and not file.is_symlink() and file.stat().st_size <= 196608:
+                return file.read_bytes()
+        except OSError:
+            continue
+    return b""
+
+
+def _candidate_keys(install_root: Path, brain_dir: Path):
+    locations = [
+        brain_dir / "private",
+        install_root,
+        Path(os.environ.get("USERPROFILE") or Path.home()) / "Downloads",
+        Path.home() / "Downloads",
+    ]
+    seen = set()
+    for directory in locations:
+        path = directory / _KEY_DOWNLOAD
+        try:
+            if path not in seen and path.is_file() and not path.is_symlink() and path.stat().st_size < 200:
+                seen.add(path)
+                yield path.read_bytes().strip()
+        except OSError:
+            continue
+
+
+def _save_profile(folder: Path, encrypted: bytes, operator_key: bytes, existing_key: bytes | None) -> bool:
+    if not _profile_valid(encrypted, operator_key):
         return False
+    if existing_key and existing_key != operator_key:
+        return False
+    if existing_key is None and os.name != "nt":
+        return False
+    folder.mkdir(parents=True, exist_ok=True)
+    if existing_key is None:
+        protected = _crypt(operator_key, unprotect=False)
+        temporary = folder / (_DPAPI_FILE + ".tmp")
+        temporary.write_bytes(protected)
+        temporary.replace(folder / _DPAPI_FILE)
+    temp_profile = folder / (_PROFILE + ".tmp")
+    temp_profile.write_bytes(encrypted)
+    temp_profile.replace(folder / _PROFILE)
+    return True
 
 
 def _candidate_archives(install_root: Path, brain_dir: Path):
@@ -115,47 +185,56 @@ def _candidate_archives(install_root: Path, brain_dir: Path):
 
 
 def bootstrap_private_support(install_root: Path | str, brain_dir: Path | str) -> bool:
-    """Zero-command discovery of owner's downloaded bundle; fail closed.
+    """Discover the owner key once; encrypted reference is already in the EXE.
 
-    Returns True when an encrypted profile with matching operator key is active.
-    Does not delete anything in Downloads or change permanent environment vars.
+    The key is never in Git, public build artifacts or program output.
+    Only CurrentUser DPAPI (or an explicit owner environment override) unlocks.
     """
     root = Path(install_root)
     brain = Path(brain_dir)
     folder = brain / "private"
     target = folder / _PROFILE
     key = support_key(brain)
-    if key and target.is_file() and _profile_valid(target.read_bytes(), key):
-        return True
+    try:
+        if key and target.is_file() and _profile_valid(target.read_bytes(), key):
+            return True
+    except OSError:
+        pass
 
+    # A user who previously installed the key can immediately use a newly
+    # published encrypted knowledge revision without another download.
+    bundled = _bundled_ciphertext(root)
+    if key and bundled:
+        try:
+            if _save_profile(folder, bundled, key, key):
+                return True
+        except OSError:
+            pass
+
+    # Prefer only a downloaded key: public repo already contains ciphertext.
+    if bundled:
+        for secret in _candidate_keys(root, brain):
+            try:
+                if _save_profile(folder, bundled, secret, key):
+                    return True
+            except OSError:
+                continue
+
+    # Backward compatibility with the already distributed owner-only ZIP.
     for archive in _candidate_archives(root, brain):
         try:
             with zipfile.ZipFile(archive) as item:
                 if any(name not in {_PROFILE, _KEY, "README.txt", "Install-Private-Support.ps1"} for name in item.namelist()):
                     continue
-                secret = item.read(_KEY)
+                secret = item.read(_KEY).strip()
                 encrypted = item.read(_PROFILE)
-            if len(encrypted) > 196608 or not _profile_valid(encrypted, secret.strip()):
-                continue
-            if not (key or os.name == "nt"):
-                continue
-            folder.mkdir(parents=True, exist_ok=True)
-            # Validate first, then atomically install. No plaintext files created.
-            if not key:
-                protected = _crypt(secret.strip(), unprotect=False)
-                tmp_key = folder / (_DPAPI_FILE + ".tmp")
-                tmp_key.write_bytes(protected)
-                tmp_key.replace(folder / _DPAPI_FILE)
-            else:
-                if not _profile_valid(encrypted, key):
-                    continue
-            tmp_profile = folder / (_PROFILE + ".tmp")
-            tmp_profile.write_bytes(encrypted)
-            tmp_profile.replace(target)
-            return True
+            # Use the ZIP only to unlock the bundled version if one exists.
+            ciphertext = bundled if bundled and _profile_valid(bundled, secret) else encrypted
+            if _save_profile(folder, ciphertext, secret, key):
+                return True
         except (OSError, ValueError, RuntimeError, KeyError, zipfile.BadZipFile):
             continue
     return False
 
 
-__all__ = ["bootstrap_private_support", "support_key"]
+__all__ = ["bootstrap_private_support", "decrypt_support_profile", "support_key"]
