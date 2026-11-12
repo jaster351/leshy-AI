@@ -80,6 +80,16 @@ class PythonEditorTests(unittest.TestCase):
         # Parsing the replacement must never execute its os.system call.
         self.assertEqual((Path(self.one["path"]) / "module.py").read_text(), proposed)
 
+    def test_crlf_checkout_and_lf_replacement_is_a_noop(self):
+        target = Path(self.one["path"]) / "module.py"
+        target.write_bytes(b"def value():\r\n    return 1\r\n")
+        before = target.read_bytes()
+        info = self.editor.preview("agent-a", "module.py")
+        with self.assertRaisesRegex(PatchError, "No changes"):
+            self.editor.apply("agent-a", "module.py", expected_sha256=info["sha256"],
+                              replacement="def value():\n    return 1\n", approval_verified=True)
+        self.assertEqual(target.read_bytes(), before)
+
     def test_oversize_and_noop_rejected(self):
         info = self.editor.preview("agent-a", "module.py")
         with self.assertRaises(PatchError):
