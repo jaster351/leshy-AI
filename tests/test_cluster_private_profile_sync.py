@@ -153,6 +153,25 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(row["value_json"], '"dark"')
 
+    def test_encrypted_profile_name_sync_uses_local_owner_mapping(self):
+        pair_id = self.pair()
+        with self.a_storage.connection() as conn:
+            conn.execute(
+                "UPDATE owner_profiles SET display_name=?,updated_at=? WHERE id=?",
+                ("Мой первый компьютер", utcnow(), self.owner_a),
+            )
+        self.b.sync_once(self.owner_b, pair_id)
+        with self.b_storage.connection() as conn:
+            owner = conn.execute(
+                "SELECT display_name FROM owner_profiles WHERE id=?", (self.owner_b,)
+            ).fetchone()
+        self.assertEqual(owner["display_name"], "Мой первый компьютер")
+        with self.a_storage.connection() as conn:
+            unrelated = conn.execute(
+                "SELECT display_name FROM owner_profiles WHERE id=?", (self.other_a,)
+            ).fetchone()
+        self.assertEqual(unrelated["display_name"], "Another user")
+
     def test_revocation_immediately_disables_remote_owner_data(self):
         pair_id = self.pair()
         self.a.revoke(self.owner_a, pair_id)
