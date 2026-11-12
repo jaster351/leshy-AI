@@ -236,7 +236,7 @@
       "id": "doi:10.18653/2026.findings-emnlp.395",
       "version": null,
       "source_edition": "Findings of EMNLP 2026 publisher PDF",
-      "first_published_at": null,
+      "first_published_at": "2026-05-24T11:04:35Z",
       "publisher_publication_date": "2026-10",
       "version_published_at": null,
       "checked_at": "2026-11-12T06:05:25Z",
@@ -247,7 +247,12 @@
       "code_url": "https://github.com/zhb0119/MemMark",
       "dataset_url": null,
       "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
-      "new_since_previous_issue": false
+      "new_since_previous_issue": false,
+      "aliases": [
+        "arXiv:2605.25002"
+      ],
+      "latest_preprint_version": null,
+      "latest_preprint_revision_at": null
     },
     {
       "id": "doi:10.18653/2026.realm-1.16",
