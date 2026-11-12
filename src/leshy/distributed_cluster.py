@@ -315,6 +315,9 @@ class HttpClusterTransport:
         self.timeout = max(5.0, float(timeout))
 
     def submit(self, node: ClusterNode, task: ClusterTask) -> ClusterResult:
+        if task.kind == "agent.prompt":
+            # No verified owner-specific consent channel is connected yet.
+            raise PermissionError("Передача пользовательского текста узлу кластера не разрешена")
         payload = {
             "task": {
                 "task_id": task.task_id,
@@ -799,7 +802,9 @@ class DistributedClusterRuntime:
         raw = dict(body.get("task") or {})
         kind = str(raw.get("kind") or "")
         source_node = str(headers.get("X-Leshy-Cluster-Node") or "")
-        if not source_node or raw.get("origin_node_id") != source_node:
+        if (not source_node or len(source_node) > 128 or
+                source_node == self.identity.node_id or
+                raw.get("origin_node_id") != source_node):
             raise PermissionError("Отправитель задания не совпадает с подписанным узлом")
         if kind not in _ALLOWED_REMOTE_KINDS:
             raise PermissionError(f"Удалённый тип задачи запрещён: {kind}")
