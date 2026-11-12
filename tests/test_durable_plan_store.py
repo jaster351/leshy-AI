@@ -63,6 +63,23 @@ class DurableStoreTests(unittest.TestCase):
         self.assertFalse(self.store.heartbeat(key,'alice','s','bad-token',now=6))
         self.assertTrue(self.store.complete(key,'alice','s',item['token'],success=True,now=24))
 
+    def test_failure_branch_does_not_stop_independent_work(self):
+        key=self.store.create('alice',[
+            {'id':'first','title':'First','max_attempts':1},
+            {'id':'independent','title':'Independent'},
+            {'id':'blocked','title':'Blocked','depends_on':['first']},
+        ])
+        claims=self.store.claim(key,'alice',limit=1,now=0)
+        self.assertEqual([x['id'] for x in claims],['first'])
+        self.store.complete(key,'alice','first',claims[0]['token'],success=False,now=1)
+        self.assertEqual(self.store.snapshot(key,'alice')['state'],'active')
+        remaining=self.store.claim(key,'alice',now=2)
+        self.assertEqual([x['id'] for x in remaining],['independent'])
+        self.store.complete(key,'alice','independent',remaining[0]['token'],success=True,now=3)
+        result=self.store.snapshot(key,'alice')
+        self.assertEqual(result['state'],'failed')
+        self.assertEqual([x['state'] for x in result['steps']],['failed','done','blocked'])
+
     def test_cancel_rejects_late_complete(self):
         key=self.store.create('alice',[{'id':'s','title':'Step'}])
         claim=self.store.claim(key,'alice',now=0)[0]

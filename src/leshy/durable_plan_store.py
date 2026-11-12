@@ -111,7 +111,8 @@ class DurablePlanStore:
         states = [r[0] for r in db.execute("SELECT state FROM durable_plan_steps WHERE plan_id=?", (plan_id,))]
         if all(s == "done" for s in states):
             state = "completed"
-        elif any(s in {"failed", "blocked"} for s in states):
+        elif all(s in {"done", "failed", "blocked", "cancelled"} for s in states):
+            # A failed branch must not prevent unrelated queued/running steps.
             state = "failed"
         else:
             state = "active"
