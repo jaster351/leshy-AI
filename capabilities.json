@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-12",
+  "note": "Данные описывают код, а не факт проверки работы на каждом узле. Реальные статусы формируются в runtime.",
+  "features": [
+    {
+      "id": "chat",
+      "title": "Локальный диалог",
+      "implementation": "implemented",
+      "probe": "model_ready",
+      "description": "Основной текстовый чат через выбранный LLM backend."
+    },
+    {
+      "id": "search",
+      "title": "Интернет-поиск",
+      "implementation": "implemented",
+      "probe": "unverified_network",
+      "description": "Поиск через браузер и резервные провайдеры; доступность проверяется фактическим запросом."
+    },
+    {
+      "id": "memory",
+      "title": "Долговременная память",
+      "implementation": "implemented",
+      "probe": "storage",
+      "description": "Локальная память и история с разграничением владельцев."
+    },
+    {
+      "id": "learning",
+      "title": "Обучение",
+      "implementation": "implemented",
+      "probe": "learning_enabled",
+      "description": "Исследования, candidate и trusted знания; фоновое обучение можно отключить."
+    },
+    {
+      "id": "tasks",
+      "title": "Задачи и планирование",
+      "implementation": "partial",
+      "probe": "storage",
+      "description": "Хранение задач, статусов и сроков; автономное многошаговое исполнение развивается."
+    },
+    {
+      "id": "telegram",
+      "title": "Telegram",
+      "implementation": "implemented",
+      "probe": "telegram_running",
+      "description": "Чат и поддержка фото через отдельный vision-маршрут при наличии модели."
+    },
+    {
+      "id": "vision",
+      "title": "Анализ изображений",
+      "implementation": "partial",
+      "probe": "not_checked",
+      "description": "Требует локальной vision-модели; проверяется реальным изображением."
+    },
+    {
+      "id": "browser",
+      "title": "Браузерный агент",
+      "implementation": "partial",
+      "probe": "not_checked",
+      "description": "Браузерные действия и подтверждения; наличие кода не доказывает E2E."
+    },
+    {
+      "id": "cluster",
+      "title": "LAN и глобальный рой",
+      "implementation": "partial",
+      "probe": "not_checked",
+      "description": "Обнаружение узлов и отдельные сетевые функции; глобальный общий runtime не завершён."
+    },
+    {
+      "id": "code_review",
+      "title": "Глубокий анализ кода",
+      "implementation": "partial",
+      "probe": "not_checked",
+      "description": "Чтение файлов и отдельных инструментов доступно; полноценная проверка кода развивается."
+    },
+    {
+      "id": "sandbox",
+      "title": "Изолированное выполнение экспериментального кода",
+      "implementation": "planned",
+      "probe": "not_checked",
+      "description": "Не заявлять о наличии полноценного sandbox без проверки."
+    },
+    {
+      "id": "visualization",
+      "title": "Графики и диаграммы",
+      "implementation": "planned",
+      "probe": "not_checked",
+      "description": "Планируемая генерация графиков, схем и отчётов."
+    },
+    {
+      "id": "personalization",
+      "title": "Персонализация",
+      "implementation": "partial",
+      "probe": "storage",
+      "description": "Пользовательские настройки и предпочтения; сквозной профиль развивается."
+    },
+    {
+      "id": "self_awareness",
+      "title": "Самоописание возможностей",
+      "implementation": "implemented",
+      "probe": "catalog",
+      "description": "Реестр возможностей, проверка runtime и резервная история в CHANGELOG."
+    },
+    {
+      "id": "logs",
+      "title": "Диагностика и журнал ошибок",
+      "implementation": "implemented",
+      "probe": "not_checked",
+      "description": "Локальные runtime и problem логи; состояние и полнота записи зависят от узла."
+    }
+  ]
+}

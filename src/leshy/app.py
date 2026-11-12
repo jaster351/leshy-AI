@@ -11,6 +11,7 @@ from typing import Any
 from .accelerator_runtime import LlamaCppRuntimeManager, LlamaServerLLM
 from .adaptive_backend import AdaptiveLLM
 from .config import Settings
+from .capability_registry import CapabilityRegistry, is_self_capability_question
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .hardware import detect_hardware
@@ -49,6 +50,7 @@ class LeshyApp:
 
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or Settings.from_env()
+        self.capabilities = CapabilityRegistry(self.settings.install_root)
         configure_diagnostics(self.settings.brain_dir, VERSION)
         self.storage = Storage(self.settings.database_path)
         self.learning = LearningControl(self.storage, self.settings.idle_learning_enabled)
@@ -453,6 +455,8 @@ class LeshyApp:
                 "или об устаревших шаблонах. Напиши готовый текст локально.",
             )
         context.append(ChatMessage("system", current_clock_context()))
+        if is_self_capability_question(message):
+            context.append(ChatMessage("system", self.capabilities.context_for_question(self)))
         source_context, source_links = read_supplied_source(self, message)
         if lookup_query != message:
             context.append(ChatMessage(

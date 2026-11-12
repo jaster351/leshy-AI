@@ -12,6 +12,7 @@ from .diagnostics import event, problem
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
+from .capability_registry import is_self_capability_question
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
@@ -234,6 +235,8 @@ class RealtimeChatManager:
                 "готовый естественный текст, используя требования пользователя.",
             )
         context.append(ChatMessage("system", current_clock_context()))
+        if is_self_capability_question(message):
+            context.append(ChatMessage("system", self.app.capabilities.context_for_question(self.app)))
         if _local_learning_question(message):
             context.append(ChatMessage("system", _today_learning_context(self.app)))
         source_context, source_links = read_supplied_source(self.app, message)
