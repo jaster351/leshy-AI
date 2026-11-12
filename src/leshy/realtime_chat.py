@@ -380,10 +380,31 @@ class RealtimeChatManager:
         if len(message) > 32000:
             raise ValueError("Сообщение слишком длинное")
 
+        # A short editing instruction ("сделай короче") must remain in the
+        # support drafting lane only if the current owner's session contains
+        # a recent explicit support ticket. Never read another owner's history.
+        support_followup = False
+        if session_id and not is_support_draft_request(message) and len(message) < 160:
+            try:
+                with self.app.storage.connection() as conn:
+                    owner_session = conn.execute(
+                        "SELECT id FROM sessions WHERE id=? AND owner_id=?",
+                        (session_id, owner_id),
+                    ).fetchone()
+                    if owner_session is not None:
+                        history = conn.execute(
+                            "SELECT role,content FROM messages WHERE session_id=? "
+                            "ORDER BY id DESC LIMIT 12",
+                            (session_id,),
+                        ).fetchall()
+                        support_followup = is_support_draft_request(message, history)
+            except Exception:
+                support_followup = False
+
         # Collect and validate the complete reply BEFORE streaming it. In
         # normal chat the persona is Leshy; in support mode the author is an
         # employee drafting text for a customer, so no assistant identity leaks.
-        if is_support_draft_request(message):
+        if is_support_draft_request(message) or support_followup:
             rid, cancel = self._register(request_id)
             sid = ""
             try:
