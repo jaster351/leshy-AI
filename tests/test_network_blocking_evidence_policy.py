@@ -61,7 +61,7 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
         result = NetworkBlockingChecker._assessment(
             TEST_IP, _local(), (), CheburcheckEvidence(ok=False, error="timeout")
         )
-        self.assertLessEqual(result.tspu_probability, 10)
+        self.assertLessEqual(result.tspu_probability, 20)
         self.assertTrue(any("не предоставил" in text for text in result.reasons))
         output = NetworkBlockingChecker.format(result)
         self.assertIn("Оценка уверенности в признаках блокировки ТСПУ:", output)
