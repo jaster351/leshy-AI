@@ -24,7 +24,8 @@ from .llm import ChatMessage
 _DISCOVERY_PORT = 38765
 _DISCOVERY_MAGIC = "leshy-cluster-v1"
 _MAX_DISCOVERY_PACKET = 24_000
-_ALLOWED_REMOTE_KINDS = {"agent.prompt", "knowledge.search", "graph.search", "cluster.ping", "web.search"}
+_ALLOWED_REMOTE_KINDS = {"agent.prompt", "knowledge.search", "cluster.ping", "web.search"}
+# Cluster HMAC authenticates nodes, not humans. No remote owner-scoped graph reads.
 
 
 def _canonical(value: dict[str, Any]) -> bytes:
@@ -314,13 +315,16 @@ class HttpClusterTransport:
         self.timeout = max(5.0, float(timeout))
 
     def submit(self, node: ClusterNode, task: ClusterTask) -> ClusterResult:
+        if task.kind == "agent.prompt":
+            # No verified owner-specific consent channel is connected yet.
+            raise PermissionError("Передача пользовательского текста узлу кластера не разрешена")
         payload = {
             "task": {
                 "task_id": task.task_id,
                 "origin_node_id": task.origin_node_id,
                 "reply_to": task.reply_to,
-                "owner_id": task.owner_id,
-                "session_id": task.session_id,
+                "owner_id": "cluster-peer:" + self.identity.node_id,
+                "session_id": "",
                 "request_id": task.request_id,
                 "priority": task.priority,
                 "kind": task.kind,
@@ -662,7 +666,30 @@ class DistributedClusterRuntime:
                 payload = {"status": "ok", "node_id": self.identity.node_id}
             elif task.kind == "knowledge.search":
                 query = str(task.payload.get("query") or "")
-                payload = {"items": self.app.knowledge.search(query, trusted_only=True, limit=8)}
+                rows = self.app.knowledge.search(query, trusted_only=True, limit=8)
+                if task.origin_node_id != self.identity.node_id:
+                    # Trusted Knowledge is NOT necessarily public. Never export
+                    # private local files or unfiltered metadata to cluster peers.
+                    from .cluster_knowledge_sync import _public_source, _safe_public_record, _ALLOWED_SOURCE_TYPES
+                    public_items = []
+                    for item in rows:
+                        if not isinstance(item, dict):
+                            continue
+                        claim = str(item.get("claim") or "")
+                        topic = str(item.get("topic") or "")
+                        source = str(item.get("source_url") or "")
+                        title = str(item.get("source_title") or "")
+                        if not (item.get("source_type") in _ALLOWED_SOURCE_TYPES and
+                                _public_source(source) and
+                                _safe_public_record(claim, topic, title, source)):
+                            continue
+                        public_items.append({
+                            "topic": topic[:500], "claim": claim[:1600],
+                            "source_url": source[:1500], "source_title": title[:400],
+                        })
+                    payload = {"items": public_items}
+                else:
+                    payload = {"items": rows}
             elif task.kind == "graph.search":
                 graph = getattr(self.app, "knowledge_graph", None)
                 if graph is None:
@@ -752,7 +779,8 @@ class DistributedClusterRuntime:
             payload={"role": role, "system": system, "prompt": prompt},
             ttl_seconds=180.0,
         )
-        return self.orchestrator.execute_or_delegate(task, self._execute_local)
+        # Never disclose private user prompts to a peer by default.
+        return self._execute_local(task)
 
     def verify_request(self, body: dict[str, Any], headers) -> None:
         cluster_id = str(headers.get("X-Leshy-Cluster-Id") or "")
@@ -774,14 +802,19 @@ class DistributedClusterRuntime:
         self.verify_request(body, headers)
         raw = dict(body.get("task") or {})
         kind = str(raw.get("kind") or "")
+        source_node = str(headers.get("X-Leshy-Cluster-Node") or "")
+        if (not source_node or len(source_node) > 128 or
+                source_node == self.identity.node_id or
+                raw.get("origin_node_id") != source_node):
+            raise PermissionError("Отправитель задания не совпадает с подписанным узлом")
         if kind not in _ALLOWED_REMOTE_KINDS:
             raise PermissionError(f"Удалённый тип задачи запрещён: {kind}")
         task = ClusterTask(
             task_id=str(raw.get("task_id") or ""),
             origin_node_id=str(raw.get("origin_node_id") or ""),
             reply_to=str(raw.get("reply_to") or ""),
-            owner_id=str(raw.get("owner_id") or "cluster")[:200],
-            session_id=str(raw.get("session_id") or "")[:200],
+            owner_id="cluster-peer:" + source_node[:100],
+            session_id="",
             request_id=str(raw.get("request_id") or "")[:200],
             priority=int(raw.get("priority") or 60),
             kind=kind,
