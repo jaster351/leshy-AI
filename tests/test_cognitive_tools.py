@@ -65,6 +65,8 @@ class SuperAgentCognitiveLoopTests(unittest.TestCase):
         service._llm_lock = threading.RLock()
         service._inputs = lambda ticket_id: [{"kind": "request", "content": "test"}]
         service._cognitive_reads = CognitiveReadExecutor(app)
+        # These unit cases intentionally bypass the persisted ticket lifecycle.
+        service._ticket_working = lambda ticket_id: True
         return service
 
     def test_tool_execution_then_text_answer(self):
