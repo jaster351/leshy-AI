@@ -1,15 +1,14 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T06:05:25Z",
+  "updated_at": "2026-11-12T07:01:01Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T06:05:25Z",
-    "previous_issue_at": "2026-11-12T05:00:44Z",
+    "searched_at": "2026-11-12T07:01:01Z",
+    "previous_issue_at": "2026-11-12T06:05:25Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "doi:10.18653/2026.findings-emnlp.395",
-      "doi:10.18653/2026.realm-1.16"
+      "doi:10.18653/2026.aacl-long.246"
     ],
-    "note": "Впервые включены две рецензированные публикации последних 30 дней: атрибуция снимков долговременной памяти MEMMARK и анализ цены ошибочного query-time forgetting. Это дополнение покрытия свежих proceedings, а не публикации после прошлого часового выпуска."
+    "note": "Впервые включена рецензированная публикация AACL-IJCNLP 2026 о разделении retrieval и детерминированного memory governance. Повторно найденные ранее рассмотренные работы исключены."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -266,6 +265,23 @@
       "url": "https://aclanthology.org/2026.realm-1.16/",
       "package": "knowledge/updates/2026-11-12/1100-memory-attribution-and-filtering-research.jsonl",
       "record_id": "memory-filtering-false-drop-cost-realm2026",
+      "code_url": null,
+      "dataset_url": null,
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
+      "new_since_previous_issue": false
+    },
+    {
+      "id": "doi:10.18653/2026.aacl-long.246",
+      "version": null,
+      "source_edition": "AACL-IJCNLP 2026 publisher PDF",
+      "first_published_at": null,
+      "publisher_publication_date": "2026-11",
+      "version_published_at": null,
+      "checked_at": "2026-11-12T07:01:01Z",
+      "publication_status": "peer_reviewed_conference_proceedings",
+      "url": "https://aclanthology.org/2026.aacl-long.246/",
+      "package": "knowledge/updates/2026-11-12/1200-memgov-certified-memory-repair-research.jsonl",
+      "record_id": "memgov-deterministic-memory-governance-aacl2026",
       "code_url": null,
       "dataset_url": null,
       "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
