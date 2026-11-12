@@ -465,6 +465,16 @@ class SuperAgentService:
             return "blocked", "Модель сообщила об успехе без результата; завершение не подтверждено.", ""
         return state, result, question
 
+    def _ticket_working(self, ticket_id: str) -> bool:
+        """Observe Stop even when it comes from another request/process."""
+        if self._stop.is_set():
+            return False
+        with self.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT state FROM superagent_tickets WHERE id=?", (ticket_id,)
+            ).fetchone()
+        return row is not None and str(row["state"]) == "working"
+
     def _execute(self, ticket: dict[str, Any]) -> tuple[str, str, str, list[dict[str, str]]]:
         ticket_id = str(ticket["id"])
         request = str(ticket["request_text"])
@@ -515,7 +525,12 @@ class SuperAgentService:
         seen_calls: set[str] = set()
         with self._llm_lock:
             for tool_step in range(3):
+                if not self._ticket_working(ticket_id):
+                    return "blocked", "Задание было остановлено владельцем.", "", sources
                 response = self.app.llm.chat(messages)
+                # An LLM call may finish after Stop: never execute its tool.
+                if not self._ticket_working(ticket_id):
+                    return "blocked", "Задание было остановлено владельцем.", "", sources
                 call = parse_tool_request(response)
                 if call is None:
                     break
@@ -523,6 +538,8 @@ class SuperAgentService:
                 name = str(call.get("tool") or "")
                 args = call.get("arguments")
                 if name == "artifact.propose" and isinstance(args, dict):
+                    if not self._ticket_working(ticket_id):
+                        return "blocked", "Задание было остановлено владельцем.", "", sources
                     try:
                         proposal = self._artifacts.propose(
                             ticket_id, str(ticket["owner_id"]),
@@ -562,6 +579,10 @@ class SuperAgentService:
                         problem("cognitive_step_begin_failed", type(exc).__name__, ticket_id=ticket_id, tool=name)
                         return "blocked", "Не удалось надёжно зарегистрировать шаг; исполнение остановлено.", "", sources
                 try:
+                    if not self._ticket_working(ticket_id):
+                        if journal is not None:
+                            journal.finish(ticket_id, attempt, step_no, status="failed")
+                        return "blocked", "Задание было остановлено владельцем.", "", sources
                     output = self._cognitive_reads.execute(name, args, ticket_id=ticket_id)
                 except Exception as exc:
                     if journal is not None:
@@ -633,14 +654,16 @@ class SuperAgentService:
             ended = utcnow()
             with self.storage.connection() as conn:
                 current = conn.execute("SELECT state FROM superagent_tickets WHERE id=?", (ticket_id,)).fetchone()
-                if current is None or str(current["state"]) == "stopped":
+                if current is None or str(current["state"]) != "working":
+                    outcome = "stopped" if current and str(current["state"]) == "stopped" else "superseded"
                     conn.execute(
-                        "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome='stopped' WHERE id=?",
-                        (ended, assignment_id),
+                        "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome=? "
+                        "WHERE id=? AND state='running'",
+                        (ended, outcome, assignment_id),
                     )
                     return
                 conn.execute(
-                    "UPDATE superagent_tickets SET state=?,latest_report=?,attention=?,sources_json=?,next_run_epoch=0,delivered=0,updated_at=? WHERE id=?",
+                    "UPDATE superagent_tickets SET state=?,latest_report=?,attention=?,sources_json=?,next_run_epoch=0,delivered=0,updated_at=? WHERE id=? AND state='working'",
                     (state, report, attention, json.dumps(sources, ensure_ascii=False), ended, ticket_id),
                 )
                 conn.execute(
@@ -654,19 +677,32 @@ class SuperAgentService:
             retry = transient and attempt < self.max_attempts
             ended = utcnow()
             with self.storage.connection() as conn:
+                current = conn.execute(
+                    "SELECT state FROM superagent_tickets WHERE id=?", (ticket_id,)
+                ).fetchone()
+                if current is None or str(current["state"]) != "working":
+                    outcome = "stopped" if current and str(current["state"]) == "stopped" else "superseded"
+                    conn.execute(
+                        "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome=? "
+                        "WHERE id=? AND state='running'",
+                        (ended, outcome, assignment_id),
+                    )
+                    event("superagent_late_error_ignored", ticket_id=ticket_id, outcome=outcome)
+                    return
                 conn.execute(
-                    "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome=?,error=? WHERE id=?",
+                    "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome=?,error=? WHERE id=? "
+                    "AND state='running'",
                     (ended, "retry" if retry else "failed", str(exc)[:1000], assignment_id),
                 )
                 if retry:
                     delay = min(60.0, float(2 ** attempt))
                     conn.execute(
-                        "UPDATE superagent_tickets SET state='queued',latest_report=?,next_run_epoch=?,updated_at=? WHERE id=?",
+                        "UPDATE superagent_tickets SET state='queued',latest_report=?,next_run_epoch=?,updated_at=? WHERE id=? AND state='working'",
                         (f"Временная ошибка, повтор через {int(delay)} сек.: {str(exc)[:500]}", time.time() + delay, ended, ticket_id),
                     )
                 else:
                     conn.execute(
-                        "UPDATE superagent_tickets SET state='failed',latest_report=?,attention='',delivered=0,updated_at=? WHERE id=?",
+                        "UPDATE superagent_tickets SET state='failed',latest_report=?,attention='',delivered=0,updated_at=? WHERE id=? AND state='working'",
                         (str(exc)[:12000], ended, ticket_id),
                     )
             problem("superagent_assignment_failed", str(exc), ticket_id=ticket_id, attempt=attempt, retry=retry)
