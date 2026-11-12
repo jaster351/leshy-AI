@@ -1,14 +1,15 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T03:58:05Z",
+  "updated_at": "2026-11-12T05:00:44Z",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T03:58:05Z",
-    "previous_issue_at": "2026-11-12T02:57:14Z",
+    "searched_at": "2026-11-12T05:00:44Z",
+    "previous_issue_at": "2026-11-12T03:58:05Z",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "doi:10.18653/2026.realm-1.35"
+      "arXiv:2611.02912",
+      "doi:10.18653/2026.emnlp-main.2296"
     ],
-    "note": "Впервые включена релевантная публикация REALM 2026 от 29 октября о динамическом удержании памяти и контролируемом poisoning-тесте. Это дополнение покрытия, а не публикация после прошлого выпуска; свежие списки arXiv всё ещё датированы 11 ноября."
+    "note": "Впервые включены препринт StateGraph от 2 ноября и обзор EMNLP 2026 о безопасности памяти по жизненному циклу. Это дополнение покрытия последних 30 дней, а не публикации после прошлого выпуска; свежие списки arXiv всё ещё датированы 11 ноября."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -198,6 +199,38 @@
       "dataset_url": null,
       "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "arXiv:2611.02912",
+      "version": "v1",
+      "first_published_at": "2026-11-02T10:44:02Z",
+      "version_published_at": "2026-11-02T10:44:02Z",
+      "checked_at": "2026-11-12T05:00:44Z",
+      "publication_status": "preprint",
+      "url": "https://arxiv.org/abs/2611.02912",
+      "package": "knowledge/updates/2026-11-12/1000-state-revision-and-memory-governance-research.jsonl",
+      "record_id": "stategraph-dependency-aware-memory-revision",
+      "code_url": null,
+      "dataset_url": null,
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_preprint",
+      "new_since_previous_issue": false
+    },
+    {
+      "id": "doi:10.18653/2026.emnlp-main.2296",
+      "version": null,
+      "source_edition": "EMNLP 2026 publisher PDF",
+      "first_published_at": null,
+      "publisher_publication_date": "2026-10",
+      "version_published_at": null,
+      "checked_at": "2026-11-12T05:00:44Z",
+      "publication_status": "peer_reviewed_conference_proceedings",
+      "url": "https://aclanthology.org/2026.emnlp-main.2296/",
+      "package": "knowledge/updates/2026-11-12/1000-state-revision-and-memory-governance-research.jsonl",
+      "record_id": "ltm-security-lifecycle-vmg-emnlp2026",
+      "code_url": null,
+      "dataset_url": null,
+      "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
+      "new_since_previous_issue": false
     }
   ],
   "issues": [
@@ -333,6 +366,16 @@
         "doi:10.18653/2026.realm-1.35"
       ],
       "note": "Впервые включена релевантная публикация REALM 2026 от 29 октября о динамическом удержании памяти и контролируемом poisoning-тесте. Это дополнение покрытия, а не публикация после прошлого выпуска; свежие списки arXiv всё ещё датированы 11 ноября."
+    },
+    {
+      "searched_at": "2026-11-12T05:00:44Z",
+      "previous_issue_at": "2026-11-12T03:58:05Z",
+      "discovery_lookback_days": 30,
+      "newly_included_ids": [
+        "arXiv:2611.02912",
+        "doi:10.18653/2026.emnlp-main.2296"
+      ],
+      "note": "Впервые включены препринт StateGraph от 2 ноября и обзор EMNLP 2026 о безопасности памяти по жизненному циклу. Это дополнение покрытия последних 30 дней, а не публикации после прошлого выпуска; свежие списки arXiv всё ещё датированы 11 ноября."
     }
   ],
   "last_search": {
