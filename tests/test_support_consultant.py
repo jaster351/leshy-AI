@@ -101,7 +101,10 @@ class SupportConsultantTests(unittest.TestCase):
         prompt = llm.calls[0][-1].content
         self.assertIn("TCP/22: тайм-аут", prompt)
         self.assertIn("Не могу подключиться по SSH", prompt)
-        self.assertIn("три коротких варианта", prompt)
+        self.assertIn("РОВНО ОДИН готовый ответ", prompt)
+        self.assertEqual(llm.calls[0][1].role, "system")
+        self.assertIn("Cloud4box", llm.calls[0][1].content)
+        self.assertIn("не добавляй подпись", llm.calls[0][1].content)
 
     def test_identity_conflict_stops_before_diagnostics_and_llm(self):
         source = FakeSource(self._context(client_id="99"))
