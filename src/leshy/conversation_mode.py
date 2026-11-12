@@ -59,10 +59,17 @@ _WORK_ACTION = (
     "почему не", "не работает", "вылетает", "упал", "ошибка",
     "проблема", "не проходит", "продолжай", "собери",
 )
+_WORK_ISSUE = (
+    "недоступ", "ошиб", "сбой", "не отвечает", "не поднимается",
+    "обрыв", "снижен", "медлен", "потеря", "потери",
+    "настройка", "сколько стоит", "какая цена", "почему",
+    "статус", "как дела с",
+)
 _CONTINUATION = (
     "и что дальше", "а дальше", "что осталось", "а второй", "а теперь",
     "продолжай", "сделай это", "поправь", "исправь", "проверил",
     "получилось", "не помогло", "та же ошибка",
+    "как дела с", "что по", "какой статус", "статус задачи",
 )
 
 
@@ -91,7 +98,8 @@ def _is_work_content(text: str) -> bool:
         return True
     has_domain = any(cue in text for cue in _WORK_TECH)
     has_action = any(cue in text for cue in _WORK_ACTION)
-    return has_domain and (has_action or len(text) > 95)
+    has_issue = any(cue in text for cue in _WORK_ISSUE)
+    return has_domain and (has_action or has_issue or len(text) > 95)
 
 
 def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> ConversationMode:
@@ -103,12 +111,27 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
         return ConversationMode("personal", "explicit_personal")
     if _starts_support(text):
         return ConversationMode("support_draft", "customer_message")
-    if any(cue in text for cue in _PERSONAL):
+    # Strong signs of pasted correspondence directed to the provider.
+    if text.startswith(("здравствуйте", "добрый день")) and (
+        any(cue in text for cue in ("у вас на", "ваш хостинг", "вашей компании",
+                                   "вашем хостинге", "у вас можно"))
+        and any(cue in text for cue in ("vps", "сервер", "хостинг", "vds", "тариф"))
+        and "?" in text
+    ):
+        return ConversationMode("support_draft", "quoted_customer_question")
+    casual_explicit = (
+        "не по работе", "давай просто поговорим", "просто поболтаем",
+        "поболтаем", "сменим тему", "давай отвлечемся",
+        "расскажи шутку", "расскажи анекдот", "поговорим о жизни",
+    )
+    if any(cue in text for cue in casual_explicit):
         return ConversationMode("personal", "personal_intent")
     if text.startswith(("/work", "/работа")):
         return ConversationMode("work", "explicit_work")
     if _is_work_content(text):
         return ConversationMode("work", "technical_work")
+    if any(cue in text for cue in _PERSONAL):
+        return ConversationMode("personal", "personal_intent")
 
     # History is bounded and same-session only; if recent user conversation
     # moved to unrelated topics, do not inherit support/work routing forever.
