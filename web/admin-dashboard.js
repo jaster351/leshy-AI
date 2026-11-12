@@ -175,6 +175,7 @@
     if(!setupMenu()){
       let n=0;const timer=setInterval(()=>{n++;if(setupMenu()||n>=20)clearInterval(timer)},250);
     }
+    void refresh();
     setInterval(()=>{if(document.visibilityState==='visible')void refresh()},10000);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});
