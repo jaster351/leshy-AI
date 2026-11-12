@@ -326,8 +326,15 @@ class ClusterOrchestrator:
                 executor_node_id=node.node_id,
             )
             result = self.transport.submit(node, task)
-            if result.task_id != task.task_id or result.origin_node_id != task.origin_node_id:
-                raise RuntimeError("Удалённый узел вернул результат не для исходной задачи")
+            if (
+                result.task_id != task.task_id
+                or result.origin_node_id != task.origin_node_id
+                or result.request_id != task.request_id
+                or result.executor_node_id != node.node_id
+            ):
+                raise RuntimeError(
+                    "Удалённый узел вернул ответ с несовпадающим task/origin/request/executor"
+                )
             return result
         finally:
             with self._lock:
