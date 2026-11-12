@@ -597,9 +597,13 @@ class NetworkBlockingChecker:
             if item.country_code.lower() == "ru" and item.status == "timeout"
         } if check_host_complete else set()
         matched_ports = tuple(
-            port for port in DEFAULT_PORTS
+            port for port in GEO_PORTS
             if port in ru_timeout_ports
             and any(item.port == port and item.status == "timeout" for item in local)
+            and any(
+                item.port == port and item.country_code not in ("", "ru")
+                and item.status == "connected" for item in remote
+            )
         )
         signals_met = (
             int(local_timeouts)
@@ -868,11 +872,11 @@ class NetworkBlockingChecker:
     def _port_results(result: BlockingAssessment) -> dict[int, dict[str, Any]]:
         """Always surface both port probes and remote country results."""
         data: dict[int, dict[str, Any]] = {}
-        for port in DEFAULT_PORTS:
+        for port in (*GEO_PORTS, 445):
             local = next((item for item in result.local if item.port == port), None)
             remote = [item for item in result.remote if item.port == port]
             data[port] = {
-                "service": "SSH" if port == 22 else "RDP",
+                "service": {22: "SSH", 80: "HTTP", 443: "HTTPS", 445: "SMB", 3389: "RDP"}[port],
                 "local_status": local.status if local else "not_checked",
                 "local_error": local.error if local else "",
                 "remote": [
@@ -980,7 +984,7 @@ class NetworkBlockingChecker:
             observations = [item for item in result.remote if item.port == port]
             if not observations:
                 lines.append(
-                    f"Check-Host TCP/{port} ({'SSH' if port == 22 else 'RDP'}): "
+                    f"Check-Host TCP/{port} ({ {22: 'SSH', 80: 'HTTP', 443: 'HTTPS', 3389: 'RDP'}[port] }): "
                     "нет результатов по российским и зарубежным узлам"
                 )
                 continue
