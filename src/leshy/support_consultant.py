@@ -9,7 +9,7 @@ import socket
 from typing import Any, Protocol
 
 from .llm import ChatMessage, LLM
-from .provider_support import support_draft_context
+from .provider_support import support_draft_context, _clean_reply, _acceptable, SUPPORT_DRAFT_MODE
 from .logging_paths import central_log_path
 from .module_settings import module_enabled
 from .modules import ModuleManifest, ModuleRequest, ModuleResponse
@@ -278,17 +278,30 @@ class SupportConsultantModule:
             f"История:\n{self._history_text(context)}\n\n"
             f"Диагностика:\n{self._diagnostics_text(diagnostic_results)}"
         )
-        answer = self.llm.chat(
-            [
-                ChatMessage("system", "Ты — помощник специалиста поставщика услуг. Не отправляй ответ, только создай черновик на русском языке."),
-                ChatMessage("system", support_draft_context(
-                    notice.question or context.subject or context.service_name,
-                    force=True,
-                    brain_dir=self.brain_dir,
-                )),
+        instructions = [
+            ChatMessage(
+                "system", SUPPORT_DRAFT_MODE + "\n"
+                "Ты составляешь один ответ клиенту от лица специалиста поддержки. "
+                "Не представляйся Лешим, не давай списки вариантов, не советуй обратиться "
+                "к другому провайдеру и не придумывай проверки. Сам ничего не отправляй."
+            ),
+            ChatMessage("system", support_draft_context(
+                notice.question or context.subject or context.service_name,
+                force=True, brain_dir=self.brain_dir,
+            )),
+        ]
+        answer = _clean_reply(self.llm.chat(instructions + [ChatMessage("user", prompt)]))
+        if not _acceptable(answer):
+            corrected = _clean_reply(self.llm.chat(instructions + [
+                ChatMessage("system", "Предыдущий вариант нарушил требование одного "
+                            "короткого ответа клиенту. Убери самопредставление, "
+                            "маркированные списки и советы обратиться в поддержку."),
                 ChatMessage("user", prompt),
-            ]
-        ).strip()
+            ]))
+            answer = corrected if _acceptable(corrected) else (
+                "Уточните, пожалуйста, ID услуги и время возникновения проблемы, "
+                "чтобы мы могли проверить обращение."
+            )
 
         return ModuleResponse(
             handled=True,
