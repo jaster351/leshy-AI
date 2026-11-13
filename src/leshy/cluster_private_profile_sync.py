@@ -72,7 +72,8 @@ def _safe_endpoint(value: str) -> str:
     except ValueError as exc:
         raise ValueError("Требуется IP-адрес локальной сети") from exc
     if (not address.is_private or address.is_loopback or address.is_link_local
-            or address.is_multicast or not port or not 1 <= port <= 65535):
+            or address.is_multicast or address.is_unspecified or address.is_reserved
+            or not port or not 1 <= port <= 65535):
         raise ValueError("Поддерживаются только частные LAN-адреса с TCP-портом")
     return f"{parsed.scheme}://{parsed.netloc}"
 
@@ -466,6 +467,8 @@ class ClusterPrivateProfileSync:
             inner = json.loads(cipher.decrypt(str(body.get("payload") or "").encode("ascii"), ttl=120))
         except (InvalidToken, ValueError, UnicodeError) as exc:
             raise PermissionError("Не удалось проверить ключ владельца") from exc
+        if not isinstance(inner, dict):
+            raise PermissionError("Некорректный формат зашифрованного профиля")
         if inner.get("owner_id") != row["remote_owner_id"]:
             raise PermissionError("Удалённая личность не совпадает с сопряжением")
         if route == "pull":
@@ -486,6 +489,8 @@ class ClusterPrivateProfileSync:
         body = {**base, "payload": cipher.encrypt(_json_bytes(inner)).decode("ascii")}
         reply = self._signed_post(row["remote_endpoint"], "/v1/cluster/private-profile/pull", body)
         remote = json.loads(cipher.decrypt(str(reply["payload"]).encode("ascii"), ttl=120))
+        if not isinstance(remote, dict):
+            raise PermissionError("Некорректный ответ сопряжённого узла")
         self._apply(owner, remote)
         outgoing = {"owner_id": owner, "snapshot": self._snapshot(owner)}
         pushed = self._signed_post(
