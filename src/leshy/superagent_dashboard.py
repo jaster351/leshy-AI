@@ -132,6 +132,7 @@ def ticket_details(service: Any, owner_id: str, ticket_id: str) -> dict[str, Any
             "state": plan.get("state"),
             "auto_run": bool(plan.get("auto_run", False)),
             "total_steps": len(all_steps),
+            "read_steps_total": sum(1 for step in all_steps if step.get("tool")),
             "state_counts": counts,
             "steps": [{"id": str(step.get("id") or "")[:64],
                        "title": str(step.get("title") or "")[:300],
