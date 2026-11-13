@@ -9,7 +9,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import json
-from typing import Any
+from typing import Any, Callable
 
 from .durable_plan_store import PlanError, _safe_read_spec
 
@@ -17,6 +17,8 @@ from .durable_plan_store import PlanError, _safe_read_spec
 def execute_ready_plan_reads(
     service: Any, ticket_id: str, owner_id: str, *,
     max_steps: int = 12, max_workers: int = 4,
+    require_auto: bool = False,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Run a bounded batch of safe reads when explicitly requested by owner.
 
@@ -25,7 +27,8 @@ def execute_ready_plan_reads(
     acknowledge a result with a revoked or expired lease.
     """
     if (type(max_steps) is not int or not 1 <= max_steps <= 24
-            or type(max_workers) is not int or not 1 <= max_workers <= 8):
+            or type(max_workers) is not int or not 1 <= max_workers <= 8
+            or type(require_auto) is not bool):
         raise PlanError("Invalid read-execution budget")
 
     bridge = service.plans
@@ -35,6 +38,13 @@ def execute_ready_plan_reads(
         raise RuntimeError("Trusted read executor is not connected")
     completed = 0
     errors = 0
+    stopped = should_stop or (lambda: False)
+
+    def allowed() -> bool:
+        if stopped():
+            return False
+        state = bridge.snapshot(ticket_id, owner_id)
+        return state['state'] == 'active' and (not require_auto or state['auto_run'])
 
     def one(claim: dict[str, Any]) -> tuple[int, int]:
         step_id, token = claim["id"], claim["token"]
@@ -46,7 +56,7 @@ def execute_ready_plan_reads(
             })
             if not name or json.loads(arg_json) != claim["arguments"]:
                 raise PermissionError("Plan step has no approved read action")
-            if bridge.snapshot(ticket_id, owner_id)["state"] != "active":
+            if not allowed():
                 return 0, 0
             if not bridge.heartbeat(
                 ticket_id, owner_id, step_id, token, lease_seconds=300,
@@ -70,6 +80,8 @@ def execute_ready_plan_reads(
                     "result_sha256": sha256(output.encode("utf-8")).hexdigest(),
                     "result_truncated": True,
                 }, sort_keys=True)
+            if not allowed():
+                return 0, 0
             accepted = bridge.complete(
                 ticket_id, owner_id, step_id, token, success=True, output=output,
             )
@@ -87,6 +99,8 @@ def execute_ready_plan_reads(
             return 0, int(accepted)
 
     while completed + errors < max_steps:
+        if not allowed():
+            break
         snapshot = bridge.snapshot(ticket_id, owner_id)
         if snapshot["state"] != "active":
             break
