@@ -22,6 +22,12 @@ class DiagnosticPublisher:
     ``logs/windows-local`` и отдельная служебная копия репозитория в .autobuild.
     """
 
+    # Diagnostic publishing is disabled until a fail-closed, independently verified
+    # redaction pipeline is available.  These logs may contain credentials,
+    # user identifiers, machine names, local paths, and complete request URLs.
+    # Keeping local diagnostics is safe; uploading the raw source is not.
+    UPLOAD_ENABLED = False
+
     BRANCH = "logs/windows-local"
     DEST = Path("log/windows-local/current")
     ALLOWED_SUFFIXES = {".log", ".txt", ".json"}
@@ -180,6 +186,8 @@ class DiagnosticPublisher:
         return result
 
     def publish_once(self) -> bool:
+        if not self.UPLOAD_ENABLED:
+            return False
         repo = self._repo_root()
         git = self._git_executable()
         if repo is None or git is None:
