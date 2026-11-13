@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS cluster_private_versions (
   owner_id TEXT NOT NULL, item_key TEXT NOT NULL, source_node TEXT NOT NULL,
   stamp TEXT NOT NULL, PRIMARY KEY(owner_id,item_key)
 );
+CREATE TABLE IF NOT EXISTS cluster_private_replay_guard (
+  pair_id TEXT NOT NULL, sender_node TEXT NOT NULL, nonce TEXT NOT NULL,
+  received_at REAL NOT NULL, PRIMARY KEY(pair_id,sender_node,nonce)
+);
+CREATE INDEX IF NOT EXISTS ix_cluster_private_replay_received
+  ON cluster_private_replay_guard(received_at);
 """
 _MAX_BODY = 100_000
 _ALLOWED_PREFS = frozenset({
@@ -380,6 +386,9 @@ class ClusterPrivateProfileSync:
                 "WHERE pair_id=? AND owner_id=?",
                 (utcnow(), pair_id, owner),
             )
+            conn.execute(
+                "DELETE FROM cluster_private_replay_guard WHERE pair_id=?", (pair_id,),
+            )
         event("cluster_private_profile_revoked", pair=pair_id[:12])
         return self.status(owner)
 
@@ -507,6 +516,24 @@ class ClusterPrivateProfileSync:
                             (owner, "__profile_name__", source, stamp),
                         )
 
+    def _claim_message(self, pair_id: str, sender_node: str, nonce: object) -> None:
+        """Fail closed on replayed encrypted LAN requests across restarts."""
+        if (not isinstance(nonce, str) or len(nonce) != 32
+                or any(ch not in "0123456789abcdef" for ch in nonce)):
+            raise PermissionError("Отсутствует корректный одноразовый идентификатор запроса")
+        with self.storage.connection() as conn:
+            conn.execute(
+                "DELETE FROM cluster_private_replay_guard WHERE received_at<?",
+                (time.time() - 600,),
+            )
+            inserted = conn.execute(
+                "INSERT OR IGNORE INTO cluster_private_replay_guard"
+                "(pair_id,sender_node,nonce,received_at) VALUES(?,?,?,?)",
+                (pair_id, sender_node, nonce, time.time()),
+            ).rowcount
+            if inserted != 1:
+                raise PermissionError("Повторная доставка зашифрованного запроса")
+
     def receive(self, route: str, body: dict, headers) -> dict:
         if not module_enabled(self.storage, "distributed-cluster"):
             raise PermissionError("Доверенный кластер выключен")
@@ -523,6 +550,9 @@ class ClusterPrivateProfileSync:
             raise PermissionError("Некорректный формат зашифрованного профиля")
         if inner.get("owner_id") != row["remote_owner_id"]:
             raise PermissionError("Удалённая личность не совпадает с сопряжением")
+        if route not in {"pull", "push"} or inner.get("operation") != route:
+            raise PermissionError("Зашифрованное сообщение адресовано другой операции")
+        self._claim_message(str(row["pair_id"]), sender, inner.get("nonce"))
         if route == "pull":
             return {"payload": cipher.encrypt(_json_bytes(self._snapshot(row["owner_id"]))).decode("ascii")}
         if route != "push":
@@ -537,14 +567,15 @@ class ClusterPrivateProfileSync:
         self._peer(row["remote_node_id"], row["remote_endpoint"])
         cipher = self._secret_cipher(row)
         base = {"pair_id": pair_id}
-        inner = {"owner_id": owner}
+        inner = {"owner_id": owner, "operation": "pull", "nonce": secrets.token_hex(16)}
         body = {**base, "payload": cipher.encrypt(_json_bytes(inner)).decode("ascii")}
         reply = self._signed_post(row["remote_endpoint"], "/v1/cluster/private-profile/pull", body)
         remote = json.loads(cipher.decrypt(str(reply["payload"]).encode("ascii"), ttl=120))
         if not isinstance(remote, dict):
             raise PermissionError("Некорректный ответ сопряжённого узла")
         self._apply(owner, remote)
-        outgoing = {"owner_id": owner, "snapshot": self._snapshot(owner)}
+        outgoing = {"owner_id": owner, "operation": "push", "nonce": secrets.token_hex(16),
+                    "snapshot": self._snapshot(owner)}
         pushed = self._signed_post(
             row["remote_endpoint"], "/v1/cluster/private-profile/push",
             {**base, "payload": cipher.encrypt(_json_bytes(outgoing)).decode("ascii")},
