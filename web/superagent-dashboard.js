@@ -131,34 +131,122 @@
           : 'В этом плане только ручные этапы. Для автоматических проверок создайте план с доступными действиями.'));
     } else if (!['ready', 'failed', 'stopped'].includes(detail.state)) {
       const planArea = element('div', 'sa-plan');
-      planArea.append(element('strong', '', 'Создать план из этапов'));
-      planArea.append(element('p', 'sa-help', 'По одному этапу в строке. Независимые этапы можно выполнять параллельно, последовательные — в указанном порядке. Сохранение плана не запускает команды автоматически.'));
-      const modeLabel = element('label', 'sa-help', 'Зависимость этапов');
+      planArea.append(element('strong', '', 'Составить план задания'));
+      planArea.append(element('p', 'sa-help',
+        'Добавьте действия кнопками. Проверки выполняются Лешим; ручные этапы остаются напоминаниями, а не командами ОС.'));
+      const modeLabel = element('label', 'sa-help', 'Как выполнять этапы');
       const modeSelect = element('select');
-      modeSelect.setAttribute('aria-label', 'Зависимость этапов плана');
-      [['parallel', 'Параллельно (независимые этапы)'], ['sequential', 'По порядку (каждый ждёт предыдущего)']].forEach(([value, text]) => {
-        const option = element('option', '', text);
-        option.value = value;
-        modeSelect.append(option);
+      modeSelect.setAttribute('aria-label', 'Порядок этапов');
+      [['parallel', 'Независимо (параллельно)'], ['sequential', 'По очереди']].forEach(([value, text]) => {
+        const option = element('option', '', text); option.value = value; modeSelect.append(option);
       });
-      modeSelect.value = 'parallel';
       planArea.append(modeLabel, modeSelect);
-      const stepsInput = element('textarea', '', 'Изучить исходные данные\nПодготовить решение\nПроверить результат');
-      stepsInput.setAttribute('aria-label', 'Этапы плана');
-      planArea.append(stepsInput);
-      planArea.append(makeButton('Сохранить план', async () => {
+
+      const stageRows = element('div', 'sa-stage-list');
+      const toolOptions = [
+        ['manual', 'Ручной этап', 'Опишите этап'],
+        ['runtime.version', 'Проверить версию Лешего', 'Проверить версию Лешего'],
+        ['runtime.platform', 'Посмотреть систему Лешего', 'Посмотреть систему Лешего'],
+        ['knowledge.search', 'Найти в проверенных знаниях', 'Найти сведения в знаниях']
+      ];
+      const addStage = (initialTool) => {
+        if (stageRows.children.length >= 64) {
+          say('Для удобства редактор поддерживает не более 64 этапов за раз.', true); return;
+        }
+        const item = element('div', 'sa-stage');
+        const select = element('select');
+        select.setAttribute('aria-label', 'Действие этапа');
+        toolOptions.forEach(([value, name]) => {
+          const option = element('option', '', name); option.value = value; select.append(option);
+        });
+        select.value = initialTool;
+        const title = element('input', 'sa-stage-title');
+        title.type = 'text'; title.maxLength = 300;
+        title.setAttribute('aria-label', 'Название этапа');
+        const query = element('input', 'sa-stage-query');
+        query.type = 'text'; query.maxLength = 300;
+        query.placeholder = 'Что искать? Например: источники информации о памяти агентов';
+        query.setAttribute('aria-label', 'Запрос для поиска в знаниях');
+        const update = () => {
+          query.hidden = select.value !== 'knowledge.search';
+          const suggested = toolOptions.find(x => x[0] === select.value)?.[2] || '';
+          if (!title.value || toolOptions.some(x => x[2] === title.value)) title.value = select.value === 'manual' ? '' : suggested;
+          title.placeholder = select.value === 'manual' ? 'Что должен сделать человек?' : suggested;
+        };
+        select.addEventListener('change', update);
+        update();
+        const remove = makeButton('Убрать', () => item.remove());
+        remove.setAttribute('aria-label', 'Удалить этап');
+        item.append(select, title, query, remove);
+        stageRows.append(item);
+        if (initialTool === 'knowledge.search') query.focus();
+        else if (initialTool === 'manual') title.focus();
+      };
+      const choices = element('div', 'sa-row');
+      [
+        ['Проверить версию', 'runtime.version'],
+        ['Сведения о системе', 'runtime.platform'],
+        ['Поиск в знаниях', 'knowledge.search'],
+        ['Ручной этап', 'manual']
+      ].forEach(([name, kind]) => choices.append(makeButton('+ ' + name, () => addStage(kind))));
+      planArea.append(choices, stageRows);
+
+      const planPayload = (steps) => {
+        const payload = {action: 'plan_create', id: taskId, steps};
+        if (new TextEncoder().encode(JSON.stringify(payload)).length > 262144) {
+          say('Слишком много данных (максимум 256 КБ). Разделите план на несколько задач.', true);
+          return null;
+        }
+        return payload;
+      };
+      const createBuiltPlan = async () => {
+        const rows = Array.from(stageRows.children);
+        if (!rows.length) { say('Сначала добавьте хотя бы одно действие.', true); return; }
+        const steps = [];
+        for (const [index, item] of rows.entries()) {
+          const tool = item.querySelector('select').value;
+          const title = item.querySelector('.sa-stage-title').value.trim();
+          const query = item.querySelector('.sa-stage-query').value.trim();
+          if (!title) { say('У каждого этапа должно быть понятное название.', true); return; }
+          if (tool === 'knowledge.search' && (query.length < 3 || query.length > 300)) {
+            say('Введите запрос для поиска в знаниях — от 3 до 300 символов.', true);
+            item.querySelector('.sa-stage-query').focus(); return;
+          }
+          const step = {id: 'step_' + (index + 1), title,
+            depends_on: modeSelect.value === 'sequential' && index ? ['step_' + index] : []};
+          if (tool !== 'manual') {
+            step.tool = tool;
+            step.arguments = tool === 'knowledge.search' ? {query} : {};
+          }
+          steps.push(step);
+        }
+        const payload = planPayload(steps);
+        if (payload) await perform(payload);
+      };
+      planArea.append(makeButton('Сохранить план из действий', createBuiltPlan));
+      planArea.append(element('p', 'sa-help',
+        'После сохранения включите «Автозапуск проверок» для выполнения в фоне. Это не включает управление файлами или системой.'));
+
+      const simple = element('details', 'sa-advanced');
+      simple.append(element('summary', '', 'Другой способ: перечислить ручные этапы строками'));
+      simple.append(element('p', 'sa-help', 'Напишите каждый этап с новой строки. Эти этапы не выполняются автоматически.'));
+      const stepsInput = element('textarea');
+      stepsInput.value = 'Изучить исходные данные\nПодготовить решение\nПроверить результат';
+      stepsInput.setAttribute('aria-label', 'Ручные этапы плана');
+      simple.append(stepsInput);
+      simple.append(makeButton('Сохранить ручные этапы', async () => {
         const titles = stepsInput.value.split('\n').map(x => x.trim()).filter(Boolean);
         if (!titles.length || titles.some(x => x.length > 300)) {
           say('Нужен хотя бы один этап, каждый до 300 символов.', true); return;
         }
-        const steps = titles.map((title, index) => ({ id: `step_${index + 1}`, title,
-          depends_on: modeSelect.value === 'sequential' && index ? [`step_${index}`] : [] }));
-        const payload = { action: 'plan_create', id: taskId, steps };
-        if (new TextEncoder().encode(JSON.stringify(payload)).length > 262144) {
-          say('План слишком большой для одного запроса (максимум 256 КБ). Разделите его на независимые задания.', true); return;
-        }
-        await perform(payload);
-      }, false));
+        const steps = titles.map((title, index) => ({
+          id: 'step_' + (index + 1), title,
+          depends_on: modeSelect.value === 'sequential' && index ? ['step_' + index] : []
+        }));
+        const payload = planPayload(steps);
+        if (payload) await perform(payload);
+      }));
+      planArea.append(simple);
       host.append(planArea);
     }
     if (!detail.latest_report && !detail.attention && !steps.length && !detail.plan) {
