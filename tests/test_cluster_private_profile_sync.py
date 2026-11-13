@@ -116,6 +116,26 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
 
+    def test_failed_pair_insert_rolls_back_invitation_consumption(self):
+        invite = self.a.invite(self.owner_a)
+        with self.a_storage.connection() as conn:
+            conn.execute(
+                "CREATE TRIGGER fail_pair_insert BEFORE INSERT ON cluster_private_pairs "
+                "BEGIN SELECT RAISE(ABORT, 'simulated disk failure'); END"
+            )
+        with self.assertRaises(Exception):
+            self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
+        with self.a_storage.connection() as conn:
+            row = conn.execute(
+                "SELECT used_at FROM cluster_private_invites WHERE invite_id=?",
+                (invite["invite_id"],),
+            ).fetchone()
+            self.assertIsNone(row["used_at"])
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM cluster_private_pairs").fetchone()[0], 0)
+            conn.execute("DROP TRIGGER fail_pair_insert")
+        self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
+        self.assertEqual(self.a.status(self.owner_a)["pair_count"], 1)
+
     def test_unpaired_local_owner_cannot_read_another_users_status(self):
         with self.assertRaises(PermissionError):
             self.a.status("victim-uuid")
