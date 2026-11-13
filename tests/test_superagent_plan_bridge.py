@@ -93,4 +93,32 @@ class PlanBridgeTests(unittest.TestCase):
         self.assertEqual(self.bridge.create("SA-ticket1", "web:alice", self.steps)["steps"][0]["state"], "queued")
 
 
+    def test_owner_bound_heartbeat_renews_lease_and_rejects_stale_tokens(self):
+        self.bridge.create("SA-ticket1", "web:alice", self.steps)
+        claim = self.bridge.claim("SA-ticket1", "web:alice", lease_seconds=90)[0]
+        self.assertTrue(self.bridge.heartbeat(
+            "SA-ticket1", "web:alice", claim["id"], claim["token"]))
+        self.assertFalse(self.bridge.heartbeat(
+            "SA-ticket1", "web:alice", claim["id"], "stale-token"))
+        with self.assertRaises(PermissionError):
+            self.bridge.heartbeat("SA-ticket1", "web:mallory", claim["id"], claim["token"])
+
+    def test_stop_racing_with_lease_renewal_revokes_plan(self):
+        self.bridge.create("SA-ticket1", "web:alice", self.steps)
+        claim = self.bridge.claim("SA-ticket1", "web:alice")[0]
+        original = self.bridge.store.heartbeat
+        def stop_during_heartbeat(*args, **kwargs):
+            renewed = original(*args, **kwargs)
+            self.service.tickets["SA-ticket1"]["state"] = "stopped"
+            return renewed
+        self.bridge.store.heartbeat = stop_during_heartbeat
+        self.assertFalse(self.bridge.heartbeat(
+            "SA-ticket1", "web:alice", claim["id"], claim["token"]))
+        self.assertEqual(self.bridge.snapshot("SA-ticket1", "web:alice")["state"], "cancelled")
+        self.assertFalse(self.bridge.complete(
+            "SA-ticket1", "web:alice", claim["id"], claim["token"],
+            success=True, output="late answer"))
+
+
+
 if __name__ == "__main__": unittest.main()
