@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T01:13:16.702367+00:00",
+  "candidates": 376,
+  "new_unique": 376,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated": 0,
+  "retracted": 0,
+  "verified": 375,
+  "candidate": 1,
+  "jsonl_bytes": 621005,
+  "previous_versions": 56501,
+  "total_latest": 56877,
+  "deduplication": "All corpus versions compared by normalized claim, stable ID and canonical keys. Semantic topic scan found only http-idempotent-intended-effect: a general definition, not a per-method registry entry. No earlier HTTP field/status assignment package. New rows retained as cohesive registry entries; unassigned ranges not exploded.",
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-13/0603-http-fields.jsonl",
+      "bytes": 441487,
+      "sha256": "3a3a69a5652a20c8dfe32da02e264301558920c11093402fbfad27df426046b4"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/0603-http-methods.jsonl",
+      "bytes": 69413,
+      "sha256": "9b48dadb45603acce9e62070a2e92405fc3cfc189dfd437bfbd8f4390828eae4"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/0603-http-status-codes.jsonl",
+      "bytes": 110105,
+      "sha256": "06aabdcc7df3e0e524b18b5d6e3bca28507543fdb122a075ef54598253d9bfa4"
+    }
+  ],
+  "cursor": {
+    "http-fields": {
+      "processed": 260,
+      "remaining": 0
+    },
+    "http-methods": {
+      "processed": 41,
+      "remaining": 0
+    },
+    "http-status-codes": {
+      "processed": 75,
+      "remaining": 0,
+      "range": "100-599"
+    }
+  },
+  "research": {
+    "window_start": "2026-11-12T20:08:04.864762+00:00",
+    "window_end": "2026-11-13T01:13:16.702367+00:00",
+    "queries": [
+      "site.arxiv.org memory agent 12 Nov 2026",
+      "site.arxiv.org memory poisoning November 2026"
+    ],
+    "new_significant_confirmed": 0,
+    "opened": [
+      "https://arxiv.org/abs/2611.14320",
+      "https://arxiv.org/abs/2611.14009",
+      "https://arxiv.org/abs/2611.11929",
+      "https://arxiv.org/abs/2610.34673"
+    ],
+    "excluded": "WikiTrace and CAMP-II remain v1 already covered. SoMem and AgentMemRec are earlier publications; new substantive revisions not established."
+  },
+  "limitations": [
+    "PubChem broad bulk reuse not confirmed from primary terms: access challenge; no chemical dataset published.",
+    "Selected three HTTP registries processed in full. Linked specification semantics not bulk-imported.",
+    "HTTP 104 temporary expiry requires follow-up; candidate, TTL 3600.",
+    "No local import, weights training, builds or automated tests."
+  ],
+  "encoding_before": {
+    "files": 159,
+    "json_jsonl_objects": 56530,
+    "errors": 0
+  },
+  "encoding_after": {
+    "files": 168,
+    "json_jsonl_objects": 56908,
+    "jsonl_records": 56877,
+    "errors": 0
+  }
+}

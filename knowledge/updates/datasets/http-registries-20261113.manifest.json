@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "license": "CC0-1.0",
+  "license_url": "https://www.iana.org/help/licensing-terms",
+  "sources": [
+    {
+      "key": "http-fields",
+      "url": "https://www.iana.org/assignments/http-fields/field-names.csv",
+      "snapshot": "knowledge/updates/datasets/http-fields-20261113.csv",
+      "sha256": "4f96c608a02ea36f82359e3b2c39fb3768b4267a7c88d524ea5d3bd6217c901f",
+      "checked_at": "2026-11-13T01:06:25.841504+00:00",
+      "source_version": "2026-11-02",
+      "rows": 260
+    },
+    {
+      "key": "http-methods",
+      "url": "https://www.iana.org/assignments/http-methods/methods.csv",
+      "snapshot": "knowledge/updates/datasets/http-methods-20261113.csv",
+      "sha256": "4614642d572a630c355f182126bd92dd5a43d398b3dc64cad9ce88826613823a",
+      "checked_at": "2026-11-13T01:06:30.434181+00:00",
+      "source_version": "2026-06-17",
+      "rows": 41
+    },
+    {
+      "key": "http-status-codes",
+      "url": "https://www.iana.org/assignments/http-status-codes/http-status-codes-1.csv",
+      "snapshot": "knowledge/updates/datasets/http-status-codes-20261113.csv",
+      "sha256": "6098f56a5f25ca050313838886090a5e58a40ca72c2b44eb19d5ac7c9f6b4896",
+      "checked_at": "2026-11-13T01:06:34.778569+00:00",
+      "source_version": "2025-09-15",
+      "rows": 75
+    }
+  ],
+  "transformation": "One record per existing registry row, preserving unassigned ranges without expanding them. Blank values become null; no linked specifications reproduced.",
+  "cursor": {
+    "http-fields": {
+      "processed": 260,
+      "remaining": 0
+    },
+    "http-methods": {
+      "processed": 41,
+      "remaining": 0
+    },
+    "http-status-codes": {
+      "processed": 75,
+      "remaining": 0
+    }
+  }
+}
