@@ -51,6 +51,10 @@
     .sa-remote button:disabled{opacity:.45;cursor:default}
     .sa-remote .sa-ssh-select{display:block;width:100%;max-width:460px;margin:6px 0 9px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
     .sa-remote .sa-error{color:var(--danger)}
+    .sa-remote input,.sa-remote textarea{box-sizing:border-box;display:block;width:100%;max-width:680px;padding:9px;margin:6px 0 10px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
+    .sa-remote pre{white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;max-height:350px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#07110d;font-size:12px}
+    .sa-remote label{display:block;font-size:12px;color:var(--muted)}
+    .sa-remote .sa-setup{padding:10px;border:1px dashed var(--line);border-radius:10px;margin:10px 0}
     .sa-dashboard code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:7px 0;color:var(--accent)}
     .sa-plan{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:10px}.sa-plan textarea{min-height:75px}.sa-plan select{width:100%;max-width:460px;margin:6px 0 10px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
     .sa-stage-result{padding:7px 9px;margin:5px 0;border-left:2px solid var(--line);overflow-wrap:anywhere}.sa-evidence{font-size:12px;color:var(--accent);margin:4px 0}.sa-proof{font-size:12px;margin:4px 0 7px}.sa-proof summary{cursor:pointer}.sa-stage{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px}
@@ -412,6 +416,49 @@
       update: 'Обновления', reboot: 'Перезагрузка', rdp: 'Удалённый экран'
     };
     let requestInFlight = false;
+    const enrollBox = element('details', 'sa-setup');
+    enrollBox.append(element('summary', '', 'Добавить свой SSH-сервер'));
+    enrollBox.append(element('p', 'sa-remote-note',
+      'Для регистрации нужен вход через подтверждённого провайдера, SSH-доступ и отпечаток ключа, ' +
+      'полученный независимо из доверенной консоли самого сервера.'));
+    const enrollmentIp = element('input');
+    enrollmentIp.placeholder = 'IP-адрес сервера, например 192.168.1.20';
+    enrollmentIp.setAttribute('aria-label', 'IP-адрес SSH-сервера');
+    enrollmentIp.maxLength = 128;
+    const enrollmentFingerprint = element('input');
+    enrollmentFingerprint.placeholder = 'SHA256:… или 64 символа SHA-256';
+    enrollmentFingerprint.setAttribute('aria-label', 'Отпечаток ключа сервера из его консоли');
+    enrollmentFingerprint.maxLength = 120; enrollmentFingerprint.autocomplete = 'off';
+    const enrollmentFile = element('select', 'sa-ssh-select');
+    enrollmentFile.setAttribute('aria-label', 'Файл учётных данных для регистрации');
+    const enrollmentState = element('p', 'sa-remote-note');
+    enrollmentState.setAttribute('role', 'status');
+    const enroll = makeButton('Подтвердить и добавить SSH-сервер', async () => {
+      if (requestInFlight || !enrollmentFile.value) return;
+      if (!enrollmentIp.value.trim() || !enrollmentFingerprint.value.trim()) {
+        enrollmentState.textContent = 'Укажите IP и отпечаток из доверенной консоли сервера.'; return;
+      }
+      if (!window.confirm('Вы лично сверили SHA-256 ключ сервера ' + enrollmentIp.value +
+        ' по его доверенной консоли и хотите зарегистрировать его?')) return;
+      requestInFlight = true; enroll.disabled = true;
+      enrollmentState.textContent = 'Проверяю подлинность SSH-узла и учётную запись…';
+      try {
+        const payload = {node_id:enrollmentIp.value.trim(), credential_file:enrollmentFile.value,
+          expected_fingerprint:enrollmentFingerprint.value.trim(), confirm:true};
+        await api('/v1/superagent/ssh/enroll', {method:'POST',body:JSON.stringify(payload)});
+        enrollmentState.textContent = 'SSH-сервер подтверждён и зарегистрирован.';
+        enrollmentFingerprint.value = '';
+      } catch (error) {
+        enrollmentState.textContent = 'Не удалось добавить SSH-сервер: ' + error.message;
+      } finally {
+        requestInFlight = false; enroll.disabled = false;
+        await load();
+      }
+    });
+    enrollBox.append(element('label', '', 'Адрес сервера'), enrollmentIp,
+      element('label', '', 'Независимый SHA-256 отпечаток SSH-ключа'), enrollmentFingerprint,
+      element('label', '', 'Файл доступа'), enrollmentFile, enroll, enrollmentState);
+    section.insertBefore(enrollBox, container);
     const addInspection = (row, node, credentials) => {
       if (!credentials || !credentials.files?.length) {
         row.append(element('p', 'sa-remote-note',
