@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T08:08:43.497442+00:00",
+  "candidates": 4213,
+  "new_unique": 4213,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated": 0,
+  "retracted": 0,
+  "jsonl_bytes": 10522011,
+  "total_latest": 70994,
+  "cursor": {
+    "namespace": "molecular_function",
+    "start_offset": 5828,
+    "processed_active": 10041,
+    "remaining_active": 0,
+    "next_namespace": "biological_process",
+    "last_id": "GO:7770087",
+    "first_id": "GO:0047219"
+  },
+  "source_manifest": "knowledge/updates/datasets/go-molecular-functions-20260726-continuation.manifest.json",
+  "source_sha256": "b08d45b268b8c24ccb2513dbbbc7d4df9f6521c099b413f79eb31e06e0fa3bcc",
+  "source_version": "releases/2026-07-26",
+  "index_bytes_before": 15090551,
+  "index_bytes_after": 10147157,
+  "deduplication": "Compared all corpus IDs, canonical keys, normalized claims, GO definitions and ontology identifiers. No identical definitions within continuation or against prior GO records. Molecular activities retain distinct substrates/context; reviewed overlap with prior general biology and chemistry explanations.",
+  "research": {
+    "window_start": "2026-11-13T07:08:09+00:00",
+    "window_end": "2026-11-13T08:08:43.497442+00:00",
+    "new_significant_confirmed": 0,
+    "opened": [
+      "https://arxiv.org/abs/2611.14505",
+      "https://arxiv.org/abs/2611.14326",
+      "https://arxiv.org/abs/2611.14320"
+    ],
+    "note": "Previously reviewed papers retain v2 Nov 11 / v1 Nov 10 / v1 Nov 10; no new substantive version confirmed."
+  },
+  "limitations": [
+    "Historical GO release 2026-07-26.",
+    "Molecular-function namespace now complete; biological_process and other domains require separate review.",
+    "Index compaction verified by source inspection and static consistency; no builds or tests.",
+    "No local import or model training observed."
+  ],
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-13/1306-go-molecular-functions-01.jsonl",
+      "bytes": 2096518,
+      "sha256": "aae543d1d25d4f181b4438998b4b8f605c0ab52819d31fa10fc3a3443440115c"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1306-go-molecular-functions-02.jsonl",
+      "bytes": 2096502,
+      "sha256": "acb3f55f5a0618430cf1aff35d52d62000cb77f5dfe3dce20a43b11537c8f061"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1306-go-molecular-functions-03.jsonl",
+      "bytes": 2096726,
+      "sha256": "625cbfa49a9f975c9dc0f1c6fe68c561b65bd69c94fbe0770aad5faa87a5439b"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1306-go-molecular-functions-04.jsonl",
+      "bytes": 2094955,
+      "sha256": "f9af2842133cc76d8ce9ae25cf00b4c6de1eb0e654d1f9a3da726339c24fdaf7"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1306-go-molecular-functions-05.jsonl",
+      "bytes": 2096741,
+      "sha256": "59a139339274e2aad00c78426a635b60d14d6645b448840bba6052dbbcc91c6d"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1306-go-molecular-functions-06.jsonl",
+      "bytes": 40569,
+      "sha256": "94a0836a891a15ecf02d9e3926a022ee449254da46115292a568a65ecf239d42"
+    }
+  ]
+}
