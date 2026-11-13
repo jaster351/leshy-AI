@@ -78,7 +78,7 @@ class DashboardControlsTests(unittest.TestCase):
         for snippet in (
             "Включить автозапуск проверок", "Выключить автозапуск проверок",
             "Выполнить доступные проверки", "action:'plan_run'",
-            "action:'plan_create'", "knowledge.search", "runtime.version",
+            "action: 'plan_create'", "knowledge.search", "runtime.version",
             "runtime.platform", "Добавьте действия кнопками",
             "expandedTasks.add(task.id)", "expandedTasks.clear()",
             "Автоматически доступны только безопасные проверки",
