@@ -510,6 +510,94 @@
         }
       });
       row.append(label, select, inspect, result);
+
+      const terminal = element('details', 'sa-setup');
+      terminal.append(element('summary', '', 'SSH-терминал и задания Лешему'));
+      terminal.append(element('p', 'sa-remote-note',
+        'Можно выполнить любую SSH-команду, а не только проверить ОС. Каждое действие ' +
+        'предварительно показывается целиком и требует отдельного подтверждения. ' +
+        'Это отдельные команды SSH: текущая папка и переменные окружения между ними не сохраняются.'));
+      const shellInput = element('textarea');
+      shellInput.rows = 3;
+      shellInput.maxLength = 4096;
+      shellInput.placeholder = 'Команда SSH для этого сервера (Linux/Windows)';
+      shellInput.setAttribute('aria-label', 'Команда SSH для ' + node.node_id);
+      const output = element('pre', 'sa-terminal-output');
+      output.setAttribute('aria-label', 'Вывод SSH-терминала');
+      output.textContent = 'Вывод появится после выполнения команды.';
+      const run = makeButton('Посмотреть и выполнить команду', async () => {
+        const command = shellInput.value;
+        if (requestInFlight || !command.trim()) {
+          if (!command.trim()) output.textContent = 'Сначала введите SSH-команду.';
+          return;
+        }
+        requestInFlight = true; run.disabled = true;
+        output.textContent = 'Проверка права выполнения и подготовка подтверждения…';
+        try {
+          const identity = {node_id:node.node_id,credential_file:select.value,command};
+          const preview = await api('/v1/superagent/ssh/prepare', {
+            method:'POST', body:JSON.stringify(identity)
+          });
+          const ticket = preview.approval;
+          if (!window.confirm('Компьютер: ' + node.node_id + '\n\nКОМАНДА:\n' + command +
+            '\n\nКоманда может изменить систему. Проверьте её сами, убедитесь в наличии резервной копии ' +
+            'для важных операций. Выполнить только эту команду?')) {
+            output.textContent = 'Команда отменена. Ничего не выполнялось.';
+            return;
+          }
+          output.textContent = 'Подключаюсь, определяю ОС и выполняю подтверждённую команду…';
+          const response = await api('/v1/superagent/ssh/execute', {
+            method:'POST', body:JSON.stringify({
+              ...identity, approval_token:ticket.approval_token, confirm:true
+            })
+          });
+          const executed = response.execution || {};
+          const status = executed.truncated ? 'Вывод ограничен; статус выполнения не подтверждён' :
+            executed.exit_code === 0 ? 'Команда завершилась с кодом 0' :
+            'Команда завершилась с кодом ' + String(executed.exit_code);
+          output.textContent = 'ОС: ' + (executed.os_family || 'не определена') + '\n' +
+            status + '\n\nSTDOUT:\n' + (executed.stdout || '(пусто)') +
+            '\n\nSTDERR:\n' + (executed.stderr || '(пусто)');
+        } catch (error) {
+          output.textContent = 'SSH-команда не выполнена: ' + error.message;
+        } finally {
+          requestInFlight = false;
+          run.disabled = false;
+        }
+      });
+      const natural = element('textarea');
+      natural.rows = 3;
+      natural.maxLength = 3000;
+      natural.placeholder = 'Опишите задачу обычными словами: например, найти причину ошибки сервиса и предложить исправление';
+      natural.setAttribute('aria-label', 'Задача Лешему для сервера ' + node.node_id);
+      const plan = makeButton('Поручить Лешему составить план', async () => {
+        const text = natural.value.trim();
+        if (!text || requestInFlight) { if (!text) output.textContent = 'Опишите задачу для Лешего.'; return; }
+        requestInFlight = true; plan.disabled = true;
+        try {
+          await api('/v1/superagent/task', {
+            method:'POST',
+            body:JSON.stringify({action:'create',
+              text:'Задание для подтверждённого SSH-сервера ' + node.node_id +
+              '. Перед предлагаемыми командами выясни ОС сервера, тип оболочки, проверь существующие настройки. ' +
+              'Не утверждай, что ты уже выполнил команду. Составь последовательность действий, ' +
+              'проверку результата и при необходимости план отката. Не выполнять рискованные изменения без подтверждения владельца. ' +
+              'Запрос пользователя: ' + text
+            })
+          });
+          output.textContent = 'Задача передана SuperAgent. План появится в списке заданий. ' +
+            'Автоматическое выполнение предложенных команд пока не подключено.';
+          natural.value = '';
+          refresh(true);
+        } catch (error) {
+          output.textContent = 'Не удалось передать задание SuperAgent: ' + error.message;
+        } finally {
+          requestInFlight = false; plan.disabled = false;
+        }
+      });
+      terminal.append(element('label', '', 'Команда для SSH'), shellInput, run, output,
+        element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
+      row.append(terminal);
       if (credentials.truncated) row.append(element('p', 'sa-remote-note',
         'Показаны первые 100 файлов доступа.'));
     };
