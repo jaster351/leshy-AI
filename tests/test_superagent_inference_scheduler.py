@@ -29,6 +29,7 @@ class InferenceSchedulerScopeTests(unittest.TestCase):
         service = object.__new__(SuperAgentService)
         service.app = object()
         service._stop = threading.Event()
+        service._ticket_working = lambda _: True
         calls = []
 
         def original(self, ticket_id, messages):
@@ -53,7 +54,9 @@ class InferenceSchedulerScopeTests(unittest.TestCase):
         first = scheduler.history[0][1]
         self.assertEqual(first["source"], "superagent:SA-first")
         self.assertEqual(first["priority"], superagent_scheduler.PRIORITY_BACKGROUND)
-        self.assertIs(first["cancel_event"], service._stop)
+        self.assertFalse(first["cancel_event"].is_set())
+        service._ticket_working = lambda _: False
+        self.assertTrue(first["cancel_event"].is_set())
         self.assertIsNone(first["timeout"])
 
 
