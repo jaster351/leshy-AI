@@ -86,7 +86,9 @@ def _detect_remote_os(transport: Any, policy: RemotePermissionPolicy,
         policy.require(actor, node, "execute", observed_fingerprint=pin)
         try:
             code, output = _fixed_command(transport, command, 5.0, None)
-        except (TimeoutError, OSError):
+        except Exception:
+            # A Windows SSH server can reject the Unix probe as an SSH
+            # channel exception rather than an exit code. Try Windows next.
             continue
         if code != 0:
             continue
