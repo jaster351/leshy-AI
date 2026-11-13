@@ -69,6 +69,20 @@ class KeyboardLayoutTests(unittest.TestCase):
         self.assertEqual(formatter.push("Connected."), "Connected.")
         self.assertEqual(formatter.finish(), "")
 
+    def test_factual_routes_use_corrected_text_without_changing_raw_history(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "src" / "leshy" / "app.py").read_text(encoding="utf-8")
+        realtime = (root / "src" / "leshy" / "realtime_chat.py").read_text(encoding="utf-8")
+        for source in (app, realtime):
+            self.assertIn("factual_query = layout_suggestion.corrected if layout_suggestion else message", source)
+            self.assertIn("answer = layout_answer(message, answer)" if source is realtime else "factual = layout_answer(message, factual)", source)
+        self.assertIn("checked_clock_answer(factual_query, self.live_search)", app)
+        self.assertIn("weather_answer(factual_query)", app)
+        self.assertIn("clock = clock_answer(factual_query)", realtime)
+        self.assertIn("weather_answer(factual_query)", realtime)
+        self.assertIn("self._save_user_and_history(message, owner_id, session_id)", realtime)
+
     def test_chat_calls_formatter_after_persisting_raw_question(self):
         from pathlib import Path
         root = Path(__file__).resolve().parents[1]
