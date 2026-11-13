@@ -295,16 +295,11 @@ class ClusterPrivateProfileSync:
         # without allowing a consumed invitation to create another pair.
         pair_id = hmac.new(self.cluster.identity.secret,
                            ("profile-pair:" + invite_id).encode("ascii"), sha256).hexdigest()[:32]
-        with self._lock:
-            if invite["used_at"] is not None:
-                existing = self._pair_row(pair_id, owner=owner, node=node)
-                if existing["remote_owner_id"] != remote_owner:
-                    raise PermissionError("Приглашение уже использовано другим профилем")
-                key = self._master.decrypt(existing["sealed_secret"].encode("ascii")).decode("ascii")
-                response = {"pair_id": pair_id, "owner_id": owner,
-                            "node_id": self.cluster.identity.node_id, "key": key}
-                return {"payload": _cipher_for_digest(digest).encrypt(
-                    _json_bytes(response)).decode("ascii")}
+        # A consumed invite is never an authentication credential again.
+        # A lost response requires a fresh invite and explicit pairing;
+        # returning the existing long-lived key would enable replay.
+        if invite["used_at"] is not None:
+            raise PermissionError("Приглашение уже использовано; создайте новое")
         key = Fernet.generate_key().decode("ascii")
         # Consume the invite and persist the pair in the SAME SQLite transaction.
         # A failed insert must roll back consumption of the one-time invitation.
