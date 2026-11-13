@@ -5,7 +5,8 @@ own authorization. It is deliberately unsuitable for mutating operations.
 """
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
 import threading
 from typing import Any
@@ -16,7 +17,7 @@ READ_ONLY_TOOLS = frozenset({
     "runtime.version",
 })
 MAX_TASKS = 24
-MAX_WORKERS = 8
+MAX_WORKERS = MAX_TASKS  # Read-only operations; actual worker admission is resource-bound.
 MAX_OUTPUT_CHARS = 4000
 
 
@@ -82,7 +83,20 @@ def execute_parallel_plan(raw_tasks: Any, tools: Any, *, context: Any,
     tasks = _validate(raw_tasks, seen_signatures=seen_signatures, allowed_tools=allowed_tools)
     workers = min(MAX_WORKERS, max(1, int(max_workers)), len(tasks))
     completed: dict[str, dict[str, Any]] = {}
-    pending = {item["id"]: item for item in tasks}
+    by_id = {item["id"]: item for item in tasks}
+    remaining = {item["id"]: len(item["depends_on"]) for item in tasks}
+    children: dict[str, list[str]] = {item["id"]: [] for item in tasks}
+    for item in tasks:
+        for parent in item["depends_on"]:
+            children[parent].append(item["id"])
+    ready = deque(item["id"] for item in tasks if remaining[item["id"]] == 0)
+
+    def finish(step_id: str, result: dict[str, Any]) -> None:
+        completed[step_id] = result
+        for child in children[step_id]:
+            remaining[child] -= 1
+            if remaining[child] == 0:
+                ready.append(child)
 
     def run(item: dict[str, Any]) -> dict[str, Any]:
         if cancel_event is not None and cancel_event.is_set():
@@ -105,23 +119,28 @@ def execute_parallel_plan(raw_tasks: Any, tools: Any, *, context: Any,
             return {"id": item["id"], "status": "failed", "error": type(exc).__name__}
 
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="leshy-plan") as pool:
-        while pending:
-            ready = [item for item in tasks if item["id"] in pending and
-                     all(dep in completed for dep in item["depends_on"])]
-            if not ready:
-                raise ParallelPlanError("План не может быть завершён")
-            scheduled = []
-            for item in ready:
-                pending.pop(item["id"])
+        in_flight: dict[Any, str] = {}
+        while len(completed) < len(tasks):
+            # Start a successor as soon as ITS prerequisites finish; never
+            # wait for an unrelated slow sibling from the same DAG level.
+            while ready and len(in_flight) < workers:
+                step_id = ready.popleft()
+                item = by_id[step_id]
                 if any(completed[dep]["status"] != "ok" for dep in item["depends_on"]):
-                    completed[item["id"]] = {"id": item["id"], "status": "blocked", "error": "dependency_failed"}
+                    finish(step_id, {"id": step_id, "status": "blocked",
+                                     "error": "dependency_failed"})
                 elif cancel_event is not None and cancel_event.is_set():
-                    completed[item["id"]] = {"id": item["id"], "status": "cancelled"}
+                    finish(step_id, {"id": step_id, "status": "cancelled"})
                 else:
-                    scheduled.append(item)
-            futures = {pool.submit(run, item): item for item in scheduled}
-            for future in as_completed(futures):
-                item = futures[future]
-                completed[item["id"]] = future.result()
+                    in_flight[pool.submit(run, item)] = step_id
+
+            if in_flight:
+                done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+                for future in done:
+                    step_id = in_flight.pop(future)
+                    finish(step_id, future.result())
+            elif not ready and len(completed) < len(tasks):
+                # Cycles and absent dependencies were rejected up front.
+                raise ParallelPlanError("План не может быть завершён")
     seen_signatures.update(item["signature"] for item in tasks)
     return [completed[item["id"]] for item in tasks]
