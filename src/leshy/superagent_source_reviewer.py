@@ -6,6 +6,7 @@ Raw queries, claims, URLs and hostnames must never enter its output.
 """
 from __future__ import annotations
 
+import ipaddress
 import re
 from urllib.parse import urlsplit
 from typing import Any
@@ -27,7 +28,21 @@ def _citable(url: str) -> str | None:
         # A URL is not a source if it is clearly malformed. No request is made.
         if not re.fullmatch(r"[a-z0-9.:-]+", hostname):
             return None
-        if not re.search(r"[a-z]", hostname) and "." not in hostname:
+        # Reject obvious internal hosts and IP literals; their presence is
+        # not evidence of an independently attributable web citation.
+        if hostname == "localhost" or hostname.endswith(".local"):
+            return None
+        try:
+            ipaddress.ip_address(hostname)
+        except ValueError:
+            pass
+        else:
+            return None
+        if "." not in hostname or ".." in hostname:
+            return None
+        try:
+            _ = parsed.port
+        except ValueError:
             return None
         return hostname
     except (ValueError, TypeError):
