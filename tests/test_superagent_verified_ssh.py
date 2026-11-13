@@ -213,5 +213,23 @@ class SuperAgentVerifiedSSHTests(unittest.TestCase):
             connect.assert_not_called()
 
 
+    def test_web_route_enforces_cookie_ticket_module_and_origin(self):
+        route = (Path(__file__).resolve().parents[1] / "src" / "leshy" /
+                 "web_server_impl14.py").read_text(encoding="utf-8")
+        segment = route.split('if path == "/v1/superagent/ssh/inspect":', 1)[1].split(
+            'if path != "/v1/superagent/task":', 1
+        )[0]
+        for required in (
+            'self._dashboard_context()', 'module_enabled(app.storage, "remote-admin")',
+            '"X-Leshy-UI"', '"Origin"', '"Content-Type"',
+            'RemotePermissionPolicy(identity)', 'policy.actor_from_web_cookie',
+            'service.get(ticket_id, owner_id=owner)',
+            'ticket.get("state") != "working"', 'inspect_remote_os(',
+        ):
+            self.assertIn(required, segment)
+        self.assertNotIn("subprocess", segment)
+        self.assertNotIn("exec_command(", segment)
+
+
 if __name__ == "__main__":
     unittest.main()
