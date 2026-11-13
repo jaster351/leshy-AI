@@ -12,6 +12,7 @@ from leshy.superagent import parse_superagent_intent
 from leshy.superagent_plan_bridge import SuperAgentPlanBridge
 from leshy.superagent_plan_commands import execute_plan_command
 from leshy.superagent_plan_runner import execute_ready_plan_reads
+from leshy.verified_tool_receipts import VerifiedToolReceipts
 
 
 class Reader:
@@ -19,6 +20,7 @@ class Reader:
         self.calls = []
         self.lock = threading.Lock()
         self.fail = False
+        self.receipts = VerifiedToolReceipts()
 
     def execute(self, tool, arguments, *, ticket_id):
         with self.lock:
@@ -26,8 +28,10 @@ class Reader:
             index = len(self.calls)
         if self.fail:
             raise RuntimeError("Unavailable")
-        return {"status": "success", "tool": tool, "receipt_id": f"verified-{index}",
-                "result": {"count": 0, "items": []}}
+        result = {"count": 0, "items": []}
+        receipt = self.receipts.record(tool, "success", result)
+        return {"status": "success", "tool": tool, "receipt_id": receipt.receipt_id,
+                "result": result}
 
 
 class Service:
@@ -63,7 +67,8 @@ class RunnerTests(unittest.TestCase):
                          ("completed", 3, 0))
         self.assertEqual(self.s._cognitive_reads.calls[-1], "knowledge.search")
         snap = SuperAgentPlanBridge(self.s).snapshot("SA-test", "alice")
-        self.assertTrue(all("verified-" in step["output"] for step in snap["steps"]))
+        self.assertTrue(all('"verified_receipt": true' in step["output"]
+                            for step in snap["steps"]))
         self.assertTrue(all("token" not in step["output"] for step in snap["steps"]))
 
     def test_manual_step_is_not_claimed(self):
