@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T01:41:37.386350+00:00",
+  "candidates": 4077,
+  "new_unique": 4076,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 1,
+  "updated": 0,
+  "retracted": 0,
+  "source_terms": 4600,
+  "obsolete_source_terms_excluded": 523,
+  "jsonl_bytes": 10614390,
+  "previous_versions": 56877,
+  "total_latest": 60953,
+  "deduplication": "All corpus versions checked by IDs, canonical keys, normalized claims and GO source identifiers. Semantic review against existing biology explanations excluded GO:0005694 as overlapping DNA/protein chromosome structure; nuclear chromosome localization and ribosome structure carry distinct information. New records bundle each definition with its direct ontology classification; relation edges are not separate facts.",
+  "cursor": {
+    "namespace": "cellular_component",
+    "last_id": "GO:7770088",
+    "processed": 4600,
+    "remaining_in_namespace": 0,
+    "next_namespace": "molecular_function"
+  },
+  "source_version": "releases/2026-07-26",
+  "source_manifest": "knowledge/updates/datasets/go-cellular-components-20260726.manifest.json",
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-13/0635-go-cellular-components-01.jsonl",
+      "bytes": 2094601,
+      "sha256": "59cddb8b236152c219e98e5ea00ec687d9c1fd77a2264780e38775e30420d77a"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/0635-go-cellular-components-02.jsonl",
+      "bytes": 2096061,
+      "sha256": "a3e8a5b05f00e5131dadab29818df2154cb39de1cf244cc8d61d69f6f2053b6a"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/0635-go-cellular-components-03.jsonl",
+      "bytes": 2096073,
+      "sha256": "9e46a5282599ceb305a20899f347afde9bc14a86f9c61bdba37ddd8ffd7d8d1c"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/0635-go-cellular-components-04.jsonl",
+      "bytes": 2095941,
+      "sha256": "7280abd04cfc8c734c8650813b401ed47e91afce0321c66042968d94ddeb1c08"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/0635-go-cellular-components-05.jsonl",
+      "bytes": 2096828,
+      "sha256": "2b78ba309b65127ad67506caa04b4bdb6e911851be0c90f7d23b79884619f4a5"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/0635-go-cellular-components-06.jsonl",
+      "bytes": 134886,
+      "sha256": "edd9a42eb803b811404804a05207f54f6a67b090ab2d14b9a9ff2d8a223c4f06"
+    }
+  ],
+  "research": {
+    "window_start": "2026-11-13T01:03:00+00:00",
+    "window_end": "2026-11-13T01:41:37.386350+00:00",
+    "new_significant_confirmed": 0,
+    "query": "site.arxiv.org agent memory 13 Nov 2026",
+    "opened": [
+      "https://arxiv.org/abs/2611.12068"
+    ],
+    "excluded": "MIRIX-2.0 is v1 dated 2026-11-09; no substantive new version established."
+  },
+  "limitations": [
+    "Retrieved current GO file identifies itself as releases/2026-07-26; not advertised as a November release.",
+    "This run covers complete cellular_component namespace. Molecular_function and biological_process require subsequent deduplication and review.",
+    "GO source references preserved; underlying individual experiments not independently repeated or reviewed.",
+    "No local import, training, builds or automated tests."
+  ]
+}
