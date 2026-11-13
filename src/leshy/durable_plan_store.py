@@ -70,6 +70,46 @@ def _validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _block_failed_descendants(db: sqlite3.Connection, plan_id: str) -> None:
+    """Cascade terminal dependency failures in O(steps + edges)."""
+    if db.execute(
+        "SELECT 1 FROM durable_plan_steps "
+        "WHERE plan_id=? AND state IN ('failed','blocked','cancelled') LIMIT 1",
+        (plan_id,),
+    ).fetchone() is None:
+        return
+    rows = db.execute(
+        "SELECT step_id,deps_json,state FROM durable_plan_steps WHERE plan_id=?",
+        (plan_id,),
+    ).fetchall()
+    states = {row["step_id"]: row["state"] for row in rows}
+    failed = deque(
+        row["step_id"] for row in rows
+        if row["state"] in {"failed", "blocked", "cancelled"}
+    )
+    children: dict[str, list[str]] = {}
+    for row in rows:
+        if row["state"] != "queued":
+            continue
+        for dependency in json.loads(row["deps_json"]):
+            children.setdefault(dependency, []).append(row["step_id"])
+    pending: list[tuple[str, str]] = []
+    while failed:
+        parent = failed.popleft()
+        for child in children.get(parent, ()):
+            if states[child] == "queued":
+                states[child] = "blocked"
+                pending.append((plan_id, child))
+                failed.append(child)
+    if pending:
+        db.executemany(
+            "UPDATE durable_plan_steps SET state='blocked' "
+            "WHERE plan_id=? AND step_id=? AND state='queued'",
+            pending,
+        )
+
+
+
 class DurablePlanStore:
     """Crash-safe graph store. Each operation uses a separate DB connection."""
 
@@ -162,22 +202,9 @@ class DurablePlanStore:
             db.execute("UPDATE durable_plan_steps SET state='failed',lease_token=NULL,lease_until=0 "
                        "WHERE plan_id=? AND state='running' AND lease_until<=? AND attempt>=max_attempts",
                        (plan_id, clock))
+            _block_failed_descendants(db, plan_id)
             rows = db.execute("SELECT * FROM durable_plan_steps WHERE plan_id=? ORDER BY rowid", (plan_id,)).fetchall()
             states = {row["step_id"]: row["state"] for row in rows}
-            # Propagate terminal dependency failures before scheduling successors.
-            changed = True
-            while changed:
-                changed = False
-                for row in rows:
-                    ident = row["step_id"]
-                    if states[ident] != "queued":
-                        continue
-                    deps = json.loads(row["deps_json"])
-                    if any(states[d] in {"failed", "blocked", "cancelled"} for d in deps):
-                        states[ident] = "blocked"
-                        db.execute("UPDATE durable_plan_steps SET state='blocked' WHERE plan_id=? AND step_id=?",
-                                   (plan_id, ident))
-                        changed = True
             claims: list[dict[str, Any]] = []
             for row in rows:
                 ident = row["step_id"]
@@ -216,19 +243,7 @@ class DurablePlanStore:
                        "WHERE plan_id=? AND step_id=? AND lease_token=?",
                        (new_state, str(output)[:4096], plan_id, step_id, token))
             if new_state == "failed":
-                # Mark descendants as blocked in the same transaction so the
-                # final snapshot never retains impossible queued successors.
-                changed = True
-                while changed:
-                    changed = False
-                    rows = db.execute("SELECT step_id,deps_json,state FROM durable_plan_steps WHERE plan_id=?", (plan_id,)).fetchall()
-                    states = {r["step_id"]: r["state"] for r in rows}
-                    for item in rows:
-                        if item["state"] != "queued":
-                            continue
-                        if any(states[dep] in {"failed", "blocked", "cancelled"} for dep in json.loads(item["deps_json"])):
-                            db.execute("UPDATE durable_plan_steps SET state='blocked' WHERE plan_id=? AND step_id=?", (plan_id, item["step_id"]))
-                            changed = True
+                _block_failed_descendants(db, plan_id)
             self._status(db, plan_id)
             db.commit()
             return True
