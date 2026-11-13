@@ -111,4 +111,45 @@ class DurableStoreTests(unittest.TestCase):
         next_claim=self.store.claim(key,'alice',now=2)
         self.assertEqual([x['id'] for x in next_claim],[b['id']])
 
+
+    def test_wide_plan_can_claim_more_than_eight_independent_steps(self):
+        count = 96
+        steps = [{'id': f'job{i}', 'title': f'Parallel job {i}'} for i in range(count)]
+        key = self.store.create('alice', steps)
+        claims = self.store.claim(key, 'alice', limit=count, now=10)
+        self.assertEqual(len(claims), count)
+        self.assertEqual(len({item['token'] for item in claims}), count)
+        # All independent work may finish; no artificial plan size or claim ceiling.
+        for item in claims:
+            self.assertTrue(self.store.complete(
+                key, 'alice', item['id'], item['token'], success=True, now=11))
+        snapshot = DurablePlanStore(self.path).snapshot(key, 'alice')
+        self.assertEqual(snapshot['state'], 'completed')
+        self.assertEqual(len(snapshot['steps']), count)
+
+    def test_large_dependency_chain_is_validated_without_recursive_walk(self):
+        count = 512
+        steps = [
+            {'id': f's{i}', 'title': f'Step {i}',
+             'depends_on': [f's{i - 1}'] if i else []}
+            for i in range(count)
+        ]
+        key = self.store.create('alice', steps)
+        claims = self.store.claim(key, 'alice', limit=count, now=10)
+        self.assertEqual([item['id'] for item in claims], ['s0'])
+        first = claims[0]
+        self.assertTrue(self.store.complete(
+            key, 'alice', first['id'], first['token'], success=True, now=11))
+        self.assertEqual(
+            [item['id'] for item in self.store.claim(key, 'alice', limit=count, now=12)],
+            ['s1'],
+        )
+
+    def test_unbounded_claim_count_still_rejects_invalid_types(self):
+        key = self.store.create('alice', [{'id': 'one', 'title': 'One'}])
+        for limit in (0, -1, True, 1.0, '8'):
+            with self.subTest(limit=limit):
+                with self.assertRaises(PlanError):
+                    self.store.claim(key, 'alice', limit=limit)
+
 if __name__=='__main__':unittest.main()

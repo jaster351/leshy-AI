@@ -53,4 +53,20 @@ class PlanCommandTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Неизвестная'):
             execute_plan_command(self.service,'plan_delete','SA-test','web:alice')
 
+
+    def test_large_plan_status_discloses_total_and_all_states(self):
+        import json
+        steps = [{'id': f'job{i}', 'title': f'Job {i}'} for i in range(96)]
+        execute_plan_command(
+            self.service, 'plan_create', 'SA-test', 'web:alice',
+            json.dumps(steps),
+        )
+        status = execute_plan_command(
+            self.service, 'plan_status', 'SA-test', 'web:alice',
+        )
+        self.assertIn('96 этапов', status)
+        self.assertIn('Показано 64 из 96', status)
+        self.assertIn('queued: 96', status)
+        self.assertNotIn('job95: queued', status)
+
 if __name__ == '__main__':unittest.main()
