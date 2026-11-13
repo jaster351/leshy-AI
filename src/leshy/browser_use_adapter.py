@@ -5,7 +5,7 @@ from pathlib import Path
 import os
 import re
 import threading
-from typing import Any, Awaitable
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
 from .browser_agent import BrowserAction, BrowserActionResult, BrowserRisk
@@ -128,18 +128,18 @@ class BrowserUseAdapter:
         return target
 
     @staticmethod
-    def _run_sync(awaitable: Awaitable[Any]) -> Any:
+    def _run_sync(make_awaitable: Callable[[], Awaitable[Any]]) -> Any:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(awaitable)
+            return asyncio.run(make_awaitable())
 
         result: dict[str, Any] = {}
         error: dict[str, BaseException] = {}
 
         def worker() -> None:
             try:
-                result["value"] = asyncio.run(awaitable)
+                result["value"] = asyncio.run(make_awaitable())
             except BaseException as exc:  # pragma: no cover
                 error["value"] = exc
 
@@ -362,7 +362,7 @@ class BrowserUseAdapter:
         if not self.available():
             return BrowserActionResult("unavailable", "Browser Use или совместимая LLM недоступны")
         try:
-            result = self._run_sync(self._run(action))
+            result = self._run_sync(lambda: self._run(action))
             if result.status == "failed" and action.risk is BrowserRisk.READ:
                 return self._fallback_read(action, result.message)
             return result
