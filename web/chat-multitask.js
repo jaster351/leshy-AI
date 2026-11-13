@@ -86,7 +86,7 @@
     messages.appendChild(box);messages.scrollTop=messages.scrollHeight;return {box,body};
   }
   function updateStreamingBox(stream){
-    if(sid()!==stream.sessionId||!stream.body||!stream.body.isConnected)return;
+    if(stream.finished||sid()!==stream.sessionId||!stream.body||!stream.body.isConnected)return;
     stream.body.textContent=stream.raw;const c=document.createElement('span');c.className='leshy-stream-caret';stream.body.appendChild(c);
     const m=$('messages');if(m&&m.scrollHeight-m.scrollTop-m.clientHeight<180)m.scrollTop=m.scrollHeight;
   }
@@ -138,16 +138,43 @@
   }
   window.stopCurrentLeshyStream=()=>stop(activeForCurrent());
 
-  async function loadHistory(id){
+  async function loadHistory(id,options={}){
     const generation=++historyGeneration;
-    setSid(id);unread.delete(id);if(!unread.size)document.title='Леший';const messages=$('messages');if(messages)messages.textContent='';
+    const keepVisible=!!options.keepVisible&&sid()===id;
+    setSid(id);unread.delete(id);if(!unread.size)document.title='Леший';
+    const messages=$('messages');
+    // При переключении диалога не показывать чужую переписку. При обновлении
+    // ТЕКУЩЕГО диалога не уничтожать сообщения до подтверждения ответа API.
+    if(messages&&!keepVisible)messages.textContent='';
     try{
       const r=await api('/v1/history?session_id='+encodeURIComponent(id)+'&owner_id='+encodeURIComponent(OWNER));
       if(generation!==historyGeneration||sid()!==id)return;
-      for(const m of r.items||[])window.addMessage(m.role,m.content,[],m.created_at);
-      const live=streams.get(id);if(live){const ui=makeStreamingBox(live.raw);if(ui){live.box=ui.box;live.body=ui.body}event('activity',{session_id:id,request_id:live.requestId,kind:live.activityKind||'',text:live.activity||'Леший думает…'})}
-    }catch(e){if(generation===historyGeneration&&sid()===id&&messages){messages.textContent='';window.addMessage('assistant','Не удалось загрузить историю: '+e.message)}}
-    try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}stateForCurrent();decorateSidebar();
+      const items=Array.isArray(r.items)?r.items:[];
+      const expectedAnswer=String(options.expectedAnswer||'');
+      const hasExpectedAnswer=!expectedAnswer||items.some(m=>m.role==='assistant'&&String(m.content||'')===expectedAnswer);
+      if(keepVisible&&messages&&messages.querySelector('.msg')&&(!items.length||!hasExpectedAnswer)){
+        // Пустой/устаревший ответ истории не может заменить видимый ответ,
+        // который пользователь только что получил через SSE.
+        event('history-sync-deferred',{session_id:id});
+      }else{
+        if(messages)messages.textContent='';
+        for(const m of items)window.addMessage(m.role,m.content,[],m.created_at);
+        const live=streams.get(id);
+        if(live){const ui=makeStreamingBox(live.raw);if(ui){live.box=ui.box;live.body=ui.body}event('activity',{session_id:id,request_id:live.requestId,kind:live.activityKind||'',text:live.activity||'Леший думает…'})}
+      }
+    }catch(e){
+      if(generation===historyGeneration&&sid()===id&&messages){
+        if(keepVisible&&messages.querySelector('.msg')){
+          event('history-sync-failed',{session_id:id});
+          toast('История временно недоступна; текущие сообщения сохранены на экране');
+        }else{
+          messages.textContent='';
+          window.addMessage('assistant','Не удалось загрузить историю: '+e.message);
+        }
+      }
+    }
+    try{if(typeof window.showSection==='function')window.showSection('chat')}catch(_e){}
+    stateForCurrent();decorateSidebar();
   }
   window.loadHistory=loadHistory;
   window.newChat=function(){
@@ -160,7 +187,14 @@
     stateForCurrent();decorateSidebar();
   };
 
-  async function refreshActiveView(stream){if(!stream.sessionId||sid()!==stream.sessionId)return;await loadHistory(stream.sessionId)}
+  async function refreshActiveView(stream){
+    if(!stream.sessionId||sid()!==stream.sessionId)return;
+    // Финализируем SSE-карточку сразу; фоновая сверка истории не должна
+    // временно удалять ни вопрос пользователя, ни только что полученный ответ.
+    stream.finished=true;
+    if(stream.body&&stream.body.isConnected)stream.body.textContent=stream.raw;
+    await loadHistory(stream.sessionId,{keepVisible:true,expectedAnswer:stream.raw});
+  }
 
   async function runStream(text,requestedSession){
     const requestId=nextRequestId();const controller=new AbortController();
