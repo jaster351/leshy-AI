@@ -1,16 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-13T13:11:00.423695+00:00",
+  "updated_at": "2026-11-13T14:04:39.040505+00:00",
   "last_successful_issue": {
-    "searched_at": "2026-11-13T13:11:00.423695+00:00",
-    "previous_issue_at": "2026-11-13T09:06:47.720743+00:00",
+    "searched_at": "2026-11-13T14:04:39.040505+00:00",
+    "previous_issue_at": "2026-11-13T13:11:00.423695+00:00",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "arXiv:2611.16590",
-      "arXiv:2611.16487",
-      "arXiv:2611.16223",
-      "arXiv:2611.12155",
-      "arXiv:2611.17316"
+      "arXiv:2611.15729"
     ]
   },
   "previous_issue_from_owner": {
@@ -414,6 +410,18 @@
       "url": "https://arxiv.org/abs/2611.17316",
       "package": "knowledge/updates/2026-11-13/1805-memory-research.jsonl",
       "record_id": "research-arxiv-2611-17316",
+      "code_url": null
+    },
+    {
+      "id": "arXiv:2611.15729",
+      "version": "v1",
+      "first_published_at": "2026-11-11T17:06:07Z",
+      "version_published_at": "2026-11-11T17:06:07Z",
+      "checked_at": "2026-11-13T14:04:39.040505+00:00",
+      "publication_status": "preprint; workshop review unconfirmed",
+      "url": "https://arxiv.org/abs/2611.15729",
+      "package": "knowledge/updates/2026-11-13/1901-memory-research.jsonl",
+      "record_id": "research-arxiv-2611-15729",
       "code_url": null
     }
   ],
