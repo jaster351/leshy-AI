@@ -132,6 +132,22 @@ class HttpRoutingTests(unittest.TestCase):
         invalid.do_GET()
         self.assertEqual(invalid.result[0], 400)
 
+    def test_remote_console_requires_session_and_provider_login(self):
+        anonymous = self.Handler(path='/v1/superagent/remote-access', owner='')
+        anonymous.do_GET()
+        self.assertEqual(anonymous.result[0], 401)
+        unverified = self.Handler(path='/v1/superagent/remote-access', owner='web:alice')
+        unverified.do_GET()
+        self.assertEqual(unverified.result[0], 403)
+
+    def test_remote_revoke_deny_by_default_no_identity_or_cross_site(self):
+        denied = self.Handler(
+            path='/v1/superagent/remote-access/revoke', owner='web:alice',
+            headers={'X-Leshy-UI': 'superagent', 'Content-Type': 'application/json'},
+            body={'node_id': '192.168.1.9', 'grantee_id': 'bob', 'capability': 'inspect'})
+        denied.do_POST()
+        self.assertEqual(denied.result[0], 403)
+
     def test_root_preserves_session_cookie_and_injects_panel(self):
         h = self.Handler(path='/', owner='web:alice')
         h.do_GET()
