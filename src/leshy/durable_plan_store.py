@@ -285,7 +285,9 @@ class DurablePlanStore:
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             state = self._check_owner(db, plan_id, owner_id)
-            if state == "cancelled":
+            # Pause/Cancel both suspend acceptance of in-flight results.
+            # A resumed plan may reclaim a step after its lease expires.
+            if state != "active":
                 db.commit()
                 return False
             row = db.execute("SELECT attempt,max_attempts FROM durable_plan_steps "

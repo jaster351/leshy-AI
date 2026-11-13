@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from .durable_plan_store import PlanError, _safe_read_spec
 from .superagent_read_evidence import verify_live_receipt
+from .superagent_source_reviewer import review_knowledge_sources
 
 
 def execute_ready_plan_reads(
@@ -79,11 +80,17 @@ def execute_ready_plan_reads(
                 "verified_receipt": True,
                 "result": receipt.get("result"),
             }
+            # Independent deterministic review of Knowledge citations, not
+            # the model's opinion, before calling the durable step complete.
+            if name == "knowledge.search":
+                evidence["source_review"] = review_knowledge_sources(receipt.get("result"))
             output = json.dumps(evidence, ensure_ascii=False, sort_keys=True, allow_nan=False)
             if len(output) > 3900:
                 # Keep a verifiable digest from the actual receipt ledger.
                 # Do not pretend the discarded result is visible to the user.
                 del evidence["result"]
+                # A review cannot be rechecked once source rows are omitted.
+                evidence.pop("source_review", None)
                 evidence["result_truncated"] = True
                 output = json.dumps(evidence, ensure_ascii=False, sort_keys=True, allow_nan=False)
             if not allowed():

@@ -121,6 +121,25 @@
             evidence.status === 'legacy' ? 'Историческое выполнение' : 'Подтверждение недоступно';
           item.append(element('p', 'sa-evidence', title + '. ' + (evidence.description || '')));
           if (evidence.summary) item.append(element('p', 'sa-help', evidence.summary));
+          if (evidence.source_review) {
+            const review = evidence.source_review;
+            const reviewText = {
+              empty: 'Совпадений в базе знаний нет.',
+              missing_sources: 'У записей нет подходящих ссылок на источники.',
+              limited_sources: 'Источников недостаточно для независимого сопоставления.',
+              multiple_hosts: 'Найдены ссылки на несколько разных сайтов.'
+            };
+            const label = element('p', 'sa-evidence',
+              'Проверка источников: ' + (reviewText[review.status] || 'Требуется проверка.'));
+            item.append(label);
+            item.append(element('p', 'sa-help',
+              'Записей: ' + review.items + ', со ссылкой: ' + review.linked_items +
+              ', сайтов: ' + review.distinct_hosts + ', повторов: ' + review.repeated_claims + '.'));
+            item.append(element('p', 'sa-help',
+              'Ссылки проверены только на наличие и разнообразие. Содержимое сайтов не проверялось; совпадение ссылок не доказывает истинность сведений.'));
+          } else if (evidence.source_review_status === 'unavailable') {
+            item.append(element('p', 'sa-help', 'Проверку ссылок нельзя подтвердить по сохранённым данным.'));
+          }
           if (evidence.result_truncated)
             item.append(element('p', 'sa-help', 'Полный результат не сохранён: доступен только его отпечаток.'));
           if (evidence.status === 'recorded') {

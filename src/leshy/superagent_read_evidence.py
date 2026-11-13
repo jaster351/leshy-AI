@@ -11,6 +11,8 @@ import json
 import re
 from typing import Any
 
+from .superagent_source_reviewer import review_knowledge_sources
+
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _TOOLS = frozenset({"runtime.version", "runtime.platform", "knowledge.search"})
@@ -93,7 +95,7 @@ def summarize_plan_evidence(step: dict[str, Any]) -> dict[str, Any] | None:
             count = result.get("count")
             if type(count) is int and 0 <= count <= 5:
                 result_summary = f"Найдено проверенных записей: {count}"
-    return {
+    summary = {
         "status": "recorded",
         "description": "Исполнение подтверждено локальной квитанцией при выполнении",
         "receipt_id": receipt,
@@ -102,6 +104,24 @@ def summarize_plan_evidence(step: dict[str, Any]) -> dict[str, Any] | None:
         "result_truncated": truncated,
         "summary": result_summary,
     }
+    if step["tool"] == "knowledge.search":
+        candidate_review = data.get("source_review")
+        if candidate_review is not None:
+            if truncated or not isinstance(candidate_review, dict):
+                summary["source_review_status"] = "unavailable"
+            else:
+                try:
+                    independent = review_knowledge_sources(result)
+                except ValueError:
+                    summary["source_review_status"] = "unavailable"
+                else:
+                    if independent == candidate_review:
+                        # Never send raw claims, URLs or hostnames in the UI.
+                        summary["source_review"] = independent
+                        summary["source_review_status"] = "reviewed"
+                    else:
+                        summary["source_review_status"] = "unavailable"
+    return summary
 
 
 __all__ = ["read_result_digest", "verify_live_receipt", "summarize_plan_evidence"]
