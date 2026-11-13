@@ -5,6 +5,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Privacy fail-closed: this legacy route cannot guarantee complete redaction
+# of personal data, filesystem paths, request URLs or credentials.
+# Do not publish any files until a verified anonymization pipeline replaces it.
+Write-Warning 'Diagnostic GitHub upload disabled: anonymization is not verified.'
+exit 0
+
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $RuntimeRoot = Join-Path $RepoRoot '.autobuild'
 $SyncRepo = Join-Path $RuntimeRoot 'log-sync-repo'
