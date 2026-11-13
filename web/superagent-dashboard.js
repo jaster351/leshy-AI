@@ -388,7 +388,8 @@
     section.append(heading);
     section.append(element('p', 'sa-remote-note',
       'Показывает зарегистрированные компьютеры и разрешения, которые можно отозвать. ' +
-      'Это не запускает SSH/RDP и не подключается к компьютерам.'));
+      'SSH-проверка ОС доступна только для ранее подтверждённых серверов. ' +
+      'Удалённый рабочий стол и выполнение произвольных команд не поддерживаются.'));
     const status = element('p', 'sa-notice');
     status.setAttribute('role', 'status');
     const container = element('div', 'sa-remote-list');
@@ -406,6 +407,60 @@
       update: 'Обновления', reboot: 'Перезагрузка', rdp: 'Удалённый экран'
     };
     let requestInFlight = false;
+    const addInspection = (row, node, credentials) => {
+      if (!credentials || !credentials.files?.length) {
+        row.append(element('p', 'sa-remote-note',
+          'Для проверки ОС выберите папку с файлами доступа в Настройках SuperAgent. ' +
+          'Пока она не задана, SSH не запускается.'));
+        const shortcut = makeButton('Открыть настройки файлов доступа', () => {
+          if (typeof window.showSection === 'function') window.showSection('settings');
+          $('saCredentialFolderCard')?.scrollIntoView({block:'start', behavior:'smooth'});
+        });
+        row.append(shortcut);
+        return;
+      }
+      const label = element('label', 'sa-remote-note', 'Файл доступа для проверки по SSH');
+      const select = element('select', 'sa-ssh-select');
+      select.setAttribute('aria-label', 'Файл доступа к компьютеру ' + node.node_id);
+      credentials.files.forEach(name => {
+        const option = element('option', '', name); option.value = name; select.append(option);
+      });
+      const result = element('p', 'sa-remote-note');
+      result.setAttribute('role', 'status');
+      const inspect = makeButton('Проверить операционную систему (SSH)', async () => {
+        if (requestInFlight || !select.value) return;
+        if (!window.confirm('Запустить только чтение ОС на компьютере ' + node.node_id +
+          '? Будет использован выбранный файл доступа. Команды пользователя не выполняются.')) return;
+        requestInFlight = true;
+        inspect.disabled = true;
+        result.textContent = 'Устанавливаю защищённое SSH-соединение и проверяю подлинность сервера…';
+        try {
+          const response = await api('/v1/superagent/ssh/inspect', {
+            method:'POST', body:JSON.stringify({
+              node_id:node.node_id, credential_file:select.value, confirm:true
+            })
+          });
+          const observed = response.inspection || {};
+          const known = observed.verified === true;
+          const name = observed.os_family === 'Windows' ? 'Windows' :
+            ['Linux','FreeBSD','OpenBSD','NetBSD','Darwin'].includes(observed.os_family)
+              ? observed.os_family : 'Не определена';
+          result.textContent = known
+            ? 'Подлинность SSH-сервера подтверждена. Операционная система: ' + name + '.'
+            : 'Подлинность SSH-сервера подтверждена, но ОС определить не удалось.';
+          result.className = 'sa-remote-note';
+        } catch (error) {
+          result.textContent = 'SSH-проверка не выполнена: ' + error.message;
+          result.className = 'sa-remote-note sa-error';
+        } finally {
+          requestInFlight = false;
+          inspect.disabled = false;
+        }
+      });
+      row.append(label, select, inspect, result);
+      if (credentials.truncated) row.append(element('p', 'sa-remote-note',
+        'Показаны первые 100 файлов доступа.'));
+    };
     async function load() {
       if (requestInFlight || !section.open) return;
       requestInFlight = true;
@@ -416,8 +471,17 @@
         const data = await api('/v1/superagent/remote-access');
         container.replaceChildren();
         status.textContent = data.remote_admin_enabled
-          ? 'Удалённое администрирование разрешено в настройках, но SSH/RDP через эту панель пока недоступны.'
+          ? 'SSH-диагностика доступна только для подтверждённых компьютеров при наличии файла доступа и SSH-модуля. RDP и управление ОС выключены.'
           : 'Удалённое администрирование выключено. Доступные разрешения можно просмотреть и отозвать.';
+        let credentials = null;
+        if (data.remote_admin_enabled && data.nodes.length) {
+          try {
+            credentials = await api('/v1/superagent/ssh/credentials');
+          } catch (error) {
+            container.append(element('p', 'sa-remote-note',
+              'Файлы доступа недоступны: ' + error.message));
+          }
+        }
         if (!data.nodes.length) {
           container.append(element('p', 'sa-remote-note',
             'Подтверждённых компьютеров пока нет. Новый компьютер не добавляется по одному IP или паролю: ' +
@@ -430,6 +494,7 @@
             row.append(element('p', 'sa-meta', 'Зарегистрирован: ' + readableTime(node.registered_at)));
             row.append(element('p', 'sa-remote-note',
               'Наличие записи не означает, что компьютер сейчас доступен или его ключ повторно проверен.'));
+            if (data.remote_admin_enabled && credentials) addInspection(row, node, credentials);
             container.append(row);
           });
         }
