@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 import json
 from .storage import utcnow
+from .superagent_read_evidence import summarize_plan_evidence
 
 _ARCHIVE_SCHEMA = """CREATE TABLE IF NOT EXISTS superagent_dashboard_archive (
     ticket_id TEXT PRIMARY KEY REFERENCES superagent_tickets(id) ON DELETE CASCADE,
@@ -128,17 +129,25 @@ def ticket_details(service: Any, owner_id: str, ticket_id: str) -> dict[str, Any
         for step in all_steps:
             state = str(step.get("state") or "unknown")
             counts[state] = counts.get(state, 0) + 1
+        visible_steps = []
+        for step in all_steps[:64]:
+            row = {
+                "id": str(step.get("id") or "")[:64],
+                "title": str(step.get("title") or "")[:300],
+                "state": str(step.get("state") or "")[:40],
+                "tool": str(step.get("tool") or "")[:100],
+            }
+            evidence = summarize_plan_evidence(step)
+            if evidence is not None:
+                row["evidence"] = evidence
+            visible_steps.append(row)
         result["plan"] = {
             "state": plan.get("state"),
             "auto_run": bool(plan.get("auto_run", False)),
             "total_steps": len(all_steps),
             "read_steps_total": sum(1 for step in all_steps if step.get("tool")),
             "state_counts": counts,
-            "steps": [{"id": str(step.get("id") or "")[:64],
-                       "title": str(step.get("title") or "")[:300],
-                       "state": str(step.get("state") or "")[:40],
-                       "tool": str(step.get("tool") or "")[:100]}
-                      for step in all_steps[:64]],
+            "steps": visible_steps,
         }
     return {"task": result}
 
