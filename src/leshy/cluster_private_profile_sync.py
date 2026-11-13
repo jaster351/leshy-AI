@@ -161,7 +161,13 @@ class ClusterPrivateProfileSync:
         with opener.open(req, timeout=_LAN_TIMEOUT) as reply:
             if reply.status != 200:
                 raise ConnectionError("Узел отказал в запросе")
-            return json.loads(reply.read(_MAX_BODY + 1).decode("utf-8"))
+            response = reply.read(_MAX_BODY + 1)
+            if len(response) > _MAX_BODY:
+                raise ValueError("Ответ узла превышает предел")
+            decoded = json.loads(response.decode("utf-8"))
+            if not isinstance(decoded, dict):
+                raise ValueError("Неверный формат ответа узла")
+            return decoded
 
     def _pair_row(self, pair_id: str, *, owner: str = "", node: str = "") -> dict:
         with self.storage.connection() as conn:
