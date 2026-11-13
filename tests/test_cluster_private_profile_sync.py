@@ -333,6 +333,39 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             restored.receive("pull", body, headers)
 
+    def test_captured_pull_response_cannot_replace_fresh_snapshot(self):
+        pair_id = self.pair()
+        original = self.b._signed_post
+        captured = []
+
+        def replay_old_response(endpoint, route, body):
+            if route.endswith("/pull"):
+                if not captured:
+                    captured.append(original(endpoint, route, body))
+                return captured[0]
+            return original(endpoint, route, body)
+
+        self.b._signed_post = replay_old_response
+        self.b.sync_once(self.owner_b, pair_id)
+        with self.assertRaises(PermissionError):
+            # The old encrypted snapshot is authentic but belongs to a
+            # different nonce; it must never be accepted as a fresh answer.
+            self.b.sync_once(self.owner_b, pair_id)
+
+    def test_pull_response_carries_exact_request_nonce(self):
+        pair_id = self.pair()
+        paired = self.b._pair_row(pair_id, owner=self.owner_b)
+        cipher = self.b._secret_cipher(paired)
+        nonce = "a" * 32
+        inner = {"owner_id": self.owner_b, "operation": "pull", "nonce": nonce}
+        body = {"pair_id": pair_id,
+                "payload": cipher.encrypt(_json_bytes(inner)).decode("ascii")}
+        response = self.a.receive("pull", body, self.cluster_b.headers(body))
+        import json
+        decrypted = json.loads(cipher.decrypt(response["payload"].encode("ascii")))
+        self.assertEqual(decrypted["request_nonce"], nonce)
+        self.assertEqual(decrypted["snapshot"]["version"], 1)
+
     def test_non_lan_endpoints_are_rejected(self):
         for endpoint in (
             "https://example.com:8765", "http://127.0.0.1:8765",
