@@ -14,6 +14,8 @@ from .module_settings import module_enabled
 from .web_server_impl11 import _runtime_html
 from .superagent_dashboard import execute_action, list_tickets, ticket_details
 from .superagent_credential_settings import get_credential_folder, set_credential_folder
+from .superagent_remote_permissions import RemotePermissionPolicy
+from .superagent_verified_ssh import inspect_remote_os
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
 
@@ -146,6 +148,57 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_set_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить настройку"})
+            if path == "/v1/superagent/ssh/inspect":
+                # Explicit, read-only remote inspection. The model has no
+                # access to this HTTP endpoint as a free-form tool.
+                context = self._dashboard_context()
+                if context is None:
+                    return None
+                owner, service = context
+                if not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Удалённая диагностика не разрешена в настройках"
+                    })
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Недопустимый источник запроса"})
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Чужой источник запроса"})
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется JSON"})
+                try:
+                    payload = self._body()
+                    if not isinstance(payload, dict) or set(payload) != {
+                        "ticket_id", "node_id", "credential_file", "confirm"
+                    } or payload["confirm"] is not True:
+                        raise ValueError("Нужны ticket_id, node_id, credential_file и подтверждение")
+                    identity = getattr(app, "owner_identity", None)
+                    if identity is None:
+                        raise PermissionError("Авторизация владельца не настроена")
+                    policy = RemotePermissionPolicy(identity)
+                    actor = policy.actor_from_web_cookie(
+                        self._cookie_value(identity.cookie_name)
+                    )
+                    if actor.owner_id != owner:
+                        raise PermissionError("Сессия и владелец задания не совпадают")
+                    ticket_id = str(payload["ticket_id"])
+                    ticket = service.get(ticket_id, owner_id=owner)
+                    if ticket.get("state") != "working":
+                        raise PermissionError("Удалённая проверка разрешена только активному заданию")
+                    result = inspect_remote_os(
+                        policy, actor, str(payload["node_id"]),
+                        str(payload["credential_file"])
+                    )
+                    # The result is not represented as a completed SuperAgent
+                    # ticket until the agent journal/receipt route is integrated.
+                    return self._json(HTTPStatus.OK, {"ticket_id": ticket_id, "inspection": result})
+                except (ValueError, PermissionError, FileNotFoundError) as exc:
+                    # No passwords, paths or underlying credential errors in API.
+                    problem("superagent_ssh_inspection_denied", type(exc).__name__)
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Нет разрешения на SSH-проверку или неверны параметры"})
+                except Exception as exc:
+                    problem("superagent_ssh_inspection_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.BAD_GATEWAY, {"error": "SSH-проверка не завершена"})
             if path != "/v1/superagent/task":
                 return super().do_POST()
             context = self._dashboard_context()
