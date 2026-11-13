@@ -222,6 +222,17 @@ class ClusterPrivateProfileSync:
 
     def _save_pair(self, pair_id: str, owner: str, remote_owner: str,
                    node_id: str, endpoint: str, secret: str) -> None:
+        # Never silently remap a trusted node to another local/remote profile.
+        # A deliberate change of identity requires revoking the old pair first.
+        with self.storage.connection() as conn:
+            collision = conn.execute(
+                "SELECT 1 FROM cluster_private_pairs WHERE remote_node_id=? "
+                "AND revoked_at IS NULL AND (owner_id<>? OR remote_owner_id<>?) "
+                "LIMIT 1",
+                (node_id, owner, remote_owner),
+            ).fetchone()
+        if collision:
+            raise PermissionError("Узел уже сопряжён с другим профилем; сначала отзовите привязку")
         # An existing pair ID must never be rebound to a different owner.
         with self.storage.connection() as conn:
             other = conn.execute(
@@ -301,6 +312,8 @@ class ClusterPrivateProfileSync:
         if invite["used_at"] is not None:
             raise PermissionError("Приглашение уже использовано; создайте новое")
         key = Fernet.generate_key().decode("ascii")
+        # The accepting node must not silently bind an already paired peer to
+        # a different account. Check again inside the write transaction below.
         # Consume the invite and persist the pair in the SAME SQLite transaction.
         # A failed insert must roll back consumption of the one-time invitation.
         sealed = self._master.encrypt(key.encode("ascii")).decode("ascii")
@@ -314,6 +327,13 @@ class ClusterPrivateProfileSync:
                 ).rowcount
                 if changed != 1:
                     raise PermissionError("Приглашение уже использовано")
+                collision = conn.execute(
+                    "SELECT 1 FROM cluster_private_pairs WHERE remote_node_id=? "
+                    "AND revoked_at IS NULL AND (owner_id<>? OR remote_owner_id<>?) LIMIT 1",
+                    (node, owner, remote_owner),
+                ).fetchone()
+                if collision:
+                    raise PermissionError("Узел уже привязан к другому профилю")
                 conn.execute(
                     "INSERT INTO cluster_private_pairs VALUES(?,?,?,?,?,?,?,?,NULL)",
                     (pair_id, owner, remote_owner, node, safe_endpoint, sealed,
