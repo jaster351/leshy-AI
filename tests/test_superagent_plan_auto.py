@@ -15,6 +15,7 @@ from leshy.superagent import parse_superagent_intent
 from leshy.superagent_plan_bridge import SuperAgentPlanBridge
 from leshy.superagent_plan_commands import execute_plan_command
 from leshy.superagent_plan_runner import execute_ready_plan_reads
+from leshy.verified_tool_receipts import VerifiedToolReceipts
 
 
 class Service:
@@ -35,11 +36,14 @@ class Service:
 class Reader:
     def __init__(self):
         self.calls = 0
+        self.receipts = VerifiedToolReceipts()
 
     def execute(self, name, arguments, *, ticket_id):
         self.calls += 1
+        result = {"version": "fake"}
+        receipt = self.receipts.record(name, "success", result)
         return {"status": "success", "tool": name,
-                "receipt_id": f"verified-{self.calls}", "result": {"version": "fake"}}
+                "receipt_id": receipt.receipt_id, "result": result}
 
 
 class AutoPlanTests(unittest.TestCase):
