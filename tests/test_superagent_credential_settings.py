@@ -9,6 +9,7 @@ import unittest
 from leshy.storage import Storage
 from leshy.superagent_credential_settings import (
     find_credential_file, get_credential_folder, set_credential_folder,
+    list_credential_file_names,
 )
 
 
@@ -49,6 +50,20 @@ class CredentialFolderTests(unittest.TestCase):
         (duplicate / "account.txt").write_text("another", encoding="utf-8")
         with self.assertRaises(ValueError):
             find_credential_file(self.storage, "web:a", "account.txt")
+
+    def test_credential_picker_exposes_only_unique_json_basenames(self):
+        (self.directory / "node.json").write_text('{"password":"PRIVATE"}', encoding="utf-8")
+        (self.directory / "ignore.log").write_text("SECRET", encoding="utf-8")
+        nested = self.directory / "nested"
+        nested.mkdir()
+        (nested / "NODE.json").write_text('{"password":"OTHER"}', encoding="utf-8")
+        (nested / "second.json").write_text('{"password":"PRIVATE2"}', encoding="utf-8")
+        set_credential_folder(self.storage, "web:a", str(self.directory))
+        selected = list_credential_file_names(self.storage, "web:a")
+        self.assertEqual(selected["files"], ["second.json"])
+        self.assertFalse(selected["truncated"])
+        self.assertNotIn("PRIVATE", str(selected))
+        self.assertFalse(list_credential_file_names(self.storage, "web:b")["available"])
 
     def test_nested_symlink_outside_selected_folder_is_ignored(self):
         outside = self.home / "outside"
