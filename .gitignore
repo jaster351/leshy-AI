@@ -16,3 +16,7 @@ Leshy-Support-Key.key
 Local-Support-Profile*.zip
 support_profile.key
 support.key.dpapi
+
+# Block legacy Windows runtimes from re-publishing sensitive diagnostics.
+# The running 1.10.135 uploader calls 'git add -A' without '-f'.
+/log/windows-local/
