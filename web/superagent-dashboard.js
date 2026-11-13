@@ -40,7 +40,7 @@
     .sa-dashboard details{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px}.sa-dashboard summary{cursor:pointer;font-size:13px}
     .sa-dialog{display:grid;gap:8px;margin-top:9px}.sa-message{padding:9px 11px;border:1px solid var(--line);border-radius:11px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.sa-user{margin-left:8%;background:rgba(96,190,133,.11)}.sa-agent{margin-right:8%;background:rgba(100,140,180,.10)}.sa-answer{margin-top:10px;padding:11px;border:1px solid var(--line);border-radius:11px}.sa-answer textarea{min-height:90px}.sa-answer .sa-help{margin:0 0 6px}
     .sa-dashboard code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:7px 0;color:var(--accent)}
-    .sa-plan{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:10px}.sa-plan textarea{min-height:75px}
+    .sa-plan{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:10px}.sa-plan textarea{min-height:75px}.sa-plan select{width:100%;max-width:460px;margin:6px 0 10px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
     @media(max-width:720px){.sa-dashboard{padding:12px}.sa-row button,.sa-controls button{flex:1;min-width:110px}}
   `;
   async function api(path, options = {}) {
@@ -91,8 +91,15 @@
     }
     if (detail.plan) {
       const plan = detail.plan;
-      host.append(element('strong', 'sa-help', 'План · ' + plan.state));
-      (plan.steps || []).forEach(step => host.append(element('p', 'sa-meta', `${step.title} — ${step.state}`)));
+      const visibleSteps = plan.steps || [];
+      const total = Number.isInteger(plan.total_steps) ? plan.total_steps : visibleSteps.length;
+      host.append(element('strong', 'sa-help', `План · ${plan.state} · ${total} этапов`));
+      if (plan.state_counts) {
+        const counts = Object.entries(plan.state_counts).map(([state, count]) => `${statusLabels[state] || state}: ${count}`);
+        host.append(element('p', 'sa-help', counts.join(' · ')));
+      }
+      visibleSteps.forEach(step => host.append(element('p', 'sa-meta', `${step.title} — ${step.state}`)));
+      if (total > visibleSteps.length) host.append(element('p', 'sa-help', `Показано ${visibleSteps.length} из ${total} этапов. Общий прогресс — выше.`));
       const group = element('div', 'sa-controls');
       if (!detail.archived && plan.state === 'active') group.append(makeButton('Пауза плана', () => perform({ action: 'plan_pause', id: taskId }), false));
       if (!detail.archived && plan.state === 'paused') group.append(makeButton('Продолжить план', () => perform({ action: 'plan_resume', id: taskId }), false));
@@ -102,18 +109,32 @@
     } else if (!['ready', 'failed', 'stopped'].includes(detail.state)) {
       const planArea = element('div', 'sa-plan');
       planArea.append(element('strong', '', 'Создать план из этапов'));
-      planArea.append(element('p', 'sa-help', 'По одному этапу в строке. Следующий этап зависит от предыдущего. Это планирование, а не запуск команд.'));
+      planArea.append(element('p', 'sa-help', 'По одному этапу в строке. Независимые этапы можно выполнять параллельно, последовательные — в указанном порядке. Сохранение плана не запускает команды автоматически.'));
+      const modeLabel = element('label', 'sa-help', 'Зависимость этапов');
+      const modeSelect = element('select');
+      modeSelect.setAttribute('aria-label', 'Зависимость этапов плана');
+      [['parallel', 'Параллельно (независимые этапы)'], ['sequential', 'По порядку (каждый ждёт предыдущего)']].forEach(([value, text]) => {
+        const option = element('option', '', text);
+        option.value = value;
+        modeSelect.append(option);
+      });
+      modeSelect.value = 'parallel';
+      planArea.append(modeLabel, modeSelect);
       const stepsInput = element('textarea', '', 'Изучить исходные данные\nПодготовить решение\nПроверить результат');
       stepsInput.setAttribute('aria-label', 'Этапы плана');
       planArea.append(stepsInput);
       planArea.append(makeButton('Сохранить план', async () => {
         const titles = stepsInput.value.split('\n').map(x => x.trim()).filter(Boolean);
-        if (!titles.length || titles.length > 32 || titles.some(x => x.length > 300)) {
-          say('Нужно от 1 до 32 этапов, каждый до 300 символов.', true); return;
+        if (!titles.length || titles.some(x => x.length > 300)) {
+          say('Нужен хотя бы один этап, каждый до 300 символов.', true); return;
         }
         const steps = titles.map((title, index) => ({ id: `step_${index + 1}`, title,
-          depends_on: index ? [`step_${index}`] : [] }));
-        await perform({ action: 'plan_create', id: taskId, steps });
+          depends_on: modeSelect.value === 'sequential' && index ? [`step_${index}`] : [] }));
+        const payload = { action: 'plan_create', id: taskId, steps };
+        if (new TextEncoder().encode(JSON.stringify(payload)).length > 262144) {
+          say('План слишком большой для одного запроса (максимум 256 КБ). Разделите его на независимые задания.', true); return;
+        }
+        await perform(payload);
       }, false));
       host.append(planArea);
     }
