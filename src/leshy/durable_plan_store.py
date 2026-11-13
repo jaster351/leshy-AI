@@ -230,8 +230,10 @@ class DurablePlanStore:
         return ident
 
     def claim(self, plan_id: str, owner_id: str, *, limit: int = 4,
-              lease_seconds: int = 90, now: float | None = None) -> list[dict[str, Any]]:
-        if type(limit) is not int or limit < 1 or type(lease_seconds) is not int or not 1 <= lease_seconds <= 3600:
+              lease_seconds: int = 90, now: float | None = None,
+              tool_only: bool = False) -> list[dict[str, Any]]:
+        if (type(limit) is not int or limit < 1 or type(lease_seconds) is not int
+                or not 1 <= lease_seconds <= 3600 or type(tool_only) is not bool):
             raise PlanError("Invalid claim limits")
         clock = time.time() if now is None else float(now)
         with self._connection() as db:
@@ -253,6 +255,9 @@ class DurablePlanStore:
             for row in rows:
                 ident = row["step_id"]
                 if states[ident] != "queued" or len(claims) >= limit:
+                    continue
+                # A trusted automatic reader must not claim human-only text steps.
+                if tool_only and not row["tool_name"]:
                     continue
                 if not all(states[d] == "done" for d in json.loads(row["deps_json"])):
                     continue
