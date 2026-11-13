@@ -228,6 +228,7 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
             "https://example.com:8765", "http://127.0.0.1:8765",
             "http://169.254.1.1:8765", "http://192.168.1.2:8765/internal",
             "https://user:password@192.168.1.2:8765",
+            "http://0.0.0.0:8765", "http://255.255.255.255:8765",
         ):
             with self.subTest(endpoint=endpoint):
                 with self.assertRaises(ValueError):
