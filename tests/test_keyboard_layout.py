@@ -29,6 +29,9 @@ class KeyboardLayoutTests(unittest.TestCase):
         self.assertEqual(suggest_keyboard_layout("rfrfz gjujlf").corrected, "какая погода")
         self.assertEqual(suggest_keyboard_layout("crjkmrj dhtvtyb").corrected, "сколько времени")
 
+    def test_reverse_layout_to_english(self):
+        self.assertEqual(suggest_keyboard_layout("руддщ").corrected, "hello")
+
     def test_original_russian(self):
         self.assertIsNone(suggest_keyboard_layout("привет"))
         self.assertIsNone(suggest_keyboard_layout("как дела"))
