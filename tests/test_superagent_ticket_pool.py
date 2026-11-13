@@ -75,9 +75,38 @@ class TicketPoolTests(unittest.TestCase):
                                   stopped=lambda: True)
             self.assertEqual(scheduled, 0)
 
-    def test_worker_count_is_clamped_to_eight(self):
-        with ParallelTicketPool(100) as pool:
-            self.assertEqual(pool.max_workers, 8)
+    def test_worker_count_scales_beyond_eight_for_healthy_nodes(self):
+        with ParallelTicketPool(48) as pool:
+            self.assertEqual(pool.max_workers, 48)
+        with self.assertRaises(ValueError):
+            ParallelTicketPool(129)
+
+    def test_backpressure_admits_no_new_work_under_memory_pressure(self):
+        from concurrent.futures import Future
+        started = threading.Event()
+        release = threading.Event()
+        submitted = []
+        def worker(ticket):
+            submitted.append(ticket["id"])
+            started.set()
+            release.wait(timeout=2)
+        tasks = [{"id": str(i)} for i in range(3)]
+        with ParallelTicketPool(16) as pool:
+            self.assertEqual(pool.fill(lambda exclude: tasks[0] if "0" not in exclude else None,
+                                       worker, stopped=lambda: False, capacity=1), 1)
+            self.assertTrue(started.wait(timeout=1))
+            self.assertEqual(pool.fill(lambda exclude: tasks[1], worker, stopped=lambda: False,
+                                       capacity=0), 0)
+            self.assertEqual(submitted, ["0"])
+            release.set()
+
+    def test_memory_limit_cannot_be_bypassed_with_bad_capacity(self):
+        with ParallelTicketPool(16) as pool:
+            for value in (-1, True, 1.0):
+                with self.subTest(value=value):
+                    with self.assertRaises(ValueError):
+                        pool.fill(lambda excluded: None, lambda ticket: None,
+                                  stopped=lambda: False, capacity=value)
 
 
 if __name__ == "__main__":
