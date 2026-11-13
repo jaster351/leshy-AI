@@ -91,8 +91,15 @@
     }
     if (detail.plan) {
       const plan = detail.plan;
-      host.append(element('strong', 'sa-help', 'План · ' + plan.state));
-      (plan.steps || []).forEach(step => host.append(element('p', 'sa-meta', `${step.title} — ${step.state}`)));
+      const visibleSteps = plan.steps || [];
+      const total = Number.isInteger(plan.total_steps) ? plan.total_steps : visibleSteps.length;
+      host.append(element('strong', 'sa-help', `План · ${plan.state} · ${total} этапов`));
+      if (plan.state_counts) {
+        const counts = Object.entries(plan.state_counts).map(([state, count]) => `${statusLabels[state] || state}: ${count}`);
+        host.append(element('p', 'sa-help', counts.join(' · ')));
+      }
+      visibleSteps.forEach(step => host.append(element('p', 'sa-meta', `${step.title} — ${step.state}`)));
+      if (total > visibleSteps.length) host.append(element('p', 'sa-help', `Показано ${visibleSteps.length} из ${total} этапов. Общий прогресс — выше.`));
       const group = element('div', 'sa-controls');
       if (!detail.archived && plan.state === 'active') group.append(makeButton('Пауза плана', () => perform({ action: 'plan_pause', id: taskId }), false));
       if (!detail.archived && plan.state === 'paused') group.append(makeButton('Продолжить план', () => perform({ action: 'plan_resume', id: taskId }), false));
@@ -108,12 +115,16 @@
       planArea.append(stepsInput);
       planArea.append(makeButton('Сохранить план', async () => {
         const titles = stepsInput.value.split('\n').map(x => x.trim()).filter(Boolean);
-        if (!titles.length || titles.length > 32 || titles.some(x => x.length > 300)) {
-          say('Нужно от 1 до 32 этапов, каждый до 300 символов.', true); return;
+        if (!titles.length || titles.some(x => x.length > 300)) {
+          say('Нужен хотя бы один этап, каждый до 300 символов.', true); return;
         }
         const steps = titles.map((title, index) => ({ id: `step_${index + 1}`, title,
           depends_on: index ? [`step_${index}`] : [] }));
-        await perform({ action: 'plan_create', id: taskId, steps });
+        const payload = { action: 'plan_create', id: taskId, steps };
+        if (new TextEncoder().encode(JSON.stringify(payload)).length > 262144) {
+          say('План слишком большой для одного запроса (максимум 256 КБ). Разделите его на независимые задания.', true); return;
+        }
+        await perform(payload);
       }, false));
       host.append(planArea);
     }
