@@ -21,6 +21,14 @@ class KeyboardLayoutTests(unittest.TestCase):
         self.assertIsNotNone(suggestion)
         self.assertEqual(suggestion.corrected, "как дела")
 
+    def test_capslock_and_initial_capital(self):
+        self.assertEqual(suggest_keyboard_layout("GHBDTN").corrected, "ПРИВЕТ")
+        self.assertEqual(suggest_keyboard_layout("Ghbdtn").corrected, "Привет")
+
+    def test_common_weather_and_time_questions(self):
+        self.assertEqual(suggest_keyboard_layout("rfrfz gjujlf").corrected, "какая погода")
+        self.assertEqual(suggest_keyboard_layout("crjkmrj dhtvtyb").corrected, "сколько времени")
+
     def test_original_russian(self):
         self.assertIsNone(suggest_keyboard_layout("привет"))
         self.assertIsNone(suggest_keyboard_layout("как дела"))
