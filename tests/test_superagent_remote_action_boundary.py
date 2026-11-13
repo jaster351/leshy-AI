@@ -118,13 +118,13 @@ class RemoteActionBoundaryTests(unittest.TestCase):
 
     def test_approval_verifier_rejection_and_revoke_race(self):
         denied = RemoteActionBoundary(
-            self.policy, approval_verifier=lambda actor, node, capability, receipt: False
+            self.policy, approval_verifier=lambda actor, node, capability, digest, receipt: False
         )
         with self.assertRaises(PermissionError):
             denied.perform(capability="rdp", approval_receipt="receipt", action_digest="a" * 64, **self.kwargs)
         self.operation.assert_not_called()
 
-        def revoke_during_confirmation(actor: VerifiedActor, node: str, capability: str, receipt: str):
+        def revoke_during_confirmation(actor: VerifiedActor, node: str, capability: str, digest: str, receipt: str):
             with self.storage.connection() as db:
                 db.execute("DELETE FROM owner_web_sessions WHERE owner_id=?", (actor.owner_id,))
             return True
