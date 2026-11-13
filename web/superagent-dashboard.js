@@ -497,8 +497,10 @@
           const name = observed.os_family === 'Windows' ? 'Windows' :
             ['Linux','FreeBSD','OpenBSD','NetBSD','Darwin'].includes(observed.os_family)
               ? observed.os_family : 'Не определена';
+          const distro = String(observed.distribution || '').slice(0,82);
           result.textContent = known
-            ? 'Подлинность SSH-сервера подтверждена. Операционная система: ' + name + '.'
+            ? 'Подлинность SSH-сервера подтверждена. Операционная система: ' + name +
+              (distro ? ' (' + distro + ')' : '') + '.'
             : 'Подлинность SSH-сервера подтверждена, но ОС определить не удалось.';
           result.className = 'sa-remote-note';
         } catch (error) {
@@ -573,15 +575,32 @@
       const plan = makeButton('Поручить Лешему составить план', async () => {
         const text = natural.value.trim();
         if (!text || requestInFlight) { if (!text) output.textContent = 'Опишите задачу для Лешего.'; return; }
+        if (!window.confirm('Проверить ОС компьютера ' + node.node_id +
+          ' по SSH и передать подтверждённые сведения вместе с задачей SuperAgent?')) return;
         requestInFlight = true; plan.disabled = true;
         try {
+          const inspected = await api('/v1/superagent/ssh/inspect', {
+            method:'POST', body:JSON.stringify({
+              node_id:node.node_id,credential_file:select.value,confirm:true
+            })
+          });
+          if (inspected.inspection?.verified !== true) {
+            throw Error('Не удалось подтвердить тип ОС, задача не отправлена.');
+          }
+          const hostOS = ['Linux','FreeBSD','OpenBSD','NetBSD','Darwin','Windows']
+            .includes(inspected.inspection.os_family) ? inspected.inspection.os_family : 'unknown';
+          if (hostOS === 'unknown') throw Error('Не удалось определить ОС сервера.');
+          const distro = String(inspected.inspection.distribution || '').slice(0,82);
           await api('/v1/superagent/task', {
             method:'POST',
             body:JSON.stringify({action:'create',
               text:'Задание для подтверждённого SSH-сервера ' + node.node_id +
-              '. Перед предлагаемыми командами выясни ОС сервера, тип оболочки, проверь существующие настройки. ' +
-              'Не утверждай, что ты уже выполнил команду. Составь последовательность действий, ' +
-              'проверку результата и при необходимости план отката. Не выполнять рискованные изменения без подтверждения владельца. ' +
+              '. ОС проверена реальным SSH-подключением: ' + hostOS +
+              (distro ? ', дистрибутив: ' + distro : '') +
+              '. Выбирай команды именно для этой ОС. До изменения системы уточни текущие настройки, ' +
+              'права и зависимости. Не утверждай, что команда уже исполнена. ' +
+              'Составь пошаговые команды, критерии успеха, проверку после каждого шага и план отката. ' +
+              'Не выполнять изменения автоматически без одобрения владельца. ' +
               'Запрос пользователя: ' + text
             })
           });
