@@ -23,6 +23,7 @@ from .image_generation import ImageGenerationManager
 from .knowledge import KnowledgeBase
 from .learning_control import LearningControl
 from .llm import ChatMessage, EchoLLM, LLMUnavailable, OllamaLLM
+from .keyboard_layout import layout_context
 from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
@@ -612,6 +613,9 @@ class LeshyApp:
         isolated_rows = conversation_rows_for_mode(rows, mode.kind)
         history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
         messages = context + history_messages
+        layout_hint = layout_context(message)
+        if layout_hint:
+            messages.insert(0, ChatMessage("system", layout_hint))
         event("chat_generation_started", session_id=sid, owner_id=owner_id, context_messages=len(messages))
         try:
             answer = self.llm.chat(messages)
