@@ -28,6 +28,7 @@ class AuthorizedRemoteAction:
     owner_id: str
     node_id: str
     capability: str
+    action_digest: str = ""
 
 
 class RemoteActionBoundary(Generic[_Result]):
@@ -49,7 +50,7 @@ class RemoteActionBoundary(Generic[_Result]):
         self,
         policy: RemotePermissionPolicy,
         *,
-        approval_verifier: Callable[[VerifiedActor, str, str, str], bool] | None = None,
+        approval_verifier: Callable[[VerifiedActor, str, str, str, str], bool] | None = None,
     ) -> None:
         self._policy = policy
         self._approval_verifier = approval_verifier
@@ -63,6 +64,7 @@ class RemoteActionBoundary(Generic[_Result]):
         observed_fingerprint: str,
         operation: Callable[[AuthorizedRemoteAction], _Result],
         approval_receipt: str = "",
+        action_digest: str = "",
     ) -> _Result:
         """Perform one action only after independently validating all scopes.
 
@@ -84,9 +86,14 @@ class RemoteActionBoundary(Generic[_Result]):
         )
         if cap in _SENSITIVE:
             receipt = str(approval_receipt or "").strip()
+            digest = str(action_digest or "").strip().lower()
+            # SHA-256 of a canonical server-built action specification. A
+            # confirmation for one command must never authorize another.
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise PermissionError("Не указан проверяемый отпечаток удалённого действия")
             if not receipt or not callable(self._approval_verifier):
                 raise PermissionError("Для удалённого действия требуется подтверждение")
-            if not self._approval_verifier(actor, node_id, cap, receipt):
+            if not self._approval_verifier(actor, node_id, cap, digest, receipt):
                 raise PermissionError("Подтверждение не найдено, истекло или отозвано")
             # Approval lookup can take time; node access might have been
             # revoked or the Web session terminated meanwhile.
@@ -97,6 +104,7 @@ class RemoteActionBoundary(Generic[_Result]):
             owner_id=actor.owner_id,
             node_id=self._policy._node(node_id),
             capability=cap,
+            action_digest=str(action_digest or "").strip().lower() if cap in _SENSITIVE else "",
         )
         return operation(context)
 
