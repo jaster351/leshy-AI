@@ -18,6 +18,7 @@ from .superagent_report_format import decode_report_json
 from .parallel_tool_scheduler import ParallelPlanError
 from .superagent_parallel import parse_parallel_read_request, run_superagent_parallel_reads
 from .superagent_ticket_pool import ParallelTicketPool
+from .superagent_worker_capacity import worker_ceiling, available_worker_slots
 from .superagent_plan_bridge import SuperAgentPlanBridge
 from .cognitive_journal import CognitiveStepJournal
 from .cognitive_lease import SuperAgentProcessLease
@@ -157,7 +158,7 @@ class SuperAgentService:
         self._cognitive_reads = CognitiveReadExecutor(app)
         self.poll_seconds = max(0.5, min(float(os.getenv("LESHY_SUPERAGENT_POLL_SECONDS", "2")), 30.0))
         self.max_attempts = max(1, min(int(os.getenv("LESHY_SUPERAGENT_MAX_ATTEMPTS", "3")), 8))
-        self.max_parallel_tickets = max(1, min(int(os.getenv("LESHY_SUPERAGENT_MAX_WORKERS", "8")), 8))
+        self.max_parallel_tickets = worker_ceiling()
         self._ensure_schema()
         self._journal = CognitiveStepJournal(self.storage)
         self.plans = SuperAgentPlanBridge(self)
@@ -871,9 +872,11 @@ class SuperAgentService:
                         for ticket_id, exc in pool.reap():
                             problem("superagent_parallel_assignment_failed",
                                     type(exc).__name__, ticket_id=ticket_id)
+                        capacity = available_worker_slots(self.max_parallel_tickets)
                         assigned = pool.fill(
                             self._next_due, self._run_ticket,
                             stopped=self._stop.is_set,
+                            capacity=capacity,
                         )
                         if assigned:
                             event("superagent_parallel_tickets_dispatched",
