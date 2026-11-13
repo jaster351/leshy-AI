@@ -230,6 +230,15 @@ class SuperAgentVerifiedSSHTests(unittest.TestCase):
         self.assertNotIn("owner_id", segment)
         self.assertNotIn("password", segment)
 
+    def test_distro_probe_uses_fixed_os_release_and_discards_unknown_fields(self):
+        from leshy.superagent_verified_ssh import _linux_distribution
+        output = 'ID=debian\nVERSION_ID="13"\nDESCRIPTION="$(sudo rm -rf /)"\n'
+        with mock.patch("leshy.superagent_verified_ssh._fixed_command",
+                        return_value=(0, output)) as probe:
+            value = _linux_distribution(mock.Mock(), 5.0, None)
+            self.assertEqual(value, "debian 13")
+            self.assertEqual(probe.call_args.args[1], "cat /etc/os-release")
+
     def test_localhost_is_refused_before_network(self):
         self.assertRaises(ValueError, _node_ip, "127.0.0.1")
         self.assertRaises(ValueError, _node_ip, "::1")
