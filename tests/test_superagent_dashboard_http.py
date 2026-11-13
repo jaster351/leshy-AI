@@ -24,6 +24,9 @@ class BaseHandler:
     def _authorized(self):
         return self.authorized
 
+    def _cookie_value(self, name):
+        return getattr(self, "cookie_value", "")
+
     def _existing_web_owner(self):
         return self.owner
 
@@ -131,6 +134,88 @@ class HttpRoutingTests(unittest.TestCase):
         invalid = self.Handler(path='/v1/superagent/tasks?archived=unknown', owner='web:alice')
         invalid.do_GET()
         self.assertEqual(invalid.result[0], 400)
+
+    def test_remote_console_requires_session_and_provider_login(self):
+        anonymous = self.Handler(path='/v1/superagent/remote-access', owner='')
+        anonymous.do_GET()
+        self.assertEqual(anonymous.result[0], 401)
+        unverified = self.Handler(path='/v1/superagent/remote-access', owner='web:alice')
+        unverified.do_GET()
+        self.assertEqual(unverified.result[0], 403)
+
+    def test_remote_revoke_deny_by_default_no_identity_or_cross_site(self):
+        denied = self.Handler(
+            path='/v1/superagent/remote-access/revoke', owner='web:alice',
+            headers={'X-Leshy-UI': 'superagent', 'Content-Type': 'application/json'},
+            body={'node_id': '192.168.1.9', 'grantee_id': 'bob', 'capability': 'inspect'})
+        denied.do_POST()
+        self.assertEqual(denied.result[0], 403)
+
+    def test_remote_inventory_and_owner_revoke_http_routes(self):
+        import hashlib
+        import time
+        from unittest.mock import Mock
+        from test_superagent_remote_permissions import Storage
+        from leshy.superagent_remote_permissions import RemotePermissionPolicy
+
+        original_storage = self.app.storage
+        original_identity = getattr(self.app, 'owner_identity', None)
+        storage = Storage()
+        identity = Mock(storage=storage, cookie_name='leshy')
+        identity.owner_for_web_cookie.side_effect = (
+            lambda cookie: 'web:alice' if cookie == 'session-a' else '')
+        with storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO owner_web_sessions VALUES (?,?,?)",
+                (hashlib.sha256(b'session-a').hexdigest(), 'web:alice', time.time() + 600))
+            conn.execute(
+                "INSERT INTO owner_identity_links VALUES (?,?,?)",
+                ('github', 'web:alice', 'verified-alice'))
+        policy = RemotePermissionPolicy(
+            identity, enrollment_verifier=lambda *args: True)
+        actor = policy.actor_from_web_cookie('session-a')
+        policy.register_verified_node(
+            actor, '192.168.100.22', 'a' * 64, enrollment_proof='test-only')
+        policy.grant(actor, '192.168.100.22', 'web:bob', 'inspect')
+        self.app.storage = storage
+        self.app.owner_identity = identity
+        try:
+            get = self.Handler(path='/v1/superagent/remote-access', owner='web:alice')
+            get.cookie_value = 'session-a'
+            get.do_GET()
+            self.assertEqual(get.result[0], 200)
+            self.assertEqual(get.result[1]['nodes'][0]['node_id'], '192.168.100.22')
+            self.assertEqual(len(get.result[1]['active_grants']), 1)
+
+            request = dict(node_id='192.168.100.22', grantee_id='web:bob',
+                           capability='inspect')
+            hostile = self.Handler(
+                path='/v1/superagent/remote-access/revoke', owner='web:alice',
+                headers={'Host': 'localhost', 'Origin': 'https://evil.example',
+                         'X-Leshy-UI': 'superagent', 'Content-Type': 'application/json'},
+                body=request)
+            hostile.cookie_value = 'session-a'
+            hostile.do_POST()
+            self.assertEqual(hostile.result[0], 403)
+
+            revoke = self.Handler(
+                path='/v1/superagent/remote-access/revoke', owner='web:alice',
+                headers={'Host': 'localhost', 'X-Leshy-UI': 'superagent',
+                         'Content-Type': 'application/json'}, body=request)
+            revoke.cookie_value = 'session-a'
+            revoke.do_POST()
+            self.assertEqual(revoke.result[0], 200)
+            self.assertTrue(revoke.result[1]['revoked'])
+            get2 = self.Handler(path='/v1/superagent/remote-access', owner='web:alice')
+            get2.cookie_value = 'session-a'
+            get2.do_GET()
+            self.assertEqual(get2.result[1]['active_grants'], [])
+        finally:
+            self.app.storage = original_storage
+            if original_identity is None:
+                del self.app.owner_identity
+            else:
+                self.app.owner_identity = original_identity
 
     def test_root_preserves_session_cookie_and_injects_panel(self):
         h = self.Handler(path='/', owner='web:alice')

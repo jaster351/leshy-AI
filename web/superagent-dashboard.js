@@ -40,6 +40,12 @@
     .sa-controls{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.sa-notice{font-size:12px;min-height:20px;margin-top:9px;color:var(--accent)}.sa-error{color:var(--danger)}
     .sa-dashboard details{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px}.sa-dashboard summary{cursor:pointer;font-size:13px}
     .sa-dialog{display:grid;gap:8px;margin-top:9px}.sa-message{padding:9px 11px;border:1px solid var(--line);border-radius:11px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.sa-user{margin-left:8%;background:rgba(96,190,133,.11)}.sa-agent{margin-right:8%;background:rgba(100,140,180,.10)}.sa-answer{margin-top:10px;padding:11px;border:1px solid var(--line);border-radius:11px}.sa-answer textarea{min-height:90px}.sa-answer .sa-help{margin:0 0 6px}
+    .sa-remote{margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:12px}
+    .sa-remote h4{font-size:14px;margin:12px 0 7px}
+    .sa-remote-card{padding:10px 0;border-bottom:1px solid var(--line)}
+    .sa-remote-card:last-child{border-bottom:0}
+    .sa-remote-note{font-size:12px;line-height:1.5;color:var(--muted);margin:8px 0}
+    .sa-remote .sa-danger{border-color:rgba(255,140,140,.45);color:var(--danger)}
     .sa-dashboard code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:7px 0;color:var(--accent)}
     .sa-plan{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:10px}.sa-plan textarea{min-height:75px}.sa-plan select{width:100%;max-width:460px;margin:6px 0 10px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
     .sa-stage-result{padding:7px 9px;margin:5px 0;border-left:2px solid var(--line);overflow-wrap:anywhere}.sa-evidence{font-size:12px;color:var(--accent);margin:4px 0}.sa-proof{font-size:12px;margin:4px 0 7px}.sa-proof summary{cursor:pointer}.sa-stage{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px}
@@ -376,6 +382,123 @@
       list.replaceChildren(element('div', 'sa-help', 'Не удалось получить задания: ' + error.message));
     }
   }
+  function installRemoteAccess(panel) {
+    const section = element('details', 'sa-remote');
+    const heading = element('summary', '', 'Удалённые компьютеры и разрешения');
+    section.append(heading);
+    section.append(element('p', 'sa-remote-note',
+      'Показывает зарегистрированные компьютеры и разрешения, которые можно отозвать. ' +
+      'Это не запускает SSH/RDP и не подключается к компьютерам.'));
+    const status = element('p', 'sa-notice');
+    status.setAttribute('role', 'status');
+    const container = element('div', 'sa-remote-list');
+    const reload = makeButton('Обновить разрешения', () => load());
+    section.append(reload, status, container);
+    panel.append(section);
+
+    const display = (value) => String(value || '').slice(0, 200);
+    const readableTime = (value) => {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? 'неизвестно' : date.toLocaleString('ru-RU');
+    };
+    const capabilities = {
+      inspect: 'Просмотр состояния', execute: 'Выполнение команд',
+      update: 'Обновления', reboot: 'Перезагрузка', rdp: 'Удалённый экран'
+    };
+    let requestInFlight = false;
+    async function load() {
+      if (requestInFlight || !section.open) return;
+      requestInFlight = true;
+      reload.disabled = true;
+      status.className = 'sa-notice';
+      status.textContent = 'Проверяю разрешения…';
+      try {
+        const data = await api('/v1/superagent/remote-access');
+        container.replaceChildren();
+        status.textContent = data.remote_admin_enabled
+          ? 'Удалённое администрирование разрешено в настройках, но SSH/RDP через эту панель пока недоступны.'
+          : 'Удалённое администрирование выключено. Доступные разрешения можно просмотреть и отозвать.';
+        if (!data.nodes.length) {
+          container.append(element('p', 'sa-remote-note',
+            'Подтверждённых компьютеров пока нет. Новый компьютер не добавляется по одному IP или паролю: ' +
+            'нужно отдельное подтверждение владения и подлинности.'));
+        } else {
+          container.append(element('h4', '', 'Мои компьютеры'));
+          data.nodes.forEach(node => {
+            const row = element('div', 'sa-remote-card');
+            row.append(element('strong', '', display(node.node_id)));
+            row.append(element('p', 'sa-meta', 'Зарегистрирован: ' + readableTime(node.registered_at)));
+            row.append(element('p', 'sa-remote-note',
+              'Наличие записи не означает, что компьютер сейчас доступен или его ключ повторно проверен.'));
+            container.append(row);
+          });
+        }
+        if (data.nodes_truncated) container.append(element('p', 'sa-remote-note', 'Показаны первые 64 компьютера.'));
+        if (data.active_grants.length) {
+          container.append(element('h4', '', 'Кому разрешён доступ'));
+          data.active_grants.forEach(grant => {
+            const row = element('div', 'sa-remote-card');
+            row.append(element('strong', '',
+              (capabilities[grant.capability] || 'Другое разрешение') +
+              ' · ' + display(grant.node_id)));
+            row.append(element('p', 'sa-meta',
+              'Пользователь: ' + display(grant.grantee_id) +
+              ' · до: ' + readableTime(grant.expires_at)));
+            const revoke = makeButton('Отозвать это разрешение', async () => {
+              if (!window.confirm('Отозвать право «' +
+                (capabilities[grant.capability] || grant.capability) +
+                '» для выбранного пользователя?')) return;
+              if (requestInFlight) return;
+              requestInFlight = true;
+              revoke.disabled = true;
+              status.textContent = 'Отзываю разрешение…';
+              let revoked = false;
+              try {
+                await api('/v1/superagent/remote-access/revoke', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    node_id: grant.node_id,
+                    grantee_id: grant.grantee_id,
+                    capability: grant.capability
+                  })
+                });
+                revoked = true;
+                row.remove();
+                // Reload the whole view to avoid showing stale grants.
+              } catch (error) {
+                status.textContent = 'Не удалось отозвать разрешение: ' + error.message;
+                status.className = 'sa-notice sa-error';
+                revoke.disabled = false;
+              } finally {
+                requestInFlight = false;
+                await load();
+                if (revoked) {
+                  status.className = 'sa-notice';
+                  status.textContent = 'Разрешение отозвано. Список обновлён.';
+                }
+              }
+            }, false, 'sa-danger');
+            row.append(revoke);
+            container.append(row);
+          });
+        } else {
+          container.append(element('p', 'sa-remote-note',
+            'Активных разрешений для других пользователей нет.'));
+        }
+        if (data.grants_truncated) container.append(element('p', 'sa-remote-note', 'Показаны первые 200 разрешений.'));
+      } catch (error) {
+        status.textContent = error.message || 'Не удалось прочитать разрешения';
+        container.replaceChildren(element('p', 'sa-remote-note',
+          'Для этого раздела нужен действующий вход через подтверждённого провайдера.'));
+      } finally {
+        requestInFlight = false;
+        reload.disabled = false;
+      }
+    }
+    section.addEventListener('toggle', () => {
+      if (section.open) load();
+    });
+  }
   function install() {
     if ($('saDashboard')) return;
     const pane = $('pane-superagent') || $('pane-tasks');
@@ -421,6 +544,7 @@
     tips.append(element('p', 'sa-help', 'Примеры новых задач — нажмите на пример, затем «Запустить»:'));
     examples.forEach(example => tips.append(makeButton(example, () => { input.value = example; input.focus(); }, false, '')));
     panel.append(tips);
+    installRemoteAccess(panel);
     const notice = element('div', 'sa-notice'); notice.id = 'saNotice'; notice.setAttribute('role', 'status');
     panel.append(notice);
     const list = element('div', 'sa-list'); list.id = 'saTaskList'; panel.append(list);
