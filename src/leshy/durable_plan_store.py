@@ -151,7 +151,8 @@ class DurablePlanStore:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS durable_plans (
                     plan_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
-                    state TEXT NOT NULL, created_at REAL NOT NULL
+                    state TEXT NOT NULL, created_at REAL NOT NULL,
+                    auto_run INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS durable_plan_steps (
                     plan_id TEXT NOT NULL REFERENCES durable_plans(plan_id) ON DELETE CASCADE,
@@ -176,6 +177,10 @@ class DurablePlanStore:
                 db.execute("ALTER TABLE durable_plan_steps ADD COLUMN tool_name TEXT NOT NULL DEFAULT ''")
             if "args_json" not in cols:
                 db.execute("ALTER TABLE durable_plan_steps ADD COLUMN args_json TEXT NOT NULL DEFAULT '{}'")
+            plan_cols = {row["name"] for row in db.execute("PRAGMA table_info(durable_plans)")}
+            if "auto_run" not in plan_cols:
+                db.execute("ALTER TABLE durable_plans ADD COLUMN auto_run INTEGER NOT NULL DEFAULT 0")
+            db.execute("CREATE INDEX IF NOT EXISTS ix_durable_plans_auto ON durable_plans(auto_run,state)")
             db.commit()
 
     @contextmanager
@@ -328,17 +333,45 @@ class DurablePlanStore:
                 db.execute("UPDATE durable_plans SET state='active' WHERE plan_id=?", (plan_id,))
                 self._status(db, plan_id)
             elif action == "cancel" and state in {"active", "paused"}:
-                db.execute("UPDATE durable_plans SET state='cancelled' WHERE plan_id=?", (plan_id,))
+                db.execute("UPDATE durable_plans SET state='cancelled',auto_run=0 WHERE plan_id=?", (plan_id,))
                 db.execute("UPDATE durable_plan_steps SET state='cancelled',lease_token=NULL,lease_until=0 "
                            "WHERE plan_id=? AND state IN ('queued','running')", (plan_id,))
             db.commit()
 
+    def set_auto(self, plan_id: str, owner_id: str, enabled: bool) -> dict[str, Any]:
+        """Only explicit owner action enables background reads; never broaden tools."""
+        if type(enabled) is not bool:
+            raise PlanError("Auto execution flag must be boolean")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            state = self._check_owner(db, plan_id, owner_id)
+            if enabled and state not in {"active", "paused"}:
+                raise PlanError("Only active or paused plans can enable auto reads")
+            db.execute("UPDATE durable_plans SET auto_run=? WHERE plan_id=?",
+                       (int(enabled), plan_id))
+            db.commit()
+        return self.snapshot(plan_id, owner_id)
+
+    def auto_plans(self, *, limit: int = 64) -> list[dict[str, str]]:
+        """Return a bounded batch of opted-in plans, never unapproved legacy plans."""
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise PlanError("Invalid auto-plan scan limit")
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT plan_id,owner_id FROM durable_plans "
+                "WHERE auto_run=1 AND state='active' "
+                "ORDER BY created_at LIMIT ?", (limit,),
+            ).fetchall()
+        return [{"id": str(row["plan_id"]), "owner_id": str(row["owner_id"])}
+                for row in rows]
+
     def snapshot(self, plan_id: str, owner_id: str) -> dict[str, Any]:
         with self._connection() as db:
             state = self._check_owner(db, plan_id, owner_id)
+            auto_run = db.execute("SELECT auto_run FROM durable_plans WHERE plan_id=?", (plan_id,)).fetchone()[0]
             rows = db.execute("SELECT step_id,title,deps_json,state,attempt,output,tool_name,args_json "
                               "FROM durable_plan_steps WHERE plan_id=? ORDER BY rowid", (plan_id,)).fetchall()
-        return {"id": plan_id, "state": state, "steps": [
+        return {"id": plan_id, "state": state, "auto_run": bool(auto_run), "steps": [
             {"id": r["step_id"], "title": r["title"], "depends_on": json.loads(r["deps_json"]),
              "state": r["state"], "attempt": r["attempt"], "output": r["output"],
              "tool": r["tool_name"], "arguments": json.loads(r["args_json"])}
