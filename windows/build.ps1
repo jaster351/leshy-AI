@@ -171,6 +171,7 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --exclude-module oci `
   --collect-all markitdown `
   --collect-all mcp `
+  --collect-all paramiko `
   --collect-all mss `
   --collect-all pyautogui `
   --collect-all pypdf `
