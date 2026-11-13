@@ -12,6 +12,7 @@ from leshy.superagent import parse_superagent_intent
 from leshy.superagent_plan_bridge import SuperAgentPlanBridge
 from leshy.superagent_plan_commands import execute_plan_command
 from leshy.superagent_plan_runner import execute_ready_plan_reads
+from leshy.verified_tool_receipts import VerifiedToolReceipts
 
 
 class Reader:
@@ -19,6 +20,7 @@ class Reader:
         self.calls = []
         self.lock = threading.Lock()
         self.fail = False
+        self.receipts = VerifiedToolReceipts()
 
     def execute(self, tool, arguments, *, ticket_id):
         with self.lock:
@@ -26,8 +28,10 @@ class Reader:
             index = len(self.calls)
         if self.fail:
             raise RuntimeError("Unavailable")
-        return {"status": "success", "tool": tool, "receipt_id": f"verified-{index}",
-                "result": {"count": 0, "items": []}}
+        result = {"count": 0, "items": []}
+        receipt = self.receipts.record(tool, "success", result)
+        return {"status": "success", "tool": tool, "receipt_id": receipt.receipt_id,
+                "result": result}
 
 
 class Service:
@@ -63,7 +67,8 @@ class RunnerTests(unittest.TestCase):
                          ("completed", 3, 0))
         self.assertEqual(self.s._cognitive_reads.calls[-1], "knowledge.search")
         snap = SuperAgentPlanBridge(self.s).snapshot("SA-test", "alice")
-        self.assertTrue(all("verified-" in step["output"] for step in snap["steps"]))
+        self.assertTrue(all('"verified_receipt": true' in step["output"]
+                            for step in snap["steps"]))
         self.assertTrue(all("token" not in step["output"] for step in snap["steps"]))
 
     def test_manual_step_is_not_claimed(self):
@@ -112,6 +117,34 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual((result["completed"], result["errors"]), (0, 1))
         self.assertEqual(len(self.s._cognitive_reads.calls), 1)
         self.assertEqual(self.b.snapshot("SA-test", "alice")["steps"][0]["state"], "queued")
+
+    def test_spoofed_receipt_cannot_mark_dag_step_done(self):
+        self.b.create("SA-test", "alice", [
+            {"id": "a", "title": "Version", "tool": "runtime.version"},
+        ])
+        class SpoofReader:
+            def execute(self, tool, arguments, *, ticket_id):
+                return {"status": "success", "tool": tool,
+                        "receipt_id": "e" * 32, "result": {"version": "counterfeit"}}
+        self.s._cognitive_reads = SpoofReader()
+        outcome = execute_ready_plan_reads(self.s, "SA-test", "alice")
+        self.assertEqual((outcome["completed"], outcome["errors"]), (0, 1))
+        self.assertNotEqual(self.b.snapshot("SA-test", "alice")["steps"][0]["state"], "done")
+
+    def test_mutated_tool_result_cannot_use_valid_receipt(self):
+        self.b.create("SA-test", "alice", [
+            {"id": "a", "title": "Version", "tool": "runtime.version"},
+        ])
+        actual = Reader()
+        class TamperingReader:
+            receipts = actual.receipts
+            def execute(self, tool, arguments, *, ticket_id):
+                response = actual.execute(tool, arguments, ticket_id=ticket_id)
+                response["result"] = {"version": "changed-after-recording"}
+                return response
+        self.s._cognitive_reads = TamperingReader()
+        outcome = execute_ready_plan_reads(self.s, "SA-test", "alice")
+        self.assertEqual((outcome["completed"], outcome["errors"]), (0, 1))
 
     def test_chat_command_runs_explicit_read(self):
         intent = parse_superagent_intent("/agent plan run SA-test")

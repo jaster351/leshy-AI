@@ -7,11 +7,11 @@ claims across processes.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from hashlib import sha256
 import json
 from typing import Any, Callable
 
 from .durable_plan_store import PlanError, _safe_read_spec
+from .superagent_read_evidence import verify_live_receipt
 
 
 def execute_ready_plan_reads(
@@ -69,17 +69,23 @@ def execute_ready_plan_reads(
                     or not isinstance(receipt.get("receipt_id"), str)
                     or not receipt["receipt_id"]):
                 raise RuntimeError("Unverified read-tool result")
+            # Verify against the trusted executor's live ledger rather than
+            # accepting a plausible-looking receipt_id returned by any tool.
+            verified = verify_live_receipt(reader, receipt, name)
             evidence = {
                 "tool": name, "receipt_id": receipt["receipt_id"],
+                "result_sha256": verified["result_sha256"],
+                "recorded_at": verified["recorded_at"],
+                "verified_receipt": True,
                 "result": receipt.get("result"),
             }
             output = json.dumps(evidence, ensure_ascii=False, sort_keys=True, allow_nan=False)
             if len(output) > 3900:
-                output = json.dumps({
-                    "tool": name, "receipt_id": receipt["receipt_id"],
-                    "result_sha256": sha256(output.encode("utf-8")).hexdigest(),
-                    "result_truncated": True,
-                }, sort_keys=True)
+                # Keep a verifiable digest from the actual receipt ledger.
+                # Do not pretend the discarded result is visible to the user.
+                del evidence["result"]
+                evidence["result_truncated"] = True
+                output = json.dumps(evidence, ensure_ascii=False, sort_keys=True, allow_nan=False)
             if not allowed():
                 return 0, 0
             accepted = bridge.complete(

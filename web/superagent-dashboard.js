@@ -42,7 +42,7 @@
     .sa-dialog{display:grid;gap:8px;margin-top:9px}.sa-message{padding:9px 11px;border:1px solid var(--line);border-radius:11px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.sa-user{margin-left:8%;background:rgba(96,190,133,.11)}.sa-agent{margin-right:8%;background:rgba(100,140,180,.10)}.sa-answer{margin-top:10px;padding:11px;border:1px solid var(--line);border-radius:11px}.sa-answer textarea{min-height:90px}.sa-answer .sa-help{margin:0 0 6px}
     .sa-dashboard code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:7px 0;color:var(--accent)}
     .sa-plan{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:10px}.sa-plan textarea{min-height:75px}.sa-plan select{width:100%;max-width:460px;margin:6px 0 10px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
-    .sa-stage{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px}
+    .sa-stage-result{padding:7px 9px;margin:5px 0;border-left:2px solid var(--line);overflow-wrap:anywhere}.sa-evidence{font-size:12px;color:var(--accent);margin:4px 0}.sa-proof{font-size:12px;margin:4px 0 7px}.sa-proof summary{cursor:pointer}.sa-stage{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px}
     .sa-stage select{width:auto;max-width:100%;flex:1 1 150px;margin:0}.sa-stage input{min-width:130px;flex:2 1 180px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
     .sa-stage input[hidden]{display:none}.sa-stage button{min-height:34px}.sa-progress{font-size:12px;margin:6px 0;color:var(--muted)}
     .sa-dashboard details.sa-advanced{margin-top:10px}.sa-dashboard button:focus-visible,.sa-dashboard input:focus-visible,.sa-dashboard select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -112,8 +112,30 @@
       const finished = Number(plan.state_counts?.done || 0);
       host.append(element('p', 'sa-progress', `Готово: ${finished} из ${total}. ` +
         (plan.auto_run ? 'Автоматические чтения включены.' : 'Автоматические чтения выключены.')));
-      visibleSteps.forEach(step => host.append(element('p', 'sa-meta',
-        `${step.title} — ${stageLabels[step.state] || step.state}`)));
+      visibleSteps.forEach(step => {
+        const item = element('div', 'sa-stage-result');
+        item.append(element('p', 'sa-meta', `${step.title} — ${stageLabels[step.state] || step.state}`));
+        if (step.evidence) {
+          const evidence = step.evidence;
+          const title = evidence.status === 'recorded' ? 'Проверено при выполнении' :
+            evidence.status === 'legacy' ? 'Историческое выполнение' : 'Подтверждение недоступно';
+          item.append(element('p', 'sa-evidence', title + '. ' + (evidence.description || '')));
+          if (evidence.summary) item.append(element('p', 'sa-help', evidence.summary));
+          if (evidence.result_truncated)
+            item.append(element('p', 'sa-help', 'Полный результат не сохранён: доступен только его отпечаток.'));
+          if (evidence.status === 'recorded') {
+            const proof = element('details', 'sa-proof');
+            proof.append(element('summary', '', 'Техническое подтверждение'));
+            proof.append(element('p', 'sa-meta', 'Квитанция: ' + (evidence.receipt_id || 'неизвестно')));
+            proof.append(element('p', 'sa-meta', 'SHA-256 результата: ' + (evidence.result_sha256 || 'неизвестен')));
+            if (evidence.recorded_at) proof.append(element('p', 'sa-meta', 'Выполнено: ' + evidence.recorded_at));
+            proof.append(element('p', 'sa-help',
+              'Подтверждено выполнение инструмента, а не достоверность внешних сведений. После перезапуска криптографическая проверка локальной базы не выполняется.'));
+            item.append(proof);
+          }
+        }
+        host.append(item);
+      });
       if (total > visibleSteps.length) host.append(element('p', 'sa-help', `Показано ${visibleSteps.length} из ${total} этапов. Общий прогресс — выше.`));
       const group = element('div', 'sa-controls');
       if (!detail.archived && plan.state === 'active') group.append(makeButton('Пауза плана', () => perform({ action: 'plan_pause', id: taskId }), false));
@@ -369,7 +391,7 @@
     tips.append(label);
     [
       ['Запустить задачу', 'Опишите обычными словами, что должен сделать Леший.'],
-      ['Подробнее', 'В карточке доступны история, отчёт, этапы и управление проверками.'],
+      ['Подробнее', 'В карточке доступны история, отчёт, этапы, подтверждения выполнения и управление проверками.'],
       ['Составить план', 'Добавьте готовые действия кнопками. Можете выбрать параллельное выполнение или порядок этапов.'],
       ['Выполнить доступные проверки', 'Однократно запускает готовые безопасные чтения.'],
       ['Включить автозапуск проверок', 'Позволяет Лешему выполнять разрешённые чтения в фоне. Можно выключить в любой момент.'],
