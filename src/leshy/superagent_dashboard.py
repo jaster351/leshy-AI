@@ -130,11 +130,13 @@ def ticket_details(service: Any, owner_id: str, ticket_id: str) -> dict[str, Any
             counts[state] = counts.get(state, 0) + 1
         result["plan"] = {
             "state": plan.get("state"),
+            "auto_run": bool(plan.get("auto_run", False)),
             "total_steps": len(all_steps),
             "state_counts": counts,
             "steps": [{"id": str(step.get("id") or "")[:64],
                        "title": str(step.get("title") or "")[:300],
-                       "state": str(step.get("state") or "")[:40]}
+                       "state": str(step.get("state") or "")[:40],
+                       "tool": str(step.get("tool") or "")[:100]}
                       for step in all_steps[:64]],
         }
     return {"task": result}
@@ -194,6 +196,26 @@ def execute_action(service: Any, owner_id: str, payload: dict[str, Any]) -> dict
             raise ValueError("План слишком большой: максимум 256 КБ данных за запрос")
         result = service.plans.create(ticket_id, owner_id, steps)
         return {"plan": {"id": str(result["id"]), "state": str(result["state"])}}
+    if action in {"plan_auto", "plan_manual"}:
+        # Same owner-bound ticket contract as the chat command, and no
+        # background execution unless the owner explicitly opts in.
+        enabled = action == "plan_auto"
+        if enabled and state in {"ready", "failed", "blocked", "stopped"}:
+            raise ValueError("Автозапуск недоступен для завершённого задания")
+        plan = service.plans.set_auto(ticket_id, owner_id, enabled)
+        wake = getattr(service, "_wake", None)
+        if wake is not None:
+            wake.set()
+        return {"plan": {"id": str(plan["id"]), "state": str(plan["state"]),
+                         "auto_run": bool(plan["auto_run"])}}
+    if action == "plan_run":
+        if state in {"ready", "failed", "blocked", "stopped"}:
+            raise ValueError("Завершённое задание нельзя запустить снова")
+        from .superagent_plan_runner import execute_ready_plan_reads
+        result = execute_ready_plan_reads(service, ticket_id, owner_id)
+        return {"plan": {"id": str(result["id"]), "state": str(result["state"]),
+                         "completed": int(result["completed"]),
+                         "errors": int(result["errors"]), "total": int(result["total"])}}
     if action in _PLAN_ACTIONS:
         plan = service.plans.control(ticket_id, owner_id, _PLAN_ACTIONS[action])
         return {"plan": {"id": str(plan["id"]), "state": str(plan["state"])}}
