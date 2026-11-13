@@ -14,6 +14,7 @@
   let pending = false;
   let showArchived = false;
   let lastSignature = "";
+  const expandedTasks = new Set();
   const element = (tag, cls, text) => {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -41,6 +42,10 @@
     .sa-dialog{display:grid;gap:8px;margin-top:9px}.sa-message{padding:9px 11px;border:1px solid var(--line);border-radius:11px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.sa-user{margin-left:8%;background:rgba(96,190,133,.11)}.sa-agent{margin-right:8%;background:rgba(100,140,180,.10)}.sa-answer{margin-top:10px;padding:11px;border:1px solid var(--line);border-radius:11px}.sa-answer textarea{min-height:90px}.sa-answer .sa-help{margin:0 0 6px}
     .sa-dashboard code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:7px 0;color:var(--accent)}
     .sa-plan{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:10px}.sa-plan textarea{min-height:75px}.sa-plan select{width:100%;max-width:460px;margin:6px 0 10px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
+    .sa-stage{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px}
+    .sa-stage select{width:auto;max-width:100%;flex:1 1 150px;margin:0}.sa-stage input{min-width:130px;flex:2 1 180px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
+    .sa-stage input[hidden]{display:none}.sa-stage button{min-height:34px}.sa-progress{font-size:12px;margin:6px 0;color:var(--muted)}
+    .sa-dashboard details.sa-advanced{margin-top:10px}.sa-dashboard button:focus-visible,.sa-dashboard input:focus-visible,.sa-dashboard select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     @media(max-width:720px){.sa-dashboard{padding:12px}.sa-row button,.sa-controls button{flex:1;min-width:110px}}
   `;
   async function api(path, options = {}) {
@@ -67,8 +72,12 @@
     pending = true;
     say('Выполняю команду…', false);
     try {
-      await api('/v1/superagent/task', { method: 'POST', body: JSON.stringify(payload) });
-      say('Готово. Список обновлён.', false);
+      const response = await api('/v1/superagent/task', { method: 'POST', body: JSON.stringify(payload) });
+      if (action === 'plan_run' && response.plan)
+        say('Проверок выполнено: ' + response.plan.completed + '. Ошибок: ' + response.plan.errors + '.', !!response.plan.errors);
+      else if (action === 'plan_auto') say('Автоматические проверки включены для этого плана.', false);
+      else if (action === 'plan_manual') say('Автоматические проверки выключены.', false);
+      else say('Готово. Список обновлён.', false);
     } catch (error) {
       say(error.message, true);
     } finally {
@@ -98,44 +107,150 @@
         const counts = Object.entries(plan.state_counts).map(([state, count]) => `${statusLabels[state] || state}: ${count}`);
         host.append(element('p', 'sa-help', counts.join(' · ')));
       }
-      visibleSteps.forEach(step => host.append(element('p', 'sa-meta', `${step.title} — ${step.state}`)));
+      const stageLabels = {queued:'Ожидает',running:'Выполняется',done:'Готово',
+        failed:'Ошибка',blocked:'Заблокировано',cancelled:'Отменено'};
+      const finished = Number(plan.state_counts?.done || 0);
+      host.append(element('p', 'sa-progress', `Готово: ${finished} из ${total}. ` +
+        (plan.auto_run ? 'Автоматические чтения включены.' : 'Автоматические чтения выключены.')));
+      visibleSteps.forEach(step => host.append(element('p', 'sa-meta',
+        `${step.title} — ${stageLabels[step.state] || step.state}`)));
       if (total > visibleSteps.length) host.append(element('p', 'sa-help', `Показано ${visibleSteps.length} из ${total} этапов. Общий прогресс — выше.`));
       const group = element('div', 'sa-controls');
       if (!detail.archived && plan.state === 'active') group.append(makeButton('Пауза плана', () => perform({ action: 'plan_pause', id: taskId }), false));
       if (!detail.archived && plan.state === 'paused') group.append(makeButton('Продолжить план', () => perform({ action: 'plan_resume', id: taskId }), false));
-      if (!detail.archived && ['active', 'paused'].includes(plan.state)) group.append(makeButton('Отменить план', () => perform({ action: 'plan_cancel', id: taskId }), false, 'sa-danger'));
+      const liveTicket = !['ready', 'failed', 'blocked', 'stopped'].includes(detail.state) && !detail.archived;
+      const hasReadSteps = visibleSteps.some(step => !!step.tool) || (plan.read_steps_total || 0) > 0;
+      if (liveTicket && plan.state === 'active' && hasReadSteps)
+        group.append(makeButton('Выполнить доступные проверки', () => perform({action:'plan_run', id:taskId}), false));
+      if (liveTicket && ['active', 'paused'].includes(plan.state) && hasReadSteps) {
+        group.append(makeButton(plan.auto_run ? 'Выключить автозапуск проверок' : 'Включить автозапуск проверок',
+          () => perform({action:plan.auto_run ? 'plan_manual':'plan_auto', id:taskId}), false));
+      }
+      if (!detail.archived && ['active', 'paused'].includes(plan.state))
+        group.append(makeButton('Отменить план', () => perform({ action: 'plan_cancel', id: taskId }), false, 'sa-danger'));
       host.append(group);
-      host.append(element('p', 'sa-help', 'План сохраняет последовательность этапов; сам по себе не запускает их автоматическое выполнение.'));
+      host.append(element('p', 'sa-help',
+        hasReadSteps
+          ? 'Автоматически доступны только безопасные проверки: версия, сведения о системе и поиск в проверенных знаниях. Действия с файлами и ОС не запускаются.'
+          : 'В этом плане только ручные этапы. Для автоматических проверок создайте план с доступными действиями.'));
     } else if (!['ready', 'failed', 'stopped'].includes(detail.state)) {
       const planArea = element('div', 'sa-plan');
-      planArea.append(element('strong', '', 'Создать план из этапов'));
-      planArea.append(element('p', 'sa-help', 'По одному этапу в строке. Независимые этапы можно выполнять параллельно, последовательные — в указанном порядке. Сохранение плана не запускает команды автоматически.'));
-      const modeLabel = element('label', 'sa-help', 'Зависимость этапов');
+      planArea.append(element('strong', '', 'Составить план задания'));
+      planArea.append(element('p', 'sa-help',
+        'Добавьте действия кнопками. Проверки выполняются Лешим; ручные этапы остаются напоминаниями, а не командами ОС.'));
+      const modeLabel = element('label', 'sa-help', 'Как выполнять этапы');
       const modeSelect = element('select');
-      modeSelect.setAttribute('aria-label', 'Зависимость этапов плана');
-      [['parallel', 'Параллельно (независимые этапы)'], ['sequential', 'По порядку (каждый ждёт предыдущего)']].forEach(([value, text]) => {
-        const option = element('option', '', text);
-        option.value = value;
-        modeSelect.append(option);
+      modeSelect.setAttribute('aria-label', 'Порядок этапов');
+      [['parallel', 'Независимо (параллельно)'], ['sequential', 'По очереди']].forEach(([value, text]) => {
+        const option = element('option', '', text); option.value = value; modeSelect.append(option);
       });
-      modeSelect.value = 'parallel';
       planArea.append(modeLabel, modeSelect);
-      const stepsInput = element('textarea', '', 'Изучить исходные данные\nПодготовить решение\nПроверить результат');
-      stepsInput.setAttribute('aria-label', 'Этапы плана');
-      planArea.append(stepsInput);
-      planArea.append(makeButton('Сохранить план', async () => {
+
+      const stageRows = element('div', 'sa-stage-list');
+      const toolOptions = [
+        ['manual', 'Ручной этап', 'Опишите этап'],
+        ['runtime.version', 'Проверить версию Лешего', 'Проверить версию Лешего'],
+        ['runtime.platform', 'Посмотреть систему Лешего', 'Посмотреть систему Лешего'],
+        ['knowledge.search', 'Найти в проверенных знаниях', 'Найти сведения в знаниях']
+      ];
+      const addStage = (initialTool) => {
+        if (stageRows.children.length >= 64) {
+          say('Для удобства редактор поддерживает не более 64 этапов за раз.', true); return;
+        }
+        const item = element('div', 'sa-stage');
+        const select = element('select');
+        select.setAttribute('aria-label', 'Действие этапа');
+        toolOptions.forEach(([value, name]) => {
+          const option = element('option', '', name); option.value = value; select.append(option);
+        });
+        select.value = initialTool;
+        const title = element('input', 'sa-stage-title');
+        title.type = 'text'; title.maxLength = 300;
+        title.setAttribute('aria-label', 'Название этапа');
+        const query = element('input', 'sa-stage-query');
+        query.type = 'text'; query.maxLength = 300;
+        query.placeholder = 'Что искать? Например: источники информации о памяти агентов';
+        query.setAttribute('aria-label', 'Запрос для поиска в знаниях');
+        const update = () => {
+          query.hidden = select.value !== 'knowledge.search';
+          const suggested = toolOptions.find(x => x[0] === select.value)?.[2] || '';
+          if (!title.value || toolOptions.some(x => x[2] === title.value)) title.value = select.value === 'manual' ? '' : suggested;
+          title.placeholder = select.value === 'manual' ? 'Что должен сделать человек?' : suggested;
+        };
+        select.addEventListener('change', update);
+        update();
+        const remove = makeButton('Убрать', () => item.remove());
+        remove.setAttribute('aria-label', 'Удалить этап');
+        item.append(select, title, query, remove);
+        stageRows.append(item);
+        if (initialTool === 'knowledge.search') query.focus();
+        else if (initialTool === 'manual') title.focus();
+      };
+      const choices = element('div', 'sa-row');
+      [
+        ['Проверить версию', 'runtime.version'],
+        ['Сведения о системе', 'runtime.platform'],
+        ['Поиск в знаниях', 'knowledge.search'],
+        ['Ручной этап', 'manual']
+      ].forEach(([name, kind]) => choices.append(makeButton('+ ' + name, () => addStage(kind))));
+      planArea.append(choices, stageRows);
+
+      const planPayload = (steps) => {
+        const payload = {action: 'plan_create', id: taskId, steps};
+        if (new TextEncoder().encode(JSON.stringify(payload)).length > 262144) {
+          say('Слишком много данных (максимум 256 КБ). Разделите план на несколько задач.', true);
+          return null;
+        }
+        return payload;
+      };
+      const createBuiltPlan = async () => {
+        const rows = Array.from(stageRows.children);
+        if (!rows.length) { say('Сначала добавьте хотя бы одно действие.', true); return; }
+        const steps = [];
+        for (const [index, item] of rows.entries()) {
+          const tool = item.querySelector('select').value;
+          const title = item.querySelector('.sa-stage-title').value.trim();
+          const query = item.querySelector('.sa-stage-query').value.trim();
+          if (!title) { say('У каждого этапа должно быть понятное название.', true); return; }
+          if (tool === 'knowledge.search' && (query.length < 3 || query.length > 300)) {
+            say('Введите запрос для поиска в знаниях — от 3 до 300 символов.', true);
+            item.querySelector('.sa-stage-query').focus(); return;
+          }
+          const step = {id: 'step_' + (index + 1), title,
+            depends_on: modeSelect.value === 'sequential' && index ? ['step_' + index] : []};
+          if (tool !== 'manual') {
+            step.tool = tool;
+            step.arguments = tool === 'knowledge.search' ? {query} : {};
+          }
+          steps.push(step);
+        }
+        const payload = planPayload(steps);
+        if (payload) await perform(payload);
+      };
+      planArea.append(makeButton('Сохранить план из действий', createBuiltPlan));
+      planArea.append(element('p', 'sa-help',
+        'После сохранения включите «Автозапуск проверок» для выполнения в фоне. Это не включает управление файлами или системой.'));
+
+      const simple = element('details', 'sa-advanced');
+      simple.append(element('summary', '', 'Другой способ: перечислить ручные этапы строками'));
+      simple.append(element('p', 'sa-help', 'Напишите каждый этап с новой строки. Эти этапы не выполняются автоматически.'));
+      const stepsInput = element('textarea');
+      stepsInput.value = 'Изучить исходные данные\nПодготовить решение\nПроверить результат';
+      stepsInput.setAttribute('aria-label', 'Ручные этапы плана');
+      simple.append(stepsInput);
+      simple.append(makeButton('Сохранить ручные этапы', async () => {
         const titles = stepsInput.value.split('\n').map(x => x.trim()).filter(Boolean);
         if (!titles.length || titles.some(x => x.length > 300)) {
           say('Нужен хотя бы один этап, каждый до 300 символов.', true); return;
         }
-        const steps = titles.map((title, index) => ({ id: `step_${index + 1}`, title,
-          depends_on: modeSelect.value === 'sequential' && index ? [`step_${index}`] : [] }));
-        const payload = { action: 'plan_create', id: taskId, steps };
-        if (new TextEncoder().encode(JSON.stringify(payload)).length > 262144) {
-          say('План слишком большой для одного запроса (максимум 256 КБ). Разделите его на независимые задания.', true); return;
-        }
-        await perform(payload);
-      }, false));
+        const steps = titles.map((title, index) => ({
+          id: 'step_' + (index + 1), title,
+          depends_on: modeSelect.value === 'sequential' && index ? ['step_' + index] : []
+        }));
+        const payload = planPayload(steps);
+        if (payload) await perform(payload);
+      }));
+      planArea.append(simple);
       host.append(planArea);
     }
     if (!detail.latest_report && !detail.attention && !steps.length && !detail.plan) {
@@ -154,15 +269,27 @@
     const actions = element('div', 'sa-controls');
     const details = element('div', 'sa-detail');
     details.hidden = true;
-    actions.append(makeButton('Подробнее', async () => {
-      if (!details.hidden) { details.hidden = true; return; }
-      details.hidden = false;
+    const loadDetails = async () => {
       details.textContent = 'Загрузка…';
       try {
         const response = await api('/v1/superagent/tasks?id=' + encodeURIComponent(task.id));
-        renderDetails(details, response.task, task.id);
+        if (expandedTasks.has(task.id)) renderDetails(details, response.task, task.id);
       } catch (error) { details.textContent = error.message; }
+    };
+    actions.append(makeButton('Подробнее', () => {
+      if (expandedTasks.has(task.id)) {
+        expandedTasks.delete(task.id);
+        details.hidden = true;
+      } else {
+        expandedTasks.add(task.id);
+        details.hidden = false;
+        loadDetails();
+      }
     }));
+    if (expandedTasks.has(task.id)) {
+      details.hidden = false;
+      loadDetails();
+    }
     if (task.can_restore) actions.append(makeButton('Вернуть из архива', () => perform({ action: 'restore', id: task.id })));
     if (task.can_stop) actions.append(makeButton('Остановить', () => perform({ action: 'stop', id: task.id }), false, 'sa-danger'));
     if (task.can_retry) actions.append(makeButton('Повторить', () => perform({ action: 'retry', id: task.id })));
@@ -196,8 +323,8 @@
       const data = await api('/v1/superagent/tasks?archived=' + (showArchived ? '1' : '0'));
       const signature = JSON.stringify([showArchived, data.tasks]);
       if (signature === lastSignature && !force) return;
-      const activeReply = document.activeElement?.closest?.('.sa-answer');
-      if (activeReply && activeReply.querySelector('textarea')?.value.trim() && !force) return;
+      const editing = document.activeElement?.closest?.('.sa-answer, .sa-plan');
+      if (editing && !force) return;
       lastSignature = signature;
       list.replaceChildren();
       if (!data.tasks.length) list.append(element('div', 'sa-help', showArchived ? 'В архиве пока нет заданий.' : 'Активных заданий пока нет. Опишите задачу выше и нажмите «Запустить».'));
@@ -230,6 +357,7 @@
     row.append(makeButton('Обновить список', () => refresh(true)));
     const toggleArchive = makeButton('Показать архив', async () => {
       showArchived = !showArchived;
+      expandedTasks.clear();
       toggleArchive.textContent = showArchived ? 'Показать активные' : 'Показать архив';
       lastSignature = '';
       await refresh(true);
@@ -237,23 +365,18 @@
     row.append(toggleArchive);
     panel.append(row);
     const tips = element('details');
-    const label = element('summary', '', 'Что делают кнопки и команды? Примеры');
+    const label = element('summary', '', 'Подсказки и примеры');
     tips.append(label);
     [
-      ['Запустить задачу', 'Создаёт новое автономное задание. Не даёт дополнительных разрешений на опасные действия.', '/agent Изучи причину ошибки запуска и подготовь отчёт'],
-      ['Остановить', 'Останавливает дальнейшие действия задания; уже начатый ответ модели может завершиться.', '/agent stop SA-...'],
-      ['Повторить', 'Заново ставит в очередь задание после ошибки или ожидания.', '/agent retry SA-...'],
-      ['Ответить', 'Передаёт ответ, когда SuperAgent ожидает решения.', '/agent answer SA-... Да, продолжай'],
-      ['Подробнее', 'Показывает отчёт, недавние инструментальные шаги и этапы плана.', '/agent status SA-...'],
-      ['Отправить ответ и продолжить', 'Появляется прямо под вопросом, когда агент ожидает ответа. После отправки задача возобновляется.', 'Ответ вводится в карточке задания'],
-      ['Завершить и закрыть', 'Переносит завершённое задание в архив, сохраняя отчёт и историю.', 'Кнопка в карточке задания'],
-      ['Отменить и закрыть', 'Останавливает незаконченное задание и переносит его в архив.', 'Кнопка в карточке задания'],
-      ['Показать архив', 'Показывает закрытые задачи с возможностью вернуть их в список.', 'Кнопка над списком'],
-      ['Пауза / продолжение плана', 'Меняет состояние сохранённого плана. Само создание плана пока не запускает этапы.', '/agent plan status SA-...']
-    ].forEach(([name, description, command]) => {
-      tips.append(element('p', 'sa-help', name + ' — ' + description));
-      tips.append(element('code', '', command));
-    });
+      ['Запустить задачу', 'Опишите обычными словами, что должен сделать Леший.'],
+      ['Подробнее', 'В карточке доступны история, отчёт, этапы и управление проверками.'],
+      ['Составить план', 'Добавьте готовые действия кнопками. Можете выбрать параллельное выполнение или порядок этапов.'],
+      ['Выполнить доступные проверки', 'Однократно запускает готовые безопасные чтения.'],
+      ['Включить автозапуск проверок', 'Позволяет Лешему выполнять разрешённые чтения в фоне. Можно выключить в любой момент.'],
+      ['Пауза и отмена', 'Останавливают новые шаги, сохраняя уже полученные результаты.'],
+      ['Ответить на вопрос', 'Напишите ответ прямо в карточке, без специальных команд и идентификаторов.'],
+      ['Архив', 'Завершённые задания можно закрывать и возвращать из архива.']
+    ].forEach(([name, description]) => tips.append(element('p', 'sa-help', name + ' — ' + description)));
     tips.append(element('p', 'sa-help', 'Примеры новых задач — нажмите на пример, затем «Запустить»:'));
     examples.forEach(example => tips.append(makeButton(example, () => { input.value = example; input.focus(); }, false, '')));
     panel.append(tips);
