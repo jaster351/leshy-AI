@@ -113,8 +113,9 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
         self.assertEqual(self.a.status(self.owner_a)["pair_count"], 0)
         self.assertEqual(self.b.status(self.owner_b)["pair_count"], 0)
         self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
-        # A retry for the SAME owner and node is safe after a lost response.
-        self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
+        # A consumed invite must not reissue the persistent pair key.
+        with self.assertRaises(PermissionError):
+            self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
         self.assertEqual(self.a.status(self.owner_a)["pair_count"], 1)
         self.assertEqual(self.b.status(self.owner_b)["pair_count"], 1)
 
@@ -135,9 +136,11 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
             self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
         self.assertEqual(self.a.status(self.owner_a)["pair_count"], 1)
         self.assertEqual(self.b.status(self.owner_b)["pair_count"], 0)
-        self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
+        # Retrying the captured invite must not return the pair secret.
+        with self.assertRaises(PermissionError):
+            self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
         self.assertEqual(self.a.status(self.owner_a)["pair_count"], 1)
-        self.assertEqual(self.b.status(self.owner_b)["pair_count"], 1)
+        self.assertEqual(self.b.status(self.owner_b)["pair_count"], 0)
 
     def test_failed_pair_insert_rolls_back_invitation_consumption(self):
         invite = self.a.invite(self.owner_a)
