@@ -58,9 +58,13 @@ def find_catalog_matches(directory: Path | str, query: str, *, limit: int = 4) -
         return []
     root = Path(directory).expanduser().resolve()
     index_path = root / "index.json"
-    if index_path.is_symlink() or not index_path.is_file() or index_path.stat().st_size > _MAX_INDEX_BYTES:
+    # A partially synchronized or damaged index must not break normal chat.
+    try:
+        if (index_path.is_symlink() or not index_path.is_file() or index_path.stat().st_size > _MAX_INDEX_BYTES):
+            return []
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
         return []
-    index = json.loads(index_path.read_text(encoding="utf-8"))
     if not isinstance(index, dict) or not isinstance(index.get("records"), dict):
         return []
     entries = index["records"]
@@ -98,8 +102,10 @@ def find_catalog_matches(directory: Path | str, query: str, *, limit: int = 4) -
                 continue
             if not is_fresh(record, now=now):
                 continue
-            haystack = (record["topic"] + " " + record["claim"]).lower()
-            overlap = sum(1 for word in terms if word in haystack)
+            # Exact tokens prevent false matches inside unrelated words,
+            # e.g. "кот" must not match "котировки".
+            record_terms = _terms(record["topic"] + " " + record["claim"])
+            overlap = len(terms & record_terms)
             if overlap == 0:
                 continue
             score = overlap / len(terms) + min(0.25, overlap * 0.05)
