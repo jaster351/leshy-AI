@@ -123,12 +123,19 @@ def ticket_details(service: Any, owner_id: str, ticket_id: str) -> dict[str, Any
     except KeyError:
         plan = None
     if plan:
+        all_steps = plan.get("steps") or []
+        counts: dict[str, int] = {}
+        for step in all_steps:
+            state = str(step.get("state") or "unknown")
+            counts[state] = counts.get(state, 0) + 1
         result["plan"] = {
             "state": plan.get("state"),
+            "total_steps": len(all_steps),
+            "state_counts": counts,
             "steps": [{"id": str(step.get("id") or "")[:64],
                        "title": str(step.get("title") or "")[:300],
                        "state": str(step.get("state") or "")[:40]}
-                      for step in plan.get("steps", [])[:64]],
+                      for step in all_steps[:64]],
         }
     return {"task": result}
 
