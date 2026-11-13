@@ -81,7 +81,7 @@ class RemoteActionBoundaryTests(unittest.TestCase):
         self.operation.reset_mock()
         for capability in ("execute", "update", "reboot", "rdp"):
             with self.assertRaises(PermissionError):
-                boundary.perform(capability=capability, approval_receipt="claimed", **self.kwargs)
+                boundary.perform(capability=capability, approval_receipt="claimed", action_digest="a" * 64, **self.kwargs)
         self.operation.assert_not_called()
 
     def test_unknown_host_key_and_other_owner_are_rejected(self):
@@ -111,7 +111,7 @@ class RemoteActionBoundaryTests(unittest.TestCase):
         for capability in ("rdp", "execute"):
             with self.assertRaises(PermissionError):
                 boundary.perform(
-                    capability=capability, approval_receipt="valid",
+                    capability=capability, approval_receipt="valid", action_digest="a" * 64,
                     **{**self.kwargs, "web_cookie": "other-cookie"}
                 )
         self.operation.assert_not_called()
@@ -121,7 +121,7 @@ class RemoteActionBoundaryTests(unittest.TestCase):
             self.policy, approval_verifier=lambda actor, node, capability, receipt: False
         )
         with self.assertRaises(PermissionError):
-            denied.perform(capability="rdp", approval_receipt="receipt", **self.kwargs)
+            denied.perform(capability="rdp", approval_receipt="receipt", action_digest="a" * 64, **self.kwargs)
         self.operation.assert_not_called()
 
         def revoke_during_confirmation(actor: VerifiedActor, node: str, capability: str, receipt: str):
@@ -137,7 +137,7 @@ class RemoteActionBoundaryTests(unittest.TestCase):
     def test_valid_server_approval_runs_exactly_one_operation(self):
         verified = Mock(return_value=True)
         boundary = RemoteActionBoundary(self.policy, approval_verifier=verified)
-        result = boundary.perform(capability="execute", approval_receipt="receipt-123", **self.kwargs)
+        result = boundary.perform(capability="execute", approval_receipt="receipt-123", action_digest="a" * 64, **self.kwargs)
         self.assertEqual(result, {"checked": True})
         self.assertEqual(self.operation.call_count, 1)
         verified.assert_called_once()
