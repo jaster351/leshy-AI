@@ -65,6 +65,7 @@ class RemoteActionBoundaryTests(unittest.TestCase):
         self.kwargs = {
             "web_cookie": "owner-cookie", "node_id": "node-1",
             "observed_fingerprint": "a" * 64, "operation": self.operation,
+            "action_digest": "f" * 64,
         }
 
     def tearDown(self):
@@ -140,7 +141,18 @@ class RemoteActionBoundaryTests(unittest.TestCase):
         self.assertEqual(result, {"checked": True})
         self.assertEqual(self.operation.call_count, 1)
         verified.assert_called_once()
-        self.assertEqual(verified.call_args.args[2:], ("execute", "receipt-123"))
+        self.assertEqual(verified.call_args.args[2:], ("execute", "f" * 64, "receipt-123"))
+
+    def test_missing_or_invalid_action_digest_denies_mutation(self):
+        boundary = RemoteActionBoundary(self.policy, approval_verifier=lambda *_: True)
+        for digest in ("", "not-a-digest", "a" * 63, "z" * 64):
+            with self.assertRaises(PermissionError):
+                boundary.perform(
+                    capability="execute",
+                    approval_receipt="receipt-for-other-action",
+                    **{**self.kwargs, "action_digest": digest}
+                )
+        self.operation.assert_not_called()
 
     def test_arbitrary_commands_or_claimed_actor_do_not_bypass_gate(self):
         boundary = RemoteActionBoundary(self.policy)
