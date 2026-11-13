@@ -12,6 +12,7 @@ from .diagnostics import event, problem
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
+from .keyboard_layout import LayoutStreamFormatter, layout_answer, layout_context, suggest_keyboard_layout
 from .capability_registry import is_self_capability_question
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply, work_reference_context
@@ -519,8 +520,10 @@ class RealtimeChatManager:
         # Обычные беседы и их быстрый streaming не затрагиваются.
         from .verified_clock import clock_answer, checked_clock_answer
         from .weather_runtime import is_weather_request, weather_answer
-        clock = clock_answer(message)
-        if clock is not None or is_weather_request(message):
+        layout_suggestion = suggest_keyboard_layout(message)
+        factual_query = layout_suggestion.corrected if layout_suggestion else message
+        clock = clock_answer(factual_query)
+        if clock is not None or is_weather_request(factual_query):
             rid, cancel = self._register(request_id)
             sid = ""
             try:
@@ -534,7 +537,7 @@ class RealtimeChatManager:
                         "kind": "weather", "phase": "fetching",
                         "text": "Получаю прогноз из погодного сервиса…",
                     })
-                    answer = str(weather_answer(message) or "Не удалось получить прогноз.")
+                    answer = str(weather_answer(factual_query) or "Не удалось получить прогноз.")
                     sources = (
                         [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
                         if "Источник: Open-Meteo" in answer else (
@@ -544,18 +547,19 @@ class RealtimeChatManager:
                     )
                 else:
                     from .research_policy import research_reason
-                    if research_reason(message) == "явный запрос интернет-поиска":
+                    if research_reason(factual_query) == "явный запрос интернет-поиска":
                         yield StreamEvent("activity", {
                             "kind": "web_search", "phase": "searching",
                             "text": "Проверяю дату в интернете дополнительно к часам компьютера…",
                         })
-                        answer, sources = checked_clock_answer(message, self.app.live_search)
+                        answer, sources = checked_clock_answer(factual_query, self.app.live_search)
                         answer = str(answer or clock)
                     else:
                         answer, sources = clock, []
                 if cancel.is_set():
                     yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
                     return
+                answer = layout_answer(message, answer)
                 answered_at = self.app._save_assistant(sid, answer)
                 event("chat_factual_tool_answered", kind="clock" if clock is not None else "weather",
                       session_id=sid, request_id=rid, source_count=len(sources))
@@ -661,6 +665,9 @@ class RealtimeChatManager:
             messages, sources, search_attempted = self._build_context(
                 message, owner_id, rows, search_plan=plan, lookup_query=lookup_query,
             )
+            layout_hint = layout_context(message)
+            if layout_hint:
+                messages.insert(0, ChatMessage("system", layout_hint))
             cinema_plan = None if is_offline_creative_request(message) else cinema_query(message, rows)
             if cinema_plan is not None and not sources:
                 answer = cinema_no_data(cinema_plan)
@@ -731,6 +738,7 @@ class RealtimeChatManager:
             # недоступен, даже когда поиск уже выполнен. Иначе неверный ответ
             # успевает появиться в Telegram до финального редактирования.
             hold_search_answer = bool(search_attempted)
+            stream_formatter = LayoutStreamFormatter(message)
             for delta in self._llm_stream(messages, cancel, owner_id):
                 if cancel.is_set():
                     break
@@ -739,8 +747,14 @@ class RealtimeChatManager:
                     continue
                 answer_parts.append(text)
                 if not hold_search_answer:
-                    yield StreamEvent("delta", {"text": text})
+                    visible = stream_formatter.push(text)
+                    if visible:
+                        yield StreamEvent("delta", {"text": visible})
 
+            if not hold_search_answer and not cancel.is_set():
+                tail = stream_formatter.finish()
+                if tail:
+                    yield StreamEvent("delta", {"text": tail})
             answer = "".join(answer_parts).strip()
             stopped = cancel.is_set()
             if not stopped and search_attempted and sources:
@@ -796,6 +810,8 @@ class RealtimeChatManager:
                         "но подходящих подтверждённых источников не нашёл."
                     )
                 event("chat_stream_web_refusal_handled", request_id=rid, source_count=len(sources))
+            if not cancel.is_set():
+                answer = layout_answer(message, answer)
             if hold_search_answer and not cancel.is_set():
                 for part in self._chunk_fallback(answer, 160):
                     yield StreamEvent("delta", {"text": part})
