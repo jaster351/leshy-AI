@@ -29,8 +29,17 @@ def execute_plan_command(service: Any, action: str, ticket_id: str,
         steps = result["steps"]
         shown = steps[:64]  # Keep chat output bounded; never hide the total.
         lines = [f"План {result['id']}: {result['state']} — {len(steps)} этапов"]
-        lines.extend(f"- {step['id']}: {step['state']} ({step['title'][:100]})"
-                     for step in shown)
+        for step in shown:
+            row = f"- {step['id']}: {step['state']} ({step['title'][:100]})"
+            if step['state'] == 'done' and step.get('tool'):
+                try:
+                    evidence = json.loads(step.get('output') or '{}')
+                except (ValueError, TypeError):
+                    evidence = {}
+                receipt = evidence.get('receipt_id') if isinstance(evidence, dict) else None
+                if isinstance(receipt, str) and receipt:
+                    row += f" — receipt: {receipt[:64]}"
+            lines.append(row)
         if len(steps) > len(shown):
             summary: dict[str, int] = {}
             for step in steps:
