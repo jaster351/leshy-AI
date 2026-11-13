@@ -113,8 +113,31 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
         self.assertEqual(self.a.status(self.owner_a)["pair_count"], 0)
         self.assertEqual(self.b.status(self.owner_b)["pair_count"], 0)
         self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
-        with self.assertRaises(PermissionError):
+        # A retry for the SAME owner and node is safe after a lost response.
+        self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
+        self.assertEqual(self.a.status(self.owner_a)["pair_count"], 1)
+        self.assertEqual(self.b.status(self.owner_b)["pair_count"], 1)
+
+    def test_lost_pairing_response_can_be_retried_without_new_pair(self):
+        invite = self.a.invite(self.owner_a)
+        original = self.b._signed_post
+        replies = []
+
+        def lose_response(endpoint, route, body):
+            answer = original(endpoint, route, body)
+            if route.endswith("accept") and not replies:
+                replies.append(answer)
+                raise ConnectionError("simulated lost HTTP response")
+            return answer
+
+        self.b._signed_post = lose_response
+        with self.assertRaises(ConnectionError):
             self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
+        self.assertEqual(self.a.status(self.owner_a)["pair_count"], 1)
+        self.assertEqual(self.b.status(self.owner_b)["pair_count"], 0)
+        self.b.join(self.owner_b, invite["endpoint"], invite["invite_id"], invite["code"])
+        self.assertEqual(self.a.status(self.owner_a)["pair_count"], 1)
+        self.assertEqual(self.b.status(self.owner_b)["pair_count"], 1)
 
     def test_failed_pair_insert_rolls_back_invitation_consumption(self):
         invite = self.a.invite(self.owner_a)
