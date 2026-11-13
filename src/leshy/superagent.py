@@ -122,7 +122,7 @@ def parse_superagent_intent(text: str) -> SuperAgentIntent | None:
     if plan_create:
         return SuperAgentIntent("plan_create", argument=plan_create.group(2).strip(),
                                 ticket_id=plan_create.group(1))
-    plan_action = re.fullmatch(r"plan\s+(status|pause|resume|cancel)\s+(SA-[A-Za-z0-9-]+)",
+    plan_action = re.fullmatch(r"plan\s+(status|pause|resume|cancel|run)\s+(SA-[A-Za-z0-9-]+)",
                                body, re.IGNORECASE)
     if plan_action:
         return SuperAgentIntent("plan_" + plan_action.group(1).lower(), ticket_id=plan_action.group(2))
