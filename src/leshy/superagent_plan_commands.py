@@ -16,6 +16,14 @@ def execute_plan_command(service: Any, action: str, ticket_id: str,
         return (f"План создан для {result['id']}: {len(result['steps'])} этапов. "
                 "Этапы сохранены, но не запущены автоматически. "
                 f"Состояние: /agent plan status {result['id']}")
+    if action == "plan_run":
+        from .superagent_plan_runner import execute_ready_plan_reads
+        result = execute_ready_plan_reads(service, ticket_id, owner_id)
+        return (f"План {result['id']}: {result['state']}; "
+                f"подтверждённых чтений: {result['completed']}, "
+                f"ошибок: {result['errors']}, "
+                f"всего этапов: {result['total']}. "
+                "Неисполняемые текстовые этапы остаются в очереди.")
     if action == "plan_status":
         result = service.plans.snapshot(ticket_id, owner_id)
         steps = result["steps"]
