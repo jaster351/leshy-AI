@@ -223,6 +223,78 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.a._pair_row(pair_id)
 
+    def test_conflicts_compare_utc_instants_not_timezone_strings(self):
+        # An offset +03:00 string can look newer but denote an older instant.
+        local = "2025-05-03T08:00:00+00:00"
+        older = "2025-05-03T10:30:00+03:00"  # 07:30 UTC
+        newer = "2025-05-03T07:59:00-01:00"  # 08:59 UTC
+        with self.a_storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO user_preferences(owner_id,key,value_json,updated_at) VALUES(?,?,?,?)",
+                (self.owner_a, "ui.theme", '"local"', local),
+            )
+            conn.execute(
+                "UPDATE owner_profiles SET display_name=?,updated_at=? WHERE id=?",
+                ("Local", local, self.owner_a),
+            )
+
+        def document(stamp, value, name):
+            return {
+                "version": 1,
+                "preferences": [{
+                    "key": "ui.theme", "value_json": value,
+                    "updated_at": stamp, "source_node": "remote-node",
+                }],
+                "profile": {"display_name": name, "updated_at": stamp,
+                            "source_node": "remote-node"},
+            }
+
+        self.a._apply(self.owner_a, document(older, '"older"', "Older"))
+        with self.a_storage.connection() as conn:
+            row = conn.execute("SELECT value_json FROM user_preferences WHERE owner_id=? AND key=?",
+                               (self.owner_a, "ui.theme")).fetchone()
+            name = conn.execute("SELECT display_name FROM owner_profiles WHERE id=?",
+                                (self.owner_a,)).fetchone()
+        self.assertEqual(row["value_json"], '"local"')
+        self.assertEqual(name["display_name"], "Local")
+
+        self.a._apply(self.owner_a, document(newer, '"newer"', "Newer"))
+        with self.a_storage.connection() as conn:
+            row = conn.execute("SELECT value_json FROM user_preferences WHERE owner_id=? AND key=?",
+                               (self.owner_a, "ui.theme")).fetchone()
+            name = conn.execute("SELECT display_name FROM owner_profiles WHERE id=?",
+                                (self.owner_a,)).fetchone()
+        self.assertEqual(row["value_json"], '"newer"')
+        self.assertEqual(name["display_name"], "Newer")
+
+    def test_equal_instant_uses_stable_source_tie_breaker(self):
+        # Conflicting values with the same UTC instant must converge, not oscillate.
+        earlier_format = "2025-05-03T08:00:00+00:00"
+        same_instant = "2025-05-03T10:00:00+02:00"
+        with self.a_storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO user_preferences(owner_id,key,value_json,updated_at) VALUES(?,?,?,?)",
+                (self.owner_a, "ui.theme", '"initial"', earlier_format),
+            )
+        # node-z wins a UTC-instant tie with the local node-a.
+        self.a._apply(self.owner_a, {
+            "version": 1, "profile": {},
+            "preferences": [{"key": "ui.theme", "value_json": '"winner"',
+                             "updated_at": same_instant, "source_node": "node-z"}],
+        })
+        # A stale copy from another node cannot overwrite the winner.
+        self.a._apply(self.owner_a, {
+            "version": 1, "profile": {},
+            "preferences": [{"key": "ui.theme", "value_json": '"loser"',
+                             "updated_at": earlier_format, "source_node": "node-b"}],
+        })
+        with self.a_storage.connection() as conn:
+            row = conn.execute("SELECT value_json FROM user_preferences WHERE owner_id=? AND key=?",
+                               (self.owner_a, "ui.theme")).fetchone()
+        self.assertEqual(row["value_json"], '"winner"')
+        values = self.a._snapshot(self.owner_a)["preferences"]
+        self.assertEqual(next(x for x in values if x["key"] == "ui.theme")["source_node"], "node-z")
+
     def test_non_lan_endpoints_are_rejected(self):
         for endpoint in (
             "https://example.com:8765", "http://127.0.0.1:8765",
