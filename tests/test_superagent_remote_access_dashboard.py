@@ -5,6 +5,7 @@ import hashlib
 import json
 import sqlite3
 import time
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -106,6 +107,15 @@ class RemoteAccessConsoleTests(unittest.TestCase):
                 (ValueError, PermissionError)
             ):
                 revoke_remote_grant(self.policy, self.owner, payload)
+
+    def test_web_controls_exist_without_remote_command_buttons(self):
+        js = (Path(__file__).resolve().parents[1] /
+              "web" / "superagent-dashboard.js").read_text(encoding="utf-8")
+        for label in ("Удалённые компьютеры и разрешения", "Отозвать это разрешение",
+                      "/v1/superagent/remote-access/revoke",
+                      "Новый компьютер не добавляется по одному IP"):
+            self.assertIn(label, js)
+        self.assertNotIn("action:'remote_shell'", js)
 
     def test_expired_grant_excluded_without_disabling_revocation(self):
         with self.storage.connection() as conn:
