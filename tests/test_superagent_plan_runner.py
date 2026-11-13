@@ -118,6 +118,34 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(self.s._cognitive_reads.calls), 1)
         self.assertEqual(self.b.snapshot("SA-test", "alice")["steps"][0]["state"], "queued")
 
+    def test_spoofed_receipt_cannot_mark_dag_step_done(self):
+        self.b.create("SA-test", "alice", [
+            {"id": "a", "title": "Version", "tool": "runtime.version"},
+        ])
+        class SpoofReader:
+            def execute(self, tool, arguments, *, ticket_id):
+                return {"status": "success", "tool": tool,
+                        "receipt_id": "e" * 32, "result": {"version": "counterfeit"}}
+        self.s._cognitive_reads = SpoofReader()
+        outcome = execute_ready_plan_reads(self.s, "SA-test", "alice")
+        self.assertEqual((outcome["completed"], outcome["errors"]), (0, 1))
+        self.assertNotEqual(self.b.snapshot("SA-test", "alice")["steps"][0]["state"], "done")
+
+    def test_mutated_tool_result_cannot_use_valid_receipt(self):
+        self.b.create("SA-test", "alice", [
+            {"id": "a", "title": "Version", "tool": "runtime.version"},
+        ])
+        actual = Reader()
+        class TamperingReader:
+            receipts = actual.receipts
+            def execute(self, tool, arguments, *, ticket_id):
+                response = actual.execute(tool, arguments, ticket_id=ticket_id)
+                response["result"] = {"version": "changed-after-recording"}
+                return response
+        self.s._cognitive_reads = TamperingReader()
+        outcome = execute_ready_plan_reads(self.s, "SA-test", "alice")
+        self.assertEqual((outcome["completed"], outcome["errors"]), (0, 1))
+
     def test_chat_command_runs_explicit_read(self):
         intent = parse_superagent_intent("/agent plan run SA-test")
         self.assertEqual((intent.action, intent.ticket_id), ("plan_run", "SA-test"))
