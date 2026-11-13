@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-13T19:08:46.407144+00:00",
+  "updated_at": "2026-11-13T19:22:41.046492+00:00",
   "last_successful_issue": {
-    "searched_at": "2026-11-13T19:08:46.407144+00:00",
-    "previous_issue_at": "2026-11-13T14:04:39.040505+00:00",
+    "searched_at": "2026-11-13T19:22:41.046492+00:00",
+    "previous_issue_at": "2026-11-13T19:08:46.407144+00:00",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "arXiv:2611.17161"
+      "arXiv:2611.16366"
     ]
   },
   "previous_issue_from_owner": {
@@ -436,6 +436,17 @@
       "record_id": "research-arxiv-2611-17161",
       "code_url": null,
       "code_access_note": "Author-provided GitHub endpoint returned 404"
+    },
+    {
+      "id": "arXiv:2611.16366",
+      "version": "v1",
+      "first_published_at": "2026-11-12T06:29:40Z",
+      "version_published_at": "2026-11-12T06:29:40Z",
+      "checked_at": "2026-11-13T19:22:41.046492+00:00",
+      "publication_status": "preprint",
+      "url": "https://arxiv.org/abs/2611.16366",
+      "record_id": "research-arxiv-2611-16366",
+      "package": "knowledge/updates/2026-11-14/0019-research.jsonl"
     }
   ],
   "issues": [
