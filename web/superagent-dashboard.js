@@ -46,6 +46,11 @@
     .sa-remote-card:last-child{border-bottom:0}
     .sa-remote-note{font-size:12px;line-height:1.5;color:var(--muted);margin:8px 0}
     .sa-remote .sa-danger{border-color:rgba(255,140,140,.45);color:var(--danger)}
+    .sa-remote button{min-height:35px;padding:7px 11px;margin:5px 6px 5px 0;border:1px solid var(--line);border-radius:9px;background:rgba(96,190,133,.13);color:var(--text);cursor:pointer}
+    .sa-remote button:hover{background:rgba(116,213,155,.22)}
+    .sa-remote button:disabled{opacity:.45;cursor:default}
+    .sa-remote .sa-ssh-select{display:block;width:100%;max-width:460px;margin:6px 0 9px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
+    .sa-remote .sa-error{color:var(--danger)}
     .sa-dashboard code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:7px 0;color:var(--accent)}
     .sa-plan{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:10px}.sa-plan textarea{min-height:75px}.sa-plan select{width:100%;max-width:460px;margin:6px 0 10px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
     .sa-stage-result{padding:7px 9px;margin:5px 0;border-left:2px solid var(--line);overflow-wrap:anywhere}.sa-evidence{font-size:12px;color:var(--accent);margin:4px 0}.sa-proof{font-size:12px;margin:4px 0 7px}.sa-proof summary{cursor:pointer}.sa-stage{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px}
