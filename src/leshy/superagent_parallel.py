@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from .parallel_tool_scheduler import ParallelPlanError, execute_parallel_plan
+from .superagent_worker_capacity import available_worker_slots, worker_ceiling
 
 
 COGNITIVE_READ_TOOLS = frozenset({"knowledge.search", "runtime.version"})
@@ -80,9 +81,12 @@ def run_superagent_parallel_reads(service: Any, ticket_id: str, attempt: int,
             except (TypeError, ValueError):
                 raise ParallelPlanError("Некорректные аргументы") from None
             mapping[signature] = tool_step * 24 + index + 1
+    capacity = available_worker_slots(worker_ceiling())
+    if capacity < 1:
+        raise ParallelPlanError("Недостаточно свободной памяти для нового параллельного чтения")
     return execute_parallel_plan(
         tasks, _JournaledReads(service, ticket_id, attempt, mapping, {}),
         context=None, seen_signatures=seen_signatures,
-        max_workers=8, cancel_event=_TicketCancelled(service, ticket_id),
+        max_workers=capacity, cancel_event=_TicketCancelled(service, ticket_id),
         allowed_tools=COGNITIVE_READ_TOOLS,
     )
