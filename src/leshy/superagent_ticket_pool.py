@@ -12,7 +12,9 @@ from typing import Any, Callable
 
 class ParallelTicketPool:
     def __init__(self, max_workers: int = 4):
-        self.max_workers = max(1, min(int(max_workers), 8))
+        if type(max_workers) is not int or not 1 <= max_workers <= 128:
+            raise ValueError("Invalid node-local worker capacity")
+        self.max_workers = max_workers
         self._executor = ThreadPoolExecutor(
             max_workers=self.max_workers, thread_name_prefix="leshy-superagent-job",
         )
@@ -44,10 +46,14 @@ class ParallelTicketPool:
         return failures
 
     def fill(self, next_due: Callable[[frozenset[str]], dict[str, Any] | None],
-             execute: Callable[[dict[str, Any]], Any], *, stopped: Callable[[], bool]) -> int:
-        """Claim up to the worker limit while excluding already-submitted IDs."""
+             execute: Callable[[dict[str, Any]], Any], *, stopped: Callable[[], bool],
+             capacity: int | None = None) -> int:
+        """Admit only available jobs; memory pressure never kills active work."""
+        if capacity is not None and (type(capacity) is not int or capacity < 0):
+            raise ValueError("Invalid worker admission capacity")
+        allowed = self.max_workers if capacity is None else min(self.max_workers, capacity)
         assigned = 0
-        while len(self._active) < self.max_workers and not stopped():
+        while len(self._active) < allowed and not stopped():
             ticket = next_due(self.active_ids)
             if ticket is None:
                 break
