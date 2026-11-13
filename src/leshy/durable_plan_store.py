@@ -365,6 +365,32 @@ class DurablePlanStore:
         return [{"id": str(row["plan_id"]), "owner_id": str(row["owner_id"])}
                 for row in rows]
 
+    def auto_ready(self, plan_id: str, owner_id: str, *, now: float | None = None) -> bool:
+        """Cheap read-only eligibility check; no claims of blocked manual steps."""
+        clock = time.time() if now is None else float(now)
+        with self._connection() as db:
+            state = self._check_owner(db, plan_id, owner_id)
+            row = db.execute("SELECT auto_run FROM durable_plans WHERE plan_id=?",
+                             (plan_id,)).fetchone()
+            if state != "active" or not row["auto_run"]:
+                return False
+            rows = db.execute(
+                "SELECT step_id,deps_json,state,tool_name,lease_until "
+                "FROM durable_plan_steps WHERE plan_id=?", (plan_id,),
+            ).fetchall()
+        states = {row["step_id"]: row["state"] for row in rows}
+        for step in rows:
+            if not step["tool_name"]:
+                continue
+            if step["state"] == "running" and float(step["lease_until"]) <= clock:
+                return True
+            if step["state"] == "queued" and all(
+                states.get(dependency) == "done"
+                for dependency in json.loads(step["deps_json"])
+            ):
+                return True
+        return False
+
     def snapshot(self, plan_id: str, owner_id: str) -> dict[str, Any]:
         with self._connection() as db:
             state = self._check_owner(db, plan_id, owner_id)
