@@ -327,6 +327,7 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._json(HTTPStatus.OK, {"inspection": {
                         "node_id": result["node_id"],
                         "os_family": result["os_family"],
+                        "distribution": str(result.get("distribution") or "")[:82],
                         "verified": bool(result["verified"]),
                         "method": result["method"],
                     }})
