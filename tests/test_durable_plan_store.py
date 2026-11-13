@@ -193,4 +193,72 @@ class DurableStoreTests(unittest.TestCase):
         self.assertFalse(self.store.complete(
             key, 'alice', 'n0', first['token'], success=True, now=7))
 
+
+    def test_explicit_safe_read_specs_survive_restart_and_dependency_claims(self):
+        steps = [
+            {'id': 'version', 'title': 'Read version',
+             'tool': 'runtime.version', 'arguments': {}},
+            {'id': 'search', 'title': 'Trusted knowledge',
+             'tool': 'knowledge.search', 'arguments': {'query': '  useful   knowledge   facts  '},
+             'depends_on': ['version']},
+        ]
+        key = self.store.create('alice', steps)
+        first = DurablePlanStore(self.path).claim(key, 'alice', now=10)
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0]['tool'], 'runtime.version')
+        self.assertEqual(first[0]['arguments'], {})
+        self.assertTrue(self.store.complete(key, 'alice', 'version',
+                         first[0]['token'], success=True, now=11))
+        second = DurablePlanStore(self.path).claim(key, 'alice', now=12)
+        self.assertEqual(second[0]['tool'], 'knowledge.search')
+        self.assertEqual(second[0]['arguments'], {'query': 'useful knowledge facts'})
+        self.assertEqual(DurablePlanStore(self.path).snapshot(key, 'alice')['steps'][1]['tool'],
+                         'knowledge.search')
+
+    def test_manual_descriptions_stay_inert_and_unapproved_tools_are_denied(self):
+        key = self.store.create('alice', [{'id': 'manual', 'title': 'Run arbitrary command'}])
+        claim = self.store.claim(key, 'alice', now=10)[0]
+        self.assertEqual((claim['tool'], claim['arguments']), ('', {}))
+        for tool, args in (
+            ('workspace.write', {'path': 'file'}),
+            ('shell.exec', {'command': 'echo hi'}),
+            ('runtime.version', {'command': 'echo hi'}),
+            ('knowledge.search', {'query': 'ab'}),
+            ('knowledge.search', {'query': 'some query', 'action': 'write'}),
+        ):
+            with self.subTest(tool=tool, arguments=args):
+                with self.assertRaises(PlanError):
+                    self.store.create('alice', [
+                        {'id': 'bad', 'title': 'Unsafe', 'tool': tool, 'arguments': args},
+                    ])
+
+    def test_migrates_legacy_plan_schema_without_resetting_lease(self):
+        import sqlite3
+        legacy = Path(self.temp.name) / 'old-plan.sqlite'
+        with sqlite3.connect(legacy) as conn:
+            conn.executescript("""
+                CREATE TABLE durable_plans(
+                    plan_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
+                    state TEXT NOT NULL, created_at REAL NOT NULL);
+                CREATE TABLE durable_plan_steps(
+                    plan_id TEXT NOT NULL, step_id TEXT NOT NULL,
+                    title TEXT NOT NULL, deps_json TEXT NOT NULL,
+                    state TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+                    max_attempts INTEGER NOT NULL, lease_token TEXT,
+                    lease_until REAL NOT NULL DEFAULT 0, output TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (plan_id,step_id));
+                INSERT INTO durable_plans VALUES('p','alice','active',1);
+                INSERT INTO durable_plan_steps VALUES(
+                    'p','old','Historical job','[]','running',1,3,'old-lease',9999999999,'previous output');
+            """)
+        migrated = DurablePlanStore(legacy)
+        snapshot = migrated.snapshot('p', 'alice')
+        self.assertEqual(snapshot['steps'][0]['state'], 'running')
+        self.assertEqual(snapshot['steps'][0]['output'], 'previous output')
+        self.assertEqual(snapshot['steps'][0]['tool'], '')
+        self.assertEqual(snapshot['steps'][0]['arguments'], {})
+        self.assertTrue(migrated.complete(
+            'p', 'alice', 'old', 'old-lease', success=True, now=10))
+
+
 if __name__=='__main__':unittest.main()
