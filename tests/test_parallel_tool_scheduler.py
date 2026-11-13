@@ -84,7 +84,7 @@ class ParallelPlanTests(unittest.TestCase):
         tools = FakeTools()
         plan = [task(f"step_{i}", f"q{i}") for i in range(15)]
         execute_parallel_plan(plan, tools, context=None, seen_signatures=set(), max_workers=99)
-        self.assertLessEqual(tools.maximum, 8)
+        self.assertLessEqual(tools.maximum, 24)
         self.assertGreaterEqual(tools.maximum, 2)
 
     def test_cancelled_plan_makes_no_calls(self):
@@ -95,6 +95,64 @@ class ParallelPlanTests(unittest.TestCase):
                                        seen_signatures=set(), cancel_event=stop)
         self.assertEqual(result[0]["status"], "cancelled")
         self.assertEqual(tools.calls, [])
+
+
+    def test_fast_descendant_starts_without_waiting_for_slow_sibling(self):
+        from concurrent.futures import ThreadPoolExecutor
+        slow_started = threading.Event()
+        fast_descendant = threading.Event()
+        release_slow = threading.Event()
+
+        class Tools:
+            def execute(self, name, args, *, context):
+                if args["query"] == "slow":
+                    slow_started.set()
+                    if not release_slow.wait(timeout=3):
+                        raise TimeoutError("slow sibling never released")
+                if args["query"] == "child":
+                    fast_descendant.set()
+                return "{}"
+
+        plan = [task("slow", "slow"), task("fast", "fast"),
+                task("child", "child", "fast")]
+        with ThreadPoolExecutor(max_workers=1) as observer:
+            future = observer.submit(execute_parallel_plan, plan, Tools(),
+                                     context=None, seen_signatures=set(), max_workers=2)
+            try:
+                self.assertTrue(slow_started.wait(timeout=1))
+                self.assertTrue(fast_descendant.wait(timeout=1),
+                                "child should start before unrelated slow sibling finishes")
+            finally:
+                release_slow.set()
+            self.assertEqual([x["status"] for x in future.result(timeout=3)],
+                             ["ok", "ok", "ok"])
+
+    def test_approval_required_blocks_only_descendants(self):
+        class Tools:
+            def execute(self, name, args, *, context):
+                if args["query"] == "needsapproval":
+                    return '{"status":"approval_required"}'
+                return '{"status":"success"}'
+
+        result = execute_parallel_plan([
+            task("a", "needsapproval"),
+            task("b", "independent"),
+            task("c", "dependent", "a"),
+        ], Tools(), context=None, seen_signatures=set(), max_workers=3)
+        self.assertEqual([x["status"] for x in result], ["blocked", "ok", "blocked"])
+
+    def test_cancel_blocks_new_descendants_not_active_reads(self):
+        cancellation = threading.Event()
+        class Tools:
+            def execute(self, name, args, *, context):
+                if args["query"] == "first":
+                    cancellation.set()
+                return "{}"
+        result = execute_parallel_plan([
+            task("a", "first"), task("b", "child", "a"),
+        ], Tools(), context=None, seen_signatures=set(), max_workers=2,
+                                       cancel_event=cancellation)
+        self.assertEqual([x["status"] for x in result], ["ok", "cancelled"])
 
 
 if __name__ == "__main__":

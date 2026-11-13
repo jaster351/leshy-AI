@@ -79,4 +79,53 @@ class ParallelSuperAgentTests(unittest.TestCase):
         self.assertIsNone(parse_parallel_read_request('{"action":"tool"}'))
         self.assertIsNotNone(parse_parallel_read_request('{"action":"parallel","tasks":[]}'))
 
+
+    def test_more_than_eight_independent_reads_when_ram_allows(self):
+        from unittest.mock import patch
+        barrier = threading.Barrier(9)
+        active = 0
+        peak = 0
+        seen = 0
+        lock = threading.Lock()
+
+        class ConcurrentExecutor:
+            def execute(self, name, args, *, ticket_id):
+                nonlocal active, peak, seen
+                with lock:
+                    active += 1
+                    seen += 1
+                    peak = max(peak, active)
+                    order = seen
+                try:
+                    if order <= 9:
+                        barrier.wait(timeout=3)
+                    return {"receipt_id": args["query"], "result": {"ok": True}}
+                finally:
+                    with lock:
+                        active -= 1
+
+        service, journal, _ = self.make_service()
+        service._cognitive_reads = ConcurrentExecutor()
+        tasks = [
+            {"id": f"s{i}", "tool": "knowledge.search",
+             "arguments": {"query": f"topic{i}"}, "depends_on": []}
+            for i in range(12)
+        ]
+        with patch('leshy.superagent_parallel.available_worker_slots', return_value=12):
+            out = run_superagent_parallel_reads(service, "SA-owner", 1, 0, tasks, set())
+        self.assertEqual([item["status"] for item in out], ["ok"] * 12)
+        self.assertGreaterEqual(peak, 9)
+        self.assertEqual(len(journal.finished), 12)
+
+    def test_memory_pressure_denies_new_reads_before_journaling(self):
+        from unittest.mock import patch
+        service, journal, reads = self.make_service()
+        with patch('leshy.superagent_parallel.available_worker_slots', return_value=0):
+            with self.assertRaisesRegex(ParallelPlanError, "памяти"):
+                run_superagent_parallel_reads(service, 'SA-owner', 1, 0, [
+                    {'id': 's1', 'tool': 'runtime.version', 'arguments': {}},
+                ], set())
+        self.assertFalse(journal.started)
+        self.assertFalse(reads.calls)
+
 if __name__=='__main__':unittest.main()
