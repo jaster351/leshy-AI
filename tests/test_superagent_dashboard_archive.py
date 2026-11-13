@@ -119,5 +119,39 @@ class DashboardArchiveTests(unittest.TestCase):
             ticket_details(self.service, "web:alice", "SA-3")
 
 
+    def test_large_plan_creation_and_summarized_details(self):
+        steps = [{"id": f"step_{i}", "title": f"Task {i}"} for i in range(96)]
+        self.service.plans.create = lambda ticket, owner, supplied: {
+            "id": ticket, "state": "active", "steps": supplied,
+        }
+        self.service.plans.snapshot = lambda ticket, owner: {
+            "id": ticket, "state": "active",
+            "steps": [{**step, "state": "queued"} for step in steps],
+        }
+        created = execute_action(self.service, "web:alice", {
+            "action": "plan_create", "id": "SA-2", "steps": steps,
+        })
+        self.assertEqual(created["plan"]["state"], "active")
+        details = ticket_details(self.service, "web:alice", "SA-2")["task"]["plan"]
+        self.assertEqual(details["total_steps"], 96)
+        self.assertEqual(details["state_counts"], {"queued": 96})
+        self.assertEqual(len(details["steps"]), 64)
+
+    def test_large_plan_request_is_bounded_by_bytes_not_step_count(self):
+        self.service.plans.create = lambda *args: self.fail("oversized plan must not be stored")
+        oversized = [{"id": f"s{i}", "title": "x" * 300} for i in range(1000)]
+        with self.assertRaisesRegex(ValueError, "256 КБ"):
+            execute_action(self.service, "web:alice", {
+                "action": "plan_create", "id": "SA-2", "steps": oversized,
+            })
+
+    def test_empty_plan_rejected_before_storage(self):
+        self.service.plans.create = lambda *args: self.fail("invalid plan must not be stored")
+        with self.assertRaisesRegex(ValueError, "хотя бы один"):
+            execute_action(self.service, "web:alice", {
+                "action": "plan_create", "id": "SA-2", "steps": [],
+            })
+
+
 if __name__ == "__main__":
     unittest.main()
