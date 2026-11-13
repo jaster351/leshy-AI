@@ -11,8 +11,9 @@ import re
 
 _EN = "`qwertyuiop[]asdfghjkl;'zxcvbnm,./"
 _RU = "ёйцукенгшщзхъфывапролджэячсмитьбю."
-_EN_TO_RU = str.maketrans(_EN, _RU)
-_RU_TO_EN = str.maketrans(_RU, _EN)
+# Include uppercase keys too: CapsLock and initial capital letters must work.
+_EN_TO_RU = str.maketrans(_EN + _EN.upper(), _RU + _RU.upper())
+_RU_TO_EN = str.maketrans(_RU + _RU.upper(), _EN + _EN.upper())
 _WORD = re.compile(r"[A-Za-zА-Яа-яЁё]+", re.UNICODE)
 _LATIN = re.compile(r"[A-Za-z]")
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
@@ -29,6 +30,8 @@ _RU_WORDS = frozenset((
     "леша", "лёша", "ошибка", "ошибку", "проблема", "команда", "команду",
     "проект", "код", "чат", "сайт", "интернет", "погода", "время",
     "добрый", "день", "утро", "вечер", "ночь", "нормально", "хорошо",
+    "какая", "какой", "какие", "погода", "времени", "скажи", "помочь",
+    "сделать", "обновить", "можешь", "программу", "задачу",
 ))
 _EN_WORDS = frozenset(("hello", "hi", "thanks", "thank", "you", "please",
                        "yes", "no", "what", "where", "why", "how", "help",
