@@ -12,6 +12,7 @@ from .diagnostics import event, problem
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
+from .keyboard_layout import layout_context
 from .capability_registry import is_self_capability_question
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply, work_reference_context
@@ -661,6 +662,9 @@ class RealtimeChatManager:
             messages, sources, search_attempted = self._build_context(
                 message, owner_id, rows, search_plan=plan, lookup_query=lookup_query,
             )
+            layout_hint = layout_context(message)
+            if layout_hint:
+                messages.insert(0, ChatMessage("system", layout_hint))
             cinema_plan = None if is_offline_creative_request(message) else cinema_query(message, rows)
             if cinema_plan is not None and not sources:
                 answer = cinema_no_data(cinema_plan)
