@@ -72,8 +72,12 @@
     pending = true;
     say('Выполняю команду…', false);
     try {
-      await api('/v1/superagent/task', { method: 'POST', body: JSON.stringify(payload) });
-      say('Готово. Список обновлён.', false);
+      const response = await api('/v1/superagent/task', { method: 'POST', body: JSON.stringify(payload) });
+      if (action === 'plan_run' && response.plan)
+        say('Проверок выполнено: ' + response.plan.completed + '. Ошибок: ' + response.plan.errors + '.', !!response.plan.errors);
+      else if (action === 'plan_auto') say('Автоматические проверки включены для этого плана.', false);
+      else if (action === 'plan_manual') say('Автоматические проверки выключены.', false);
+      else say('Готово. Список обновлён.', false);
     } catch (error) {
       say(error.message, true);
     } finally {
@@ -265,15 +269,27 @@
     const actions = element('div', 'sa-controls');
     const details = element('div', 'sa-detail');
     details.hidden = true;
-    actions.append(makeButton('Подробнее', async () => {
-      if (!details.hidden) { details.hidden = true; return; }
-      details.hidden = false;
+    const loadDetails = async () => {
       details.textContent = 'Загрузка…';
       try {
         const response = await api('/v1/superagent/tasks?id=' + encodeURIComponent(task.id));
-        renderDetails(details, response.task, task.id);
+        if (expandedTasks.has(task.id)) renderDetails(details, response.task, task.id);
       } catch (error) { details.textContent = error.message; }
+    };
+    actions.append(makeButton('Подробнее', () => {
+      if (expandedTasks.has(task.id)) {
+        expandedTasks.delete(task.id);
+        details.hidden = true;
+      } else {
+        expandedTasks.add(task.id);
+        details.hidden = false;
+        loadDetails();
+      }
     }));
+    if (expandedTasks.has(task.id)) {
+      details.hidden = false;
+      loadDetails();
+    }
     if (task.can_restore) actions.append(makeButton('Вернуть из архива', () => perform({ action: 'restore', id: task.id })));
     if (task.can_stop) actions.append(makeButton('Остановить', () => perform({ action: 'stop', id: task.id }), false, 'sa-danger'));
     if (task.can_retry) actions.append(makeButton('Повторить', () => perform({ action: 'retry', id: task.id })));
@@ -307,8 +323,8 @@
       const data = await api('/v1/superagent/tasks?archived=' + (showArchived ? '1' : '0'));
       const signature = JSON.stringify([showArchived, data.tasks]);
       if (signature === lastSignature && !force) return;
-      const activeReply = document.activeElement?.closest?.('.sa-answer');
-      if (activeReply && activeReply.querySelector('textarea')?.value.trim() && !force) return;
+      const editing = document.activeElement?.closest?.('.sa-answer, .sa-plan');
+      if (editing && !force) return;
       lastSignature = signature;
       list.replaceChildren();
       if (!data.tasks.length) list.append(element('div', 'sa-help', showArchived ? 'В архиве пока нет заданий.' : 'Активных заданий пока нет. Опишите задачу выше и нажмите «Запустить».'));
@@ -341,6 +357,7 @@
     row.append(makeButton('Обновить список', () => refresh(true)));
     const toggleArchive = makeButton('Показать архив', async () => {
       showArchived = !showArchived;
+      expandedTasks.clear();
       toggleArchive.textContent = showArchived ? 'Показать активные' : 'Показать архив';
       lastSignature = '';
       await refresh(true);
@@ -348,23 +365,18 @@
     row.append(toggleArchive);
     panel.append(row);
     const tips = element('details');
-    const label = element('summary', '', 'Что делают кнопки и команды? Примеры');
+    const label = element('summary', '', 'Подсказки и примеры');
     tips.append(label);
     [
-      ['Запустить задачу', 'Создаёт новое автономное задание. Не даёт дополнительных разрешений на опасные действия.', '/agent Изучи причину ошибки запуска и подготовь отчёт'],
-      ['Остановить', 'Останавливает дальнейшие действия задания; уже начатый ответ модели может завершиться.', '/agent stop SA-...'],
-      ['Повторить', 'Заново ставит в очередь задание после ошибки или ожидания.', '/agent retry SA-...'],
-      ['Ответить', 'Передаёт ответ, когда SuperAgent ожидает решения.', '/agent answer SA-... Да, продолжай'],
-      ['Подробнее', 'Показывает отчёт, недавние инструментальные шаги и этапы плана.', '/agent status SA-...'],
-      ['Отправить ответ и продолжить', 'Появляется прямо под вопросом, когда агент ожидает ответа. После отправки задача возобновляется.', 'Ответ вводится в карточке задания'],
-      ['Завершить и закрыть', 'Переносит завершённое задание в архив, сохраняя отчёт и историю.', 'Кнопка в карточке задания'],
-      ['Отменить и закрыть', 'Останавливает незаконченное задание и переносит его в архив.', 'Кнопка в карточке задания'],
-      ['Показать архив', 'Показывает закрытые задачи с возможностью вернуть их в список.', 'Кнопка над списком'],
-      ['Пауза / продолжение плана', 'Меняет состояние сохранённого плана. Само создание плана пока не запускает этапы.', '/agent plan status SA-...']
-    ].forEach(([name, description, command]) => {
-      tips.append(element('p', 'sa-help', name + ' — ' + description));
-      tips.append(element('code', '', command));
-    });
+      ['Запустить задачу', 'Опишите обычными словами, что должен сделать Леший.'],
+      ['Подробнее', 'В карточке доступны история, отчёт, этапы и управление проверками.'],
+      ['Составить план', 'Добавьте готовые действия кнопками. Можете выбрать параллельное выполнение или порядок этапов.'],
+      ['Выполнить доступные проверки', 'Однократно запускает готовые безопасные чтения.'],
+      ['Включить автозапуск проверок', 'Позволяет Лешему выполнять разрешённые чтения в фоне. Можно выключить в любой момент.'],
+      ['Пауза и отмена', 'Останавливают новые шаги, сохраняя уже полученные результаты.'],
+      ['Ответить на вопрос', 'Напишите ответ прямо в карточке, без специальных команд и идентификаторов.'],
+      ['Архив', 'Завершённые задания можно закрывать и возвращать из архива.']
+    ].forEach(([name, description]) => tips.append(element('p', 'sa-help', name + ' — ' + description)));
     tips.append(element('p', 'sa-help', 'Примеры новых задач — нажмите на пример, затем «Запустить»:'));
     examples.forEach(example => tips.append(makeButton(example, () => { input.value = example; input.focus(); }, false, '')));
     panel.append(tips);
