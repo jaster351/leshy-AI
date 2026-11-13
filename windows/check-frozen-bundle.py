@@ -17,6 +17,7 @@ REQUIRED_MODULES = (
     "leshy.network_blocking_module",
     "leshy.provider_support",
     "leshy.private_support_bootstrap",
+    "leshy.superagent_verified_ssh",
 )
 
 

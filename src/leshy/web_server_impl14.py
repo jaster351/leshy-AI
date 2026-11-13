@@ -13,7 +13,10 @@ from .diagnostics import problem
 from .module_settings import module_enabled
 from .web_server_impl11 import _runtime_html
 from .superagent_dashboard import execute_action, list_tickets, ticket_details
-from .superagent_credential_settings import get_credential_folder, set_credential_folder
+from .superagent_credential_settings import (
+    get_credential_folder, set_credential_folder, list_credential_file_names,
+)
+from .superagent_verified_ssh import inspect_remote_os
 from .superagent_remote_access_dashboard import (
     authorized_remote_context, list_remote_access, revoke_remote_grant,
 )
@@ -127,6 +130,24 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_get_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось прочитать настройку папки"})
+            if parsed.path == "/v1/superagent/ssh/credentials":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Удалённая диагностика выключена"
+                    })
+                policy, actor = context
+                try:
+                    return self._json(HTTPStatus.OK, list_credential_file_names(
+                        policy.storage, actor.owner_id,
+                    ))
+                except (ValueError, PermissionError, OSError) as exc:
+                    problem("superagent_ssh_credential_picker_denied", type(exc).__name__)
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Не удалось выбрать файлы доступа; проверьте настройки папки"
+                    })
             if parsed.path == "/v1/superagent/remote-access":
                 context = self._remote_context()
                 if context is None:
@@ -188,8 +209,56 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_set_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить настройку"})
+            if path == "/v1/superagent/ssh/inspect":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Включите удалённую диагностику в настройках"
+                    })
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Недопустимый источник запроса"
+                    })
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Чужой источник запроса"
+                    })
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется JSON"})
+                try:
+                    payload = self._body()
+                    if (not isinstance(payload, dict) or
+                            set(payload) != {"node_id", "credential_file", "confirm"} or
+                            payload.get("confirm") is not True or
+                            not isinstance(payload["node_id"], str) or
+                            not isinstance(payload["credential_file"], str)):
+                        raise ValueError("Выберите компьютер, файл доступа и подтвердите проверку")
+                    policy, actor = context
+                    result = inspect_remote_os(
+                        policy, actor, payload["node_id"], payload["credential_file"]
+                    )
+                    # Results intentionally omit host keys and any command output.
+                    return self._json(HTTPStatus.OK, {"inspection": {
+                        "node_id": result["node_id"],
+                        "os_family": result["os_family"],
+                        "verified": bool(result["verified"]),
+                        "method": result["method"],
+                    }})
+                except (ValueError, PermissionError, FileNotFoundError) as exc:
+                    problem("superagent_ssh_inspection_denied", type(exc).__name__)
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Компьютер не подтверждён, нет прав или неверно выбран файл доступа"
+                    })
+                except Exception as exc:
+                    problem("superagent_ssh_inspection_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.BAD_GATEWAY, {
+                        "error": "SSH-проверка не завершена: проверьте связь и установленный модуль SSH"
+                    })
             if path == "/v1/superagent/remote-access/revoke":
-                # Only revocation is exposed: no enroll/grant/SSH/RDP route.
+                # Only revocation is exposed; no enroll/grant/OS mutation route.
                 context = self._remote_context()
                 if context is None:
                     return None

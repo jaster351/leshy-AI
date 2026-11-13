@@ -187,6 +187,52 @@ class HttpRoutingTests(unittest.TestCase):
             self.assertEqual(get.result[1]['nodes'][0]['node_id'], '192.168.100.22')
             self.assertEqual(len(get.result[1]['active_grants']), 1)
 
+            from unittest.mock import patch
+            with patch('leshy.web_server_impl14.list_credential_file_names',
+                       return_value={'configured':True,'available':True,
+                                     'files':['host.json']}) as picker:
+                files = self.Handler(
+                    path='/v1/superagent/ssh/credentials', owner='web:alice')
+                files.cookie_value = 'session-a'
+                files.do_GET()
+                self.assertEqual(files.result[0], 200)
+                self.assertEqual(files.result[1]['files'], ['host.json'])
+                picker.assert_called_once_with(storage, 'web:alice')
+            ssh_payload = {'node_id':'192.168.100.22',
+                           'credential_file':'host.json','confirm':True}
+            with patch('leshy.web_server_impl14.inspect_remote_os',
+                       return_value={'node_id':'192.168.100.22',
+                           'os_family':'Linux','verified':True,
+                           'method':'ssh:uname','host_key_sha256':'a'*64}) as check:
+                wrong_origin = self.Handler(
+                    path='/v1/superagent/ssh/inspect', owner='web:alice',
+                    headers={'X-Leshy-UI':'superagent','Content-Type':'application/json',
+                             'Origin':'https://evil.invalid','Host':'localhost'},
+                    body=ssh_payload)
+                wrong_origin.cookie_value = 'session-a'
+                wrong_origin.do_POST()
+                self.assertEqual(wrong_origin.result[0], 403)
+                no_confirmation = self.Handler(
+                    path='/v1/superagent/ssh/inspect', owner='web:alice',
+                    headers={'X-Leshy-UI':'superagent','Content-Type':'application/json'},
+                    body={**ssh_payload,'confirm':False})
+                no_confirmation.cookie_value = 'session-a'
+                no_confirmation.do_POST()
+                self.assertEqual(no_confirmation.result[0], 403)
+                check.assert_not_called()
+                inspect = self.Handler(
+                    path='/v1/superagent/ssh/inspect', owner='web:alice',
+                    headers={'X-Leshy-UI':'superagent','Content-Type':'application/json'},
+                    body=ssh_payload)
+                inspect.cookie_value = 'session-a'
+                inspect.do_POST()
+                self.assertEqual(inspect.result[0], 200)
+                self.assertEqual(inspect.result[1]['inspection']['os_family'], 'Linux')
+                self.assertNotIn('host_key_sha256',
+                                 inspect.result[1]['inspection'])
+                check.assert_called_once()
+                self.assertEqual(check.call_args.args[1].owner_id, 'web:alice')
+
             request = dict(node_id='192.168.100.22', grantee_id='web:bob',
                            capability='inspect')
             hostile = self.Handler(
