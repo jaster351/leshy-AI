@@ -127,6 +127,29 @@ def _fixed_command(transport: Any, command: str, timeout: float, cancel_event: A
         channel.close()
 
 
+def _linux_distribution(transport: Any, timeout: float, cancel_event: Any) -> str:
+    """Probe only fixed read-only os-release metadata, never shell scripts."""
+    try:
+        code, result = _fixed_command(transport, "cat /etc/os-release", timeout, cancel_event)
+    except (OSError, RuntimeError, TimeoutError):
+        return ""
+    if code:
+        return ""
+    values: dict[str, str] = {}
+    for line in result.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key not in {"ID", "VERSION_ID"}:
+            continue
+        value = value.strip().strip('"').strip("'")
+        if re.fullmatch(r"[A-Za-z0-9._+-]{1,40}", value):
+            values[key] = value
+    if not values.get("ID"):
+        return ""
+    return (values["ID"] + (" " + values["VERSION_ID"] if values.get("VERSION_ID") else ""))[:82]
+
+
 def inspect_remote_os(
     policy: RemotePermissionPolicy,
     actor: VerifiedActor,
@@ -183,9 +206,16 @@ def inspect_remote_os(
                 family, method = "Windows", "ssh:ver"
                 break
         policy.require(actor, node, "inspect", observed_fingerprint=observed)
+        distribution = ""
+        if family == "Linux":
+            # A second fixed read is safe; authorization can be revoked
+            # between OS detection and this metadata probe.
+            policy.require(actor, node, "inspect", observed_fingerprint=observed)
+            distribution = _linux_distribution(transport, timeout, cancel_event)
         result = {
             "node_id": node,
             "os_family": family,
+            "distribution": distribution,
             "verified": family != "unknown",
             "method": method,
             "host_key_sha256": observed,

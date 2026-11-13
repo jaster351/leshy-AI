@@ -233,6 +233,72 @@ class HttpRoutingTests(unittest.TestCase):
                 check.assert_called_once()
                 self.assertEqual(check.call_args.args[1].owner_id, 'web:alice')
 
+            from unittest.mock import patch
+            headers = {'X-Leshy-UI':'superagent', 'Content-Type':'application/json',
+                       'Host':'localhost'}
+            with patch('leshy.web_server_impl14.enroll_verified_ssh_node',
+                       return_value={'node_id':'192.168.100.23','enrolled':True}) as enroll:
+                invalid = self.Handler(
+                    path='/v1/superagent/ssh/enroll', owner='web:alice',
+                    headers=headers,
+                    body={'node_id':'192.168.100.23','credential_file':'server.json',
+                          'expected_fingerprint':'a'*64,'confirm':False})
+                invalid.cookie_value = 'session-a'
+                invalid.do_POST()
+                self.assertEqual(invalid.result[0], 400)
+                enroll.assert_not_called()
+                valid = self.Handler(
+                    path='/v1/superagent/ssh/enroll', owner='web:alice',
+                    headers=headers,
+                    body={**invalid.request_body, 'confirm':True})
+                valid.cookie_value = 'session-a'
+                valid.do_POST()
+                self.assertEqual(valid.result[0], 200)
+                enroll.assert_called_once()
+                self.assertEqual(enroll.call_args.args[1].owner_id, 'web:alice')
+            preview = {'node_id':'192.168.100.22',
+                       'credential_file':'server.json','command':'sudo systemctl status demo'}
+            with patch('leshy.web_server_impl14.prepare_ssh_command',
+                       return_value={'approval_token':'test-token', 'sha256':'a'*64}) as prepare:
+                pre = self.Handler(
+                    path='/v1/superagent/ssh/prepare', owner='web:alice',
+                    headers=headers, body=preview)
+                pre.cookie_value = 'session-a'
+                pre.do_POST()
+                self.assertEqual(pre.result[0], 200)
+                prepare.assert_called_once()
+                self.assertEqual(prepare.call_args.args[1].owner_id, 'web:alice')
+            execution = {**preview, 'approval_token':'test-token','confirm':True}
+            with patch('leshy.web_server_impl14.consume_ssh_approval') as consume, patch(
+                'leshy.web_server_impl14.run_ssh_terminal_command',
+                return_value={'node_id':'192.168.100.22','os_family':'Linux',
+                              'exit_code':0,'stdout':'active','stderr':'','truncated':False}
+            ) as run:
+                bad_origin = self.Handler(
+                    path='/v1/superagent/ssh/execute', owner='web:alice',
+                    headers={**headers,'Origin':'https://evil.invalid'}, body=execution)
+                bad_origin.cookie_value = 'session-a'
+                bad_origin.do_POST()
+                self.assertEqual(bad_origin.result[0], 403)
+                consume.assert_not_called()
+                no_approval = self.Handler(
+                    path='/v1/superagent/ssh/execute', owner='web:alice',
+                    headers=headers,body={**execution,'confirm':False})
+                no_approval.cookie_value = 'session-a'
+                no_approval.do_POST()
+                self.assertEqual(no_approval.result[0], 400)
+                consume.assert_not_called()
+                allowed = self.Handler(
+                    path='/v1/superagent/ssh/execute', owner='web:alice',
+                    headers=headers, body=execution)
+                allowed.cookie_value = 'session-a'
+                allowed.do_POST()
+                self.assertEqual(allowed.result[0], 200)
+                self.assertEqual(allowed.result[1]['execution']['stdout'], 'active')
+                consume.assert_called_once()
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[1].owner_id, 'web:alice')
+
             request = dict(node_id='192.168.100.22', grantee_id='web:bob',
                            capability='inspect')
             hostile = self.Handler(

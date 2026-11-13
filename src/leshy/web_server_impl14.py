@@ -17,6 +17,9 @@ from .superagent_credential_settings import (
     get_credential_folder, set_credential_folder, list_credential_file_names,
 )
 from .superagent_verified_ssh import inspect_remote_os
+from .superagent_ssh_enrollment import enroll_verified_ssh_node
+from .superagent_ssh_terminal import run_ssh_terminal_command
+from .superagent_ssh_approvals import prepare_ssh_command, consume_ssh_approval
 from .superagent_remote_access_dashboard import (
     authorized_remote_context, list_remote_access, revoke_remote_grant,
 )
@@ -209,6 +212,86 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_set_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить настройку"})
+            if path in {
+                "/v1/superagent/ssh/enroll",
+                "/v1/superagent/ssh/prepare",
+                "/v1/superagent/ssh/execute",
+            }:
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Удалённое управление выключено"
+                    })
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Недопустимый источник SSH-запроса"
+                    })
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Чужой источник SSH-запроса"
+                    })
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {
+                        "error": "Требуется JSON"
+                    })
+                policy, actor = context
+                try:
+                    payload = self._body()
+                    if not isinstance(payload, dict):
+                        raise ValueError("Нужен объект запроса")
+                    if path == "/v1/superagent/ssh/enroll":
+                        if set(payload) != {
+                            "node_id", "credential_file", "expected_fingerprint", "confirm"
+                        } or payload.get("confirm") is not True:
+                            raise ValueError("Подтвердите регистрацию компьютера")
+                        return self._json(HTTPStatus.OK, {
+                            "enrollment": enroll_verified_ssh_node(
+                                policy, actor, payload["node_id"],
+                                payload["credential_file"], payload["expected_fingerprint"],
+                            ),
+                        })
+                    if path == "/v1/superagent/ssh/prepare":
+                        if set(payload) != {"node_id", "credential_file", "command"}:
+                            raise ValueError("Выберите компьютер и команду")
+                        return self._json(HTTPStatus.OK, {
+                            "approval": prepare_ssh_command(
+                                policy, actor, payload["node_id"],
+                                payload["credential_file"], payload["command"],
+                            ),
+                        })
+                    if set(payload) != {
+                        "node_id", "credential_file", "command", "approval_token", "confirm"
+                    } or payload.get("confirm") is not True:
+                        raise ValueError("Подтвердите точную SSH-команду")
+                    consume_ssh_approval(
+                        policy, actor, payload["approval_token"], payload["node_id"],
+                        payload["credential_file"], payload["command"],
+                    )
+                    result = run_ssh_terminal_command(
+                        policy, actor, payload["node_id"],
+                        payload["credential_file"], payload["command"],
+                    )
+                    return self._json(HTTPStatus.OK, {"execution": result})
+                except ValueError:
+                    return self._json(HTTPStatus.BAD_REQUEST, {
+                        "error": "Неверные параметры SSH. Проверьте выбранные значения."
+                    })
+                except PermissionError:
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Отказ в SSH-доступе, подтверждении ключа или полномочиях"
+                    })
+                except TimeoutError:
+                    return self._json(HTTPStatus.GATEWAY_TIMEOUT, {
+                        "error": "SSH-сервер не ответил вовремя"
+                    })
+                except Exception as exc:
+                    problem("superagent_ssh_operation_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.BAD_GATEWAY, {
+                        "error": "SSH-операция не выполнена"
+                    })
             if path == "/v1/superagent/ssh/inspect":
                 context = self._remote_context()
                 if context is None:
@@ -244,6 +327,7 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._json(HTTPStatus.OK, {"inspection": {
                         "node_id": result["node_id"],
                         "os_family": result["os_family"],
+                        "distribution": str(result.get("distribution") or "")[:82],
                         "verified": bool(result["verified"]),
                         "method": result["method"],
                     }})

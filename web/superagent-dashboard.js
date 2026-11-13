@@ -51,6 +51,10 @@
     .sa-remote button:disabled{opacity:.45;cursor:default}
     .sa-remote .sa-ssh-select{display:block;width:100%;max-width:460px;margin:6px 0 9px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
     .sa-remote .sa-error{color:var(--danger)}
+    .sa-remote input,.sa-remote textarea{box-sizing:border-box;display:block;width:100%;max-width:680px;padding:9px;margin:6px 0 10px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
+    .sa-remote pre{white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;max-height:350px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#07110d;font-size:12px}
+    .sa-remote label{display:block;font-size:12px;color:var(--muted)}
+    .sa-remote .sa-setup{padding:10px;border:1px dashed var(--line);border-radius:10px;margin:10px 0}
     .sa-dashboard code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:7px 0;color:var(--accent)}
     .sa-plan{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:10px}.sa-plan textarea{min-height:75px}.sa-plan select{width:100%;max-width:460px;margin:6px 0 10px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
     .sa-stage-result{padding:7px 9px;margin:5px 0;border-left:2px solid var(--line);overflow-wrap:anywhere}.sa-evidence{font-size:12px;color:var(--accent);margin:4px 0}.sa-proof{font-size:12px;margin:4px 0 7px}.sa-proof summary{cursor:pointer}.sa-stage{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px}
@@ -412,6 +416,49 @@
       update: 'Обновления', reboot: 'Перезагрузка', rdp: 'Удалённый экран'
     };
     let requestInFlight = false;
+    const enrollBox = element('details', 'sa-setup');
+    enrollBox.append(element('summary', '', 'Добавить свой SSH-сервер'));
+    enrollBox.append(element('p', 'sa-remote-note',
+      'Для регистрации нужен вход через подтверждённого провайдера, SSH-доступ и отпечаток ключа, ' +
+      'полученный независимо из доверенной консоли самого сервера.'));
+    const enrollmentIp = element('input');
+    enrollmentIp.placeholder = 'IP-адрес сервера, например 192.168.1.20';
+    enrollmentIp.setAttribute('aria-label', 'IP-адрес SSH-сервера');
+    enrollmentIp.maxLength = 128;
+    const enrollmentFingerprint = element('input');
+    enrollmentFingerprint.placeholder = 'SHA256:… или 64 символа SHA-256';
+    enrollmentFingerprint.setAttribute('aria-label', 'Отпечаток ключа сервера из его консоли');
+    enrollmentFingerprint.maxLength = 120; enrollmentFingerprint.autocomplete = 'off';
+    const enrollmentFile = element('select', 'sa-ssh-select');
+    enrollmentFile.setAttribute('aria-label', 'Файл учётных данных для регистрации');
+    const enrollmentState = element('p', 'sa-remote-note');
+    enrollmentState.setAttribute('role', 'status');
+    const enroll = makeButton('Подтвердить и добавить SSH-сервер', async () => {
+      if (requestInFlight || !enrollmentFile.value) return;
+      if (!enrollmentIp.value.trim() || !enrollmentFingerprint.value.trim()) {
+        enrollmentState.textContent = 'Укажите IP и отпечаток из доверенной консоли сервера.'; return;
+      }
+      if (!window.confirm('Вы лично сверили SHA-256 ключ сервера ' + enrollmentIp.value +
+        ' по его доверенной консоли и хотите зарегистрировать его?')) return;
+      requestInFlight = true; enroll.disabled = true;
+      enrollmentState.textContent = 'Проверяю подлинность SSH-узла и учётную запись…';
+      try {
+        const payload = {node_id:enrollmentIp.value.trim(), credential_file:enrollmentFile.value,
+          expected_fingerprint:enrollmentFingerprint.value.trim(), confirm:true};
+        await api('/v1/superagent/ssh/enroll', {method:'POST',body:JSON.stringify(payload)});
+        enrollmentState.textContent = 'SSH-сервер подтверждён и зарегистрирован.';
+        enrollmentFingerprint.value = '';
+      } catch (error) {
+        enrollmentState.textContent = 'Не удалось добавить SSH-сервер: ' + error.message;
+      } finally {
+        requestInFlight = false; enroll.disabled = false;
+        await load();
+      }
+    });
+    enrollBox.append(element('label', '', 'Адрес сервера'), enrollmentIp,
+      element('label', '', 'Независимый SHA-256 отпечаток SSH-ключа'), enrollmentFingerprint,
+      element('label', '', 'Файл доступа'), enrollmentFile, enroll, enrollmentState);
+    section.insertBefore(enrollBox, container);
     const addInspection = (row, node, credentials) => {
       if (!credentials || !credentials.files?.length) {
         row.append(element('p', 'sa-remote-note',
@@ -450,8 +497,10 @@
           const name = observed.os_family === 'Windows' ? 'Windows' :
             ['Linux','FreeBSD','OpenBSD','NetBSD','Darwin'].includes(observed.os_family)
               ? observed.os_family : 'Не определена';
+          const distro = String(observed.distribution || '').slice(0,82);
           result.textContent = known
-            ? 'Подлинность SSH-сервера подтверждена. Операционная система: ' + name + '.'
+            ? 'Подлинность SSH-сервера подтверждена. Операционная система: ' + name +
+              (distro ? ' (' + distro + ')' : '') + '.'
             : 'Подлинность SSH-сервера подтверждена, но ОС определить не удалось.';
           result.className = 'sa-remote-note';
         } catch (error) {
@@ -463,6 +512,111 @@
         }
       });
       row.append(label, select, inspect, result);
+
+      const terminal = element('details', 'sa-setup');
+      terminal.append(element('summary', '', 'SSH-терминал и задания Лешему'));
+      terminal.append(element('p', 'sa-remote-note',
+        'Можно выполнить любую SSH-команду, а не только проверить ОС. Каждое действие ' +
+        'предварительно показывается целиком и требует отдельного подтверждения. ' +
+        'Это отдельные команды SSH: текущая папка и переменные окружения между ними не сохраняются.'));
+      const shellInput = element('textarea');
+      shellInput.rows = 3;
+      shellInput.maxLength = 4096;
+      shellInput.placeholder = 'Команда SSH для этого сервера (Linux/Windows)';
+      shellInput.setAttribute('aria-label', 'Команда SSH для ' + node.node_id);
+      const output = element('pre', 'sa-terminal-output');
+      output.setAttribute('aria-label', 'Вывод SSH-терминала');
+      output.textContent = 'Вывод появится после выполнения команды.';
+      const run = makeButton('Посмотреть и выполнить команду', async () => {
+        const command = shellInput.value;
+        if (requestInFlight || !command.trim()) {
+          if (!command.trim()) output.textContent = 'Сначала введите SSH-команду.';
+          return;
+        }
+        requestInFlight = true; run.disabled = true;
+        output.textContent = 'Проверка права выполнения и подготовка подтверждения…';
+        try {
+          const identity = {node_id:node.node_id,credential_file:select.value,command};
+          const preview = await api('/v1/superagent/ssh/prepare', {
+            method:'POST', body:JSON.stringify(identity)
+          });
+          const ticket = preview.approval;
+          if (!window.confirm('Компьютер: ' + node.node_id + '\n\nКОМАНДА:\n' + command +
+            '\n\nКоманда может изменить систему. Проверьте её сами, убедитесь в наличии резервной копии ' +
+            'для важных операций. Выполнить только эту команду?')) {
+            output.textContent = 'Команда отменена. Ничего не выполнялось.';
+            return;
+          }
+          output.textContent = 'Подключаюсь, определяю ОС и выполняю подтверждённую команду…';
+          const response = await api('/v1/superagent/ssh/execute', {
+            method:'POST', body:JSON.stringify({
+              ...identity, approval_token:ticket.approval_token, confirm:true
+            })
+          });
+          const executed = response.execution || {};
+          const status = executed.truncated ? 'Вывод ограничен; статус выполнения не подтверждён' :
+            executed.exit_code === 0 ? 'Команда завершилась с кодом 0' :
+            'Команда завершилась с кодом ' + String(executed.exit_code);
+          output.textContent = 'ОС: ' + (executed.os_family || 'не определена') + '\n' +
+            status + '\n\nSTDOUT:\n' + (executed.stdout || '(пусто)') +
+            '\n\nSTDERR:\n' + (executed.stderr || '(пусто)');
+        } catch (error) {
+          output.textContent = 'SSH-команда не выполнена: ' + error.message;
+        } finally {
+          requestInFlight = false;
+          run.disabled = false;
+        }
+      });
+      const natural = element('textarea');
+      natural.rows = 3;
+      natural.maxLength = 3000;
+      natural.placeholder = 'Опишите задачу обычными словами: например, найти причину ошибки сервиса и предложить исправление';
+      natural.setAttribute('aria-label', 'Задача Лешему для сервера ' + node.node_id);
+      const plan = makeButton('Поручить Лешему составить план', async () => {
+        const text = natural.value.trim();
+        if (!text || requestInFlight) { if (!text) output.textContent = 'Опишите задачу для Лешего.'; return; }
+        if (!window.confirm('Проверить ОС компьютера ' + node.node_id +
+          ' по SSH и передать подтверждённые сведения вместе с задачей SuperAgent?')) return;
+        requestInFlight = true; plan.disabled = true;
+        try {
+          const inspected = await api('/v1/superagent/ssh/inspect', {
+            method:'POST', body:JSON.stringify({
+              node_id:node.node_id,credential_file:select.value,confirm:true
+            })
+          });
+          if (inspected.inspection?.verified !== true) {
+            throw Error('Не удалось подтвердить тип ОС, задача не отправлена.');
+          }
+          const hostOS = ['Linux','FreeBSD','OpenBSD','NetBSD','Darwin','Windows']
+            .includes(inspected.inspection.os_family) ? inspected.inspection.os_family : 'unknown';
+          if (hostOS === 'unknown') throw Error('Не удалось определить ОС сервера.');
+          const distro = String(inspected.inspection.distribution || '').slice(0,82);
+          await api('/v1/superagent/task', {
+            method:'POST',
+            body:JSON.stringify({action:'create',
+              text:'Задание для подтверждённого SSH-сервера ' + node.node_id +
+              '. ОС проверена реальным SSH-подключением: ' + hostOS +
+              (distro ? ', дистрибутив: ' + distro : '') +
+              '. Выбирай команды именно для этой ОС. До изменения системы уточни текущие настройки, ' +
+              'права и зависимости. Не утверждай, что команда уже исполнена. ' +
+              'Составь пошаговые команды, критерии успеха, проверку после каждого шага и план отката. ' +
+              'Не выполнять изменения автоматически без одобрения владельца. ' +
+              'Запрос пользователя: ' + text
+            })
+          });
+          output.textContent = 'Задача передана SuperAgent. План появится в списке заданий. ' +
+            'Автоматическое выполнение предложенных команд пока не подключено.';
+          natural.value = '';
+          refresh(true);
+        } catch (error) {
+          output.textContent = 'Не удалось передать задание SuperAgent: ' + error.message;
+        } finally {
+          requestInFlight = false; plan.disabled = false;
+        }
+      });
+      terminal.append(element('label', '', 'Команда для SSH'), shellInput, run, output,
+        element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
+      row.append(terminal);
       if (credentials.truncated) row.append(element('p', 'sa-remote-note',
         'Показаны первые 100 файлов доступа.'));
     };
@@ -476,10 +630,10 @@
         const data = await api('/v1/superagent/remote-access');
         container.replaceChildren();
         status.textContent = data.remote_admin_enabled
-          ? 'SSH-диагностика доступна только для подтверждённых компьютеров при наличии файла доступа и SSH-модуля. RDP и управление ОС выключены.'
+          ? 'SSH-терминал доступен для подтверждённых компьютеров: произвольные команды требуют отдельного подтверждения. RDP пока не подключён.'
           : 'Удалённое администрирование выключено. Доступные разрешения можно просмотреть и отозвать.';
         let credentials = null;
-        if (data.remote_admin_enabled && data.nodes.length) {
+        if (data.remote_admin_enabled) {
           try {
             credentials = await api('/v1/superagent/ssh/credentials');
           } catch (error) {
@@ -487,6 +641,14 @@
               'Файлы доступа недоступны: ' + error.message));
           }
         }
+        enrollmentFile.replaceChildren();
+        (credentials?.files || []).forEach(name => {
+          const option = element('option', '', name);
+          option.value = name;
+          enrollmentFile.append(option);
+        });
+        enroll.disabled = !data.remote_admin_enabled || !credentials?.files?.length;
+        enrollBox.hidden = !data.remote_admin_enabled;
         if (!data.nodes.length) {
           container.append(element('p', 'sa-remote-note',
             'Подтверждённых компьютеров пока нет. Новый компьютер не добавляется по одному IP или паролю: ' +
@@ -499,7 +661,7 @@
             row.append(element('p', 'sa-meta', 'Зарегистрирован: ' + readableTime(node.registered_at)));
             row.append(element('p', 'sa-remote-note',
               'Наличие записи не означает, что компьютер сейчас доступен или его ключ повторно проверен.'));
-            if (data.remote_admin_enabled && credentials) addInspection(row, node, credentials);
+            if (data.remote_admin_enabled) addInspection(row, node, credentials);
             container.append(row);
           });
         }
