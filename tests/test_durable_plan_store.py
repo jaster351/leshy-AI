@@ -152,4 +152,45 @@ class DurableStoreTests(unittest.TestCase):
                 with self.assertRaises(PlanError):
                     self.store.claim(key, 'alice', limit=limit)
 
+
+    def test_deep_failure_blocks_descendants_but_preserves_independent_step(self):
+        count = 1536
+        steps = [
+            {'id': f'n{i}', 'title': f'Node {i}',
+             'max_attempts': 1 if i == 0 else 3,
+             'depends_on': [f'n{i - 1}'] if i else []}
+            for i in range(count)
+        ] + [{'id': 'independent', 'title': 'Independent'}]
+        key = self.store.create('alice', steps)
+        first = self.store.claim(key, 'alice', limit=1, now=10)[0]
+        self.assertEqual(first['id'], 'n0')
+        self.assertTrue(self.store.complete(
+            key, 'alice', 'n0', first['token'], success=False, now=11))
+        snapshot = self.store.snapshot(key, 'alice')
+        self.assertEqual(snapshot['state'], 'active')
+        self.assertEqual(snapshot['steps'][-2]['state'], 'blocked')
+        self.assertEqual(snapshot['steps'][-1]['state'], 'queued')
+        claimed = self.store.claim(key, 'alice', now=12)
+        self.assertEqual([item['id'] for item in claimed], ['independent'])
+        self.store.complete(key, 'alice', 'independent',
+                            claimed[0]['token'], success=True, now=13)
+        self.assertEqual(self.store.snapshot(key, 'alice')['state'], 'failed')
+
+    def test_expired_lease_propagates_failure_through_large_chain(self):
+        count = 512
+        steps = [
+            {'id': f'n{i}', 'title': f'Node {i}',
+             'max_attempts': 1 if i == 0 else 3,
+             'depends_on': [f'n{i - 1}'] if i else []}
+            for i in range(count)
+        ]
+        key = self.store.create('alice', steps)
+        first = self.store.claim(key, 'alice', now=0, lease_seconds=5)[0]
+        self.assertEqual(self.store.claim(key, 'alice', now=6), [])
+        snapshot = self.store.snapshot(key, 'alice')
+        self.assertEqual(snapshot['state'], 'failed')
+        self.assertEqual(snapshot['steps'][-1]['state'], 'blocked')
+        self.assertFalse(self.store.complete(
+            key, 'alice', 'n0', first['token'], success=True, now=7))
+
 if __name__=='__main__':unittest.main()
