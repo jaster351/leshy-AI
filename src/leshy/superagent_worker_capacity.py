@@ -34,9 +34,39 @@ def _free_memory_bytes() -> int | None:
         import psutil  # type: ignore
         return max(0, int(psutil.virtual_memory().available))
     except Exception:
-        # Unknown RAM is not mistaken for an unlimited amount. CPU/explicit
-        # configuration stays the only concurrency input when psutil is absent.
-        return None
+        pass
+    # Windows builds do not depend on psutil. Query the OS directly so memory
+    # backpressure still works for packaged Leshy on ordinary Windows PCs.
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            class MemoryStatusEx(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = MemoryStatusEx()
+            status.dwLength = ctypes.sizeof(status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return max(0, int(status.ullAvailPhys))
+        except (AttributeError, OSError, ImportError):
+            pass
+    else:
+        try:
+            with open("/proc/meminfo", encoding="ascii") as source:
+                for line in source:
+                    if line.startswith("MemAvailable:"):
+                        return max(0, int(line.split()[1]) * 1024)
+        except (OSError, ValueError, IndexError):
+            pass
+    # If RAM cannot be measured, preserve explicit CPU-based ceiling. Never
+    # guess memory from total RAM or process virtual address space.
+    return None
 
 
 def available_worker_slots(ceiling: int, *, free_memory_bytes: int | None = None,
