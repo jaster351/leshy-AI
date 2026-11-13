@@ -48,6 +48,18 @@ class SuperAgentPlanBridge:
         self.store.control(ticket_id, owner_id, action)
         return self.store.snapshot(ticket_id, owner_id)
 
+    def set_auto(self, ticket_id: str, owner_id: str, enabled: bool) -> dict[str, Any]:
+        """Only a real owner may opt a live ticket into durable read execution."""
+        ticket = self._ticket(ticket_id, owner_id)
+        if enabled and ticket["state"] in _TERMINAL_TICKETS:
+            raise PlanError("Cannot enable auto reads for a terminal ticket")
+        result = self.store.set_auto(ticket_id, owner_id, enabled)
+        # Stop may race with opt-in. Treat terminal ticket as authoritative.
+        if enabled and self._ticket(ticket_id, owner_id)["state"] in _TERMINAL_TICKETS:
+            self.store.control(ticket_id, owner_id, "cancel")
+            raise PlanError("Ticket ended while enabling auto reads")
+        return result
+
     def claim(self, ticket_id: str, owner_id: str, *, limit: int = 4,
               lease_seconds: int = 90, tool_only: bool = False) -> list[dict[str, Any]]:
         ticket = self._ticket(ticket_id, owner_id)

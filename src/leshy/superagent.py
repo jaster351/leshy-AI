@@ -20,6 +20,7 @@ from .superagent_parallel import parse_parallel_read_request, run_superagent_par
 from .superagent_ticket_pool import ParallelTicketPool
 from .superagent_worker_capacity import worker_ceiling, available_worker_slots
 from .superagent_plan_bridge import SuperAgentPlanBridge
+from .superagent_plan_runner import execute_ready_plan_reads
 from .cognitive_journal import CognitiveStepJournal
 from .cognitive_lease import SuperAgentProcessLease
 from .diagnostics import event, problem
@@ -122,7 +123,7 @@ def parse_superagent_intent(text: str) -> SuperAgentIntent | None:
     if plan_create:
         return SuperAgentIntent("plan_create", argument=plan_create.group(2).strip(),
                                 ticket_id=plan_create.group(1))
-    plan_action = re.fullmatch(r"plan\s+(status|pause|resume|cancel|run)\s+(SA-[A-Za-z0-9-]+)",
+    plan_action = re.fullmatch(r"plan\s+(status|pause|resume|cancel|run|auto|manual)\s+(SA-[A-Za-z0-9-]+)",
                                body, re.IGNORECASE)
     if plan_action:
         return SuperAgentIntent("plan_" + plan_action.group(1).lower(), ticket_id=plan_action.group(2))
@@ -162,6 +163,7 @@ class SuperAgentService:
         self._ensure_schema()
         self._journal = CognitiveStepJournal(self.storage)
         self.plans = SuperAgentPlanBridge(self)
+        self._auto_plan_backoff: dict[str, float] = {}
         # Тестовый/встроенный Runtime может не иметь settings: сохраняем
         # безопасный каталог рядом с БД, не создавая его без подтверждения.
         settings = getattr(app, "settings", None)
@@ -478,6 +480,50 @@ class SuperAgentService:
         with self.storage.connection() as conn:
             row = conn.execute(sql, values).fetchone()
         return dict(row) if row else None
+
+    def _next_auto_plan(self, exclude_ids: frozenset[str] = frozenset()) -> dict[str, str] | None:
+        """Pick ready opted-in read plans only while this process is leader."""
+        if self._stop.is_set() or not self._lease.held:
+            return None
+        for plan in self.plans.store.auto_plans(limit=128):
+            ident, owner = plan["id"], plan["owner_id"]
+            if ident in exclude_ids or time.monotonic() < self._auto_plan_backoff.get(ident, 0):
+                continue
+            try:
+                ticket = self.get(ident, owner_id=owner)
+                if ticket["state"] in {"ready", "blocked", "failed", "stopped"}:
+                    self.plans.store.control(ident, owner, "cancel")
+                    continue
+                if self.plans.store.auto_ready(ident, owner):
+                    return plan
+            except (KeyError, PermissionError, ValueError, OSError) as exc:
+                problem("superagent_auto_plan_scan_failed", type(exc).__name__,
+                        ticket_id=ident)
+                self._auto_plan_backoff[ident] = time.monotonic() + 30.0
+        return None
+
+    def _run_auto_plan(self, plan: dict[str, str]) -> None:
+        """Background job uses the same scoped reader; never performs writes."""
+        if self._stop.is_set() or not self._lease.held:
+            return
+        ident, owner = plan["id"], plan["owner_id"]
+        try:
+            remaining = max(1, min(4, available_worker_slots(self.max_parallel_tickets)))
+            result = execute_ready_plan_reads(
+                self, ident, owner, max_steps=12, max_workers=remaining,
+                require_auto=True, should_stop=self._stop.is_set,
+            )
+            if result["completed"] or result["errors"]:
+                event("superagent_auto_plan_batch",
+                      ticket_id=ident, completed=result["completed"],
+                      errors=result["errors"], state=result["state"])
+            if result["errors"] or not result["completed"]:
+                self._auto_plan_backoff[ident] = time.monotonic() + 30.0
+            else:
+                self._auto_plan_backoff.pop(ident, None)
+        except (KeyError, PermissionError, ValueError, RuntimeError, OSError) as exc:
+            problem("superagent_auto_plan_failed", type(exc).__name__, ticket_id=ident)
+            self._auto_plan_backoff[ident] = time.monotonic() + 30.0
 
     def _inputs(self, ticket_id: str) -> list[dict[str, str]]:
         with self.storage.connection() as conn:
@@ -857,7 +903,7 @@ class SuperAgentService:
             # The leader owns the pool, and retains the process lease until
             # every in-flight assignment finishes on shutdown. Local LLM
             # generation is still serialized by the inference scheduler.
-            with ParallelTicketPool(self.max_parallel_tickets) as pool:
+            with ParallelTicketPool(self.max_parallel_tickets) as pool, ParallelTicketPool(2) as plan_pool:
                 while not self._stop.is_set():
                     try:
                         if not self._activate():
@@ -875,6 +921,9 @@ class SuperAgentService:
                         for ticket_id, exc in pool.reap():
                             problem("superagent_parallel_assignment_failed",
                                     type(exc).__name__, ticket_id=ticket_id)
+                        for plan_id, exc in plan_pool.reap():
+                            problem("superagent_auto_plan_worker_failed",
+                                    type(exc).__name__, ticket_id=plan_id)
                         capacity = available_worker_slots(self.max_parallel_tickets)
                         assigned = pool.fill(
                             self._next_due, self._run_ticket,
@@ -884,6 +933,12 @@ class SuperAgentService:
                         if assigned:
                             event("superagent_parallel_tickets_dispatched",
                                   count=assigned, active=len(pool.active_ids))
+                        # Keep interactive ticket work ahead of opt-in DAG reads.
+                        remaining = max(0, capacity - len(pool.active_ids))
+                        plan_pool.fill(
+                            self._next_auto_plan, self._run_auto_plan,
+                            stopped=self._stop.is_set, capacity=min(2, remaining),
+                        )
                     except Exception as exc:
                         problem("superagent_loop_failed", str(exc))
                     self._wake.wait(self.poll_seconds)

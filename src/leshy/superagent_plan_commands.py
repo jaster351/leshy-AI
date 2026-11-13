@@ -16,6 +16,14 @@ def execute_plan_command(service: Any, action: str, ticket_id: str,
         return (f"План создан для {result['id']}: {len(result['steps'])} этапов. "
                 "Этапы сохранены, но не запущены автоматически. "
                 f"Состояние: /agent plan status {result['id']}")
+    if action in {"plan_auto", "plan_manual"}:
+        enabled = action == "plan_auto"
+        result = service.plans.set_auto(ticket_id, owner_id, enabled)
+        wake = getattr(service, "_wake", None)
+        if wake is not None:
+            wake.set()
+        mode = "включён" if result["auto_run"] else "выключен"
+        return f"Автоматическое выполнение безопасных чтений: {mode}; план {result['id']} ({result['state']})."
     if action == "plan_run":
         from .superagent_plan_runner import execute_ready_plan_reads
         result = execute_ready_plan_reads(service, ticket_id, owner_id)
@@ -28,7 +36,8 @@ def execute_plan_command(service: Any, action: str, ticket_id: str,
         result = service.plans.snapshot(ticket_id, owner_id)
         steps = result["steps"]
         shown = steps[:64]  # Keep chat output bounded; never hide the total.
-        lines = [f"План {result['id']}: {result['state']} — {len(steps)} этапов"]
+        lines = [f"План {result['id']}: {result['state']} — {len(steps)} этапов; "
+                 f"авточтение: {'включено' if result['auto_run'] else 'выключено'}"]
         for step in shown:
             row = f"- {step['id']}: {step['state']} ({step['title'][:100]})"
             if step['state'] == 'done' and step.get('tool'):
