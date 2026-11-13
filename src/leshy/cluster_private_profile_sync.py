@@ -197,6 +197,17 @@ class ClusterPrivateProfileSync:
                 (pair_id,),
             ).fetchone()
             if other is not None:
+                existing = conn.execute(
+                    "SELECT owner_id,remote_owner_id,remote_node_id,remote_endpoint,sealed_secret,"
+                    "revoked_at FROM cluster_private_pairs WHERE pair_id=?", (pair_id,)
+                ).fetchone()
+                if (existing["revoked_at"] is None and existing["owner_id"] == owner
+                        and existing["remote_owner_id"] == remote_owner
+                        and existing["remote_node_id"] == node_id
+                        and existing["remote_endpoint"] == _safe_endpoint(endpoint)
+                        and self._master.decrypt(existing["sealed_secret"].encode("ascii"))
+                        == secret.encode("ascii")):
+                    return  # Lost HTTP response: local retry is idempotent.
                 raise PermissionError("Повторная привязка с таким идентификатором запрещена")
             conn.execute(
                 "INSERT INTO cluster_private_pairs VALUES(?,?,?,?,?,?,?,?,NULL)",
@@ -234,7 +245,7 @@ class ClusterPrivateProfileSync:
             invite = conn.execute(
                 "SELECT * FROM cluster_private_invites WHERE invite_id=?", (invite_id,)
             ).fetchone()
-            if invite is None or invite["used_at"] is not None or float(invite["expires_at"]) <= time.time():
+            if invite is None or float(invite["expires_at"]) <= time.time():
                 raise PermissionError("Приглашение истекло или уже использовано")
             owner = str(invite["owner_id"])
             digest = str(invite["code_digest"])
@@ -248,7 +259,20 @@ class ClusterPrivateProfileSync:
         remote_owner = str(payload["owner_id"])
         if not (1 <= len(remote_owner) <= 200):
             raise ValueError("Некорректный профиль сопрягаемого узла")
-        pair_id = secrets.token_hex(16)
+        # Stable, secret-derived ID permits a retry after a lost HTTP response,
+        # without allowing a consumed invitation to create another pair.
+        pair_id = hmac.new(self.cluster.identity.secret,
+                           ("profile-pair:" + invite_id).encode("ascii"), sha256).hexdigest()[:32]
+        with self._lock:
+            if invite["used_at"] is not None:
+                existing = self._pair_row(pair_id, owner=owner, node=node)
+                if existing["remote_owner_id"] != remote_owner:
+                    raise PermissionError("Приглашение уже использовано другим профилем")
+                key = self._master.decrypt(existing["sealed_secret"].encode("ascii")).decode("ascii")
+                response = {"pair_id": pair_id, "owner_id": owner,
+                            "node_id": self.cluster.identity.node_id, "key": key}
+                return {"payload": _cipher_for_digest(digest).encrypt(
+                    _json_bytes(response)).decode("ascii")}
         key = Fernet.generate_key().decode("ascii")
         # Consume the invite and persist the pair in the SAME SQLite transaction.
         # A failed insert must roll back consumption of the one-time invitation.
