@@ -142,6 +142,24 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
         self.assertEqual(self.a.status(self.owner_a)["pair_count"], 1)
         self.assertEqual(self.b.status(self.owner_b)["pair_count"], 0)
 
+    def test_existing_peer_cannot_be_reassigned_to_another_local_owner(self):
+        self.pair()
+        new_invite = self.a.invite(self.other_a)
+        with self.assertRaises(PermissionError):
+            self.b.join(self.owner_b, new_invite["endpoint"],
+                        new_invite["invite_id"], new_invite["code"])
+        self.assertEqual(self.a.status(self.owner_a)["pair_count"], 1)
+        self.assertEqual(self.a.status(self.other_a)["pair_count"], 0)
+        self.assertEqual(self.b.status(self.owner_b)["pair_count"], 1)
+
+    def test_join_side_rejects_peer_profile_remapping(self):
+        self.pair()
+        with self.assertRaises(PermissionError):
+            self.b._save_pair("another-pair", self.owner_b, "different-remote-owner",
+                              "node-a", self.cluster_a.local_node.endpoint,
+                              "a" * 44)
+        self.assertEqual(self.b.status(self.owner_b)["pair_count"], 1)
+
     def test_failed_pair_insert_rolls_back_invitation_consumption(self):
         invite = self.a.invite(self.owner_a)
         with self.a_storage.connection() as conn:
