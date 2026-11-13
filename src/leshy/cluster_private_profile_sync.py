@@ -91,6 +91,31 @@ def _valid_stamp(value: object) -> str:
     return value
 
 
+def _timestamp_rank(value: object) -> datetime | None:
+    """Compare timestamps by UTC instant, never by their string representation."""
+    valid = _valid_stamp(value)
+    if not valid:
+        return None
+    try:
+        return datetime.fromisoformat(valid.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
+
+
+def _incoming_is_newer(incoming_stamp: str, incoming_source: str,
+                       current_stamp: str, current_source: str) -> bool:
+    """Deterministic LWW with node-ID tie-break for identical UTC instants."""
+    incoming_time = _timestamp_rank(incoming_stamp)
+    if incoming_time is None:
+        return False
+    current_time = _timestamp_rank(current_stamp)
+    if current_time is None:
+        return True
+    if incoming_time != current_time:
+        return incoming_time > current_time
+    return incoming_source > current_source
+
+
 class _NoRedirects(request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise ValueError("Редиректы межузловой синхронизации запрещены")
@@ -420,7 +445,20 @@ class ClusterPrivateProfileSync:
                     "SELECT updated_at FROM user_preferences WHERE owner_id=? AND key=?",
                     (owner, key),
                 ).fetchone()
-                if row is not None and str(row["updated_at"]) >= stamp:
+                stored_stamp = str(row["updated_at"]) if row is not None else ""
+                version = conn.execute(
+                    "SELECT source_node,stamp FROM cluster_private_versions "
+                    "WHERE owner_id=? AND item_key=?",
+                    (owner, key),
+                ).fetchone()
+                stored_source = (
+                    str(version["source_node"])
+                    if version is not None and version["stamp"] == stored_stamp
+                    else self.cluster.identity.node_id
+                )
+                if row is not None and not _incoming_is_newer(
+                    stamp, source, stored_stamp, stored_source
+                ):
                     continue
                 conn.execute(
                     "INSERT INTO user_preferences(owner_id,key,value_json,updated_at) VALUES(?,?,?,?) "
@@ -443,7 +481,21 @@ class ClusterPrivateProfileSync:
                     current = conn.execute(
                         "SELECT updated_at FROM owner_profiles WHERE id=?", (owner,)
                     ).fetchone()
-                    if current is not None and str(current["updated_at"]) < stamp:
+                    if current is not None:
+                        stored_stamp = str(current["updated_at"])
+                        version = conn.execute(
+                            "SELECT source_node,stamp FROM cluster_private_versions "
+                            "WHERE owner_id=? AND item_key='__profile_name__'",
+                            (owner,),
+                        ).fetchone()
+                        stored_source = (
+                            str(version["source_node"])
+                            if version is not None and version["stamp"] == stored_stamp
+                            else self.cluster.identity.node_id
+                        )
+                    if current is not None and _incoming_is_newer(
+                        stamp, source, stored_stamp, stored_source
+                    ):
                         conn.execute(
                             "UPDATE owner_profiles SET display_name=?,updated_at=? WHERE id=?",
                             (name, stamp, owner),
