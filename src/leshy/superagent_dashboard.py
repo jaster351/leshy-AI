@@ -6,6 +6,7 @@ control owner_id. Existing service methods enforce owner and state contracts.
 from __future__ import annotations
 
 from typing import Any
+import json
 from .storage import utcnow
 
 _ARCHIVE_SCHEMA = """CREATE TABLE IF NOT EXISTS superagent_dashboard_archive (
@@ -178,8 +179,12 @@ def execute_action(service: Any, owner_id: str, payload: dict[str, Any]) -> dict
         if state in {"ready", "failed", "stopped"}:
             raise ValueError("План нельзя добавлять к завершённому заданию")
         steps = payload.get("steps")
-        if not isinstance(steps, list) or not 1 <= len(steps) <= 32:
-            raise ValueError("Нужно от 1 до 32 этапов")
+        if not isinstance(steps, list) or not steps:
+            raise ValueError("План должен содержать хотя бы один этап")
+        # Bound the request size rather than the number of independent DAG steps.
+        # Execution parallelism is separately limited by real worker capacity.
+        if len(json.dumps(steps, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > 262144:
+            raise ValueError("План слишком большой: максимум 256 КБ данных за запрос")
         result = service.plans.create(ticket_id, owner_id, steps)
         return {"plan": {"id": str(result["id"]), "state": str(result["state"])}}
     if action in _PLAN_ACTIONS:
