@@ -611,10 +611,10 @@
         const data = await api('/v1/superagent/remote-access');
         container.replaceChildren();
         status.textContent = data.remote_admin_enabled
-          ? 'SSH-диагностика доступна только для подтверждённых компьютеров при наличии файла доступа и SSH-модуля. RDP и управление ОС выключены.'
+          ? 'SSH-терминал доступен для подтверждённых компьютеров: произвольные команды требуют отдельного подтверждения. RDP пока не подключён.'
           : 'Удалённое администрирование выключено. Доступные разрешения можно просмотреть и отозвать.';
         let credentials = null;
-        if (data.remote_admin_enabled && data.nodes.length) {
+        if (data.remote_admin_enabled) {
           try {
             credentials = await api('/v1/superagent/ssh/credentials');
           } catch (error) {
@@ -622,6 +622,14 @@
               'Файлы доступа недоступны: ' + error.message));
           }
         }
+        enrollmentFile.replaceChildren();
+        (credentials?.files || []).forEach(name => {
+          const option = element('option', '', name);
+          option.value = name;
+          enrollmentFile.append(option);
+        });
+        enroll.disabled = !data.remote_admin_enabled || !credentials?.files?.length;
+        enrollBox.hidden = !data.remote_admin_enabled;
         if (!data.nodes.length) {
           container.append(element('p', 'sa-remote-note',
             'Подтверждённых компьютеров пока нет. Новый компьютер не добавляется по одному IP или паролю: ' +
@@ -634,7 +642,7 @@
             row.append(element('p', 'sa-meta', 'Зарегистрирован: ' + readableTime(node.registered_at)));
             row.append(element('p', 'sa-remote-note',
               'Наличие записи не означает, что компьютер сейчас доступен или его ключ повторно проверен.'));
-            if (data.remote_admin_enabled && credentials) addInspection(row, node, credentials);
+            if (data.remote_admin_enabled) addInspection(row, node, credentials);
             container.append(row);
           });
         }
