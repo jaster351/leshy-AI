@@ -14,6 +14,7 @@
   let pending = false;
   let showArchived = false;
   let lastSignature = "";
+  const expandedTasks = new Set();
   const element = (tag, cls, text) => {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -41,6 +42,10 @@
     .sa-dialog{display:grid;gap:8px;margin-top:9px}.sa-message{padding:9px 11px;border:1px solid var(--line);border-radius:11px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.sa-user{margin-left:8%;background:rgba(96,190,133,.11)}.sa-agent{margin-right:8%;background:rgba(100,140,180,.10)}.sa-answer{margin-top:10px;padding:11px;border:1px solid var(--line);border-radius:11px}.sa-answer textarea{min-height:90px}.sa-answer .sa-help{margin:0 0 6px}
     .sa-dashboard code{display:block;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:7px 0;color:var(--accent)}
     .sa-plan{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:10px}.sa-plan textarea{min-height:75px}.sa-plan select{width:100%;max-width:460px;margin:6px 0 10px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
+    .sa-stage{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:8px 0;padding:9px;border:1px solid var(--line);border-radius:9px}
+    .sa-stage select{width:auto;max-width:100%;flex:1 1 150px;margin:0}.sa-stage input{min-width:130px;flex:2 1 180px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#07110d;color:var(--text)}
+    .sa-stage input[hidden]{display:none}.sa-stage button{min-height:34px}.sa-progress{font-size:12px;margin:6px 0;color:var(--muted)}
+    .sa-dashboard details.sa-advanced{margin-top:10px}.sa-dashboard button:focus-visible,.sa-dashboard input:focus-visible,.sa-dashboard select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     @media(max-width:720px){.sa-dashboard{padding:12px}.sa-row button,.sa-controls button{flex:1;min-width:110px}}
   `;
   async function api(path, options = {}) {
@@ -98,14 +103,32 @@
         const counts = Object.entries(plan.state_counts).map(([state, count]) => `${statusLabels[state] || state}: ${count}`);
         host.append(element('p', 'sa-help', counts.join(' · ')));
       }
-      visibleSteps.forEach(step => host.append(element('p', 'sa-meta', `${step.title} — ${step.state}`)));
+      const stageLabels = {queued:'Ожидает',running:'Выполняется',done:'Готово',
+        failed:'Ошибка',blocked:'Заблокировано',cancelled:'Отменено'};
+      const finished = Number(plan.state_counts?.done || 0);
+      host.append(element('p', 'sa-progress', `Готово: ${finished} из ${total}. ` +
+        (plan.auto_run ? 'Автоматические чтения включены.' : 'Автоматические чтения выключены.')));
+      visibleSteps.forEach(step => host.append(element('p', 'sa-meta',
+        `${step.title} — ${stageLabels[step.state] || step.state}`)));
       if (total > visibleSteps.length) host.append(element('p', 'sa-help', `Показано ${visibleSteps.length} из ${total} этапов. Общий прогресс — выше.`));
       const group = element('div', 'sa-controls');
       if (!detail.archived && plan.state === 'active') group.append(makeButton('Пауза плана', () => perform({ action: 'plan_pause', id: taskId }), false));
       if (!detail.archived && plan.state === 'paused') group.append(makeButton('Продолжить план', () => perform({ action: 'plan_resume', id: taskId }), false));
-      if (!detail.archived && ['active', 'paused'].includes(plan.state)) group.append(makeButton('Отменить план', () => perform({ action: 'plan_cancel', id: taskId }), false, 'sa-danger'));
+      const liveTicket = !['ready', 'failed', 'blocked', 'stopped'].includes(detail.state) && !detail.archived;
+      const hasReadSteps = visibleSteps.some(step => !!step.tool) || (plan.read_steps_total || 0) > 0;
+      if (liveTicket && plan.state === 'active' && hasReadSteps)
+        group.append(makeButton('Выполнить доступные проверки', () => perform({action:'plan_run', id:taskId}), false));
+      if (liveTicket && ['active', 'paused'].includes(plan.state) && hasReadSteps) {
+        group.append(makeButton(plan.auto_run ? 'Выключить автозапуск проверок' : 'Включить автозапуск проверок',
+          () => perform({action:plan.auto_run ? 'plan_manual':'plan_auto', id:taskId}), false));
+      }
+      if (!detail.archived && ['active', 'paused'].includes(plan.state))
+        group.append(makeButton('Отменить план', () => perform({ action: 'plan_cancel', id: taskId }), false, 'sa-danger'));
       host.append(group);
-      host.append(element('p', 'sa-help', 'План сохраняет последовательность этапов; сам по себе не запускает их автоматическое выполнение.'));
+      host.append(element('p', 'sa-help',
+        hasReadSteps
+          ? 'Автоматически доступны только безопасные проверки: версия, сведения о системе и поиск в проверенных знаниях. Действия с файлами и ОС не запускаются.'
+          : 'В этом плане только ручные этапы. Для автоматических проверок создайте план с доступными действиями.'));
     } else if (!['ready', 'failed', 'stopped'].includes(detail.state)) {
       const planArea = element('div', 'sa-plan');
       planArea.append(element('strong', '', 'Создать план из этапов'));
