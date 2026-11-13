@@ -410,6 +410,7 @@
       if (requestInFlight || !section.open) return;
       requestInFlight = true;
       reload.disabled = true;
+      status.className = 'sa-notice';
       status.textContent = 'Проверяю разрешения…';
       try {
         const data = await api('/v1/superagent/remote-access');
@@ -451,6 +452,7 @@
               requestInFlight = true;
               revoke.disabled = true;
               status.textContent = 'Отзываю разрешение…';
+              let revoked = false;
               try {
                 await api('/v1/superagent/remote-access/revoke', {
                   method: 'POST',
@@ -460,7 +462,7 @@
                     capability: grant.capability
                   })
                 });
-                status.textContent = 'Разрешение отозвано.';
+                revoked = true;
                 row.remove();
                 // Reload the whole view to avoid showing stale grants.
               } catch (error) {
@@ -470,6 +472,10 @@
               } finally {
                 requestInFlight = false;
                 await load();
+                if (revoked) {
+                  status.className = 'sa-notice';
+                  status.textContent = 'Разрешение отозвано. Список обновлён.';
+                }
               }
             }, false, 'sa-danger');
             row.append(revoke);
