@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-13T14:04:39.040505+00:00",
+  "updated_at": "2026-11-13T19:08:46.407144+00:00",
   "last_successful_issue": {
-    "searched_at": "2026-11-13T14:04:39.040505+00:00",
-    "previous_issue_at": "2026-11-13T13:11:00.423695+00:00",
+    "searched_at": "2026-11-13T19:08:46.407144+00:00",
+    "previous_issue_at": "2026-11-13T14:04:39.040505+00:00",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "arXiv:2611.15729"
+      "arXiv:2611.17161"
     ]
   },
   "previous_issue_from_owner": {
@@ -423,6 +423,19 @@
       "package": "knowledge/updates/2026-11-13/1901-memory-research.jsonl",
       "record_id": "research-arxiv-2611-15729",
       "code_url": null
+    },
+    {
+      "id": "arXiv:2611.17161",
+      "version": "v1",
+      "first_published_at": "2026-11-12T17:39:14Z",
+      "version_published_at": "2026-11-12T17:39:14Z",
+      "checked_at": "2026-11-13T19:08:46.407144+00:00",
+      "publication_status": "preprint",
+      "url": "https://arxiv.org/abs/2611.17161",
+      "package": "knowledge/updates/2026-11-14/0002-memory-research.jsonl",
+      "record_id": "research-arxiv-2611-17161",
+      "code_url": null,
+      "code_access_note": "Author-provided GitHub endpoint returned 404"
     }
   ],
   "issues": [

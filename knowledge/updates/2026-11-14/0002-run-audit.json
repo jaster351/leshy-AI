@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T19:08:46.407144+00:00",
+  "source_rows_received": 186,
+  "candidates_considered": 137,
+  "new_unique_records": 137,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "source_rows_consolidated": 50,
+  "updated_versions": 0,
+  "retracted_versions": 0,
+  "new_jsonl_bytes": 512458,
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-14/0002-iana-tls-extensions-01.jsonl",
+      "records": 136,
+      "bytes": 509474,
+      "sha256": "31b273c714ff040ab37e7a40d7ea53d2c8f52fb5cbce29c783b02bc98b797060"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0002-memory-research.jsonl",
+      "records": 1,
+      "bytes": 2984,
+      "sha256": "3c77b726344912331f35cba2dcc3edd50356a9e1916d7d145ccf4821fa2eabcc"
+    }
+  ],
+  "cursor": {
+    "processed_source_records": 186,
+    "remaining": 0,
+    "last_registry": "tls-certificate-compression-algorithm-ids"
+  },
+  "source_manifest": "knowledge/updates/datasets/iana-tls-extensions-20261114.manifest.json",
+  "deduplication": "All historical ids, canonical keys and normalized claims compared. HTTP ALPN header and TLS ALPN protocol identifiers are distinct. Existing TLS Parameters records reviewed as separate registries. Identical source meanings with identical applicability/status/comments consolidated; ranges preserved.",
+  "research": {
+    "window_start": "2026-11-13T14:04:39.040505+00:00",
+    "window_end": "2026-11-13T19:08:46.407144+00:00",
+    "new_ids": [
+      "2611.17161v1"
+    ],
+    "older_versions_checked": [
+      "2611.11929v1",
+      "2610.34673v1"
+    ],
+    "primary_sources_opened": [
+      "https://arxiv.org/abs/2611.17161",
+      "https://arxiv.org/html/2611.17161v1"
+    ]
+  },
+  "limitations": [
+    "Complete six TLS Extensions registries processed; another domain requires independent source/schema/license assessment",
+    "Downloaded XML updated 2026-11-12, web-rendered page showed 2026-11-09; source version pinned to raw XML hash",
+    "Research code endpoint 404; no independent reproduction",
+    "No local import, model training, builds or autotests performed"
+  ],
+  "encoding_validation": {
+    "files": 252,
+    "json_jsonl_records": 96258,
+    "issues": 0
+  }
+}
