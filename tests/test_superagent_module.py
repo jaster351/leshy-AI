@@ -42,7 +42,7 @@ class SuperAgentContractTests(unittest.TestCase):
         self.assertIn("PRIORITY_BACKGROUND", source)
         self.assertIn("get_inference_scheduler", source)
         self.assertIn("scheduler.slot", source)
-        self.assertIn("cancel_event=self._stop", source)
+        self.assertIn("cancel_event=cancelled", source)\n        self.assertIn("_TicketCancellation", source)
 
     def test_module_is_visible_in_settings_and_toggle_is_live(self) -> None:
         settings = (ROOT / "src" / "leshy" / "module_settings.py").read_text(encoding="utf-8")
