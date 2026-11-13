@@ -16,7 +16,7 @@ _RU_TO_EN = str.maketrans(_RU, _EN)
 _WORD = re.compile(r"[A-Za-zА-Яа-яЁё]+", re.UNICODE)
 _LATIN = re.compile(r"[A-Za-z]")
 _CYRILLIC = re.compile(r"[А-Яа-яЁё]")
-_UNSAFE = re.compile(r"[/\\@#{}<>:=_~|$^*+\\d]|https?\\b|www\\.|\\.\\w{2,}", re.IGNORECASE)
+_UNSAFE = re.compile(r"[/\\@#{}<>:=_~|$^*+\d]|https?\b|www\.|\.\w{2,}", re.IGNORECASE)
 _RU_WORDS = frozenset((
     "привет", "пока", "спасибо", "пожалуйста", "да", "нет", "как", "дела",
     "что", "это", "такое", "почему", "где", "когда", "сколько", "можно",
