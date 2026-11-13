@@ -134,4 +134,49 @@ def find_credential_file(storage: Any, owner_id: str, filename: str) -> Path:
     return found[0]
 
 
-__all__ = ["get_credential_folder", "set_credential_folder", "find_credential_file"]
+def list_credential_file_names(storage: Any, owner_id: str) -> dict[str, Any]:
+    """List unique JSON basenames inside the owner's configured folder.
+
+    Never read file contents or expose absolute paths. Duplicate basenames
+    are omitted: find_credential_file() also refuses ambiguous names.
+    """
+    folder = get_credential_folder(storage, owner_id)
+    if not folder["available"]:
+        return {"configured": folder["configured"], "available": False, "files": []}
+    root = Path(folder["path"])
+    if root.is_symlink() or root.resolve(strict=True) != root:
+        raise PermissionError("Папка доступа была изменена")
+    found: dict[str, str] = {}
+    duplicates: set[str] = set()
+    inspected = 0
+
+    def fail_walk(error: OSError) -> None:
+        raise PermissionError("Папка доступа недоступна") from error
+
+    for base, dirs, files in os.walk(root, followlinks=False, onerror=fail_walk):
+        dirs[:] = [name for name in dirs if not (Path(base) / name).is_symlink()]
+        inspected += len(dirs) + len(files)
+        if inspected > _MAX_ENTRIES:
+            raise ValueError("В папке слишком много файлов для безопасного просмотра")
+        for name in files:
+            if not name.lower().endswith(".json") or len(name) > 255:
+                continue
+            if name in {".", ".."} or any(ch in name for ch in ("/", "\\", "\x00", ":")):
+                continue
+            candidate = Path(base) / name
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            if not candidate.resolve(strict=True).is_relative_to(root):
+                continue
+            key = name.casefold()
+            if key in found:
+                duplicates.add(key)
+            else:
+                found[key] = name
+    names = sorted((v for k, v in found.items() if k not in duplicates), key=str.casefold)
+    return {"configured": True, "available": True,
+            "files": names[:100], "truncated": len(names) > 100}
+
+
+
+__all__ = ["get_credential_folder", "set_credential_folder", "find_credential_file", "list_credential_file_names"]
