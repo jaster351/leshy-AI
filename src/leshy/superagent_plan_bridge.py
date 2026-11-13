@@ -49,11 +49,12 @@ class SuperAgentPlanBridge:
         return self.store.snapshot(ticket_id, owner_id)
 
     def claim(self, ticket_id: str, owner_id: str, *, limit: int = 4,
-              lease_seconds: int = 90) -> list[dict[str, Any]]:
+              lease_seconds: int = 90, tool_only: bool = False) -> list[dict[str, Any]]:
         ticket = self._ticket(ticket_id, owner_id)
         if ticket["state"] in _TERMINAL_TICKETS:
             return []
-        claims = self.store.claim(ticket_id, owner_id, limit=limit, lease_seconds=lease_seconds)
+        claims = self.store.claim(ticket_id, owner_id, limit=limit, lease_seconds=lease_seconds,
+                                  tool_only=tool_only)
         # A Stop may race with the SQLite claim. Never issue a newly claimed
         # step to an executor after observing the terminal ticket state.
         if self._ticket(ticket_id, owner_id)["state"] in _TERMINAL_TICKETS:
