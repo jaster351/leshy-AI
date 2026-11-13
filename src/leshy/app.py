@@ -23,7 +23,7 @@ from .image_generation import ImageGenerationManager
 from .knowledge import KnowledgeBase
 from .learning_control import LearningControl
 from .llm import ChatMessage, EchoLLM, LLMUnavailable, OllamaLLM
-from .keyboard_layout import layout_context
+from .keyboard_layout import layout_answer, layout_context
 from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
@@ -636,6 +636,7 @@ class LeshyApp:
         except Exception as exc:
             problem("chat_generation_failed", str(exc), session_id=sid, owner_id=owner_id)
             raise
+        answer = layout_answer(message, answer)
         answered_at = self._save_assistant(sid, answer)
         event(
             "chat_generation_finished",
