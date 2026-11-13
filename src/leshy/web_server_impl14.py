@@ -14,6 +14,9 @@ from .module_settings import module_enabled
 from .web_server_impl11 import _runtime_html
 from .superagent_dashboard import execute_action, list_tickets, ticket_details
 from .superagent_credential_settings import get_credential_folder, set_credential_folder
+from .superagent_remote_access_dashboard import (
+    authorized_remote_context, list_remote_access, revoke_remote_grant,
+)
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
 
@@ -45,6 +48,30 @@ def make_handler(app, telegram, settings, model_catalog):
                 self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "SuperAgent ещё не запущен"})
                 return None
             return owner, service
+
+        def _remote_context(self):
+            # This inventory is strictly for existing, provider-linked Web
+            # owners. An anonymous cookie / API key is not remote authority.
+            owner = self._settings_owner()
+            if owner is None:
+                return None
+            if not module_enabled(app.storage, "superagent"):
+                self._json(HTTPStatus.CONFLICT, {
+                    "error": "Включите SuperAgent в настройках модулей"
+                })
+                return None
+            try:
+                identity = getattr(app, "owner_identity", None)
+                if identity is None:
+                    raise PermissionError("Вход через провайдера не настроен")
+                return authorized_remote_context(
+                    app, owner, self._cookie_value(identity.cookie_name)
+                )
+            except (PermissionError, ValueError):
+                self._json(HTTPStatus.FORBIDDEN, {
+                    "error": "Для списка компьютеров требуется подтверждённый вход владельца"
+                })
+                return None
 
         def do_GET(self):
             parsed = parse.urlsplit(self.path)
@@ -100,6 +127,21 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_get_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось прочитать настройку папки"})
+            if parsed.path == "/v1/superagent/remote-access":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                policy, actor = context
+                try:
+                    return self._json(HTTPStatus.OK, list_remote_access(
+                        policy, actor,
+                        remote_admin_enabled=module_enabled(app.storage, "remote-admin"),
+                    ))
+                except Exception as exc:
+                    problem("superagent_remote_access_list_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось получить список удалённых компьютеров"
+                    })
             if parsed.path != "/v1/superagent/tasks":
                 return super().do_GET()
             context = self._dashboard_context()
@@ -146,6 +188,36 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_set_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить настройку"})
+            if path == "/v1/superagent/remote-access/revoke":
+                # Only revocation is exposed: no enroll/grant/SSH/RDP route.
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Недопустимый источник запроса"
+                    })
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Чужой источник запроса"
+                    })
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется JSON"})
+                policy, actor = context
+                try:
+                    return self._json(HTTPStatus.OK, revoke_remote_grant(
+                        policy, actor, self._body()
+                    ))
+                except (PermissionError, ValueError):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Нельзя отозвать это разрешение"
+                    })
+                except Exception as exc:
+                    problem("superagent_remote_access_revoke_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось отозвать разрешение"
+                    })
             if path != "/v1/superagent/task":
                 return super().do_POST()
             context = self._dashboard_context()
