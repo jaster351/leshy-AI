@@ -549,7 +549,7 @@ class ClusterPrivateProfileSync:
             raise PermissionError("Зашифрованное сообщение адресовано другой операции")
         self._claim_message(str(row["pair_id"]), sender, inner.get("nonce"))
         if route == "pull":
-            return {"payload": cipher.encrypt(_json_bytes(self._snapshot(row["owner_id"]))).decode("ascii")}
+            return {"payload": cipher.encrypt(_json_bytes({"request_nonce": inner["nonce"], "snapshot": self._snapshot(row["owner_id"])})).decode("ascii")}
         if route != "push":
             raise ValueError("Неизвестная операция")
         self._apply(str(row["owner_id"]), inner.get("snapshot"))
@@ -566,9 +566,11 @@ class ClusterPrivateProfileSync:
         body = {**base, "payload": cipher.encrypt(_json_bytes(inner)).decode("ascii")}
         reply = self._signed_post(row["remote_endpoint"], "/v1/cluster/private-profile/pull", body)
         remote = json.loads(cipher.decrypt(str(reply["payload"]).encode("ascii"), ttl=120))
-        if not isinstance(remote, dict):
-            raise PermissionError("Некорректный ответ сопряжённого узла")
-        self._apply(owner, remote)
+        if (not isinstance(remote, dict) or
+                not hmac.compare_digest(str(remote.get("request_nonce") or ""), inner["nonce"]) or
+                not isinstance(remote.get("snapshot"), dict)):
+            raise PermissionError("Ответ не соответствует текущему запросу профиля")
+        self._apply(owner, remote["snapshot"])
         outgoing = {"owner_id": owner, "operation": "push", "nonce": secrets.token_hex(16),
                     "snapshot": self._snapshot(owner)}
         pushed = self._signed_post(
