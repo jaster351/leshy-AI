@@ -61,6 +61,23 @@ class SuperAgentPlanBridge:
             return []
         return claims
 
+    def heartbeat(self, ticket_id: str, owner_id: str, step_id: str,
+                  token: str, *, lease_seconds: int = 90,
+                  now: float | None = None) -> bool:
+        """Renew an owner-authorized lease without resurrecting stopped work."""
+        ticket = self._ticket(ticket_id, owner_id)
+        if ticket["state"] in _TERMINAL_TICKETS:
+            self.store.control(ticket_id, owner_id, "cancel")
+            return False
+        renewed = self.store.heartbeat(
+            ticket_id, owner_id, step_id, token,
+            lease_seconds=lease_seconds, now=now,
+        )
+        if self._ticket(ticket_id, owner_id)["state"] in _TERMINAL_TICKETS:
+            self.store.control(ticket_id, owner_id, "cancel")
+            return False
+        return renewed
+
     def complete(self, ticket_id: str, owner_id: str, step_id: str,
                  token: str, *, success: bool, output: str = "") -> bool:
         ticket = self._ticket(ticket_id, owner_id)

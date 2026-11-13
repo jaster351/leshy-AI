@@ -17,6 +17,35 @@ from typing import Any
 
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_SAFE_READ_TOOLS = frozenset({"knowledge.search", "runtime.version", "runtime.platform"})
+
+
+def _safe_read_spec(step: dict[str, Any]) -> tuple[str, str]:
+    """Persist only strictly validated read actions; text steps remain inert."""
+    tool = step.get("tool", "")
+    arguments = step.get("arguments", {})
+    if tool == "" and arguments == {}:
+        return "", "{}"
+    if not isinstance(tool, str) or tool not in _SAFE_READ_TOOLS:
+        raise PlanError("Only explicitly approved read-only plan tools are supported")
+    if not isinstance(arguments, dict):
+        raise PlanError("Tool arguments must be a JSON object")
+    if tool == "knowledge.search":
+        query = arguments.get("query")
+        if set(arguments) != {"query"} or not isinstance(query, str) or not 3 <= len(query.strip()) <= 300:
+            raise PlanError("knowledge.search requires a query of 3–300 characters")
+        arguments = {"query": " ".join(query.split())}
+    elif arguments:
+        raise PlanError("Runtime read tools take no arguments")
+    try:
+        serialized = json.dumps(arguments, ensure_ascii=False, sort_keys=True,
+                                separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError):
+        raise PlanError("Tool arguments must be JSON-compatible") from None
+    if len(serialized.encode("utf-8")) > 4096:
+        raise PlanError("Tool arguments exceed 4096 bytes")
+    return tool, serialized
+
 
 
 class PlanError(ValueError):
@@ -44,8 +73,10 @@ def _validate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         attempts = step.get("max_attempts", 3)
         if type(attempts) is not int or not 1 <= attempts <= 8:
             raise PlanError("max_attempts must be 1–8")
+        tool, args_json = _safe_read_spec(step)
         ids.add(ident)
-        normalized.append({"id": ident, "title": title.strip(), "depends_on": deps, "max_attempts": attempts})
+        normalized.append({"id": ident, "title": title.strip(), "depends_on": deps,
+                           "max_attempts": attempts, "tool": tool, "args_json": args_json})
     # O(steps + dependencies), not quadratic rescans for long DAGs.
     # Batch sizes are constrained at execution by available workers/resources,
     # not by a hard-coded limit on the number of planned steps.
@@ -130,11 +161,22 @@ class DurablePlanStore:
                     max_attempts INTEGER NOT NULL,
                     lease_token TEXT, lease_until REAL NOT NULL DEFAULT 0,
                     output TEXT NOT NULL DEFAULT '',
+                    tool_name TEXT NOT NULL DEFAULT '',
+                    args_json TEXT NOT NULL DEFAULT '{}',
                     PRIMARY KEY (plan_id, step_id)
                 );
                 CREATE INDEX IF NOT EXISTS ix_durable_steps_state
                     ON durable_plan_steps(plan_id, state);
             """)
+            # Preserve plans created by older builds; migrate without deleting
+            # in-flight leases or rewriting completed step outputs.
+            db.execute("BEGIN IMMEDIATE")
+            cols = {row["name"] for row in db.execute("PRAGMA table_info(durable_plan_steps)")}
+            if "tool_name" not in cols:
+                db.execute("ALTER TABLE durable_plan_steps ADD COLUMN tool_name TEXT NOT NULL DEFAULT ''")
+            if "args_json" not in cols:
+                db.execute("ALTER TABLE durable_plan_steps ADD COLUMN args_json TEXT NOT NULL DEFAULT '{}'")
+            db.commit()
 
     @contextmanager
     def _connection(self):
@@ -179,9 +221,11 @@ class DurablePlanStore:
             db.execute("BEGIN IMMEDIATE")
             db.execute("INSERT INTO durable_plans(plan_id,owner_id,state,created_at) VALUES(?,?,?,?)",
                        (ident, owner_id, "active", time.time()))
-            db.executemany("INSERT INTO durable_plan_steps(plan_id,step_id,title,deps_json,state,max_attempts) "
-                           "VALUES(?,?,?,?,'queued',?)",
-                           [(ident, s["id"], s["title"], json.dumps(s["depends_on"]), s["max_attempts"]) for s in tasks])
+            db.executemany("INSERT INTO durable_plan_steps("
+                           "plan_id,step_id,title,deps_json,state,max_attempts,tool_name,args_json) "
+                           "VALUES(?,?,?,?,'queued',?,?,?)",
+                           [(ident, s["id"], s["title"], json.dumps(s["depends_on"]),
+                             s["max_attempts"], s["tool"], s["args_json"]) for s in tasks])
             db.commit()
         return ident
 
@@ -218,7 +262,9 @@ class DurablePlanStore:
                            (token, clock + lease_seconds, plan_id, ident))
                 states[ident] = "running"
                 claims.append({"id": ident, "title": row["title"], "token": token,
-                               "attempt": row["attempt"] + 1})
+                               "attempt": row["attempt"] + 1,
+                               "tool": row["tool_name"],
+                               "arguments": json.loads(row["args_json"])})
             self._status(db, plan_id)
             db.commit()
             return claims
@@ -285,8 +331,10 @@ class DurablePlanStore:
     def snapshot(self, plan_id: str, owner_id: str) -> dict[str, Any]:
         with self._connection() as db:
             state = self._check_owner(db, plan_id, owner_id)
-            rows = db.execute("SELECT step_id,title,deps_json,state,attempt,output FROM durable_plan_steps "
-                              "WHERE plan_id=? ORDER BY rowid", (plan_id,)).fetchall()
+            rows = db.execute("SELECT step_id,title,deps_json,state,attempt,output,tool_name,args_json "
+                              "FROM durable_plan_steps WHERE plan_id=? ORDER BY rowid", (plan_id,)).fetchall()
         return {"id": plan_id, "state": state, "steps": [
             {"id": r["step_id"], "title": r["title"], "depends_on": json.loads(r["deps_json"]),
-             "state": r["state"], "attempt": r["attempt"], "output": r["output"]} for r in rows]}
+             "state": r["state"], "attempt": r["attempt"], "output": r["output"],
+             "tool": r["tool_name"], "arguments": json.loads(r["args_json"])}
+            for r in rows]}
