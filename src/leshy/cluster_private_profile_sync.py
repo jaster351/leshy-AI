@@ -250,6 +250,10 @@ class ClusterPrivateProfileSync:
             raise ValueError("Некорректный профиль сопрягаемого узла")
         pair_id = secrets.token_hex(16)
         key = Fernet.generate_key().decode("ascii")
+        # Consume the invite and persist the pair in the SAME SQLite transaction.
+        # A failed insert must roll back consumption of the one-time invitation.
+        sealed = self._master.encrypt(key.encode("ascii")).decode("ascii")
+        safe_endpoint = _safe_endpoint(peer.endpoint)
         with self._lock:
             with self.storage.connection() as conn:
                 changed = conn.execute(
@@ -257,9 +261,13 @@ class ClusterPrivateProfileSync:
                     "AND used_at IS NULL AND expires_at>?",
                     (time.time(), invite_id, time.time()),
                 ).rowcount
-            if changed != 1:
-                raise PermissionError("Приглашение уже использовано")
-            self._save_pair(pair_id, owner, remote_owner, node, peer.endpoint, key)
+                if changed != 1:
+                    raise PermissionError("Приглашение уже использовано")
+                conn.execute(
+                    "INSERT INTO cluster_private_pairs VALUES(?,?,?,?,?,?,?,?,NULL)",
+                    (pair_id, owner, remote_owner, node, safe_endpoint, sealed,
+                     json.dumps(["profile", "ui_preferences"]), utcnow()),
+                )
         response = {"pair_id": pair_id, "owner_id": owner,
                     "node_id": self.cluster.identity.node_id, "key": key}
         event("cluster_private_profile_paired", peer=node[:12])
