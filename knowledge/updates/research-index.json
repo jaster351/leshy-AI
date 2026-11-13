@@ -1,14 +1,17 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-12T11:04:30Z",
+  "updated_at": "2026-11-13T13:11:00.423695+00:00",
   "last_successful_issue": {
-    "searched_at": "2026-11-12T11:04:30Z",
-    "previous_issue_at": "2026-11-12T09:55:57Z",
+    "searched_at": "2026-11-13T13:11:00.423695+00:00",
+    "previous_issue_at": "2026-11-13T09:06:47.720743+00:00",
     "discovery_lookback_days": 30,
     "newly_included_ids": [
-      "doi:10.18653/2026.findings-emnlp.1312"
-    ],
-    "note": "Свежие списки и целевой поиск после прошлого выпуска не выявили новой публикации последнего часа. Впервые включена ранее не покрытая рецензированная работа Findings of EMNLP 2026 о query-only memory injection с открытым экспериментальным репозиторием."
+      "arXiv:2611.16590",
+      "arXiv:2611.16487",
+      "arXiv:2611.16223",
+      "arXiv:2611.12155",
+      "arXiv:2611.17316"
+    ]
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -352,6 +355,66 @@
       "dataset_url": "https://github.com/TrustAIRLab/AMIA/tree/main/data",
       "inclusion_reason": "first_time_coverage_of_recent_relevant_proceedings_publication",
       "new_since_previous_issue": false
+    },
+    {
+      "id": "arXiv:2611.16590",
+      "version": "v1",
+      "first_published_at": "2026-11-12T10:23:15Z",
+      "version_published_at": "2026-11-12T10:23:15Z",
+      "checked_at": "2026-11-13T13:11:00.423695+00:00",
+      "publication_status": "preprint; venue unconfirmed",
+      "url": "https://arxiv.org/abs/2611.16590",
+      "package": "knowledge/updates/2026-11-13/1805-memory-research.jsonl",
+      "record_id": "research-arxiv-2611-16590",
+      "code_url": "https://github.com/flyingView/AstroMemBench-v1"
+    },
+    {
+      "id": "arXiv:2611.16487",
+      "version": "v1",
+      "first_published_at": "2026-11-12T08:58:20Z",
+      "version_published_at": "2026-11-12T08:58:20Z",
+      "checked_at": "2026-11-13T13:11:00.423695+00:00",
+      "publication_status": "preprint; venue unconfirmed",
+      "url": "https://arxiv.org/abs/2611.16487",
+      "package": "knowledge/updates/2026-11-13/1805-memory-research.jsonl",
+      "record_id": "research-arxiv-2611-16487",
+      "code_url": null
+    },
+    {
+      "id": "arXiv:2611.16223",
+      "version": "v1",
+      "first_published_at": "2026-11-12T03:17:19Z",
+      "version_published_at": "2026-11-12T03:17:19Z",
+      "checked_at": "2026-11-13T13:11:00.423695+00:00",
+      "publication_status": "preprint; venue unconfirmed",
+      "url": "https://arxiv.org/abs/2611.16223",
+      "package": "knowledge/updates/2026-11-13/1805-memory-research.jsonl",
+      "record_id": "research-arxiv-2611-16223",
+      "code_url": "https://github.com/jiazhicheng7-ctrl/MindMem"
+    },
+    {
+      "id": "arXiv:2611.12155",
+      "version": "v1",
+      "first_published_at": "2026-11-09T10:05:07Z",
+      "version_published_at": "2026-11-09T10:05:07Z",
+      "checked_at": "2026-11-13T13:11:00.423695+00:00",
+      "publication_status": "preprint; venue unconfirmed",
+      "url": "https://arxiv.org/abs/2611.12155",
+      "package": "knowledge/updates/2026-11-13/1805-memory-research.jsonl",
+      "record_id": "research-arxiv-2611-12155",
+      "code_url": null
+    },
+    {
+      "id": "arXiv:2611.17316",
+      "version": "v1",
+      "first_published_at": "2026-11-12T18:58:22Z",
+      "version_published_at": "2026-11-12T18:58:22Z",
+      "checked_at": "2026-11-13T13:11:00.423695+00:00",
+      "publication_status": "preprint; venue unconfirmed",
+      "url": "https://arxiv.org/abs/2611.17316",
+      "package": "knowledge/updates/2026-11-13/1805-memory-research.jsonl",
+      "record_id": "research-arxiv-2611-17316",
+      "code_url": null
     }
   ],
   "issues": [

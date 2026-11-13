@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T13:11:00.423695+00:00",
+  "candidates_considered": 23980,
+  "new_unique_records": 23975,
+  "exact_duplicates": 1,
+  "semantic_duplicates": 4,
+  "updated_versions": 0,
+  "retracted_versions": 0,
+  "obsolete_source_terms_excluded": 6911,
+  "new_jsonl_bytes": 62270925,
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-01.jsonl",
+      "bytes": 2094565,
+      "sha256": "5489cfc542e0d39a59249a0a776634864036eef3ff21b8266d269335caefafa6"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-02.jsonl",
+      "bytes": 2094910,
+      "sha256": "e918288738bcf863c416e9c16a85855045ba728daa084b5913a66151e810b8b7"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-03.jsonl",
+      "bytes": 2096369,
+      "sha256": "bffa3774aab03a08764ccd6a740103412ff822e864fb678d5a2f1c4ecfc8727b"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-04.jsonl",
+      "bytes": 2096427,
+      "sha256": "515e6da6feb6dfe7cbb22340079d96baa8963a72ccfa0d5273439e571e1c51ab"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-05.jsonl",
+      "bytes": 2096004,
+      "sha256": "80971e102665d2129055417d289e7c1166fa1287bef27c864d60910252d06ba0"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-06.jsonl",
+      "bytes": 2095867,
+      "sha256": "d3dac3049615717bf161112fcc9b8753bb79a56c01e851d3d7826e7d3f39766f"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-07.jsonl",
+      "bytes": 2096214,
+      "sha256": "310aedb0c4acb02647167178aa14987cf22eb35d58954304531aa05cdd549fc4"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-08.jsonl",
+      "bytes": 2096966,
+      "sha256": "304c6a6164ac046fd34833fc479f0442bb2cba79f96f211184499cad7cf47497"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-09.jsonl",
+      "bytes": 2096358,
+      "sha256": "a687d63383433ef784ffee656b056435dbcfd946ac2f1ce2ad6f41e599cfa05e"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-10.jsonl",
+      "bytes": 2094886,
+      "sha256": "bf6caf7b98a5943dfe32c40eb889246e63e21ffa16948bf2f87d257229062e10"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-11.jsonl",
+      "bytes": 2096935,
+      "sha256": "8957879296e31d95797c88d96f665a9330c316bf985377421b89721aca941fa3"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-12.jsonl",
+      "bytes": 2096259,
+      "sha256": "c059d401a9d80484e8eb344e52be39a0b1d53802b1e08ec62e3d8b2ff5b63e4d"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-13.jsonl",
+      "bytes": 2097127,
+      "sha256": "19a20bbde67075c8650dae2053f554e02e58d3c86b5377f0c08a0877df90958f"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-14.jsonl",
+      "bytes": 2097072,
+      "sha256": "7dbc5c2faa85b4676718aa40e672caa3c02964d7d20eb4e4116a17dc39cc6241"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-15.jsonl",
+      "bytes": 2095821,
+      "sha256": "1b2346fbe4a86d103c0ba36e21e1542fb75182d302e0f327dfd03683fd517265"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-16.jsonl",
+      "bytes": 2095520,
+      "sha256": "0b26696f896e3b20afece2977e96b0d221f1f5d6cae550df0a2f40acc2c9cda0"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-17.jsonl",
+      "bytes": 2096431,
+      "sha256": "4de27c1972bb3c0eb61c65cda479d166984f6581542e98884ed8fd622cdecc71"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-18.jsonl",
+      "bytes": 2095288,
+      "sha256": "a22b01639bed8ff965a066bed482f1ac4dd1860de6a75dec1c18921e5e965b6b"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-19.jsonl",
+      "bytes": 2094792,
+      "sha256": "13f903a9ad166dd0b46aa73b21ef3e3298f20ccaa108e81602cf88d0d25d12ba"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-20.jsonl",
+      "bytes": 2096076,
+      "sha256": "9e052bc59351e329dccf3e78393fa84276ed0c3a0d17228534cb315841a40781"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-21.jsonl",
+      "bytes": 2095288,
+      "sha256": "83497e92e3857175027d0c23948eaa63b35062a6d00e5bee6f034d259382ad2d"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-22.jsonl",
+      "bytes": 2095291,
+      "sha256": "b7d595441356688ac5b320a4fd4b11b836624e7e749642190cd257fe38f3c846"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-23.jsonl",
+      "bytes": 2095251,
+      "sha256": "4f2606fe1b72973b172b1335d280bc60335e7b0946e0d30e7dfba96e650d0937"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-24.jsonl",
+      "bytes": 2095859,
+      "sha256": "5ccdafc4fe92e6184cfea11431de67b7b175a00e38c8bc940a78c7c3ea2ae918"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-25.jsonl",
+      "bytes": 2096782,
+      "sha256": "0c78d36f936fd18b88f27aa3ea9908a55ac1194067d9a95a3f5fc6d1ca206e5e"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-26.jsonl",
+      "bytes": 2095173,
+      "sha256": "579439c3d0f17e64f95ec45be66b330268ab8620a7b767e60ebdf21c8f604540"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-27.jsonl",
+      "bytes": 2095267,
+      "sha256": "d8d67a70c4c422a41dd2e5a4c776d2069add85967dbe360dcafbd34c7dd49d17"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-28.jsonl",
+      "bytes": 2097013,
+      "sha256": "b023527a4977a179003f03d24ccc3e6ec7cdb0658156fa4035cac2b7bd235fae"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-29.jsonl",
+      "bytes": 2095060,
+      "sha256": "1ffd76669083776536fca6f73a9fd921b8e690e5be3d33481c5028160d780fe2"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-go-biological-processes-30.jsonl",
+      "bytes": 1479188,
+      "sha256": "d0d5edd1f562215e0863f28bc7603cf57f58e988284677a8697866972a4d83f5"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1805-memory-research.jsonl",
+      "bytes": 10866,
+      "sha256": "1239942dde0b85869d1c28673ba9b6be0f293ec5894f2e1185f5029250707064"
+    }
+  ],
+  "cursor": {
+    "namespace": "biological_process",
+    "start_offset": 0,
+    "processed_active": 23974,
+    "remaining_active": 0,
+    "first_id": "GO:0000001",
+    "last_id": "GO:7770084",
+    "next_namespace": null
+  },
+  "source_manifest": "knowledge/updates/datasets/go-biological-processes-20260726.manifest.json",
+  "deduplication": "All historical JSONL ids, canonical keys, Unicode-normalized claims and GO definitions checked. Chemical signs, primes and inequalities retained. Four generic biology overlaps excluded after manual review. Nine punctuation-stripped near-matches reviewed and retained as distinct scientific entities. MemoryDojo v1 already reviewed: excluded.",
+  "research": {
+    "window_start": "2026-11-13T09:06:47.720743+00:00",
+    "window_end": "2026-11-13T13:11:00.423695+00:00",
+    "new_ids": [
+      "2611.16590",
+      "2611.16487",
+      "2611.16223",
+      "2611.12155",
+      "2611.17316"
+    ],
+    "previously_reviewed_excluded": [
+      "2611.09721v1"
+    ],
+    "limitations": [
+      "CoReMem: abstract only",
+      "HeMeR: venue not independently confirmed",
+      "MindMem: code/data promised upon acceptance",
+      "StealthyPoison: artifact endpoint unavailable"
+    ]
+  },
+  "limitations": [
+    "GO source remains July release; not presented as November discovery",
+    "No independent experimental reproductions; research records remain candidate",
+    "No local import or model training observed"
+  ],
+  "local_tests_and_builds_run": false,
+  "encoding_validation": {
+    "files": 239,
+    "json_objects": 95422,
+    "issues": 0
+  }
+}
