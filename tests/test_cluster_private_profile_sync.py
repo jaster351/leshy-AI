@@ -295,6 +295,41 @@ class ClusterPrivateProfileSyncTests(unittest.TestCase):
         values = self.a._snapshot(self.owner_a)["preferences"]
         self.assertEqual(next(x for x in values if x["key"] == "ui.theme")["source_node"], "node-z")
 
+    def test_encrypted_profile_request_replay_and_route_swap_are_denied(self):
+        pair_id = self.pair()
+        paired = self.b._pair_row(pair_id, owner=self.owner_b)
+        cipher = self.b._secret_cipher(paired)
+
+        def signed(operation, nonce):
+            packet = {"owner_id": self.owner_b, "operation": operation, "nonce": nonce}
+            body = {"pair_id": pair_id,
+                    "payload": cipher.encrypt(_json_bytes(packet)).decode("ascii")}
+            return body, self.cluster_b.headers(body)
+
+        body, headers = signed("pull", "a" * 32)
+        answer = self.a.receive("pull", body, headers)
+        self.assertIn("payload", answer)
+        # A captured signed and encrypted LAN request cannot be resent.
+        with self.assertRaises(PermissionError):
+            self.a.receive("pull", body, headers)
+
+        # Route is cryptographically bound to the decrypted operation.
+        other, other_headers = signed("pull", "b" * 32)
+        with self.assertRaises(PermissionError):
+            self.a.receive("push", other, other_headers)
+
+        malformed, malformed_headers = signed("pull", "not-a-valid-nonce")
+        with self.assertRaises(PermissionError):
+            self.a.receive("pull", malformed, malformed_headers)
+
+        # Replay database is durable, not only an in-memory deduplication set.
+        restored = ClusterPrivateProfileSync(
+            SimpleNamespace(storage=self.a_storage, settings=SimpleNamespace(brain_dir=self.a_path)),
+            self.cluster_a,
+        )
+        with self.assertRaises(PermissionError):
+            restored.receive("pull", body, headers)
+
     def test_non_lan_endpoints_are_rejected(self):
         for endpoint in (
             "https://example.com:8765", "http://127.0.0.1:8765",
