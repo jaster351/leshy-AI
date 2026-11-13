@@ -23,7 +23,7 @@ from .image_generation import ImageGenerationManager
 from .knowledge import KnowledgeBase
 from .learning_control import LearningControl
 from .llm import ChatMessage, EchoLLM, LLMUnavailable, OllamaLLM
-from .keyboard_layout import layout_answer, layout_context
+from .keyboard_layout import layout_answer, layout_context, suggest_keyboard_layout
 from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
@@ -428,9 +428,11 @@ class LeshyApp:
         # Ничего не меняем в обычном диалоге и его скорости.
         from .verified_clock import checked_clock_answer
         from .weather_runtime import weather_answer
-        factual, sources = checked_clock_answer(message, self.live_search)
+        layout_suggestion = suggest_keyboard_layout(message)
+        factual_query = layout_suggestion.corrected if layout_suggestion else message
+        factual, sources = checked_clock_answer(factual_query, self.live_search)
         if factual is None:
-            factual = weather_answer(message)
+            factual = weather_answer(factual_query)
             sources = (
                 [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
                 if factual is not None and "Источник: Open-Meteo" in factual else (
@@ -439,6 +441,7 @@ class LeshyApp:
                 )
             )
         if factual is not None:
+            factual = layout_answer(message, factual)
             event("chat_factual_tool_answered", kind="weather" if sources else "clock_or_unavailable_weather",
                   session_id=sid, source_count=len(sources))
             return {
