@@ -337,7 +337,20 @@ class TorrentParserBridge:
 
     def submit(self, owner_id: str, kind: str, title: str, *, part: str = ""):
         if not self.owner_allowed(owner_id):
-            return {"status": "not_configured", "message": "Настройте подключение к Parser for Plex в параметрах Лешего."}
+            # Distinguish missing setup from an owner mismatch; do not reveal
+            # the NAS address or any pairing credential to the caller.
+            configured = bool(self._read().get("configured"))
+            return {
+                "status": "owner_mismatch" if configured else "not_configured",
+                "message": (
+                    "Подключение Parser for Plex уже сохранено, но текущий Telegram/Web профиль "
+                    "не связан с профилем, выполнившим настройку. Откройте Web Лешего "
+                    "под прежним профилем и подтвердите привязку Telegram. "
+                    "Сбрасывать NAS и ключ не нужно."
+                    if configured else
+                    "Настройте подключение к Parser for Plex в параметрах Лешего."
+                ),
+            }
         # Verify the stored credential instead of assuming that a local file
         # means the NAS still accepts it. Re-pair automatically only while
         # the owner-opened NAS pairing window is available.
