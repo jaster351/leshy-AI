@@ -20,6 +20,7 @@ from .llm import ChatMessage
 from .storage import utcnow
 from .os_control_guard import OSControlGate, DISABLED
 from .native_shell import resolve_native_shell
+from .native_remote_capabilities import remote_client_capabilities
 from .action_safety_guard import check_external_action
 
 
@@ -472,6 +473,7 @@ class OperatingSystemController:
             **self._gate.status(),
             "platform": platform.system(),
             "native_shell": shell,
+            "remote_clients": remote_client_capabilities(),
             "runs_with_process_privileges": True,
             "uac_bypass": False,
             "natural_language_requests": True,
