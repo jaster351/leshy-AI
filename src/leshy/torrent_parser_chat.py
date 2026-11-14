@@ -4,7 +4,7 @@ Works in both HTTP chat and streaming chat; other conversations are unchanged.
 """
 from __future__ import annotations
 
-from .torrent_parser_bridge import TorrentParserBridge, parse_request
+from .torrent_parser_bridge import TorrentParserBridge, parse_request, parse_premiere_request
 from .storage import utcnow
 
 def authorized_owner_for_parser(app, bridge, owner_id: str) -> str:
@@ -36,7 +36,7 @@ def install_torrent_parser_chat(app_class, stream_class):
         original_chat = app_class.chat
 
         def chat(self, message, *, owner_id="web:local", session_id=None):
-            if parse_request(message) is None:
+            if parse_request(message) is None and parse_premiere_request(message) is None:
                 return original_chat(self, message, owner_id=owner_id, session_id=session_id)
             bridge = TorrentParserBridge(self.settings.brain_dir)
             parser_owner = authorized_owner_for_parser(self, bridge, owner_id)
