@@ -24,6 +24,29 @@ _INTENT = re.compile(
     r"\s*[,!:—-]*\s*(.+?)\s*[.!?]*$",
     re.IGNORECASE,
 )
+_PREMIERE_INTENT = re.compile(
+    r"\b(?:следи|отслеживай|мониторь|отслеживать|следить|проверяй)\b",
+    re.IGNORECASE,
+)
+_PREMIERE_STOP = re.compile(r"\b(?:перестань|прекрати|останови|отключи|не\s+надо)\b", re.IGNORECASE)
+_PREMIERE_TOPIC = re.compile(
+    r"\b(?:кинопремьер\w*|нов\w*\s+фильм\w*|фильм\w*\s+в\s+кинотеатр\w*|"
+    r"вышедш\w*\s+в\s+кинотеатр\w*|релиз\w*\s+фильм\w*)",
+    re.IGNORECASE,
+)
+
+
+def parse_premiere_request(message: str) -> bool | None:
+    phrase = str(message or "").strip()
+    if not _PREMIERE_TOPIC.search(phrase):
+        return None
+    if _PREMIERE_STOP.search(phrase):
+        return False
+    if _PREMIERE_INTENT.search(phrase):
+        return True
+    return None
+
+
 _LOCK = threading.RLock()
 _OPENER = request.build_opener(request.ProxyHandler({}))
 
@@ -164,12 +187,37 @@ class TorrentParserBridge:
                              secret=secret, timeout=6)
         return data
 
-    def execute_chat(self, owner_id: str, message: str):
-        command = parse_request(message)
-        if not command:
-            return None
-        kind, title = command
+    def watch_premieres(self, owner_id: str, enabled: bool) -> str:
+        if not self.owner_allowed(owner_id):
+            return "Настройте подключение к Parser for Plex в параметрах Лешего."
+        secret = load_secret(self.secret)
+        if not secret:
+            return "Parser for Plex не привязан. Проверьте настройки Лешего."
         try:
+            state = self._request(
+                self._read()["address"] + "/v1/watch/premieres",
+                {"enabled": bool(enabled)}, secret=secret, timeout=6,
+            )
+        except RuntimeError as exc:
+            if "HTTP 400" in str(exc):
+                return ("Для мониторинга кинопремьер нужен бесплатный ключ TMDB на NAS. "
+                        "Пока мониторинг не включён.")
+            raise
+        if enabled:
+            return ("Начал отслеживать новинки кинопроката. "
+                    "Буду проверять появление подходящих раздач и ставить их в очередь. "
+                    "Передача .torrent ещё не означает завершение загрузки фильма.")
+        return "Остановил отслеживание новых кинопремьер."
+
+    def execute_chat(self, owner_id: str, message: str):
+        premiere = parse_premiere_request(message)
+        command = parse_request(message)
+        if premiere is None and not command:
+            return None
+        try:
+            if premiere is not None:
+                return self.watch_premieres(owner_id, premiere)
+            kind, title = command
             info = self.submit(owner_id, kind, title)
             return str(info.get("message") or "Команда принята.")
         except (ConnectionError, ValueError, RuntimeError, PermissionError) as exc:
