@@ -244,7 +244,15 @@ class BrowserPlatform:
             {"task": intent.text, "allowed_hosts": (host,), "use_vision": False, "max_steps": 20, **self._profile_arguments(owner_id)},
             description=intent.text,
         )
-        result = self.agent.execute(action)
+        # A specifically configured local Kitesurf is tried first for a
+        # single URL read. Research involving several sites still uses
+        # Browser Use as the primary intelligent agent.
+        if self.kitesurf.available():
+            result = self.kitesurf.execute(action)
+            if result.status in {"unavailable", "unsupported"}:
+                result = self.agent.execute(action)
+        else:
+            result = self.agent.execute(action)
         if result.status != "ok":
             raise RuntimeError(result.message)
         self._remember_results(session_id, [{"title": intent.url, "url": intent.url, "snippet": ""}])
