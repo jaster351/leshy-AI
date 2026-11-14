@@ -46,7 +46,8 @@ class ParserWebSettingsTests(unittest.TestCase):
             stable = root / "stable"
             first_bridge = TorrentParserBridge(root / "first" / "LeshyBrain",
                                                persistent_root=stable)
-            with patch.object(web_server_impl15, "_PREVIOUS_MAKE_HANDLER",
+            with patch.object(first_bridge, "pair", side_effect=ConnectionError("NAS offline")), patch.object(
+                              web_server_impl15, "_PREVIOUS_MAKE_HANDLER",
                               return_value=_Parent), patch.object(
                               web_server_impl15, "TorrentParserBridge",
                               return_value=first_bridge):
