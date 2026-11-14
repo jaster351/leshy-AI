@@ -22,7 +22,9 @@ from .superagent_ssh_terminal import run_ssh_terminal_command
 from .superagent_ssh_approvals import (
     prepare_ssh_command, consume_ssh_approval,
     prepare_ssh_checked_step, consume_ssh_checked_approval,
+    prepare_ssh_plan, consume_ssh_plan_approval,
 )
+from .superagent_ssh_plan import execute_approved_ssh_plan
 from .superagent_ssh_checked_step import run_ssh_checked_step
 from .superagent_remote_access_dashboard import (
     authorized_remote_context, list_remote_access, revoke_remote_grant,
@@ -222,6 +224,8 @@ def make_handler(app, telegram, settings, model_catalog):
                 "/v1/superagent/ssh/execute",
                 "/v1/superagent/ssh/check/prepare",
                 "/v1/superagent/ssh/check/execute",
+                "/v1/superagent/ssh/plan/prepare",
+                "/v1/superagent/ssh/plan/execute",
             }:
                 context = self._remote_context()
                 if context is None:
@@ -268,6 +272,31 @@ def make_handler(app, telegram, settings, model_catalog):
                                 payload["credential_file"], payload["command"],
                             ),
                         })
+                    if path == "/v1/superagent/ssh/plan/prepare":
+                        if set(payload) != {"node_id", "credential_file", "steps"}:
+                            raise ValueError("Выберите компьютер и шаги плана")
+                        return self._json(HTTPStatus.OK, {
+                            "approval": prepare_ssh_plan(
+                                policy, actor, payload["node_id"],
+                                payload["credential_file"], payload["steps"],
+                            )
+                        })
+                    if path == "/v1/superagent/ssh/plan/execute":
+                        if (set(payload) != {
+                            "node_id", "credential_file", "steps",
+                            "approval_token", "confirm",
+                        } or payload.get("confirm") is not True):
+                            raise ValueError("Подтвердите точную последовательность SSH-команд")
+                        consume_ssh_plan_approval(
+                            policy, actor, payload["approval_token"], payload["node_id"],
+                            payload["credential_file"], payload["steps"],
+                        )
+                        executed_plan = execute_approved_ssh_plan(
+                            policy, actor, payload["node_id"],
+                            payload["credential_file"], payload["steps"],
+                            may_continue=lambda: module_enabled(app.storage, "remote-admin"),
+                        )
+                        return self._json(HTTPStatus.OK, {"ssh_plan": executed_plan})
                     if path == "/v1/superagent/ssh/check/prepare":
                         if set(payload) != {
                             "node_id", "credential_file", "command",
@@ -326,7 +355,10 @@ def make_handler(app, telegram, settings, model_catalog):
                     })
                 except Exception as exc:
                     problem("superagent_ssh_operation_failed", type(exc).__name__)
-                    if path == "/v1/superagent/ssh/check/execute":
+                    if path in {
+                        "/v1/superagent/ssh/check/execute",
+                        "/v1/superagent/ssh/plan/execute",
+                    }:
                         return self._json(HTTPStatus.BAD_GATEWAY, {
                             "error": "Результат операции неизвестен. Команда могла выполниться; "
                                      "проверьте состояние сервера до повторной попытки."
