@@ -142,6 +142,9 @@ def probe_rdp_tls(
             tls_certificate_verified=True,
             tls_version=str(secured.version() or "unknown"),
         )
+    except PermissionError:
+        # An identity mismatch or revoked owner permission is not a network error.
+        raise
     except (OSError, ssl.SSLError) as exc:
         raise RDPPreflightError("RDP network or TLS negotiation failed") from exc
     finally:
