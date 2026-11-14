@@ -74,19 +74,24 @@ def run_ssh_checked_step(
         check: dict[str, Any] | None = None
         verdict = "action_failed"
         if primary["exit_code"] == 0 and not primary["truncated"]:
-            # A separate authorization check before the second SSH command
-            # prevents the action's approval from becoming a standing grant.
-            policy.require(actor, node, "execute", observed_fingerprint=observed)
-            check = _safe_step_result(
-                _bounded_exec(transport, verification_command, timeout)
-            )
-            if check["exit_code"] == 0 and not check["truncated"]:
-                output = check["stdout"] + "\n" + check["stderr"]
-                verdict = "confirmed" if (
-                    not expected_text or expected_text in output
-                ) else "not_confirmed"
+            # Revocation, timeout or a dropped channel during post-check
+            # means UNKNOWN outcome, not failure and certainly not success.
+            try:
+                # Recheck rights immediately before the second SSH command.
+                policy.require(actor, node, "execute", observed_fingerprint=observed)
+                check = _safe_step_result(
+                    _bounded_exec(transport, verification_command, timeout)
+                )
+            except Exception:
+                verdict = "verification_unavailable"
             else:
-                verdict = "not_confirmed"
+                if check["exit_code"] == 0 and not check["truncated"]:
+                    output = check["stdout"] + "\n" + check["stderr"]
+                    verdict = "confirmed" if (
+                        not expected_text or expected_text in output
+                    ) else "not_confirmed"
+                else:
+                    verdict = "not_confirmed"
 
     # Only non-sensitive digests and statuses are persisted. The exact
     # commands and outputs are sent only to the authorized Web response.
