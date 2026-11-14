@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-14T03:08:17.701172+00:00",
+  "source_commit": "31846481de7ea17d92f2f46fad76abe58b2e9bb0",
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/json/licenses.json",
+      "sha256": "ab735654671a6d53f30717b14f6f1060eac23699403ce0ffdf4f6f3273360c0b",
+      "bytes": 339360
+    },
+    {
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/31846481de7ea17d92f2f46fad76abe58b2e9bb0/json/exceptions.json",
+      "sha256": "88af4eeb9b59ecd179e2ef821ff2025bb8b85716f36776207c20d77d4606c952",
+      "bytes": 41421
+    }
+  ],
+  "rights_basis": "Самостоятельные формулировки фактических соответствий идентификаторов, названий и реестрового статуса. Тексты лицензий и охраняемые пояснения не воспроизводятся. Официальный README разрешает потребление опубликованных форматов; общая лицензия CC0 не предполагается.",
+  "terms_url": "https://github.com/spdx/license-list-XML#consuming-license-data-from-this-repository",
+  "candidate_count": 826,
+  "new_unique": 826,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "existing_records_scanned": 104026,
+  "semantic_review": "Existing SPDX references cover three IANA media types, not license or exception identities; no equivalent identity facts found.",
+  "cursor": {
+    "completed": true,
+    "last_identifier": "x11vnc-openssl-exception",
+    "next": "Later source revision: compare identities and version changed records"
+  },
+  "generator": "knowledge/updates/tools/generate_spdx_registry.py",
+  "reproduce": [
+    "python",
+    "knowledge/updates/tools/generate_spdx_registry.py",
+    "licenses.json",
+    "exceptions.json",
+    "2026-11-14T03:08:17.701172+00:00",
+    "knowledge/updates/2026-11-14/0804-spdx-identities.jsonl"
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-14T02:02:26.426539+00:00",
+  "updated_at": "2026-11-14T03:08:17.701172+00:00",
   "last_successful_issue": {
     "searched_at": "2026-11-14T00:59:37.893780+00:00",
     "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
@@ -655,7 +655,7 @@
     }
   ],
   "last_search": {
-    "searched_at": "2026-11-14T02:02:26.426539+00:00",
+    "searched_at": "2026-11-14T03:08:17.701172+00:00",
     "previous_issue_at": {
       "searched_at": "2026-11-14T00:59:37.893780+00:00",
       "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
@@ -665,10 +665,11 @@
       ]
     },
     "newly_included_ids": [],
-    "unchanged_checked": [
-      "arXiv:2611.16366v1"
+    "primary_pages_checked": [
+      "https://arxiv.org/abs/2611.02361",
+      "https://arxiv.org/html/2611.02361v1"
     ],
-    "note": "Fresh primary-source search found no verified significant new eligible work since last issue; older search results and previously reviewed works not repeated."
+    "note": "Fresh search found older work first published 2 Nov, unchanged v1, outside new-publication window; no significant new eligible research confirmed."
   },
   "pending_primary_reviews": [
     {
