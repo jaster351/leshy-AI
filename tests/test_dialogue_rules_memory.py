@@ -116,6 +116,16 @@ class DialogueRuleMemoryTests(unittest.TestCase):
             self.assertIn("не сохранено", secret_receipt)
             self.assertEqual(persistent_rule_context(storage, "telegram:101"), "")
 
+    def test_shared_legacy_owner_cannot_receive_private_style_rules(self):
+        with tempfile.TemporaryDirectory() as temp:
+            storage = Storage(Path(temp) / "brain.db")
+            memory_id, receipt = save_direct_rule(
+                storage, "web:local", "Установи постоянное правило: отвечай на Вы"
+            )
+            self.assertIsNone(memory_id)
+            self.assertIn("не сохранено", receipt)
+            self.assertEqual(persistent_rule_context(storage, "web:local"), "")
+
     def test_duplicate_rule_is_idempotent_and_owner_separated(self):
         with tempfile.TemporaryDirectory() as temp:
             storage = Storage(Path(temp) / "brain.db")
