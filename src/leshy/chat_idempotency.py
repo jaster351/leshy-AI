@@ -11,6 +11,7 @@ from .diagnostics import event, problem
 from .realtime_chat import RealtimeChatManager, StreamEvent
 from .storage import utcnow
 from .telegram_fast import FastTelegramBridge
+from .torrent_parser_chat import is_explicit_parser_request, stream_parser_chat
 
 
 _REQUEST_SCHEMA = """
@@ -288,13 +289,21 @@ def install_global_chat_idempotency() -> None:
         done_payload: dict[str, Any] | None = None
         error_text = ""
         try:
-            for item in _ORIGINAL_STREAM(
-                self,
-                message,
-                owner_id=owner_id,
-                session_id=session_id,
-                request_id=rid,
-            ):
+            # Route explicit NAS commands BEFORE generic LLM/web-search adapters.
+            # Keep the enclosing durable idempotency claim: never double-submit
+            # a movie job after a timeout or an uncertain network result.
+            events = (
+                stream_parser_chat(
+                    self, message, owner_id=owner_id,
+                    session_id=session_id, request_id=rid,
+                )
+                if is_explicit_parser_request(message)
+                else _ORIGINAL_STREAM(
+                    self, message, owner_id=owner_id,
+                    session_id=session_id, request_id=rid,
+                )
+            )
+            for item in events:
                 if item.type == "start":
                     sid = str(item.data.get("session_id") or "")
                     if sid:
