@@ -155,6 +155,11 @@ class TorrentParserBridge:
             (legacy / "secrets" / "torrent_parser_token.secret", self.secret),
         )
         with _LOCK:
+            # Never combine settings from one installation with a token from
+            # another installation: a matching legacy pair may migrate only
+            # when the canonical settings file is not already present.
+            if self.settings.exists():
+                return
             for source, target in sources:
                 if not source.is_file() or target.exists():
                     continue
