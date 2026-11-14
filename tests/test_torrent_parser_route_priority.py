@@ -84,6 +84,31 @@ class RoutePriorityTests(unittest.TestCase):
         self.assertEqual(len(parser_calls), 2)
         generic.assert_not_called()
 
+    def test_unknown_network_outcome_is_not_retried_with_same_request_id(self):
+        ledger = _Ledger()
+        generic = Mock(side_effect=AssertionError("Unexpected generic search"))
+        attempts = []
+
+        def uncertain(*args, **kwargs):
+            attempts.append("called")
+            raise RuntimeError("NAS request may have reached server")
+            yield  # Preserve generator semantics.
+
+        self._install_mock_runtime(ledger, generic, uncertain)
+        manager = SimpleNamespace(app=SimpleNamespace())
+        first = list(ci.RealtimeChatManager.stream(
+            manager, PROMPT, owner_id="telegram:123", request_id="telegram:123:msg-5",
+        ))
+        self.assertEqual(first[-1].type, "done")
+        self.assertTrue(first[-1].data["outcome_uncertain"])
+        self.assertIn("Проверьте очередь", first[-1].data["answer"])
+        repeated = list(ci.RealtimeChatManager.stream(
+            manager, PROMPT, owner_id="telegram:123", request_id="telegram:123:msg-5",
+        ))
+        self.assertEqual(repeated[0].type, "duplicate")
+        self.assertEqual(attempts, ["called"])
+        generic.assert_not_called()
+
     def test_normal_chat_uses_existing_pipeline(self):
         ledger = _Ledger()
         generic = Mock(return_value=iter([
