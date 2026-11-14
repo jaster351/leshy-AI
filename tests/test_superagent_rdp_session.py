@@ -143,3 +143,79 @@ def test_text_validation_and_revocation():
     with pytest.raises(PermissionError):
         broker.type_text("alice", sid, frame_digest=receipt.frame_digest, text="safe")
     assert backend.texts == []
+
+
+class ChangingScreenBackend(FakeBackend):
+    def __init__(self):
+        super().__init__()
+        self.pixels = b"initial-frame"
+        self.capture_count = 0
+        self.on_capture = None
+
+    def capture(self, connection):
+        self.capture_count += 1
+        if self.on_capture is not None:
+            self.on_capture(self.capture_count)
+        return RDPFrame(800, 600, self.pixels)
+
+
+def test_changed_desktop_blocks_click_without_dispatch():
+    broker, _, now, _ = setup_controller()
+    backend = ChangingScreenBackend()
+    broker.backend = backend
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+    backend.pixels = b"screen-changed"
+    with pytest.raises(PermissionError, match="desktop changed"):
+        broker.click("alice", sid, frame_digest=receipt.frame_digest, x=10, y=10)
+    assert backend.clicks == []
+    assert backend.capture_count == 2
+    with pytest.raises(PermissionError):
+        broker.click("alice", sid, frame_digest=receipt.frame_digest, x=10, y=10)
+
+
+def test_changed_desktop_blocks_keyboard_input():
+    broker, _, _, _ = setup_controller()
+    backend = ChangingScreenBackend()
+    broker.backend = backend
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+    backend.pixels = b"screen-changed"
+    with pytest.raises(PermissionError, match="desktop changed"):
+        broker.type_text("alice", sid, frame_digest=receipt.frame_digest, text="hello")
+    assert backend.texts == []
+
+
+def test_revocation_during_recapture_blocks_click():
+    broker, _, _, allowed = setup_controller()
+    backend = ChangingScreenBackend()
+    backend.on_capture = lambda count: allowed.clear() if count == 2 else None
+    broker.backend = backend
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+    with pytest.raises(PermissionError):
+        broker.click("alice", sid, frame_digest=receipt.frame_digest, x=2, y=3)
+    assert backend.clicks == []
+
+
+def test_timeout_during_recapture_blocks_click():
+    broker, _, now, _ = setup_controller()
+    backend = ChangingScreenBackend()
+    backend.on_capture = lambda count: now.__setitem__(0, 106.0) if count == 2 else None
+    broker.backend = backend
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+    with pytest.raises(PermissionError, match="desktop changed"):
+        broker.click("alice", sid, frame_digest=receipt.frame_digest, x=2, y=3)
+    assert backend.clicks == []
+
+
+def test_unchanged_desktop_allows_click_after_recapture():
+    broker, _, _, _ = setup_controller()
+    backend = ChangingScreenBackend()
+    broker.backend = backend
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+    broker.click("alice", sid, frame_digest=receipt.frame_digest, x=2, y=3)
+    assert backend.clicks == [(2, 3)]
+    assert backend.capture_count == 2
