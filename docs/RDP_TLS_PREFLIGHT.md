@@ -17,11 +17,11 @@ RDP gateway, background service, or remote-host agent is started.
    CredSSP and CredSSP + Early User Authorization Result.
 5. Parses the X.224 Connection Confirm and rejects unknown security modes,
    Standard RDP Security downgrades and malformed responses.
-6. Performs TLS 1.2+ handshake with an RDP certificate pin. RDP commonly uses
+6. Applies one overall deadline to the TCP connection, X.224 reads and TLS\n   handshake, preventing indefinite negotiation by a trickle-feed server.\n7. Performs TLS 1.2+ handshake with an RDP certificate pin. RDP commonly uses
    self-signed certificates, so certificate **pinning is mandatory**, not
    optional: the TLS peer certificate's DER SHA-256 must match the independently
    trusted fingerprint before a successful result is returned.
-7. Rechecks owner authorization and closes the encrypted socket. No password,
+8. Rechecks owner authorization and closes the encrypted socket. No password,
    NLA/CredSSP token, mouse event, image, clipboard data or remote command
    is transmitted.
 
@@ -38,8 +38,8 @@ The current RDP session controller is still an unattached contract and
 
 ## Tests and limits
 
-Isolated tests use fragmented mock TCP responses and mocked TLS for downgrade,
-invalid packets, missing fingerprints, certificate mismatch and authorization
+Seventeen isolated Python tests use fragmented mock TCP responses and mocked TLS for downgrade,
+invalid packets, missing fingerprints, certificate mismatch, overall timeout and authorization
 revocation. A separate local experiment used a synthetic X.224 responder
 and a real TLS 1.3 handshake on loopback; **no real Windows or Linux RDP
 server has been tested**.
