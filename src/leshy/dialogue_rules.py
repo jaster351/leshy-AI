@@ -38,7 +38,9 @@ _SECRET_ASSIGNMENT = re.compile(
 
 def is_direct_rule_request(message: str) -> bool:
     """Only the user's direct request; never scan quoted pages or model output."""
-    head = re.sub(r"^[\s#>\-]+", "", str(message or "")).casefold()
+    # Do not promote pasted Markdown quotes, list items or headers to direct
+    # instructions. Only whitespace and a direct vocative are allowed.
+    head = str(message or "").lstrip().casefold()
     if head.startswith("леший,"):
         head = head[len("леший,"):].lstrip()
     return any(head.startswith(prefix) for prefix in _PREFIXES)
