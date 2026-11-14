@@ -249,7 +249,7 @@ def test_malformed_frame_does_not_publish_partial_receipt():
     sid = broker.open("alice", "192.0.2.10", "a" * 64)
     receipt = broker.observe("alice", sid)
     backend.capture = lambda connection: RDPFrame(
-        800, 600, b"initial-frame", pixel_format="invalid-\\u2603"
+        800, 600, b"initial-frame", pixel_format="invalid-☃"
     )
     with pytest.raises(UnicodeEncodeError):
         broker.observe("alice", sid)
