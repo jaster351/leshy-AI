@@ -666,6 +666,70 @@
         element('label', '', 'Ожидаемый текст в выводе проверки (необязательно)'), expectedInput,
         verifyRun, checkedResult
       );
+      const suggestions = element('details', 'sa-setup');
+      suggestions.append(element('summary', '', 'Команды из готовых ответов SuperAgent'));
+      suggestions.append(element('p', 'sa-remote-note',
+        'Леший ищет предложенные команды в ответах Ваших задач. ' +
+        'Нажатие «Подставить» только заполняет поле — ничего не запускает. ' +
+        'Перед выполнением проверьте команду, ОС сервера и последствия.'));
+      const suggested = element('select', 'sa-ssh-select');
+      suggested.setAttribute('aria-label', 'Предложенные SuperAgent команды');
+      const suggestedStatus = element('p', 'sa-remote-note');
+      suggestedStatus.setAttribute('role', 'status');
+      let suggestedCommands = [];
+      const loadSuggestions = makeButton('Показать предложенные команды', async () => {
+        if (requestInFlight) return;
+        requestInFlight = true;
+        loadSuggestions.disabled = true;
+        suggestedStatus.textContent = 'Ищу команды в ответах SuperAgent…';
+        try {
+          const items = await api('/v1/superagent/tasks?archived=0');
+          const result = [];
+          for (const task of (items.tasks || []).slice(0, 50)) {
+            const report = String(task.latest_report || '').slice(0, 3000);
+            const blocks = /```(?:bash|sh|shell|powershell|pwsh|ps1|cmd|bat)?\s*\r?\n([\s\S]*?)\r?\n?```/gi;
+            let match;
+            while ((match = blocks.exec(report)) && result.length < 25) {
+              const command = match[1].trim();
+              if (command && new TextEncoder().encode(command).length <= 4096) {
+                result.push({
+                  command,
+                  label: String(task.title || 'Задание').slice(0, 65) +
+                    ' · вариант ' + (result.length + 1)
+                });
+              }
+            }
+            if (result.length >= 25) break;
+          }
+          suggestedCommands = result;
+          suggested.replaceChildren();
+          result.forEach((item, index) => {
+            const option = element('option', '', item.label);
+            option.value = String(index);
+            suggested.append(option);
+          });
+          suggestedStatus.textContent = result.length
+            ? 'Найдено ' + result.length + ' предложений. Выберите команду и подставьте в нужное поле.'
+            : 'В последних заданиях нет команд в отдельных блоках Bash/PowerShell/CMD.';
+        } catch (error) {
+          suggestedStatus.textContent = 'Не удалось получить предложения: ' + error.message;
+        } finally {
+          requestInFlight = false;
+          loadSuggestions.disabled = false;
+        }
+      });
+      const putSuggested = (target) => {
+        const index = Number(suggested.value);
+        const entry = suggestedCommands[index];
+        if (!entry) { suggestedStatus.textContent = 'Сначала загрузите и выберите команду.'; return; }
+        target.value = entry.command;
+        target.focus();
+        suggestedStatus.textContent = 'Команда подставлена, но НЕ запущена. Проверьте её перед выполнением.';
+      };
+      suggestions.append(loadSuggestions, suggested,
+        makeButton('Подставить как действие', () => putSuggested(shellInput)),
+        makeButton('Подставить как проверку', () => putSuggested(checkInput)),
+        suggestedStatus);
       const natural = element('textarea');
       natural.rows = 3;
       natural.maxLength = 3000;
@@ -716,7 +780,7 @@
         }
       });
       terminal.append(element('label', '', 'Команда для SSH'), shellInput, run, output,
-        checkBox, element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
+        checkBox, suggestions, element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
       row.append(terminal);
       if (credentials.truncated) row.append(element('p', 'sa-remote-note',
         'Показаны первые 100 файлов доступа.'));
