@@ -273,7 +273,7 @@ def test_png_reauthorization_failure_consumes_receipt_after_permission_restored(
 
     def revoke_on_second_get(owner_id, session_id):
         calls[0] += 1
-        if calls[0] == 2:
+        if calls[0] == 1:
             allowed.clear()
         return original_get(owner_id, session_id)
 
@@ -286,3 +286,30 @@ def test_png_reauthorization_failure_consumes_receipt_after_permission_restored(
     with pytest.raises(PermissionError, match="stale or already used"):
         broker.click("alice", sid, frame_digest=session.frame_digest, x=0, y=0)
     assert backend.clicks == []
+
+
+def test_revoked_observation_cannot_reactivate_old_receipt_after_restore():
+    """The authorization failure itself must consume the previous receipt."""
+    broker, backend, _, allowed = setup_controller()
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    previous = broker.observe("alice", sid)
+    allowed.clear()
+    with pytest.raises(PermissionError, match="No permission"):
+        broker.observe_frame("alice", sid)
+    allowed.add("alice")
+    with pytest.raises(PermissionError, match="stale or already used"):
+        broker.click("alice", sid, frame_digest=previous.frame_digest, x=1, y=1)
+    assert backend.clicks == []
+    refreshed = broker.observe("alice", sid)
+    broker.click("alice", sid, frame_digest=refreshed.frame_digest, x=1, y=1)
+    assert backend.clicks == [(1, 1)]
+
+
+def test_wrong_owner_observation_does_not_consume_legitimate_receipt():
+    broker, backend, _, _ = setup_controller()
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+    with pytest.raises(PermissionError):
+        broker.observe_frame("bob", sid)
+    broker.click("alice", sid, frame_digest=receipt.frame_digest, x=1, y=1)
+    assert backend.clicks == [(1, 1)]
