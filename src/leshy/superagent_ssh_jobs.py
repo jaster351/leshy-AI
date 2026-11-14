@@ -12,8 +12,8 @@ explicit human reconciliation before new SSH plans can run.
 from __future__ import annotations
 
 import json
-import os
 import secrets
+import sqlite3
 import threading
 import time
 import uuid
@@ -267,18 +267,23 @@ def start_ssh_plan_job(policy: Any, actor: Any, node_id: str,
     _db_init(policy.storage)
     ident = str(uuid.uuid4())
     now = time.time()
-    with _DB_LOCK, policy.storage.connection() as db:
-        # A UNIQUE partial index prevents simultaneous active jobs even if
-        # two Web requests race. Stale jobs remain fail-closed until reviewed.
-        db.execute(
-            "INSERT INTO superagent_ssh_plan_jobs "
-            "(job_id,owner_id,node_id,plan_sha256,instance_id,status,total,"
-            "confirmed,current_step,stop_requested,safe_progress_json,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,'queued',?,0,NULL,0,'[]',?,?)",
-            (ident, actor.owner_id, node,
-             plan_approval_signature(normalized).split(":")[-1],
-             _INSTANCE, len(normalized), now, now),
-        )
+    try:
+        with _DB_LOCK, policy.storage.connection() as db:
+            # A UNIQUE partial index prevents simultaneous active jobs even
+            # when two HTTP requests race across workers/processes.
+            db.execute(
+                "INSERT INTO superagent_ssh_plan_jobs "
+                "(job_id,owner_id,node_id,plan_sha256,instance_id,status,total,"
+                "confirmed,current_step,stop_requested,safe_progress_json,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,'queued',?,0,NULL,0,'[]',?,?)",
+                (ident, actor.owner_id, node,
+                 plan_approval_signature(normalized).split(":")[-1],
+                 _INSTANCE, len(normalized), now, now),
+            )
+    except sqlite3.IntegrityError as exc:
+        raise PermissionError(
+            "Другой SSH-план ещё не завершён или требует ручной сверки"
+        ) from exc
     thread = threading.Thread(
         target=_worker, args=(
             policy, actor, ident, node, credential_file, normalized, may_continue,
