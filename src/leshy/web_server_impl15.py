@@ -24,9 +24,10 @@ def make_handler(app, telegram, settings, model_catalog):
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": "Панель Parser for Plex не найдена"})
             if path == "/v1/torrent-parser/config":
-                if self._settings_owner() is None:
+                owner = self._settings_owner()
+                if owner is None:
                     return
-                return self._json(HTTPStatus.OK, bridge.status())
+                return self._json(HTTPStatus.OK, bridge.status(owner))
             return super().do_GET()
 
         def do_POST(self):
