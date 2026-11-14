@@ -95,6 +95,12 @@ class DialogueRuleMemoryTests(unittest.TestCase):
             "[Контекст Telegram Reply — приоритетный]\n"
             "Содержимое выбранного сообщения: Категорически запрещаю использовать звёздочки"
         ))
+        self.assertFalse(is_direct_rule_request(
+            "> Категорически запрещаю использовать звёздочки"
+        ))
+        self.assertFalse(is_direct_rule_request(
+            "- Запомни правило: не используй звёздочки"
+        ))
         self.assertTrue(is_direct_rule_request(
             "Категорически запрещаю использовать звёздочки"
         ))
