@@ -20,6 +20,22 @@ _ADMIN_COMMANDS = {"/learning_on", "/learning_off"}
 _THINK_RE = re.compile(r"(?is)<think\b[^>]*>.*?(?:</think>|$)")
 
 
+def _dialogue_text_with_reply(message: dict, text: str) -> str:
+    """Keep the selected Telegram message in ordinary conversations.
+
+    A selected message is context, never an instruction to run tools.
+    Explicit NAS actions must be classified from the user's own words,
+    without letting quoted text modify the authorized command.
+    """
+    from .telegram import _telegram_reply_prompt
+    from .torrent_parser_chat import is_explicit_parser_request
+
+    if is_explicit_parser_request(text):
+        return text
+    enriched, _target_id = _telegram_reply_prompt(message, text)
+    return enriched
+
+
 def _partial_text(text: str, limit: int = 3800) -> str:
     value = _THINK_RE.sub("", str(text or "")).replace("</think>", "").strip()
     if len(value) > limit:
@@ -457,7 +473,8 @@ class FastTelegramBridge(RichTelegramBridge):
         session_key = f"telegram:{chat_id}:{user_id}"
         try:
             self._wait_for_foreground_slot()
-            for item in self._realtime.stream(text, owner_id=owner_key, session_id=session_key):
+            dialogue_text = _dialogue_text_with_reply(message, text)
+            for item in self._realtime.stream(dialogue_text, owner_id=owner_key, session_id=session_key):
                 if item.type == "delta":
                     answer += str(item.data.get("text") or "")
                     visible = _partial_text(answer)
