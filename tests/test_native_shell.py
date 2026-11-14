@@ -107,6 +107,17 @@ class NativeShellControllerTests(unittest.TestCase):
                 self.controller._native_shell("exit 7", timeout=4)
         self.assertNotIn("native shell output", str(failure.exception))
 
+    def test_native_shell_rejects_destructive_disk_and_power_commands(self):
+        shell = NativeShell("sh", "/bin/sh", ("-c",))
+        with mock.patch("leshy.os_control.resolve_native_shell", return_value=shell):
+            for command in ("mkfs.ext4 /dev/sdb1", "wipefs -a /dev/sdb",
+                            "dd if=/dev/zero of=/dev/sda", "systemctl poweroff",
+                            "shutdown -h now"):
+                with self.subTest(command=command):
+                    with self.assertRaises(PermissionError):
+                        self.controller._native_shell(command)
+        self.assertFalse(any(call[0] == "launch" for call in self.controller._gate.calls))
+
     def test_direct_run_maps_to_current_os(self):
         command = OperatingSystemController._direct_command("/os run echo hello")
         self.assertEqual(command, ("native_shell", {"command": "echo hello"}))
