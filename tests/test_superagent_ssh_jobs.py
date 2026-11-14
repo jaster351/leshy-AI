@@ -190,6 +190,18 @@ class PersistedSSHJobTests(unittest.TestCase):
                 start_ssh_plan_job(self.policy, self.actor, HOST, "server.json",
                                    self.plan, may_continue=lambda: True)
             executor.assert_not_called()
+        with self.assertRaises(PermissionError):
+            acknowledge_ssh_plan_job(self.policy, self.actor, job["job_id"])
+        requested = cancel_ssh_plan_job(self.policy, self.actor, job["job_id"])
+        self.assertTrue(requested["stop_requested"])
+        with self.assertRaises(PermissionError):
+            acknowledge_ssh_plan_job(self.policy, self.actor, job["job_id"])
+        # A prior worker must be quiescent for at least ten minutes.
+        with self.storage.connection() as db:
+            db.execute(
+                "UPDATE superagent_ssh_plan_jobs SET updated_at=? WHERE job_id=?",
+                (time.time() - 610, job["job_id"]),
+            )
         reviewed = acknowledge_ssh_plan_job(self.policy, self.actor, job["job_id"])
         self.assertEqual(reviewed["status"], "reviewed")
         self.assertFalse(reviewed["resumable"])
