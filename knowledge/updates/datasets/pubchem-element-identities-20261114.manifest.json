@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T20:00:10.441546+00:00",
+  "source_url": "https://pubchem.ncbi.nlm.nih.gov/rest/pug/periodictable/JSON",
+  "source_sha256": "6abc1932a117fccc4c61bf9cdbcf96a0355beac82cddba82bd436e6ce4aee72a",
+  "source_bytes": 44490,
+  "source_rows": 118,
+  "selected_fields": [
+    "AtomicNumber",
+    "Symbol",
+    "Name"
+  ],
+  "terms_url": "https://www.ncbi.nlm.nih.gov/home/about/policies/",
+  "rights_basis": "Only factual identity mappings in original sentences. No blanket open license is asserted for third-party PubChem data. No contributed narrative or experimental property compilation redistributed.",
+  "attribution": "PubChem, National Library of Medicine, NCBI",
+  "cursor": {
+    "last_atomic_number": 118,
+    "remaining_identities": 0
+  },
+  "generator": "knowledge/updates/tools/generate_element_identities.py",
+  "limitations": [
+    "Source web page required browser verification; documented PUG REST endpoint retrieved successfully",
+    "Property columns excluded pending provenance, units and applicability review"
+  ]
+}

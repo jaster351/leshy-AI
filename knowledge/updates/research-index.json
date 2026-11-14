@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-13T19:22:41.046492+00:00",
+  "updated_at": "2026-11-14T00:59:37.893780+00:00",
   "last_successful_issue": {
-    "searched_at": "2026-11-13T19:22:41.046492+00:00",
-    "previous_issue_at": "2026-11-13T19:08:46.407144+00:00",
-    "discovery_lookback_days": 30,
+    "searched_at": "2026-11-14T00:59:37.893780+00:00",
+    "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
     "newly_included_ids": [
-      "arXiv:2611.16366"
+      "arXiv:2611.16492",
+      "arXiv:2611.16627"
     ]
   },
   "previous_issue_from_owner": {
@@ -447,6 +447,30 @@
       "url": "https://arxiv.org/abs/2611.16366",
       "record_id": "research-arxiv-2611-16366",
       "package": "knowledge/updates/2026-11-14/0019-research.jsonl"
+    },
+    {
+      "id": "arXiv:2611.16492",
+      "version": "v1",
+      "first_published_at": "2026-11-12T09:01:06Z",
+      "version_published_at": "2026-11-12T09:01:06Z",
+      "checked_at": "2026-11-14T00:59:37.893780+00:00",
+      "publication_status": "preprint",
+      "url": "https://arxiv.org/abs/2611.16492",
+      "record_id": "research-arxiv-2611-16492",
+      "package": "knowledge/updates/2026-11-14/0557-research.jsonl",
+      "evidence_scope": "abstract only"
+    },
+    {
+      "id": "arXiv:2611.16627",
+      "version": "v1",
+      "first_published_at": "2026-11-12T10:59:40Z",
+      "version_published_at": "2026-11-12T10:59:40Z",
+      "checked_at": "2026-11-14T00:59:37.893780+00:00",
+      "publication_status": "preprint",
+      "url": "https://arxiv.org/abs/2611.16627",
+      "record_id": "research-arxiv-2611-16627",
+      "package": "knowledge/updates/2026-11-14/0557-research.jsonl",
+      "evidence_scope": "abstract only"
     }
   ],
   "issues": [
@@ -631,25 +655,13 @@
     }
   ],
   "last_search": {
-    "completed_at": "2026-11-12T11:04:30Z",
-    "incremental_since": "2026-11-12T09:55:57Z",
-    "additional_lookback_start": "2026-10-13",
-    "new_publications_or_significant_versions_after_previous_issue_found": [],
-    "first_time_coverage_ids": [
-      "doi:10.18653/2026.findings-emnlp.1312"
+    "searched_at": "2026-11-13T20:00:58.019300+00:00",
+    "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
+    "newly_included_ids": [],
+    "unchanged_checked": [
+      "arXiv:2611.15729v1"
     ],
-    "query_topics": [
-      "LLM agent long-term memory provenance poisoning retrieval verification November 2026",
-      "RAG knowledge update poisoning agent memory",
-      "ACL Anthology memory agent provenance rollback poisoning",
-      "OpenReview LLM agent memory security provenance"
-    ],
-    "opened_primary_urls": [
-      "https://aclanthology.org/2026.findings-emnlp.1312/",
-      "https://aclanthology.org/2026.findings-emnlp.1312.pdf",
-      "https://github.com/TrustAIRLab/AMIA"
-    ],
-    "note": "Новых публикаций после выпуска 09:55:57Z не подтверждено; впервые полностью проверена и включена ранее не покрытая работа AMIA из Findings of EMNLP 2026."
+    "note": "Fresh web searches returned no verified significant new eligible work. Prior issues not repeated."
   },
   "pending_primary_reviews": [
     {
