@@ -212,3 +212,46 @@ def test_public_numeric_ipv4_aliases_remain_accessible(host):
     result = agent.execute(BrowserAction("read", f"https://{host}/", BrowserRisk.READ))
     assert result.status == "ok"
     assert len(adapter.calls) == 1
+
+
+class StatusAdapter:
+    def __init__(self, adapter_id, status):
+        self.adapter_id = adapter_id
+        self.status = status
+        self.calls = 0
+
+    def available(self):
+        return True
+
+    def execute(self, action):
+        self.calls += 1
+        return BrowserActionResult(self.status, self.status, {"result": self.status})
+
+
+def test_failed_read_can_fall_back_to_second_engine():
+    first = StatusAdapter("browser-use", "failed")
+    second = StatusAdapter("kitesurf-cdp", "ok")
+    agent = BrowserAgent([first, second])
+    result = agent.execute(BrowserAction("research", "https://example.com", BrowserRisk.READ))
+    assert result.status == "ok"
+    assert first.calls == 1 and second.calls == 1
+
+
+@pytest.mark.parametrize("status", ["needs_user_action", "blocked"])
+def test_challenge_or_security_block_never_triggers_fallback(status):
+    first = StatusAdapter("browser-use", status)
+    second = StatusAdapter("kitesurf-cdp", "ok")
+    agent = BrowserAgent([first, second])
+    result = agent.execute(BrowserAction("research", "https://example.com", BrowserRisk.READ))
+    assert result.status == status
+    assert first.calls == 1 and second.calls == 0
+
+
+def test_failed_read_reports_original_failure_when_all_engines_unavailable():
+    first = StatusAdapter("browser-use", "failed")
+    second = StatusAdapter("kitesurf-cdp", "unavailable")
+    agent = BrowserAgent([first, second])
+    assert agent.execute(BrowserAction(
+        "research", "https://example.com", BrowserRisk.READ,
+    )).status == "failed"
+    assert first.calls == 1 and second.calls == 1

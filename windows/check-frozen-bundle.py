@@ -20,6 +20,7 @@ REQUIRED_MODULES = (
     "leshy.superagent_verified_ssh",
     "leshy.superagent_ssh_plan",
     "leshy.superagent_ssh_jobs",
+    "leshy.kitesurf_cdp_adapter",
 )
 
 

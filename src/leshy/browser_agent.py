@@ -141,6 +141,7 @@ class BrowserAgent:
                   url=action.url, legacy_approved_ignored=bool(approved))
             raise ApprovalRequired(action)
 
+        read_failure: BrowserActionResult | None = None
         for adapter in self.adapters:
             try:
                 if not adapter.available():
@@ -150,7 +151,18 @@ class BrowserAgent:
             except Exception as exc:
                 event("browser_agent_adapter_failed", adapter=getattr(adapter, "adapter_id", "unknown"), action=action.name, error=str(exc))
                 continue
+            if result.status == "failed" and action.risk is BrowserRisk.READ:
+                # READ has no approved side effects: a failed page inspection
+                # may safely try a different engine. Never retry CAPTCHA,
+                # host-policy blocks, or any mutation/checkout action.
+                if read_failure is None:
+                    read_failure = result
+                event("browser_agent_read_retry_other_engine",
+                      adapter=adapter.adapter_id, action=action.name)
+                continue
             if result.status not in {"unavailable", "unsupported"}:
                 return result
 
-        return BrowserActionResult("unavailable", "Нет доступного browser-адаптера для этого действия.")
+        return read_failure or BrowserActionResult(
+            "unavailable", "Нет доступного browser-адаптера для этого действия."
+        )
