@@ -567,6 +567,169 @@
           run.disabled = false;
         }
       });
+      const checkBox = element('details', 'sa-setup');
+      checkBox.append(element('summary', '', 'Выполнить команду с обязательной проверкой результата'));
+      checkBox.append(element('p', 'sa-remote-note',
+        'Сначала Леший выполнит команду. Если она завершится без ошибки, ' +
+        'он запустит отдельную команду проверки на том же SSH-соединении. ' +
+        'Успех будет показан только при совпадении ожидаемого результата. ' +
+        'Команду проверки тоже проверьте сами: она не гарантированно безопасна.'));
+      const checkInput = element('textarea');
+      checkInput.rows = 2;
+      checkInput.maxLength = 4096;
+      checkInput.placeholder = 'Например, Linux: systemctl is-active nginx';
+      checkInput.setAttribute('aria-label', 'Команда проверки результата SSH');
+      const expectedInput = element('input');
+      expectedInput.type = 'text';
+      expectedInput.maxLength = 512;
+      expectedInput.placeholder = 'Например: active (необязательно; без текста проверяется код 0)';
+      expectedInput.setAttribute('aria-label', 'Ожидаемый текст в результате проверки');
+      const checkedResult = element('pre', 'sa-terminal-output');
+      checkedResult.textContent = 'Результат выполнения и проверки появится здесь.';
+      checkedResult.setAttribute('role', 'status');
+      const verifyRun = makeButton('Выполнить команду и проверить результат', async () => {
+        const command = shellInput.value;
+        const verification_command = checkInput.value;
+        const expected_text = expectedInput.value;
+        if (requestInFlight) return;
+        if (!command.trim() || !verification_command.trim()) {
+          checkedResult.textContent = 'Укажите основную команду выше и отдельную команду проверки.';
+          return;
+        }
+        requestInFlight = true;
+        verifyRun.disabled = true;
+        checkedResult.textContent = 'Сверяю разрешения для двух команд…';
+        try {
+          const identity = {
+            node_id: node.node_id, credential_file: select.value,
+            command, verification_command, expected_text
+          };
+          const preview = await api('/v1/superagent/ssh/check/prepare', {
+            method: 'POST', body: JSON.stringify(identity)
+          });
+          const ticket = preview.approval || {};
+          if (!window.confirm(
+            'Компьютер: ' + node.node_id +
+            '\n\n1. КОМАНДА:\n' + command +
+            '\n\n2. ПРОВЕРКА (тоже исполняемая команда):\n' + verification_command +
+            '\n\nОЖИДАЕМЫЙ ТЕКСТ: ' + (expected_text || '(только код завершения 0)') +
+            '\n\nВы сверили ОБЕ команды, разрешаете их однократное выполнение и ' +
+            'понимаете, что они могут изменить систему?'
+          )) {
+            checkedResult.textContent = 'Операция отменена до выполнения команды.';
+            return;
+          }
+          checkedResult.textContent = 'Выполняю команду, затем проверяю ожидаемое состояние…';
+          const response = await api('/v1/superagent/ssh/check/execute', {
+            method: 'POST', body: JSON.stringify({
+              ...identity, approval_token: ticket.approval_token, confirm: true
+            })
+          });
+          const step = response.checked_step || {};
+          const primary = step.action || {};
+          const check = step.verification;
+          const label = step.verdict === 'confirmed'
+            ? expected_text
+              ? 'ПРОВЕРКА ПРОЙДЕНА: проверочная команда завершилась успешно и ожидаемый текст найден.'
+              : 'ПРОВЕРКА ПРОЙДЕНА ПО КОДУ ВЫХОДА 0. Содержимое результата отдельно не сопоставлялось.'
+            : step.verdict === 'action_failed'
+              ? 'ОСНОВНАЯ КОМАНДА ЗАВЕРШИЛАСЬ С ОШИБКОЙ ИЛИ УСЕЧЕНИЕМ ВЫВОДА. Проверка не выполнялась; побочные изменения возможны.'
+              : step.verdict === 'verification_unavailable'
+                ? 'РЕЗУЛЬТАТ НЕИЗВЕСТЕН: проверка стала недоступна. Не повторяйте команду, пока не проверите сервер.'
+                : 'НЕ ПОДТВЕРЖДЕНО: проверка не подтвердила ожидаемое состояние.';
+          checkedResult.textContent =
+            'ОС: ' + (step.os_family || 'неизвестно') + '\n' + label +
+            '\n\nОСНОВНАЯ КОМАНДА: код=' + String(primary.exit_code) +
+            (primary.truncated ? ' (вывод усечён)' : '') +
+            '\nSTDOUT:\n' + (primary.stdout || '(пусто)') +
+            '\nSTDERR:\n' + (primary.stderr || '(пусто)') +
+            (check ? '\n\nПРОВЕРКА: код=' + String(check.exit_code) +
+              (check.truncated ? ' (вывод усечён)' : '') +
+              '\nSTDOUT:\n' + (check.stdout || '(пусто)') +
+              '\nSTDERR:\n' + (check.stderr || '(пусто)')
+              : '\n\nПРОВЕРКА: не выполнялась');
+          checkedResult.className = step.verdict === 'confirmed'
+            ? 'sa-terminal-output' : 'sa-terminal-output sa-error';
+        } catch (error) {
+          checkedResult.textContent =
+            'Статус операции не подтверждён: ' + error.message +
+            '\nЕсли соединение оборвалось, команда могла уже выполниться. ' +
+            'Не повторяйте её до независимой проверки состояния сервера.';
+          checkedResult.className = 'sa-terminal-output sa-error';
+        } finally {
+          requestInFlight = false;
+          verifyRun.disabled = false;
+        }
+      });
+      checkBox.append(
+        element('label', '', 'Команда проверки после выполнения'), checkInput,
+        element('label', '', 'Ожидаемый текст в выводе проверки (необязательно)'), expectedInput,
+        verifyRun, checkedResult
+      );
+      const suggestions = element('details', 'sa-setup');
+      suggestions.append(element('summary', '', 'Команды из готовых ответов SuperAgent'));
+      suggestions.append(element('p', 'sa-remote-note',
+        'Леший ищет предложенные команды в ответах Ваших задач. ' +
+        'Нажатие «Подставить» только заполняет поле — ничего не запускает. ' +
+        'Перед выполнением проверьте команду, ОС сервера и последствия.'));
+      const suggested = element('select', 'sa-ssh-select');
+      suggested.setAttribute('aria-label', 'Предложенные SuperAgent команды');
+      const suggestedStatus = element('p', 'sa-remote-note');
+      suggestedStatus.setAttribute('role', 'status');
+      let suggestedCommands = [];
+      const loadSuggestions = makeButton('Показать предложенные команды', async () => {
+        if (requestInFlight) return;
+        requestInFlight = true;
+        loadSuggestions.disabled = true;
+        suggestedStatus.textContent = 'Ищу команды в ответах SuperAgent…';
+        try {
+          const items = await api('/v1/superagent/tasks?archived=0');
+          const result = [];
+          for (const task of (items.tasks || []).slice(0, 50)) {
+            const report = String(task.latest_report || '').slice(0, 3000);
+            const blocks = /```(?:bash|sh|shell|powershell|pwsh|ps1|cmd|bat)?\s*\r?\n([\s\S]*?)\r?\n?```/gi;
+            let match;
+            while ((match = blocks.exec(report)) && result.length < 25) {
+              const command = match[1].trim();
+              if (command && new TextEncoder().encode(command).length <= 4096) {
+                result.push({
+                  command,
+                  label: String(task.title || 'Задание').slice(0, 65) +
+                    ' · вариант ' + (result.length + 1)
+                });
+              }
+            }
+            if (result.length >= 25) break;
+          }
+          suggestedCommands = result;
+          suggested.replaceChildren();
+          result.forEach((item, index) => {
+            const option = element('option', '', item.label);
+            option.value = String(index);
+            suggested.append(option);
+          });
+          suggestedStatus.textContent = result.length
+            ? 'Найдено ' + result.length + ' предложений. Выберите команду и подставьте в нужное поле.'
+            : 'В последних заданиях нет команд в отдельных блоках Bash/PowerShell/CMD.';
+        } catch (error) {
+          suggestedStatus.textContent = 'Не удалось получить предложения: ' + error.message;
+        } finally {
+          requestInFlight = false;
+          loadSuggestions.disabled = false;
+        }
+      });
+      const putSuggested = (target) => {
+        const index = Number(suggested.value);
+        const entry = suggestedCommands[index];
+        if (!entry) { suggestedStatus.textContent = 'Сначала загрузите и выберите команду.'; return; }
+        target.value = entry.command;
+        target.focus();
+        suggestedStatus.textContent = 'Команда подставлена, но НЕ запущена. Проверьте её перед выполнением.';
+      };
+      suggestions.append(loadSuggestions, suggested,
+        makeButton('Подставить как действие', () => putSuggested(shellInput)),
+        makeButton('Подставить как проверку', () => putSuggested(checkInput)),
+        suggestedStatus);
       const natural = element('textarea');
       natural.rows = 3;
       natural.maxLength = 3000;
@@ -599,8 +762,10 @@
               (distro ? ', дистрибутив: ' + distro : '') +
               '. Выбирай команды именно для этой ОС. До изменения системы уточни текущие настройки, ' +
               'права и зависимости. Не утверждай, что команда уже исполнена. ' +
-              'Составь пошаговые команды, критерии успеха, проверку после каждого шага и план отката. ' +
-              'Не выполнять изменения автоматически без одобрения владельца. ' +
+              'Для каждого шага предложи ТОЧНУЮ команду действия, отдельную команду проверки ' +
+              'и ожидаемый текст в выводе (если нужен), соответствующие реальной ОС; оцени риск, ' +
+              'составь критерий успеха и план отката. Код 0 без проверки состояния не считать успехом. ' +
+              'Команды и проверки запускать только после отдельного одобрения владельца. ' +
               'Запрос пользователя: ' + text
             })
           });
@@ -615,7 +780,7 @@
         }
       });
       terminal.append(element('label', '', 'Команда для SSH'), shellInput, run, output,
-        element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
+        checkBox, suggestions, element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
       row.append(terminal);
       if (credentials.truncated) row.append(element('p', 'sa-remote-note',
         'Показаны первые 100 файлов доступа.'));

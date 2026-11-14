@@ -299,6 +299,65 @@ class HttpRoutingTests(unittest.TestCase):
                 run.assert_called_once()
                 self.assertEqual(run.call_args.args[1].owner_id, 'web:alice')
 
+            checked = {
+                'node_id':'192.168.100.22',
+                'credential_file':'server.json',
+                'command':'systemctl restart nginx',
+                'verification_command':'systemctl is-active nginx',
+                'expected_text':'active',
+            }
+            with patch('leshy.web_server_impl14.prepare_ssh_checked_step',
+                       return_value={
+                           'approval_token':'one-time','step_sha256':'a'*64
+                       }) as prepare_checked:
+                checked_prepare = self.Handler(
+                    path='/v1/superagent/ssh/check/prepare', owner='web:alice',
+                    headers=headers, body=checked)
+                checked_prepare.cookie_value = 'session-a'
+                checked_prepare.do_POST()
+                self.assertEqual(checked_prepare.result[0], 200)
+                self.assertEqual(prepare_checked.call_args.args[1].owner_id, 'web:alice')
+                foreign = self.Handler(
+                    path='/v1/superagent/ssh/check/prepare', owner='web:alice',
+                    headers={**headers,'Origin':'https://evil.invalid'},
+                    body=checked)
+                foreign.cookie_value = 'session-a'
+                foreign.do_POST()
+                self.assertEqual(foreign.result[0], 403)
+                prepare_checked.assert_called_once()
+
+            completed = {
+                'node_id':'192.168.100.22', 'os_family':'Linux',
+                'verdict':'confirmed',
+                'action':{'exit_code':0,'stdout':'','stderr':'','truncated':False},
+                'verification':{'exit_code':0,'stdout':'active','stderr':'','truncated':False},
+            }
+            with patch('leshy.web_server_impl14.consume_ssh_checked_approval') as consume_checked, patch(
+                'leshy.web_server_impl14.run_ssh_checked_step',
+                return_value=completed,
+            ) as execute_checked:
+                no_confirm = self.Handler(
+                    path='/v1/superagent/ssh/check/execute', owner='web:alice',
+                    headers=headers,
+                    body={**checked,'approval_token':'one-time','confirm':False})
+                no_confirm.cookie_value = 'session-a'
+                no_confirm.do_POST()
+                self.assertEqual(no_confirm.result[0], 400)
+                consume_checked.assert_not_called()
+                checked_execute = self.Handler(
+                    path='/v1/superagent/ssh/check/execute', owner='web:alice',
+                    headers=headers,
+                    body={**checked,'approval_token':'one-time','confirm':True})
+                checked_execute.cookie_value = 'session-a'
+                checked_execute.do_POST()
+                self.assertEqual(checked_execute.result[0], 200)
+                self.assertEqual(
+                    checked_execute.result[1]['checked_step']['verdict'], 'confirmed'
+                )
+                consume_checked.assert_called_once()
+                execute_checked.assert_called_once()
+                self.assertEqual(execute_checked.call_args.args[1].owner_id, 'web:alice')
+
             request = dict(node_id='192.168.100.22', grantee_id='web:bob',
                            capability='inspect')
             hostile = self.Handler(

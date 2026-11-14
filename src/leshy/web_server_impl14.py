@@ -19,7 +19,11 @@ from .superagent_credential_settings import (
 from .superagent_verified_ssh import inspect_remote_os
 from .superagent_ssh_enrollment import enroll_verified_ssh_node
 from .superagent_ssh_terminal import run_ssh_terminal_command
-from .superagent_ssh_approvals import prepare_ssh_command, consume_ssh_approval
+from .superagent_ssh_approvals import (
+    prepare_ssh_command, consume_ssh_approval,
+    prepare_ssh_checked_step, consume_ssh_checked_approval,
+)
+from .superagent_ssh_checked_step import run_ssh_checked_step
 from .superagent_remote_access_dashboard import (
     authorized_remote_context, list_remote_access, revoke_remote_grant,
 )
@@ -216,6 +220,8 @@ def make_handler(app, telegram, settings, model_catalog):
                 "/v1/superagent/ssh/enroll",
                 "/v1/superagent/ssh/prepare",
                 "/v1/superagent/ssh/execute",
+                "/v1/superagent/ssh/check/prepare",
+                "/v1/superagent/ssh/check/execute",
             }:
                 context = self._remote_context()
                 if context is None:
@@ -262,6 +268,37 @@ def make_handler(app, telegram, settings, model_catalog):
                                 payload["credential_file"], payload["command"],
                             ),
                         })
+                    if path == "/v1/superagent/ssh/check/prepare":
+                        if set(payload) != {
+                            "node_id", "credential_file", "command",
+                            "verification_command", "expected_text",
+                        }:
+                            raise ValueError("Нужна команда и её проверка")
+                        return self._json(HTTPStatus.OK, {
+                            "approval": prepare_ssh_checked_step(
+                                policy, actor, payload["node_id"],
+                                payload["credential_file"], payload["command"],
+                                payload["verification_command"], payload["expected_text"],
+                            )
+                        })
+                    if path == "/v1/superagent/ssh/check/execute":
+                        if (set(payload) != {
+                            "node_id", "credential_file", "command",
+                            "verification_command", "expected_text",
+                            "approval_token", "confirm",
+                        } or payload.get("confirm") is not True):
+                            raise ValueError("Подтвердите обе точные SSH-команды")
+                        consume_ssh_checked_approval(
+                            policy, actor, payload["approval_token"], payload["node_id"],
+                            payload["credential_file"], payload["command"],
+                            payload["verification_command"], payload["expected_text"],
+                        )
+                        checked = run_ssh_checked_step(
+                            policy, actor, payload["node_id"],
+                            payload["credential_file"], payload["command"],
+                            payload["verification_command"], payload["expected_text"],
+                        )
+                        return self._json(HTTPStatus.OK, {"checked_step": checked})
                     if set(payload) != {
                         "node_id", "credential_file", "command", "approval_token", "confirm"
                     } or payload.get("confirm") is not True:
@@ -289,8 +326,13 @@ def make_handler(app, telegram, settings, model_catalog):
                     })
                 except Exception as exc:
                     problem("superagent_ssh_operation_failed", type(exc).__name__)
+                    if path == "/v1/superagent/ssh/check/execute":
+                        return self._json(HTTPStatus.BAD_GATEWAY, {
+                            "error": "Результат операции неизвестен. Команда могла выполниться; "
+                                     "проверьте состояние сервера до повторной попытки."
+                        })
                     return self._json(HTTPStatus.BAD_GATEWAY, {
-                        "error": "SSH-операция не выполнена"
+                        "error": "SSH-операция не подтверждена; команда могла выполниться"
                     })
             if path == "/v1/superagent/ssh/inspect":
                 context = self._remote_context()
