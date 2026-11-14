@@ -52,6 +52,11 @@ def save_direct_rule(storage, owner_id: str, message: str) -> tuple[int | None, 
     owner = str(owner_id or "").strip()[:200]
     if not owner:
         return None, "Не удалось определить профиль. Правило не сохранено."
+    if owner.casefold() in {"web:local", "shared", "standalone"}:
+        return None, (
+            "Правило не сохранено: используется общий или анонимный профиль. "
+            "Сначала войдите в индивидуальный профиль, чтобы не смешивать память пользователей."
+        )
     if len(content) > _MAX_RULE_LENGTH:
         return None, (
             f"Правило не сохранено: сообщение длиннее {_MAX_RULE_LENGTH} символов. "
