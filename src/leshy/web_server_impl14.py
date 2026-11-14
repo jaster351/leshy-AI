@@ -326,8 +326,13 @@ def make_handler(app, telegram, settings, model_catalog):
                     })
                 except Exception as exc:
                     problem("superagent_ssh_operation_failed", type(exc).__name__)
+                    if path == "/v1/superagent/ssh/check/execute":
+                        return self._json(HTTPStatus.BAD_GATEWAY, {
+                            "error": "Результат операции неизвестен. Команда могла выполниться; "
+                                     "проверьте состояние сервера до повторной попытки."
+                        })
                     return self._json(HTTPStatus.BAD_GATEWAY, {
-                        "error": "SSH-операция не выполнена"
+                        "error": "SSH-операция не подтверждена; команда могла выполниться"
                     })
             if path == "/v1/superagent/ssh/inspect":
                 context = self._remote_context()
