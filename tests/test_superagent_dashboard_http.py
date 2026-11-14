@@ -394,12 +394,13 @@ class HttpRoutingTests(unittest.TestCase):
 
             plan_payload = {**ssh_plan, 'approval_token':'single-use', 'confirm':True}
             result_plan = {
-                "node_id":"192.168.100.22", "status":"stopped",
-                "total":2, "confirmed_steps":1, "stopped_at":1,
-                "remaining_not_started":0, "steps":[], "auto_retry":False,
+                "job_id":"123e4567-e89b-12d3-a456-426614174000",
+                "node_id":"192.168.100.22", "status":"queued",
+                "total":2, "confirmed_steps":0,
+                "remaining_not_started":2, "steps":[], "auto_retry":False,
             }
             with patch('leshy.web_server_impl14.consume_ssh_plan_approval') as consume_plan, patch(
-                'leshy.web_server_impl14.execute_approved_ssh_plan',
+                'leshy.web_server_impl14.start_ssh_plan_job',
                 return_value=result_plan
             ) as execute_plan:
                 missing_consent = self.Handler(
@@ -424,12 +425,75 @@ class HttpRoutingTests(unittest.TestCase):
                     headers=headers, body=plan_payload)
                 accepted.cookie_value = 'session-a'
                 accepted.do_POST()
-                self.assertEqual(accepted.result[0], 200)
-                self.assertEqual(accepted.result[1]['ssh_plan']['status'], 'stopped')
+                self.assertEqual(accepted.result[0], 202)
+                self.assertEqual(accepted.result[1]['ssh_job']['status'], 'queued')
                 consume_plan.assert_called_once()
                 execute_plan.assert_called_once()
                 self.assertEqual(execute_plan.call_args.args[1].owner_id, 'web:alice')
                 self.assertTrue(callable(execute_plan.call_args.kwargs['may_continue']))
+
+            # Status and cancellation must remain provider-bound even if
+            # the remote-admin module is switched off during execution.
+            with patch('leshy.web_server_impl14.list_ssh_plan_jobs',
+                       return_value={'jobs':[result_plan]}) as status_list:
+                query = self.Handler(
+                    path='/v1/superagent/ssh/plan/jobs', owner='web:alice')
+                query.cookie_value = 'session-a'
+                query.do_GET()
+                self.assertEqual(query.result[0], 200)
+                self.assertEqual(query.result[1]['jobs'][0]['status'], 'queued')
+                status_list.assert_called_once()
+                status_list.reset_mock()
+                outsider = self.Handler(
+                    path='/v1/superagent/ssh/plan/jobs',
+                    owner='web:bob')
+                outsider.do_GET()
+                self.assertEqual(outsider.result[0], 403)
+                status_list.assert_not_called()
+
+            with patch('leshy.web_server_impl14.cancel_ssh_plan_job',
+                       return_value={**result_plan,'stop_requested':True}) as cancel_job:
+                job_payload = {
+                    'job_id':'123e4567-e89b-12d3-a456-426614174000',
+                    'confirm': True,
+                }
+                wrong_site = self.Handler(
+                    path='/v1/superagent/ssh/plan/jobs/cancel',
+                    owner='web:alice',
+                    headers={**headers,'Origin':'https://evil.invalid'},
+                    body=job_payload)
+                wrong_site.cookie_value = 'session-a'
+                wrong_site.do_POST()
+                self.assertEqual(wrong_site.result[0], 403)
+                cancel_job.assert_not_called()
+                no_confirm = self.Handler(
+                    path='/v1/superagent/ssh/plan/jobs/cancel',
+                    owner='web:alice', headers=headers,
+                    body={**job_payload,'confirm':False})
+                no_confirm.cookie_value = 'session-a'
+                no_confirm.do_POST()
+                self.assertEqual(no_confirm.result[0], 403)
+                cancel_job.assert_not_called()
+                stop = self.Handler(
+                    path='/v1/superagent/ssh/plan/jobs/cancel',
+                    owner='web:alice', headers=headers, body=job_payload)
+                stop.cookie_value = 'session-a'
+                stop.do_POST()
+                self.assertEqual(stop.result[0], 200)
+                self.assertTrue(stop.result[1]['ssh_job']['stop_requested'])
+                cancel_job.assert_called_once()
+
+            with patch('leshy.web_server_impl14.acknowledge_ssh_plan_job',
+                       return_value={**result_plan,'status':'reviewed'}) as acknowledge:
+                reviewed = self.Handler(
+                    path='/v1/superagent/ssh/plan/jobs/review',
+                    owner='web:alice', headers=headers,
+                    body={'job_id':result_plan['job_id'],'confirm':True})
+                reviewed.cookie_value = 'session-a'
+                reviewed.do_POST()
+                self.assertEqual(reviewed.result[0], 200)
+                self.assertEqual(reviewed.result[1]['ssh_job']['status'], 'reviewed')
+                acknowledge.assert_called_once()
 
             request = dict(node_id='192.168.100.22', grantee_id='web:bob',
                            capability='inspect')
