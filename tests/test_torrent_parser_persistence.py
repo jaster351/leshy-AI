@@ -52,13 +52,13 @@ class ParserPersistenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             bridge = TorrentParserBridge(root / "brain", persistent_root=root / "state")
-            bridge.configure("http://192.168.0.19:8766", "original-owner")
+            bridge.configure("http://10.0.0.9:8766", "original-owner")
             save_secret(bridge.secret, "a" * 40)
             stranger = bridge.status("different-owner")
             self.assertFalse(stranger["configured"])
             self.assertFalse(stranger["paired"])
             self.assertTrue(stranger["profile_mismatch"])
-            self.assertNotEqual(stranger["address"], "http://10.0.0.11:8766")
+            self.assertNotEqual(stranger["address"], "http://10.0.0.9:8766")
             with self.assertRaises(PermissionError):
                 bridge.configure("http://10.0.0.11:8766", "different-owner")
             self.assertTrue(bridge.status("original-owner")["paired"])
