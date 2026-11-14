@@ -16,14 +16,23 @@ from .secret_store import load_secret, save_secret
 
 
 DEFAULT_ADDRESS = "http://192.168.0.19:8766"
-_INTENT = re.compile(
+_DOWNLOAD = re.compile(
     r"^\s*(?:(?:алиса[,! ]*)?попроси\s+помощника\s+по\s+дому\s+)?"
     r"(?:скачай|скачать|загрузи|загрузить|найди\s+торрент\s+на|"
-    r"найти\s+торрент\s+на)\s*[,!:—-]*\s*"
-    r"(фильм|кино|группу|исполнителя|музыку|альбом|песню|трек)"
-    r"\s*[,!:—-]*\s*(.+?)\s*[.!?]*$",
+    r"найти\s+торрент\s+на)\s*[,!:—-]*\s*(.+?)\s*$",
     re.IGNORECASE,
 )
+_FIRST_PART = re.compile(
+    r"^(?:(?:самую\s+)?первую|1-?(?:ю|ую))\s+часть\s+"
+    r"|^первый\s+фильм\s+",
+    re.IGNORECASE,
+)
+_MEDIA_PREFIX = re.compile(
+    r"^(фильм|кино|группу|исполнителя|музыку|альбом|песню|трек)"
+    r"\s*[,!:—-]*\s+",
+    re.IGNORECASE,
+)
+
 _PREMIERE_INTENT = re.compile(
     r"\b(?:следи|отслеживай|мониторь|отслеживать|следить|проверяй)\b",
     re.IGNORECASE,
@@ -51,13 +60,42 @@ _LOCK = threading.RLock()
 _OPENER = request.build_opener(request.ProxyHandler({}))
 
 
-def parse_request(message: str) -> tuple[str, str] | None:
-    match = _INTENT.fullmatch(str(message or "").strip())
+def parse_media_request(message: str) -> tuple[str, str, str] | None:
+    """Identify an explicit download command, including ordinary Russian word order.
+
+    The first-part marker is *intent*, not a hard-coded title/year mapping.
+    The NAS selects the first theatrical release using verified search results.
+    """
+    match = _DOWNLOAD.fullmatch(str(message or "").strip())
     if not match:
         return None
-    kind = "movie" if match.group(1).lower() in {"фильм", "кино"} else "music"
-    title = match.group(2).strip().strip("!?., ")
-    return (kind, title) if 0 < len(title) <= 200 else None
+    phrase = match.group(1).strip().strip("!?., ")
+    part = ""
+    initial = _FIRST_PART.match(phrase)
+    if initial:
+        part = "first"
+        phrase = phrase[initial.end():].lstrip(" ,:—-")
+    media = _MEDIA_PREFIX.match(phrase)
+    if media:
+        word = media.group(1).casefold()
+        kind = "movie" if word in {"фильм", "кино"} else "music"
+        phrase = phrase[media.end():]
+    elif part == "first":
+        kind = "movie"
+    else:
+        return None
+    # "скачай фильм Аватар, первую часть", or "фильм Обитель зла, самую первую часть"
+    tail = re.search(r"\s*[,;:—-]\s*(?:самую\s+)?первую\s+часть\s*$", phrase, re.I)
+    if kind == "movie" and tail:
+        part = "first"
+        phrase = phrase[:tail.start()]
+    title = phrase.strip("!?., :—-")
+    return (kind, title, part) if 0 < len(title) <= 200 else None
+
+
+def parse_request(message: str) -> tuple[str, str] | None:
+    parsed = parse_media_request(message)
+    return (parsed[0], parsed[1]) if parsed else None
 
 
 def _base_url(url: str) -> str:
@@ -176,14 +214,14 @@ class TorrentParserBridge:
             save_secret(self.secret, received)
         return self.status()
 
-    def submit(self, owner_id: str, kind: str, title: str):
+    def submit(self, owner_id: str, kind: str, title: str, *, part: str = ""):
         if not self.owner_allowed(owner_id):
             return {"status": "not_configured", "message": "Настройте подключение к Parser for Plex в параметрах Лешего."}
         secret = load_secret(self.secret)
         if not secret:
             return {"status": "unpaired", "message": "Откройте настройки Лешего и выполните первичную привязку Parser for Plex."}
         data = self._request(self._read()["address"] + "/v1/jobs",
-                             {"kind": kind, "query": title, "wait_seconds": 2.5},
+                             {"kind": kind, "query": title, "part": part, "wait_seconds": 2.5},
                              secret=secret, timeout=6)
         return data
 
@@ -211,14 +249,14 @@ class TorrentParserBridge:
 
     def execute_chat(self, owner_id: str, message: str):
         premiere = parse_premiere_request(message)
-        command = parse_request(message)
+        command = parse_media_request(message)
         if premiere is None and not command:
             return None
         try:
             if premiere is not None:
                 return self.watch_premieres(owner_id, premiere)
-            kind, title = command
-            info = self.submit(owner_id, kind, title)
+            kind, title, part = command
+            info = self.submit(owner_id, kind, title, part=part)
             return str(info.get("message") or "Команда принята.")
         except (ConnectionError, ValueError, RuntimeError, PermissionError) as exc:
             return str(exc)
