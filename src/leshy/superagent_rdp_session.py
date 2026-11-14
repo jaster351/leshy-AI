@@ -52,6 +52,7 @@ class _Session:
     width: int = 0
     height: int = 0
     pixel_format: str = "opaque"
+    content_digest: str = ""
     used: bool = True
 
 
@@ -112,6 +113,33 @@ class RDPSessionController:
         self.authorize(owner_id, session.node_id)
         return session
 
+    @staticmethod
+    def _content_digest(frame: RDPFrame) -> str:
+        """Bind the intended action to actual pixels, dimensions and format."""
+        return hashlib.sha256(
+            frame.width.to_bytes(4, "big") +
+            frame.height.to_bytes(4, "big") +
+            frame.pixel_format.encode("ascii", "strict") + b"\\0" +
+            frame.pixels
+        ).hexdigest()
+
+    def _verify_live_frame(self, owner_id: str, session: _Session) -> None:
+        """Fail closed if remote desktop changed after the last observation.
+
+        Must be called under _lock, with the receipt already consumed.
+        """
+        frame = self.backend.capture(session.connection)
+        self.authorize(owner_id, session.node_id)
+        if (self.clock() - session.captured_at > self.max_frame_age or
+                frame.width != session.width or frame.height != session.height or
+                frame.pixel_format != session.pixel_format or
+                not isinstance(frame.pixels, bytes) or
+                not (0 < len(frame.pixels) <= 32 * 1024 * 1024) or
+                not hmac.compare_digest(
+                    self._content_digest(frame), session.content_digest
+                )):
+            raise PermissionError("RDP desktop changed since observation; capture again")
+
     def observe(self, owner_id: str, session_id: str) -> FrameReceipt:
         receipt, _ = self.observe_frame(owner_id, session_id)
         return receipt
@@ -136,6 +164,7 @@ class RDPSessionController:
             session.captured_at = self.clock()
             session.width, session.height = frame.width, frame.height
             session.pixel_format = frame.pixel_format
+            session.content_digest = self._content_digest(frame)
             session.used = False
             return FrameReceipt(session_id, digest, frame.width, frame.height), frame.pixels
 
@@ -174,7 +203,7 @@ class RDPSessionController:
                 raise ValueError("Click outside observed framebuffer")
             # Consume first, so failures cannot cause implicit retries.
             session.used = True
-            self.authorize(owner_id, session.node_id)
+            self._verify_live_frame(owner_id, session)
             self.backend.click(session.connection, x, y)
 
     def type_text(
@@ -196,7 +225,7 @@ class RDPSessionController:
             if not callable(send):
                 raise RuntimeError("RDP backend does not implement text input")
             session.used = True
-            self.authorize(owner_id, session.node_id)
+            self._verify_live_frame(owner_id, session)
             send(session.connection, text)
 
     def close(self, owner_id: str, session_id: str) -> None:
