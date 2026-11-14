@@ -148,6 +148,9 @@ class RDPSessionController:
         """In-process frame transfer only; never expose pixels to diagnostics."""
         with self._lock:
             session = self._get(owner_id, session_id)
+            # Starting a new observation invalidates the previous action
+            # receipt even if capture, validation or authorization fails.
+            session.used = True
             frame = self.backend.capture(session.connection)
             # Capture may block; recheck permissions before returning any pixels.
             self.authorize(owner_id, session.node_id)
