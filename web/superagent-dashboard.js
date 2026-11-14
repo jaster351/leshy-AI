@@ -459,6 +459,60 @@
       element('label', '', 'Независимый SHA-256 отпечаток SSH-ключа'), enrollmentFingerprint,
       element('label', '', 'Файл доступа'), enrollmentFile, enroll, enrollmentState);
     section.insertBefore(enrollBox, container);
+    const gatewayBox = element('details', 'sa-setup');
+    gatewayBox.append(element('summary', '', 'Web SSH и RDP через Apache Guacamole'));
+    gatewayBox.append(element('p', 'sa-remote-note',
+      'Настоящий интерактивный SSH-терминал и удалённый рабочий стол доступны ' +
+      'через отдельный шлюз Guacamole. Сначала настройте адрес и подключения в Guacamole. ' +
+      'У него собственный вход и проверка серверов: Леший не получает пароли, ' +
+      'содержимое терминала или изображение экрана.'));
+    const gatewayAddress = element('input');
+    gatewayAddress.type = 'url';
+    gatewayAddress.maxLength = 512;
+    gatewayAddress.placeholder = 'https://your-server.example/guacamole/';
+    gatewayAddress.setAttribute('aria-label', 'Адрес вашего Apache Guacamole');
+    const gatewayStatus = element('p', 'sa-remote-note');
+    gatewayStatus.setAttribute('role', 'status');
+    let gatewayUrl = '';
+    const gatewaySave = makeButton('Сохранить адрес шлюза', async () => {
+      if (requestInFlight) return;
+      const url = gatewayAddress.value.trim();
+      if (!window.confirm(url
+        ? 'Сохранить этот HTTPS-адрес Guacamole? При открытии браузер перейдёт ' +
+          'на отдельный шлюз, где потребуется свой вход.'
+        : 'Удалить сохранённый адрес шлюза Guacamole?')) return;
+      requestInFlight = true; gatewaySave.disabled = true;
+      try {
+        const response = await api('/v1/superagent/remote-gateway', {
+          method: 'POST', body: JSON.stringify({url,confirm:true})
+        });
+        gatewayUrl = String(response.gateway?.url || '');
+        gatewayAddress.value = gatewayUrl;
+        gatewayStatus.textContent = gatewayUrl
+          ? 'Шлюз сохранён. Вход и создание SSH/RDP-подключений выполняются в Guacamole.'
+          : 'Адрес шлюза удалён.';
+      } catch (error) {
+        gatewayStatus.textContent = 'Не удалось сохранить шлюз: ' + error.message;
+      } finally {
+        requestInFlight = false; gatewaySave.disabled = false;
+      }
+    });
+    const gatewayOpen = makeButton('Открыть Web-терминал SSH / рабочий стол RDP', () => {
+      if (!gatewayUrl) {
+        gatewayStatus.textContent = 'Сначала сохраните адрес работающего Guacamole.';
+        return;
+      }
+      window.open(gatewayUrl, '_blank', 'noopener,noreferrer');
+    });
+    gatewayBox.append(
+      element('label', '', 'Адрес Guacamole (HTTPS; локально допускается 127.0.0.1)'),
+      gatewayAddress, gatewaySave, gatewayOpen, gatewayStatus,
+      element('p', 'sa-remote-note',
+        'Этот переход открывает собственный интерфейс Guacamole. ' +
+        'В нём выберите заранее настроенный SSH- или RDP-сервер. ' +
+        'Для удалённых клиентов используйте HTTPS и отдельную авторизацию.')
+    );
+    section.insertBefore(gatewayBox, container);
     const addInspection = (row, node, credentials) => {
       if (!credentials || !credentials.files?.length) {
         row.append(element('p', 'sa-remote-note',
@@ -1155,9 +1209,21 @@
       status.textContent = 'Проверяю разрешения…';
       try {
         const data = await api('/v1/superagent/remote-access');
+        try {
+          const response = await api('/v1/superagent/remote-gateway');
+          gatewayUrl = String(response.gateway?.url || '');
+          if (document.activeElement !== gatewayAddress) gatewayAddress.value = gatewayUrl;
+          gatewayStatus.textContent = gatewayUrl
+            ? 'Сохранённый шлюз: ' + gatewayUrl
+            : 'Шлюз не настроен. Укажите адрес существующей установки Guacamole.';
+        } catch (error) {
+          gatewayUrl = '';
+          gatewayStatus.textContent = 'Шлюз пока недоступен: ' + error.message;
+        }
+        gatewayBox.hidden = !data.remote_admin_enabled;
         container.replaceChildren();
         status.textContent = data.remote_admin_enabled
-          ? 'SSH-терминал доступен для подтверждённых компьютеров: произвольные команды требуют отдельного подтверждения. RDP пока не подключён.'
+          ? 'SSH-команды и планы доступны на зарегистрированных узлах. Web SSH/RDP работает через отдельный настроенный Guacamole; штатный RDP можно открыть через .rdp.'
           : 'Удалённое администрирование выключено. Доступные разрешения можно просмотреть и отозвать.';
         let credentials = null;
         if (data.remote_admin_enabled) {
