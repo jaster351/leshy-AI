@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import threading
 from urllib import error, parse, request
 
@@ -127,11 +129,61 @@ def _base_url(url: str) -> str:
     return parse.urlunsplit((u.scheme, u.netloc, "", "", ""))
 
 
+def _persistent_parser_root() -> Path:
+    """Installation-independent owner OS state; never place credentials in Git."""
+    if os.name == "nt":
+        home = os.getenv("LOCALAPPDATA")
+        base = Path(home) if home else Path.home() / "AppData" / "Local"
+        return base / "Leshy-AI" / "integrations" / "parser-for-plex"
+    xdg = os.getenv("XDG_STATE_HOME")
+    return (Path(xdg) if xdg else Path.home() / ".local" / "state") / "leshy-ai" / "integrations" / "parser-for-plex"
+
+
 class TorrentParserBridge:
-    def __init__(self, brain_dir: str | Path):
-        root = Path(brain_dir)
-        self.settings = root / "settings" / "torrent_parser.json"
-        self.secret = root / "secrets" / "torrent_parser_token.secret"
+    def __init__(self, brain_dir: str | Path, *, persistent_root: Path | None = None):
+        root = Path(persistent_root) if persistent_root is not None else _persistent_parser_root()
+        self.settings = root / "torrent_parser.json"
+        self.secret = root / "torrent_parser_token.secret"
+        self._migrate_legacy(Path(brain_dir))
+
+    def _migrate_legacy(self, legacy: Path) -> None:
+        """Copy prior LeshyBrain state once; never delete legacy credentials.
+
+        An interrupted copy may resume only for byte-identical configuration,
+        preventing a token being mixed with another installation's owner.
+        """
+        config = legacy / "settings" / "torrent_parser.json"
+        secret = legacy / "secrets" / "torrent_parser_token.secret"
+        with _LOCK:
+            if self.settings.exists():
+                if self.secret.exists() or not config.is_file() or not secret.is_file():
+                    return
+                if self.settings.read_bytes() != config.read_bytes():
+                    return
+                sources = ((secret, self.secret),)
+            elif self.secret.exists():
+                return
+            else:
+                sources = ((config, self.settings), (secret, self.secret))
+            for source, target in sources:
+                if not source.is_file() or target.exists():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    target.parent.chmod(0o700)
+                except OSError:
+                    pass
+                temporary = target.with_name(target.name + ".migrating")
+                # Stale temporary files from interrupted writes are not trusted.
+                temporary.unlink(missing_ok=True)
+                try:
+                    with source.open("rb") as reader, temporary.open("xb") as writer:
+                        shutil.copyfileobj(reader, writer, 1024 * 1024)
+                    temporary.chmod(0o600)
+                    if not target.exists():
+                        temporary.replace(target)
+                finally:
+                    temporary.unlink(missing_ok=True)
 
     def _read(self):
         try:
@@ -140,9 +192,24 @@ class TorrentParserBridge:
         except (OSError, ValueError):
             return {}
 
-    def status(self):
+    def status(self, owner_id: str | None = None):
         data = self._read()
-        saved = load_secret(self.secret)
+        if owner_id is not None and not self.owner_allowed(owner_id):
+            # Do not reveal private NAS addresses or contact somebody else's NAS.
+            return {
+                "address": DEFAULT_ADDRESS,
+                "configured": False,
+                "credential_saved": False,
+                "auth_verified": None,
+                "paired": False,
+                "profile_mismatch": bool(data.get("configured")),
+            }
+        try:
+            saved = load_secret(self.secret)
+            secret_error = False
+        except (RuntimeError, OSError, ValueError):
+            saved = ""
+            secret_error = True
         verified = None
         if data.get("configured") and saved:
             try:
@@ -157,13 +224,19 @@ class TorrentParserBridge:
                 # Network unavailable or NAS still on an older release.
                 # Do not erase a local credential based on a transient error.
                 verified = None
-        return {
+        state = {
             "address": data.get("address") or DEFAULT_ADDRESS,
             "configured": bool(data.get("configured")),
             "credential_saved": bool(saved),
             "auth_verified": verified,
             "paired": verified is True,
         }
+        if secret_error:
+            state["pairing_error"] = (
+                "Защищённый ключ нельзя прочитать в текущем профиле ОС. "
+                "Проверьте учётную запись Windows и прежний LeshyBrain."
+            )
+        return state
 
     def owner_allowed(self, owner_id: str) -> bool:
         data = self._read()
@@ -177,10 +250,18 @@ class TorrentParserBridge:
             raise PermissionError("Требуется вход владельца в веб-интерфейс Лешего")
         with _LOCK:
             previous = self._read()
-            if previous.get("address") != base or previous.get("owner_id") != owner:
-                self.secret.unlink(missing_ok=True)
+            old_owner = str(previous.get("owner_id") or "").strip()
+            if previous.get("configured") and old_owner and old_owner != owner:
+                raise PermissionError(
+                    "Подключение привязано к другому профилю Лешего. "
+                    "Войдите в прежний профиль. Чужие настройки нельзя перезаписывать."
+                )
             payload = {"address": base, "owner_id": owner, "configured": True}
             self.settings.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                self.settings.parent.chmod(0o700)
+            except OSError:
+                pass
             temp = self.settings.with_suffix(".json.tmp")
             temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             temp.replace(self.settings)
@@ -188,7 +269,9 @@ class TorrentParserBridge:
                 self.settings.chmod(0o600)
             except OSError:
                 pass
-        return self.status()
+            if previous.get("address") != base or old_owner != owner:
+                self.secret.unlink(missing_ok=True)
+        return self.status(owner)
 
     @staticmethod
     def _request(url, body=None, secret=None, timeout=4.0):
@@ -244,17 +327,30 @@ class TorrentParserBridge:
                 else:
                     if reply.get("authorized") is not True:
                         raise RuntimeError("NAS не подтвердил действительность ключа")
-                    return self.status()
+                    return self.status(owner_id)
             reply = self._request(base + "/v1/pair", {"client_name": "Leshy"}, timeout=5)
             received = str(reply.get("token") or "")
             if len(received) < 32:
                 raise ValueError("Parser for Plex не вернул действительный ключ")
             save_secret(self.secret, received)
-        return self.status()
+        return self.status(owner_id)
 
     def submit(self, owner_id: str, kind: str, title: str, *, part: str = ""):
         if not self.owner_allowed(owner_id):
-            return {"status": "not_configured", "message": "Настройте подключение к Parser for Plex в параметрах Лешего."}
+            # Distinguish missing setup from an owner mismatch; do not reveal
+            # the NAS address or any pairing credential to the caller.
+            configured = bool(self._read().get("configured"))
+            return {
+                "status": "owner_mismatch" if configured else "not_configured",
+                "message": (
+                    "Подключение Parser for Plex уже сохранено, но текущий Telegram/Web профиль "
+                    "не связан с профилем, выполнившим настройку. Откройте Web Лешего "
+                    "под прежним профилем и подтвердите привязку Telegram. "
+                    "Сбрасывать NAS и ключ не нужно."
+                    if configured else
+                    "Настройте подключение к Parser for Plex в параметрах Лешего."
+                ),
+            }
         # Verify the stored credential instead of assuming that a local file
         # means the NAS still accepts it. Re-pair automatically only while
         # the owner-opened NAS pairing window is available.

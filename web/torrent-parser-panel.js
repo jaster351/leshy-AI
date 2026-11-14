@@ -46,13 +46,16 @@
     const address = byId('torrentParserAddress');
     const render = (data) => {
       if (data.address) address.value = data.address;
-      state.textContent = [
-        data.configured ? 'Адрес настроен' : 'Адрес не сохранён',
-        data.paired ? 'NAS подтвердил ключ' :
-          (data.credential_saved && data.auth_verified === false ? 'Ключ отклонён NAS: нужна повторная привязка' :
-           data.credential_saved && data.auth_verified === null ? 'Ключ сохранён, но проверить NAS не удалось' :
-           'Привязка не выполнена')
-      ].join(' · ');
+      state.textContent = data.profile_mismatch
+        ? 'Настройки принадлежат другому профилю Лешего. Войдите в прежний профиль — чужая привязка не будет сброшена.'
+        : [
+            data.configured ? 'Адрес настроен' : 'Адрес не сохранён',
+            data.paired ? 'NAS подтвердил ключ' :
+              (data.credential_saved && data.auth_verified === false ? 'Ключ отклонён NAS: нужна повторная привязка' :
+               data.credential_saved && data.auth_verified === null ? 'Ключ сохранён, но проверить NAS не удалось' :
+               'Привязка не выполнена'),
+            data.pairing_error || ''
+          ].filter(Boolean).join(' · ');
     };
     const onAction = async (buttonId, callback, busyText) => {
       const button = byId(buttonId);

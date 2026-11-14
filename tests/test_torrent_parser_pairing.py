@@ -15,7 +15,7 @@ class ParserPairingRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.bridge = TorrentParserBridge(Path(self.temp.name))
+        self.bridge = TorrentParserBridge(Path(self.temp.name), persistent_root=Path(self.temp.name) / "parser-state")
         self.bridge.settings.parent.mkdir(parents=True, exist_ok=True)
         self.bridge.settings.write_text(
             json.dumps({"configured": True,
