@@ -151,3 +151,13 @@ def test_reject_legacy_rdp_without_tls():
                 probe_rdp_tls("192.0.2.100", "a" * 64, authorize=lambda _: None)
             wrap.assert_not_called()
     assert raw.closed
+
+
+def test_total_timeout_aborts_before_network_io():
+    raw = FakeSocket(server_reply(2))
+    with patch("leshy.rdp_tls_preflight.socket.create_connection", return_value=raw):
+        with patch("leshy.rdp_tls_preflight.time.monotonic", side_effect=[0.0, 2.0]):
+            with pytest.raises(RDPPreflightError, match="overall timeout"):
+                probe_rdp_tls("192.0.2.100", "a" * 64, authorize=lambda _: None, timeout=1)
+    assert raw.sent == b""
+    assert raw.closed
