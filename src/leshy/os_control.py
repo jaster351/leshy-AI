@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from .diagnostics import event, problem
 from .llm import ChatMessage
 from .storage import utcnow
 from .os_control_guard import OSControlGate, DISABLED
+from .native_shell import resolve_native_shell
 from .action_safety_guard import check_external_action
 
 
@@ -47,6 +49,14 @@ class OperatingSystemController:
         r"bcdedit\b|bootrec\b|cipher\s+/w\b|remove-item\s+[^\r\n]*(?:windows|system32)[^\r\n]*-recurse|"
         r"reg(?:\.exe)?\s+delete\s+HKLM\\|set-mppreference\b[^\r\n]*disable|"
         r"disable-windowsoptionalfeature\b|manage-bde\b[^\r\n]*-off)"
+    )
+
+    _NATIVE_CRITICAL_RE = re.compile(
+        r"(?i)(?:\b(?:mkfs(?:\.[a-z0-9]+)?|wipefs|sfdisk|fdisk|cfdisk|"
+        r"parted|shred|blkdiscard)\b|"
+        r"\bdd\b[^\r\n]*\bof\s*=\s*/dev/|"
+        r"\bsystemctl\s+(?:poweroff|halt|reboot)\b|"
+        r"\b(?:poweroff|halt|shutdown|reboot)\b)"
     )
 
     def __init__(self, app):
@@ -95,6 +105,12 @@ class OperatingSystemController:
         safe_args = dict(args)
         if "content" in safe_args:
             safe_args["content"] = f"<{len(str(safe_args['content']))} символов>"
+        if action in {"powershell", "native_shell"} and "command" in safe_args:
+            raw = str(safe_args["command"])
+            safe_args["command"] = {
+                "sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                "bytes": len(raw.encode("utf-8")),
+            }
         payload = {
             "action": action,
             "owner_id": str(owner_id)[:200],
@@ -154,8 +170,46 @@ class OperatingSystemController:
             output = (out or b"").decode("utf-8", errors="replace")
             errors = (err or b"").decode("utf-8", errors="replace")
             if proc.returncode != 0:
-                raise RuntimeError(f"PowerShell exit {proc.returncode}: {self._clip(output+errors,4000)}")
+                raise RuntimeError(f"PowerShell завершился с кодом {proc.returncode}; полный вывод команды не сохраняется в лог")
             return self._clip(output + (chr(10)+errors if errors else ""))
+        finally:
+            if proc.poll() is None:
+                self._gate.terminate(proc)
+            self._gate.unregister(proc)
+
+    def _native_shell(self, command: str, *, timeout: int = 60) -> tuple[str, str]:
+        """Execute through an installed OS shell using the revocable gate.
+
+        Each invocation starts a fresh OS process, not a persistent PTY.
+        """
+        shell = resolve_native_shell()
+        if self._DANGEROUS_RE.search(command) or self._NATIVE_CRITICAL_RE.search(command):
+            raise PermissionError("Критическая системная команда запрещена")
+        argv = shell.argv(command)
+        generation = getattr(self._local, "generation", None)
+        self._gate.check(generation)
+        proc = self._gate.launch(argv, capture=True)
+        deadline = time.monotonic() + max(2, min(int(timeout), 120))
+        try:
+            while True:
+                self._gate.check(generation)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Истекло время системной команды")
+                try:
+                    stdout, stderr = proc.communicate(timeout=min(0.2, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            self._gate.check(generation)
+            out = (stdout or b"").decode("utf-8", errors="replace")
+            err = (stderr or b"").decode("utf-8", errors="replace")
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"{shell.kind} завершился с кодом {proc.returncode}: "
+                    + " подробный вывод не сохраняется в лог"
+                )
+            return shell.kind, self._clip(out + ("\n" + err if err else ""))
         finally:
             if proc.poll() is None:
                 self._gate.terminate(proc)
@@ -271,9 +325,13 @@ class OperatingSystemController:
                 result = OSActionResult(action, True, f"Удалено: {path}")
 
             elif action == "process_list":
-                output = self._powershell("Get-Process | Sort-Object CPU -Descending | Select-Object -First 80 Id,ProcessName,CPU,WorkingSet64 | ConvertTo-Json -Compress")
-                try: data = json.loads(output) if output else []
-                except json.JSONDecodeError: data = output
+                if os.name == "nt":
+                    output = self._powershell("Get-Process | Sort-Object CPU -Descending | Select-Object -First 80 Id,ProcessName,CPU,WorkingSet64 | ConvertTo-Json -Compress")
+                    try: data = json.loads(output) if output else []
+                    except json.JSONDecodeError: data = output
+                else:
+                    _, output = self._native_shell("ps -eo pid,ppid,comm")
+                    data = output
                 result = OSActionResult(action, True, "Список процессов получен", data)
 
             elif action == "start_process":
@@ -317,12 +375,22 @@ class OperatingSystemController:
                 output = self._powershell(str(args.get("command") or ""), timeout=int(args.get("timeout") or 60))
                 result = OSActionResult(action, True, "PowerShell-команда выполнена", output)
 
+            elif action == "native_shell":
+                kind, output = self._native_shell(
+                    str(args.get("command") or ""),
+                    timeout=int(args.get("timeout") or 60),
+                )
+                result = OSActionResult(action, True, f"Команда выполнена через {kind}", output)
+
             else:
                 raise ValueError(f"Неизвестное действие ОС: {action}")
             self._gate.check(generation)
         except Exception as exc:
             result = OSActionResult(action, False, str(exc), None)
-            problem("os_action_failed", str(exc), action=action, owner_id=str(owner_id)[:200])
+            # Shell exception text can include stdout/stderr and secrets.
+            problem("os_action_failed",
+                    type(exc).__name__ if action in {"native_shell", "powershell"} else str(exc),
+                    action=action, owner_id=str(owner_id)[:200])
         finally:
             self._local.generation = None
             if generation is not None:
@@ -347,16 +415,18 @@ class OperatingSystemController:
             "ls": ("list_dir", {"path": tail or str(Path.home())}), "dir": ("list_dir", {"path": tail or str(Path.home())}),
             "cat": ("read_text", {"path": tail}), "read": ("read_text", {"path": tail}),
             "mkdir": ("make_dir", {"path": tail}), "open": ("open_path", {"path": tail}),
-            "run": ("powershell", {"command": tail}), "powershell": ("powershell", {"command": tail}),
+            "run": ("native_shell", {"command": tail}),
+            "shell": ("native_shell", {"command": tail}),
+            "powershell": ("powershell", {"command": tail}),
         }
         return mapping.get(cmd)
 
     def _plan_natural(self, message: str) -> tuple[str, dict[str, Any]]:
         self.assert_allowed()
         prompt = [
-            ChatMessage("system", "/no_think\nТы планировщик локального Windows-инструмента Лешего. Верни ТОЛЬКО JSON без markdown. "
-                        "Схема: {\"action\":\"...\",\"args\":{...}}. Разрешённые action: system_status,list_dir,read_text,write_text,make_dir,copy,move,delete,process_list,start_process,stop_process,open_path,powershell. "
-                        "Выбирай powershell только когда пользователь явно просит выполнить команду/скрипт или задачу невозможно выразить другим action. Не придумывай пути, PID и имена программ, которых нет в запросе; если данных недостаточно, верни {\"action\":\"need_clarification\",\"args\":{\"question\":\"...\"}}."),
+            ChatMessage("system", "/no_think\nТы планировщик локального инструмента Лешего под ОС " + platform.system() + ". Верни ТОЛЬКО JSON без markdown. "
+                        "Схема: {\"action\":\"...\",\"args\":{...}}. Разрешённые action: system_status,list_dir,read_text,write_text,make_dir,copy,move,delete,process_list,start_process,stop_process,open_path,powershell,native_shell. "
+                        "Выбирай native_shell только когда пользователь явно просит выполнить команду/скрипт или задачу невозможно выразить другим action. Не придумывай пути, PID и имена программ, которых нет в запросе; если данных недостаточно, верни {\"action\":\"need_clarification\",\"args\":{\"question\":\"...\"}}."),
             ChatMessage("user", str(message)),
         ]
         raw = str(self.app.llm.chat(prompt) or "").strip()
@@ -380,7 +450,7 @@ class OperatingSystemController:
             return (
                 "Управление ОС включено. Можно просить естественным языком или использовать `/os`: "
                 "`/os status`, `/os ps`, `/os ls ПУТЬ`, `/os cat ФАЙЛ`, `/os mkdir ПУТЬ`, "
-                "`/os open ПУТЬ`, `/os run PowerShell-команда`."
+                "`/os open ПУТЬ`, `/os run КОМАНДА` (PowerShell/CMD/Bash/sh в зависимости от ОС)."
             )
         if action == "need_clarification":
             return str(args.get("question") or "Уточните системное действие.")
@@ -394,9 +464,14 @@ class OperatingSystemController:
         return result.summary + "\n\n" + self._clip(rendered)
 
     def status(self) -> dict[str, Any]:
+        try:
+            shell = resolve_native_shell().kind
+        except RuntimeError:
+            shell = "unavailable"
         return {
             **self._gate.status(),
             "platform": platform.system(),
+            "native_shell": shell,
             "runs_with_process_privileges": True,
             "uac_bypass": False,
             "natural_language_requests": True,
@@ -431,7 +506,7 @@ def install_os_control(app) -> OperatingSystemController:
                 "help", "need_clarification", "system_status", "list_dir",
                 "read_text", "write_text", "make_dir", "copy", "move",
                 "delete", "process_list", "start_process", "stop_process",
-                "open_path", "powershell",
+                "open_path", "powershell", "native_shell",
             }
             if planned[0] not in supported:
                 event("os_action_delegated_to_chat", action=str(planned[0])[:80], owner_id=owner_id)

@@ -77,11 +77,11 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         values = dict(args or {})
         if normalized == "delete" and not approved_delete:
             return OSActionResult("delete", False, "Удаление возможно только после отдельного подтверждения владельца")
-        if normalized == "powershell" and self._SHELL_DELETE_RE.search(str(values.get("command") or "")):
+        if normalized in {"powershell", "native_shell"} and self._SHELL_DELETE_RE.search(str(values.get("command") or "")):
             return OSActionResult(
-                "powershell",
+                normalized,
                 False,
-                "Удаляющие PowerShell-команды нельзя выполнять напрямую. Попросите Лешего удалить конкретный файл или папку — он покажет кнопки подтверждения.",
+                "Удаляющие команды оболочки нельзя выполнять напрямую. Попросите Лешего удалить конкретный файл или папку — он покажет кнопки подтверждения.",
             )
         return super().execute(action, values, owner_id=owner_id)
 
@@ -289,7 +289,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             return (
                 "Управление ОС включено. Можно просить естественным языком или использовать `/os`: "
                 "`/os status`, `/os ps`, `/os ls ПУТЬ`, `/os cat ФАЙЛ`, `/os mkdir ПУТЬ`, "
-                "`/os open ПУТЬ`, `/os delete ПУТЬ`, `/os run PowerShell-команда`. "
+                "`/os open ПУТЬ`, `/os delete ПУТЬ`, `/os run КОМАНДА для текущей ОС`. "
                 "Любое удаление выполняется только после Вашего подтверждения."
             )
         if action == "need_clarification":

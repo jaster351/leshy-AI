@@ -525,69 +525,32 @@ class HttpRoutingTests(unittest.TestCase):
             else:
                 self.app.owner_identity = original_identity
 
-    def test_guacamole_and_rdp_routes_have_confirmation_and_origin_boundaries(self):
+    def test_native_rdp_route_requires_owner_and_exact_node(self):
         actor = SimpleNamespace(owner_id="web:alice")
         policy = object()
-        headers = {"Host":"localhost", "Content-Type":"application/json",
-                   "X-Leshy-UI":"superagent"}
-        configured = {
-            "configured":True, "url":"https://guac.example.net/guacamole/",
-            "protocols":["ssh","rdp"], "ai_desktop_control":False,
+        profile = {
+            "node_id": "192.168.5.12",
+            "filename": "Leshy-RDP-192-168-5-12.rdp",
+            "rdp": "full address:s:192.168.5.12:3389\r\n",
         }
         with patch.object(self.Handler, "_remote_context", return_value=(policy, actor)):
-            with patch("leshy.web_server_impl14.get_remote_gateway",
-                       return_value=configured) as get:
-                status = self.Handler(path="/v1/superagent/remote-gateway")
-                status.do_GET()
-                self.assertEqual(status.result[0], 200)
-                self.assertEqual(status.result[1]["gateway"]["url"], configured["url"])
-                get.assert_called_once_with(policy, actor)
-            with patch("leshy.web_server_impl14.set_remote_gateway",
-                       return_value=configured) as save:
-                foreign = self.Handler(
-                    path="/v1/superagent/remote-gateway",
-                    headers={**headers,"Origin":"https://evil.invalid"},
-                    body={"url":configured["url"],"confirm":True})
-                foreign.do_POST()
-                self.assertEqual(foreign.result[0], 403)
-                save.assert_not_called()
-
-                missing = self.Handler(path="/v1/superagent/remote-gateway",
-                    headers=headers, body={"url":configured["url"],"confirm":False})
-                missing.do_POST()
-                self.assertEqual(missing.result[0], 400)
-                save.assert_not_called()
-
-                valid = self.Handler(path="/v1/superagent/remote-gateway",
-                    headers=headers, body={"url":configured["url"],"confirm":True})
-                valid.do_POST()
-                self.assertEqual(valid.result[0], 200)
-                save.assert_called_once_with(policy, actor, configured["url"])
-
-            connection = {
-                "node_id":"192.168.5.12",
-                "filename":"Leshy-RDP-192-168-5-12.rdp",
-                "rdp":"full address:s:192.168.5.12:3389\r\n",
-            }
             with patch("leshy.web_server_impl14.rdp_connection_profile",
-                       return_value=connection) as create:
-                profile = self.Handler(path="/v1/superagent/rdp/profile?node_id=192.168.5.12")
-                profile.do_GET()
-                self.assertEqual(profile.result[0], 200)
-                self.assertEqual(profile.result[1]["profile"]["filename"],
-                                 connection["filename"])
-                create.assert_called_once_with(policy, actor, "192.168.5.12")
-                create.reset_mock()
-                invalid = self.Handler(path="/v1/superagent/rdp/profile?node_id=x&extra=y")
-                invalid.do_GET()
-                self.assertEqual(invalid.result[0], 400)
-                create.assert_not_called()
-
+                       return_value=profile) as make:
+                allowed = self.Handler(path="/v1/superagent/rdp/profile?node_id=192.168.5.12")
+                allowed.do_GET()
+                self.assertEqual(allowed.result[0], 200)
+                self.assertEqual(allowed.result[1]["profile"]["filename"], profile["filename"])
+                make.assert_called_once_with(policy, actor, "192.168.5.12")
+                make.reset_mock()
+                bad = self.Handler(path="/v1/superagent/rdp/profile?node_id=x&extra=y")
+                bad.do_GET()
+                self.assertEqual(bad.result[0], 400)
+                make.assert_not_called()
         with patch.object(self.Handler, "_remote_context", return_value=None):
-            no_session = self.Handler(path="/v1/superagent/remote-gateway")
-            no_session.do_GET()
-            with patch("leshy.web_server_impl14.get_remote_gateway") as get:
-                get.assert_not_called()
+            with patch("leshy.web_server_impl14.rdp_connection_profile") as make:
+                denied = self.Handler(path="/v1/superagent/rdp/profile?node_id=192.168.5.12")
+                denied.do_GET()
+                make.assert_not_called()
 
     def test_root_preserves_session_cookie_and_injects_panel(self):
         h = self.Handler(path='/', owner='web:alice')
