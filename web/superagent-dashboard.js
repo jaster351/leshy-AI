@@ -567,6 +567,101 @@
           run.disabled = false;
         }
       });
+      const checkBox = element('details', 'sa-setup');
+      checkBox.append(element('summary', '', 'Выполнить команду с обязательной проверкой результата'));
+      checkBox.append(element('p', 'sa-remote-note',
+        'Сначала Леший выполнит команду. Если она завершится без ошибки, ' +
+        'он запустит отдельную команду проверки на том же SSH-соединении. ' +
+        'Успех будет показан только при совпадении ожидаемого результата. ' +
+        'Команду проверки тоже проверьте сами: она не гарантированно безопасна.'));
+      const checkInput = element('textarea');
+      checkInput.rows = 2;
+      checkInput.maxLength = 4096;
+      checkInput.placeholder = 'Например, Linux: systemctl is-active nginx';
+      checkInput.setAttribute('aria-label', 'Команда проверки результата SSH');
+      const expectedInput = element('input');
+      expectedInput.type = 'text';
+      expectedInput.maxLength = 512;
+      expectedInput.placeholder = 'Например: active (необязательно; без текста проверяется код 0)';
+      expectedInput.setAttribute('aria-label', 'Ожидаемый текст в результате проверки');
+      const checkedResult = element('pre', 'sa-terminal-output');
+      checkedResult.textContent = 'Результат выполнения и проверки появится здесь.';
+      checkedResult.setAttribute('role', 'status');
+      const verifyRun = makeButton('Выполнить команду и проверить результат', async () => {
+        const command = shellInput.value;
+        const verification_command = checkInput.value;
+        const expected_text = expectedInput.value;
+        if (requestInFlight) return;
+        if (!command.trim() || !verification_command.trim()) {
+          checkedResult.textContent = 'Укажите основную команду выше и отдельную команду проверки.';
+          return;
+        }
+        requestInFlight = true;
+        verifyRun.disabled = true;
+        checkedResult.textContent = 'Сверяю разрешения для двух команд…';
+        try {
+          const identity = {
+            node_id: node.node_id, credential_file: select.value,
+            command, verification_command, expected_text
+          };
+          const preview = await api('/v1/superagent/ssh/check/prepare', {
+            method: 'POST', body: JSON.stringify(identity)
+          });
+          const ticket = preview.approval || {};
+          if (!window.confirm(
+            'Компьютер: ' + node.node_id +
+            '\n\n1. КОМАНДА:\n' + command +
+            '\n\n2. ПРОВЕРКА (тоже исполняемая команда):\n' + verification_command +
+            '\n\nОЖИДАЕМЫЙ ТЕКСТ: ' + (expected_text || '(только код завершения 0)') +
+            '\n\nВы сверили ОБЕ команды, разрешаете их однократное выполнение и ' +
+            'понимаете, что они могут изменить систему?'
+          )) {
+            checkedResult.textContent = 'Операция отменена до выполнения команды.';
+            return;
+          }
+          checkedResult.textContent = 'Выполняю команду, затем проверяю ожидаемое состояние…';
+          const response = await api('/v1/superagent/ssh/check/execute', {
+            method: 'POST', body: JSON.stringify({
+              ...identity, approval_token: ticket.approval_token, confirm: true
+            })
+          });
+          const step = response.checked_step || {};
+          const primary = step.action || {};
+          const check = step.verification;
+          const label = step.verdict === 'confirmed'
+            ? 'ПОДТВЕРЖДЕНО: проверочная команда завершилась успешно и ожидаемый текст совпал.'
+            : step.verdict === 'action_failed'
+              ? 'ОСНОВНАЯ КОМАНДА НЕ ЗАВЕРШИЛАСЬ УСПЕШНО. Проверка не выполнялась.'
+              : 'НЕ ПОДТВЕРЖДЕНО: проверка не подтвердила ожидаемое состояние.';
+          checkedResult.textContent =
+            'ОС: ' + (step.os_family || 'неизвестно') + '\n' + label +
+            '\n\nОСНОВНАЯ КОМАНДА: код=' + String(primary.exit_code) +
+            (primary.truncated ? ' (вывод усечён)' : '') +
+            '\nSTDOUT:\n' + (primary.stdout || '(пусто)') +
+            '\nSTDERR:\n' + (primary.stderr || '(пусто)') +
+            (check ? '\n\nПРОВЕРКА: код=' + String(check.exit_code) +
+              (check.truncated ? ' (вывод усечён)' : '') +
+              '\nSTDOUT:\n' + (check.stdout || '(пусто)') +
+              '\nSTDERR:\n' + (check.stderr || '(пусто)')
+              : '\n\nПРОВЕРКА: не выполнялась');
+          checkedResult.className = step.verdict === 'confirmed'
+            ? 'sa-terminal-output' : 'sa-terminal-output sa-error';
+        } catch (error) {
+          checkedResult.textContent =
+            'Статус операции не подтверждён: ' + error.message +
+            '\nЕсли соединение оборвалось, команда могла уже выполниться. ' +
+            'Не повторяйте её до независимой проверки состояния сервера.';
+          checkedResult.className = 'sa-terminal-output sa-error';
+        } finally {
+          requestInFlight = false;
+          verifyRun.disabled = false;
+        }
+      });
+      checkBox.append(
+        element('label', '', 'Команда проверки после выполнения'), checkInput,
+        element('label', '', 'Ожидаемый текст в выводе проверки (необязательно)'), expectedInput,
+        verifyRun, checkedResult
+      );
       const natural = element('textarea');
       natural.rows = 3;
       natural.maxLength = 3000;
@@ -615,7 +710,7 @@
         }
       });
       terminal.append(element('label', '', 'Команда для SSH'), shellInput, run, output,
-        element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
+        checkBox, element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
       row.append(terminal);
       if (credentials.truncated) row.append(element('p', 'sa-remote-note',
         'Показаны первые 100 файлов доступа.'));
