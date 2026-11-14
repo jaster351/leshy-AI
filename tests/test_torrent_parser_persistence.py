@@ -69,6 +69,21 @@ class ParserPersistenceTests(unittest.TestCase):
                 bridge.configure("http://10.0.0.11:8766", "different-owner")
             self.assertTrue(bridge.status("original-owner")["paired"])
 
+    def test_telegram_explains_owner_mismatch_without_nas_disclosure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bridge = TorrentParserBridge(root / "brain", persistent_root=root / "state")
+            bridge.configure("http://10.0.0.9:8766", "linked-web-owner")
+            with patch.object(bridge, "_request",
+                              side_effect=AssertionError("must not access NAS")):
+                result = bridge.submit("telegram:unlinked", "movie", "Обитель зла")
+            self.assertEqual(result["status"], "owner_mismatch")
+            self.assertIn("Telegram/Web профиль", result["message"])
+            self.assertNotIn("10.0.0.9", result["message"])
+            missing = TorrentParserBridge(root / "empty", persistent_root=root / "empty-state")
+            self.assertEqual(missing.submit("telegram:unlinked", "movie", "Обитель зла")["status"],
+                             "not_configured")
+
     def test_canonical_settings_not_overwritten_by_legacy_after_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
