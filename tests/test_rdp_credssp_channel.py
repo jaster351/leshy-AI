@@ -207,3 +207,19 @@ def test_owner_revoked_during_credssp_closes_channel(messages):
         with pytest.raises(PermissionError, match="revoked"):
             conn.authenticate_server(mechanism_factory=lambda *a, **kw: object())
         assert tls.closed
+
+
+def test_long_form_der_length_and_tls_fragmentation():
+    packet = encode_tsrequest(TSRequest(nego_tokens=(b"x" * 200,)))
+    assert packet[1] & 0x80
+    stream = Stream(packet)
+    assert chan.read_tsrequest(stream, deadline=time.monotonic() + 5) == packet
+    assert not stream.pending
+
+
+def test_credential_bearing_tsrequest_is_never_accepted():
+    # A valid version plus explicit [2] authInfo field. Even though the
+    # enclosing length is correct, this transport has no credential path.
+    packet = bytes.fromhex("3009a003020106a2020400")
+    with pytest.raises(ValueError, match="Credential delegation"):
+        chan.read_tsrequest(Stream(packet), deadline=time.monotonic() + 5)
