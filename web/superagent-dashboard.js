@@ -583,7 +583,7 @@
       expectedInput.type = 'text';
       expectedInput.maxLength = 512;
       expectedInput.placeholder = 'Например: active (необязательно; без текста проверяется код 0)';
-      expectedInput.setAttribute('aria-label', 'Ожидаемый текст в результате проверки');
+      expectedInput.setAttribute('aria-label', 'Ожидаемая строка в результате проверки');
       const checkedResult = element('pre', 'sa-terminal-output');
       checkedResult.textContent = 'Результат выполнения и проверки появится здесь.';
       checkedResult.setAttribute('role', 'status');
@@ -630,7 +630,7 @@
           const check = step.verification;
           const label = step.verdict === 'confirmed'
             ? expected_text
-              ? 'ПРОВЕРКА ПРОЙДЕНА: проверочная команда завершилась успешно и ожидаемый текст найден.'
+              ? 'ПРОВЕРКА ПРОЙДЕНА: проверочная команда завершилась успешно и ожидаемая строка совпала полностью.'
               : 'ПРОВЕРКА ПРОЙДЕНА ПО КОДУ ВЫХОДА 0. Содержимое результата отдельно не сопоставлялось.'
             : step.verdict === 'action_failed'
               ? 'ОСНОВНАЯ КОМАНДА ЗАВЕРШИЛАСЬ С ОШИБКОЙ ИЛИ УСЕЧЕНИЕМ ВЫВОДА. Проверка не выполнялась; побочные изменения возможны.'
@@ -775,16 +775,16 @@
         const expected = element('input');
         expected.type = 'text'; expected.maxLength = 512;
         expected.value = seed.expected_text || '';
-        expected.placeholder = 'Ожидаемый фрагмент (лучше указать; необязательно)';
+        expected.placeholder = 'Ожидаемая строка целиком (лучше указать; необязательно)';
         expected.className = 'sa-ssh-plan-expected';
-        expected.setAttribute('aria-label', 'Ожидаемый текст проверки');
+        expected.setAttribute('aria-label', 'Ожидаемая строка проверки');
         const remove = makeButton('Удалить этот шаг', () => {
           row.remove(); renumber(); invalidatePlan();
         });
         row.append(element('strong', 'sa-ssh-plan-number', 'Шаг'),
           element('label', '', 'Действие'), action,
           element('label', '', 'Проверка результата'), verify,
-          element('label', '', 'Ожидаемый текст в выводе'), expected, remove);
+          element('label', '', 'Ожидаемая строка в выводе'), expected, remove);
         [action, verify, expected].forEach(control =>
           control.addEventListener('input', invalidatePlan));
         planRows.append(row); renumber(); invalidatePlan();
