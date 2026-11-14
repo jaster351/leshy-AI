@@ -144,8 +144,12 @@ class RDPSessionController:
             self.backend.click(session.connection, x, y)
 
     def close(self, owner_id: str, session_id: str) -> None:
+        # Closing is always permitted for the original session owner, even
+        # after a grant is revoked. It cannot send remote input.
         with self._lock:
-            session = self._get(owner_id, session_id)
+            session = self._sessions.get(session_id)
+            if session is None or not hmac.compare_digest(session.owner_id, owner_id):
+                raise PermissionError("RDP session unavailable")
             del self._sessions[session_id]
             self.backend.close(session.connection)
 
