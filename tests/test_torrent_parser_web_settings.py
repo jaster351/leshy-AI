@@ -79,6 +79,18 @@ class ParserWebSettingsTests(unittest.TestCase):
                 self.assertNotEqual(other_response[1]["address"], "http://10.0.0.12:8766")
                 denied = stranger.do_POST()
                 self.assertEqual(denied[0], HTTPStatus.BAD_REQUEST)
+                stranger.path = "/v1/torrent-parser/test"
+                with patch.object(restarted_bridge, "test",
+                                  side_effect=AssertionError("foreign NAS access")):
+                    forbidden_test = stranger.do_POST()
+                self.assertEqual(forbidden_test[0], HTTPStatus.FORBIDDEN)
+                owner.path = "/v1/torrent-parser/test"
+                with patch.object(restarted_bridge, "test", return_value={
+                    "ok": True, "service": "parser-for-plex"
+                }):
+                    allowed_test = owner.do_POST()
+                self.assertEqual(allowed_test[0], HTTPStatus.OK)
+                self.assertTrue(allowed_test[1]["connected"])
 
 
 if __name__ == "__main__":
