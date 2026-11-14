@@ -21,6 +21,8 @@ REQUIRED_MODULES = (
     "leshy.superagent_ssh_plan",
     "leshy.superagent_ssh_jobs",
     "leshy.kitesurf_cdp_adapter",
+    "leshy.superagent_remote_gateway",
+    "leshy.superagent_rdp_profile",
 )
 
 

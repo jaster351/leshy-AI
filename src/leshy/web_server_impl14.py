@@ -18,6 +18,8 @@ from .superagent_credential_settings import (
 )
 from .superagent_verified_ssh import inspect_remote_os
 from .superagent_ssh_enrollment import enroll_verified_ssh_node
+from .superagent_rdp_profile import rdp_connection_profile
+from .superagent_remote_gateway import get_remote_gateway, set_remote_gateway
 from .superagent_ssh_terminal import run_ssh_terminal_command
 from .superagent_ssh_approvals import (
     prepare_ssh_command, consume_ssh_approval,
@@ -160,6 +162,51 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._json(HTTPStatus.FORBIDDEN, {
                         "error": "Не удалось выбрать файлы доступа; проверьте настройки папки"
                     })
+            if parsed.path == "/v1/superagent/remote-gateway":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                policy, actor = context
+                try:
+                    return self._json(HTTPStatus.OK, {
+                        "gateway": get_remote_gateway(policy, actor)
+                    })
+                except Exception as exc:
+                    problem("superagent_remote_gateway_get_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось получить настройки шлюза"
+                    })
+            if parsed.path == "/v1/superagent/rdp/profile":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Удалённое управление выключено"
+                    })
+                try:
+                    parameters = parse.parse_qs(parsed.query)
+                    if set(parameters) != {"node_id"} or len(parameters["node_id"]) != 1:
+                        raise ValueError("Выберите зарегистрированный компьютер")
+                    policy, actor = context
+                    return self._json(HTTPStatus.OK, {
+                        "profile": rdp_connection_profile(
+                            policy, actor, parameters["node_id"][0],
+                        )
+                    })
+                except ValueError:
+                    return self._json(HTTPStatus.BAD_REQUEST, {
+                        "error": "Некорректный RDP-адрес"
+                    })
+                except PermissionError:
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "У Вас нет доступа к этому RDP-подключению"
+                    })
+                except Exception as exc:
+                    problem("superagent_rdp_profile_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось подготовить RDP-подключение"
+                    })
             if parsed.path == "/v1/superagent/ssh/plan/jobs":
                 context = self._remote_context()
                 if context is None:
@@ -243,6 +290,47 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_set_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить настройку"})
+            if path == "/v1/superagent/remote-gateway":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Удалённое управление выключено"
+                    })
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Недопустимый источник запроса"
+                    })
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Чужой источник запроса"
+                    })
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется JSON"})
+                policy, actor = context
+                try:
+                    payload = self._body()
+                    if (not isinstance(payload, dict) or set(payload) != {"url", "confirm"}
+                            or payload.get("confirm") is not True):
+                        raise ValueError("Подтвердите адрес SSH/RDP-шлюза")
+                    return self._json(HTTPStatus.OK, {
+                        "gateway": set_remote_gateway(policy, actor, payload["url"])
+                    })
+                except ValueError:
+                    return self._json(HTTPStatus.BAD_REQUEST, {
+                        "error": "Неверный адрес шлюза: используйте HTTPS либо локальный 127.0.0.1"
+                    })
+                except PermissionError:
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Владелец не подтверждён"
+                    })
+                except Exception as exc:
+                    problem("superagent_remote_gateway_save_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось сохранить адрес шлюза"
+                    })
             if path in {
                 "/v1/superagent/ssh/plan/jobs/cancel",
                 "/v1/superagent/ssh/plan/jobs/review",

@@ -1,0 +1,59 @@
+# Separate optional browser-based SSH/RDP gateway for Leshy.
+# Apache Guacamole 1.6.0. No remote server passwords are stored in this repo.
+# Frontend binds ONLY to the local host. Publish through an authenticated TLS
+# reverse proxy if access from other computers is desired.
+services:
+  database:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: guacamole
+      POSTGRES_USER: guacamole
+      POSTGRES_PASSWORD: ${GUAC_DB_PASSWORD:?Set strong GUAC_DB_PASSWORD in local .env}
+    volumes:
+      - guac-postgres:/var/lib/postgresql/data
+      - ./initdb.sql:/docker-entrypoint-initdb.d/01-guacamole.sql:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guacamole -d guacamole"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  guacd:
+    image: guacamole/guacd:1.6.0
+    restart: unless-stopped
+    networks:
+      - backend
+    # Do NOT publish guacd's unauthenticated 4822/tcp to the host!
+
+  guacamole:
+    image: guacamole/guacamole:1.6.0
+    restart: unless-stopped
+    environment:
+      GUACD_HOSTNAME: guacd
+      POSTGRESQL_HOSTNAME: database
+      POSTGRESQL_DATABASE: guacamole
+      POSTGRESQL_USERNAME: guacamole
+      POSTGRESQL_PASSWORD: ${GUAC_DB_PASSWORD:?Set strong GUAC_DB_PASSWORD in local .env}
+      POSTGRESQL_ENABLED: "true"
+      WEBAPP_CONTEXT: guacamole
+    ports:
+      - "127.0.0.1:8088:8080"
+    networks:
+      - backend
+      - frontend
+    depends_on:
+      database:
+        condition: service_healthy
+      guacd:
+        condition: service_started
+
+networks:
+  backend:
+    internal: true
+  frontend: {}
+
+volumes:
+  guac-postgres: {}

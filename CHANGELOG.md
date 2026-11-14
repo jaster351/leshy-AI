@@ -1,3 +1,13 @@
+## 14.11.2026 — Web SSH/RDP через Apache Guacamole без собственного низкоуровневого PTY (1.10.149)
+
+- После технической блокировки публикации собственного интерактивного SSH PTY найден альтернативный открытый стек **Apache Guacamole 1.6.0**: настоящий SSH-терминал и графический RDP в Web-браузере. Собственные SSH-планы Лешего v1.10.147 сохраняются независимо от Guacamole.
+- Добавлены оригинальные настройки внешнего шлюза `src/leshy/superagent_remote_gateway.py` с авторизацией подтверждённого Web-владельца, изоляцией URL по owner_id, строгим URL-валидатором (HTTPS либо literal loopback HTTP), без хранения SSH/RDP-паролей, cookies, экранов или текстов терминала.
+- В Web API реализованы `GET/POST /v1/superagent/remote-gateway`, в интерфейсе — адрес шлюза, безопасное сохранение и кнопка запуска интерактивного SSH/RDP в отдельной вкладке. Собственные логин и права Guacamole обязательны; SSO и управление экраном самой моделью пока не заявлены.
+- Добавлен owner-scoped `GET /v1/superagent/rdp/profile?node_id=...` и безопасный `.rdp`-профиль для штатного клиента Windows: CredSSP, независимая проверка сертификата, без паролей, редиректа дисков/принтеров/буфера. Кнопка доступна на зарегистрированных узлах даже без настроенного файла SSH-доступа.
+- `deploy/guacamole/compose.yaml` и README: Docker stack из guacamole/guacamole:1.6.0, guacamole/guacd:1.6.0 и PostgreSQL, изолированная служебная сеть, HTTPS reverse proxy только при отдельной настройке, Web-порт на localhost, секреты в .env/.gitignore. Включение шлюза — добровольное, существующий браузер и Web-интерфейс Лешего не подменяются.
+- Добавлены регрессионные сценарии на неавторизованный доступ, URL injection/open redirect, owner isolation, отсутствие секретов и Web origin/confirmation, а также Windows frozen-bundle preflight для новых модулей.
+- Ограничение: это полностью интерактивные SSH/RDP **для пользователя в Guacamole**, но не автономный RDP Computer Use Лешего и не встроенный WebSocket PTY; внешний Guacamole нужно реально разворачивать и проверять отдельно. Python unit, Windows build и живой Guacamole/RDP/SSH E2E в данном проходе не запускались.
+
 ## 14.11.2026 — Локальный Kitesurf CDP для Browser Agent (1.10.148)
 
 - Изучена архитектура cloudflare/kitesurf (Cloudflare Workers, Rust/WASM, Boa, CDP, локальный wrangler dev); учтены неполная совместимость с Chrome, отсутствие антибот-фингерпринтинга, требование платных Dynamic Workers для облачного размещения и отсутствие собственной авторизации CDP.
