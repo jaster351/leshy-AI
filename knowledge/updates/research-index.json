@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-14T00:59:37.893780+00:00",
+  "updated_at": "2026-11-14T02:02:26.426539+00:00",
   "last_successful_issue": {
     "searched_at": "2026-11-14T00:59:37.893780+00:00",
     "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
@@ -655,13 +655,20 @@
     }
   ],
   "last_search": {
-    "searched_at": "2026-11-13T20:00:58.019300+00:00",
-    "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
+    "searched_at": "2026-11-14T02:02:26.426539+00:00",
+    "previous_issue_at": {
+      "searched_at": "2026-11-14T00:59:37.893780+00:00",
+      "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
+      "newly_included_ids": [
+        "arXiv:2611.16492",
+        "arXiv:2611.16627"
+      ]
+    },
     "newly_included_ids": [],
     "unchanged_checked": [
-      "arXiv:2611.15729v1"
+      "arXiv:2611.16366v1"
     ],
-    "note": "Fresh web searches returned no verified significant new eligible work. Prior issues not repeated."
+    "note": "Fresh primary-source search found no verified significant new eligible work since last issue; older search results and previously reviewed works not repeated."
   },
   "pending_primary_reviews": [
     {

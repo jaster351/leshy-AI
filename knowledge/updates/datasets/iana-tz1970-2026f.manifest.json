@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "source_url": "https://data.iana.org/time-zones/releases/tzdata2026f.tar.gz",
+  "source_version": "2026f",
+  "checked_at": "2026-11-14T02:02:26.426539+00:00",
+  "source_family": "iana-tzdb",
+  "license": "Public domain",
+  "license_evidence": "Archive LICENSE and zone1970.tab header",
+  "archive_sha256": "01b4a91cec5167ed48c11e8ab78f2048cead78ce94b0cafcad0ae8c5a3044d3d",
+  "table_sha256": "5f23781702bf51408ff1581daa109ab3b9257fb433b1554e579d92172892c0cf",
+  "source_bytes": 17592,
+  "candidate_count": 312,
+  "published_count": 312,
+  "cursor": {
+    "completed": true,
+    "table": "zone1970.tab",
+    "last_zone": "Africa/Johannesburg",
+    "next": "Check a later tzdb edition and version changed identities"
+  },
+  "generator": "knowledge/updates/tools/generate_tz1970.py",
+  "reproduce": [
+    "python",
+    "knowledge/updates/tools/generate_tz1970.py",
+    "tzdata2026f.tar.gz",
+    "2026-11-14T02:02:26.426539+00:00",
+    "knowledge/updates/2026-11-14/0658-iana-tz1970.jsonl"
+  ],
+  "deduplication": {
+    "existing_records_scanned": 103714,
+    "exact_duplicates": 0,
+    "semantic_duplicates": 0,
+    "semantic_review": "Existing time/timezone claims inspected; locale labels, protocol ports and support timestamps do not contain timezone geographic mappings."
+  },
+  "limitations": "Complete zone1970 table only. zone.tab overlaps and is not imported separately; offsets and transitions require separate validated conversion."
+}
