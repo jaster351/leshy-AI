@@ -236,5 +236,64 @@ class KitesurfTests(unittest.TestCase):
         self.assertEqual(result.status, "needs_user_action")
 
 
+class BrowserPlatformKitesurfRoutingTests(unittest.TestCase):
+    def test_direct_url_prefers_explicit_local_engine_without_browser_use(self):
+        from leshy.browser_platform_runtime import BrowserPlatform, BrowserConversationIntent
+        platform = object.__new__(BrowserPlatform)
+        platform.kitesurf = mock.Mock()
+        platform.kitesurf.available.return_value = True
+        platform.kitesurf.execute.return_value = mock.Mock(
+            status="ok", data={"result": "Site contents"}, message="read",
+        )
+        platform.agent = mock.Mock()
+        platform._remember_results = mock.Mock()
+        answer, sources = platform.research_url(
+            BrowserConversationIntent("research_url", "Изучи эту страницу",
+                                      "https://example.com/read"),
+            owner_id="web:owner", session_id="session-1",
+        )
+        self.assertEqual(answer, "Site contents")
+        self.assertEqual(sources[0]["url"], "https://example.com/read")
+        platform.kitesurf.execute.assert_called_once()
+        platform.agent.execute.assert_not_called()
+        platform._remember_results.assert_called_once()
+
+    def test_unavailable_kitesurf_falls_back_to_existing_browser_agent(self):
+        from leshy.browser_platform_runtime import BrowserPlatform, BrowserConversationIntent
+        platform = object.__new__(BrowserPlatform)
+        platform.kitesurf = mock.Mock()
+        platform.kitesurf.available.return_value = True
+        platform.kitesurf.execute.return_value = mock.Mock(
+            status="unavailable", data={}, message="CDP incompatible",
+        )
+        platform.agent = mock.Mock()
+        platform.agent.execute.return_value = mock.Mock(
+            status="ok", data={"result": "Chromium contents"}, message="read",
+        )
+        platform._remember_results = mock.Mock()
+        answer, _ = platform.research_url(
+            BrowserConversationIntent("research_url", "Посмотри", "https://example.com/read"),
+            owner_id="web:owner", session_id="session-1",
+        )
+        self.assertEqual(answer, "Chromium contents")
+        platform.agent.execute.assert_called_once()
+
+    def test_challenge_must_not_be_retried_through_another_engine(self):
+        from leshy.browser_platform_runtime import BrowserPlatform, BrowserConversationIntent
+        platform = object.__new__(BrowserPlatform)
+        platform.kitesurf = mock.Mock()
+        platform.kitesurf.available.return_value = True
+        platform.kitesurf.execute.return_value = mock.Mock(
+            status="needs_user_action", data={}, message="CAPTCHA required",
+        )
+        platform.agent = mock.Mock()
+        with self.assertRaisesRegex(RuntimeError, "CAPTCHA"):
+            platform.research_url(
+                BrowserConversationIntent("research_url", "Прочитай", "https://example.com/read"),
+                owner_id="web:owner", session_id="session-1",
+            )
+        platform.agent.execute.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
