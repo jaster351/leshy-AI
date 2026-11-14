@@ -18,6 +18,7 @@ from .superagent_credential_settings import (
 )
 from .superagent_verified_ssh import inspect_remote_os
 from .superagent_ssh_enrollment import enroll_verified_ssh_node
+from .superagent_rdp_profile import rdp_connection_profile
 from .superagent_ssh_terminal import run_ssh_terminal_command
 from .superagent_ssh_approvals import (
     prepare_ssh_command, consume_ssh_approval,
@@ -159,6 +160,37 @@ def make_handler(app, telegram, settings, model_catalog):
                     problem("superagent_ssh_credential_picker_denied", type(exc).__name__)
                     return self._json(HTTPStatus.FORBIDDEN, {
                         "error": "Не удалось выбрать файлы доступа; проверьте настройки папки"
+                    })
+            if parsed.path == "/v1/superagent/rdp/profile":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Удалённое управление выключено"
+                    })
+                try:
+                    parameters = parse.parse_qs(parsed.query)
+                    if set(parameters) != {"node_id"} or len(parameters["node_id"]) != 1:
+                        raise ValueError("Выберите зарегистрированный компьютер")
+                    policy, actor = context
+                    return self._json(HTTPStatus.OK, {
+                        "profile": rdp_connection_profile(
+                            policy, actor, parameters["node_id"][0],
+                        )
+                    })
+                except ValueError:
+                    return self._json(HTTPStatus.BAD_REQUEST, {
+                        "error": "Некорректный RDP-адрес"
+                    })
+                except PermissionError:
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "У Вас нет доступа к этому RDP-подключению"
+                    })
+                except Exception as exc:
+                    problem("superagent_rdp_profile_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось подготовить RDP-подключение"
                     })
             if parsed.path == "/v1/superagent/ssh/plan/jobs":
                 context = self._remote_context()
