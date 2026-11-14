@@ -21,6 +21,7 @@ from .superagent_ssh_plan import plan_approval_signature
 _LOCK = threading.RLock()
 _PENDING: dict[str, tuple[str, str, str, str, str, str, float]] = {}
 _TTL = 90.0
+_PLAN_TTL = 300.0  # Longer review time for up to six full SSH steps.
 _MAX_PENDING = 128
 
 
@@ -58,12 +59,13 @@ def prepare_ssh_command(policy: Any, actor: Any, node: str,
                 _PENDING.pop(key, None)
         if len(_PENDING) >= _MAX_PENDING:
             raise PermissionError("Слишком много неподтверждённых SSH-команд")
+        lifetime = _PLAN_TTL if approval_kind == "sequential-plan" else _TTL
         _PENDING[token_key] = (
             actor.owner_id, actor.session_fingerprint, normalized_node,
-            name, digest, approval_kind, now + _TTL,
+            name, digest, approval_kind, now + lifetime,
         )
     return {
-        "approval_token": token, "sha256": digest, "expires_seconds": 90,
+        "approval_token": token, "sha256": digest, "expires_seconds": int(lifetime),
         "node_id": normalized_node, "command_bytes": len(command.encode("utf-8")),
     }
 
