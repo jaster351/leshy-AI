@@ -843,6 +843,65 @@
           preparePlan.disabled = false;
         }
       });
+      const importTaskPlan = makeButton('Загрузить план из последнего ответа Лешего', async () => {
+        if (requestInFlight) return;
+        requestInFlight = true;
+        importTaskPlan.disabled = true;
+        invalidatePlan();
+        planPreview.textContent = 'Ищу подходящий план в Ваших заданиях для этого компьютера…';
+        try {
+          const listing = await api('/v1/superagent/tasks?archived=0');
+          let imported = null;
+          // Each detail request is owner-authorized by the server; check the
+          // original user request, not just a model-produced report/IP.
+          const marker = 'Задание для подтверждённого SSH-сервера ' + node.node_id + '.';
+          for (const item of (listing.tasks || []).slice(0, 15)) {
+            const detail = await api('/v1/superagent/tasks?id=' + encodeURIComponent(item.id));
+            const task = detail.task || {};
+            const fromThisHost = (task.conversation || []).some(entry =>
+              entry.role === 'user' && String(entry.text || '').startsWith(marker));
+            if (!fromThisHost) continue;
+            const report = String(task.latest_report || '');
+            const blocks = /```json\s*\r?\n([\s\S]*?)\r?\n?```/gi;
+            let found;
+            while ((found = blocks.exec(report))) {
+              let parsed;
+              try { parsed = JSON.parse(found[1]); } catch { continue; }
+              const rows = parsed?.ssh_steps;
+              if (!Array.isArray(rows) || !rows.length || rows.length > 6) continue;
+              if (rows.every(step => step && typeof step === 'object' &&
+                Object.keys(step).sort().join(',') ===
+                  'command,expected_text,verification_command' &&
+                ['command','verification_command','expected_text']
+                  .every(key => typeof step[key] === 'string') &&
+                step.command.trim() && step.verification_command.trim() &&
+                new TextEncoder().encode(step.command).length <= 4096 &&
+                new TextEncoder().encode(step.verification_command).length <= 4096 &&
+                new TextEncoder().encode(step.expected_text).length <= 512)) {
+                imported = rows;
+                break;
+              }
+            }
+            if (imported) break;
+          }
+          if (!imported) {
+            planPreview.textContent = 'В последних заданиях для данного сервера нет готового JSON-плана ' +
+              'с отдельными проверками. Попросите Лешего составить план или заполните шаги вручную.';
+            return;
+          }
+          planRows.replaceChildren();
+          imported.forEach(step => createPlanRow(step));
+          planPreview.textContent = 'Импортировано ' + imported.length +
+            ' шагов. План только заполнен, ничего не выполнено. ' +
+            'Внимательно проверьте команды, затем нажмите «Подготовить план».';
+          planBox.open = true;
+        } catch (error) {
+          planPreview.textContent = 'Не удалось импортировать план: ' + error.message;
+        } finally {
+          requestInFlight = false;
+          importTaskPlan.disabled = false;
+        }
+      });
       const addStepButton = makeButton('Добавить шаг', () => createPlanRow());
       const copySingleStep = makeButton('Взять текущие команды из терминала', () =>
         createPlanRow({
@@ -850,7 +909,7 @@
           verification_command: checkInput.value,
           expected_text: expectedInput.value
         }));
-      planBox.append(planRows, addStepButton, copySingleStep,
+      planBox.append(planRows, addStepButton, copySingleStep, importTaskPlan,
         preparePlan, planPreview, executePlan, planOutput);
       createPlanRow();
       const suggestions = element('details', 'sa-setup');
@@ -949,6 +1008,7 @@
               (distro ? ', дистрибутив: ' + distro : '') +
               '. Выбирай команды именно для этой ОС. До изменения системы уточни текущие настройки, ' +
               'права и зависимости. Не утверждай, что команда уже исполнена. ' +
+              'В конце ответа добавь один JSON-блок с ssh_steps из 1–6 шагов: command, verification_command, expected_text; без секретов. ' +
               'Для каждого шага предложи ТОЧНУЮ команду действия, отдельную команду проверки ' +
               'и ожидаемый текст в выводе (если нужен), соответствующие реальной ОС; оцени риск, ' +
               'составь критерий успеха и план отката. Код 0 без проверки состояния не считать успехом. ' +
