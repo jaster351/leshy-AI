@@ -442,7 +442,7 @@ class OperatingSystemController:
             return (
                 "Управление ОС включено. Можно просить естественным языком или использовать `/os`: "
                 "`/os status`, `/os ps`, `/os ls ПУТЬ`, `/os cat ФАЙЛ`, `/os mkdir ПУТЬ`, "
-                "`/os open ПУТЬ`, `/os run PowerShell-команда`."
+                "`/os open ПУТЬ`, `/os run КОМАНДА` (PowerShell/CMD/Bash/sh в зависимости от ОС)."
             )
         if action == "need_clarification":
             return str(args.get("question") or "Уточните системное действие.")
@@ -456,9 +456,14 @@ class OperatingSystemController:
         return result.summary + "\n\n" + self._clip(rendered)
 
     def status(self) -> dict[str, Any]:
+        try:
+            shell = resolve_native_shell().kind
+        except RuntimeError:
+            shell = "unavailable"
         return {
             **self._gate.status(),
             "platform": platform.system(),
+            "native_shell": shell,
             "runs_with_process_privileges": True,
             "uac_bypass": False,
             "natural_language_requests": True,
