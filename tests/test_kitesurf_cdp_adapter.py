@@ -96,6 +96,8 @@ class KitesurfTests(unittest.TestCase):
         for invalid in (
             "wss://cloud.example/devtools/browser",
             "ws://127.1:8787/devtools/browser",
+            "ws://127.5.1.2:8787/devtools/browser",
+            "ws://[::1%eth0]:8787/devtools/browser",
             "ws://2130706433:8787/devtools/browser",
             "ws://localhost:8787/devtools/browser",
             "ws://127.0.0.1:80/devtools/browser",
