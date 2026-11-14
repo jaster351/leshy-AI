@@ -51,6 +51,14 @@ class OperatingSystemController:
         r"disable-windowsoptionalfeature\b|manage-bde\b[^\r\n]*-off)"
     )
 
+    _NATIVE_CRITICAL_RE = re.compile(
+        r"(?i)(?:\b(?:mkfs(?:\.[a-z0-9]+)?|wipefs|sfdisk|fdisk|cfdisk|"
+        r"parted|shred|blkdiscard)\b|"
+        r"\bdd\b[^\r\n]*\bof\s*=\s*/dev/|"
+        r"\bsystemctl\s+(?:poweroff|halt|reboot)\b|"
+        r"\b(?:poweroff|halt|shutdown|reboot)\b)"
+    )
+
     def __init__(self, app):
         self.app = app
         self.storage = app.storage
@@ -175,7 +183,7 @@ class OperatingSystemController:
         Each invocation starts a fresh OS process, not a persistent PTY.
         """
         shell = resolve_native_shell()
-        if self._DANGEROUS_RE.search(command):
+        if self._DANGEROUS_RE.search(command) or self._NATIVE_CRITICAL_RE.search(command):
             raise PermissionError("Критическая системная команда запрещена")
         argv = shell.argv(command)
         generation = getattr(self._local, "generation", None)
