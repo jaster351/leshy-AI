@@ -513,6 +513,52 @@
         'Для удалённых клиентов используйте HTTPS и отдельную авторизацию.')
     );
     section.insertBefore(gatewayBox, container);
+    const addNativeRdp = (row, node) => {
+      const rdpInfo = element('p', 'sa-remote-note',
+        'RDP открывается в штатном клиенте Вашего компьютера. Вход и проверка ' +
+        'сертификата выполняются в нём; Леший не получает пароль или изображение экрана.');
+      const rdpOpen = makeButton('Открыть этот сервер через RDP', async () => {
+        if (requestInFlight) return;
+        if (!window.confirm('Создать безопасный профиль RDP для ' + node.node_id +
+          '? Подключение, проверку сертификата и ввод пароля выполняет ' +
+          'штатный клиент Вашего компьютера.')) return;
+        requestInFlight = true; rdpOpen.disabled = true;
+        try {
+          const data = await api('/v1/superagent/rdp/profile?node_id=' +
+            encodeURIComponent(node.node_id));
+          const profile = data.profile || {};
+          const rdp = String(profile.rdp || '');
+          if (!rdp || rdp.length > 4096 || !profile.filename?.endsWith('.rdp'))
+            throw Error('Недействительный профиль RDP');
+          // Windows .rdp uses UTF-16 LE with BOM. No password is embedded.
+          const bytes = new Uint8Array(2 + rdp.length * 2);
+          bytes[0] = 255; bytes[1] = 254;
+          for (let i = 0; i < rdp.length; i++) {
+            const code = rdp.charCodeAt(i);
+            bytes[2 + i * 2] = code & 255;
+            bytes[3 + i * 2] = code >>> 8;
+          }
+          const url = URL.createObjectURL(new Blob([bytes], {
+            type: 'application/x-rdp'
+          }));
+          const download = document.createElement('a');
+          download.href = url; download.download = String(profile.filename);
+          download.hidden = true;
+          document.body.append(download);
+          download.click();
+          download.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          rdpInfo.textContent = 'Профиль RDP подготовлен. Откройте скачанный .rdp-файл ' +
+            'в Microsoft Remote Desktop. Сверьте сертификат сервера перед входом. ' +
+            'Это подключение для Вас, не автономное RDP-управление Лешего.';
+        } catch (error) {
+          rdpInfo.textContent = 'Не удалось подготовить подключение RDP: ' + error.message;
+        } finally {
+          requestInFlight = false; rdpOpen.disabled = false;
+        }
+      });
+      row.append(rdpOpen, rdpInfo);
+    };
     const addInspection = (row, node, credentials) => {
       if (!credentials || !credentials.files?.length) {
         row.append(element('p', 'sa-remote-note',
@@ -567,50 +613,6 @@
       });
       row.append(label, select, inspect, result);
 
-      const rdpInfo = element('p', 'sa-remote-note',
-        'RDP открывается в штатном клиенте Вашего компьютера. Вход и проверка ' +
-        'сертификата выполняются в нём; Леший не получает пароль или изображение экрана.');
-      const rdpOpen = makeButton('Открыть этот сервер через RDP', async () => {
-        if (requestInFlight) return;
-        if (!window.confirm('Создать безопасный профиль RDP для ' + node.node_id +
-          '? Подключение, проверку сертификата и ввод пароля выполняет ' +
-          'штатный клиент Вашего компьютера.')) return;
-        requestInFlight = true; rdpOpen.disabled = true;
-        try {
-          const data = await api('/v1/superagent/rdp/profile?node_id=' +
-            encodeURIComponent(node.node_id));
-          const profile = data.profile || {};
-          const rdp = String(profile.rdp || '');
-          if (!rdp || rdp.length > 4096 || !profile.filename?.endsWith('.rdp'))
-            throw Error('Недействительный профиль RDP');
-          // Windows .rdp uses UTF-16 LE with BOM. No password is embedded.
-          const bytes = new Uint8Array(2 + rdp.length * 2);
-          bytes[0] = 255; bytes[1] = 254;
-          for (let i = 0; i < rdp.length; i++) {
-            const code = rdp.charCodeAt(i);
-            bytes[2 + i * 2] = code & 255;
-            bytes[3 + i * 2] = code >>> 8;
-          }
-          const url = URL.createObjectURL(new Blob([bytes], {
-            type: 'application/x-rdp'
-          }));
-          const download = document.createElement('a');
-          download.href = url; download.download = String(profile.filename);
-          download.hidden = true;
-          document.body.append(download);
-          download.click();
-          download.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 5000);
-          rdpInfo.textContent = 'Профиль RDP подготовлен. Откройте скачанный .rdp-файл ' +
-            'в Microsoft Remote Desktop. Сверьте сертификат сервера перед входом. ' +
-            'Это подключение для Вас, не автономное RDP-управление Лешего.';
-        } catch (error) {
-          rdpInfo.textContent = 'Не удалось подготовить подключение RDP: ' + error.message;
-        } finally {
-          requestInFlight = false; rdpOpen.disabled = false;
-        }
-      });
-      row.append(rdpOpen, rdpInfo);
 
       const terminal = element('details', 'sa-setup');
       terminal.append(element('summary', '', 'SSH-терминал и задания Лешему'));
@@ -1254,7 +1256,10 @@
             row.append(element('p', 'sa-meta', 'Зарегистрирован: ' + readableTime(node.registered_at)));
             row.append(element('p', 'sa-remote-note',
               'Наличие записи не означает, что компьютер сейчас доступен или его ключ повторно проверен.'));
-            if (data.remote_admin_enabled) addInspection(row, node, credentials);
+            if (data.remote_admin_enabled) {
+              addNativeRdp(row, node);
+              addInspection(row, node, credentials);
+            }
             container.append(row);
           });
         }
