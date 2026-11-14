@@ -27,6 +27,7 @@ class RDPBackend(Protocol):
     def connect(self, host: str, *, expected_tls_sha256: str) -> object: ...
     def capture(self, connection: object) -> RDPFrame: ...
     def click(self, connection: object, x: int, y: int) -> None: ...
+    def type_text(self, connection: object, text: str) -> None: ...
     def close(self, connection: object) -> None: ...
 
 
@@ -108,23 +109,28 @@ class RDPSessionController:
         return session
 
     def observe(self, owner_id: str, session_id: str) -> FrameReceipt:
+        receipt, _ = self.observe_frame(owner_id, session_id)
+        return receipt
+
+    def observe_frame(self, owner_id: str, session_id: str) -> tuple[FrameReceipt, bytes]:
+        """In-process frame transfer only; never expose pixels to diagnostics."""
         with self._lock:
             session = self._get(owner_id, session_id)
             frame = self.backend.capture(session.connection)
             if not (1 <= frame.width <= 8192 and 1 <= frame.height <= 8192):
                 raise ValueError("Invalid framebuffer dimensions")
-            if not isinstance(frame.pixels, bytes) or not frame.pixels:
-                raise ValueError("Empty framebuffer")
+            if not isinstance(frame.pixels, bytes) or not (0 < len(frame.pixels) <= 32 * 1024 * 1024):
+                raise ValueError("Empty or oversized framebuffer")
             # Frame bytes are never stored in session state or audits.
             digest = hashlib.sha256(
-                frame.width.to_bytes(4, "big") +
+                secrets.token_bytes(16) + frame.width.to_bytes(4, "big") +
                 frame.height.to_bytes(4, "big") + frame.pixels
             ).hexdigest()
             session.frame_digest = digest
             session.captured_at = self.clock()
             session.width, session.height = frame.width, frame.height
             session.used = False
-            return FrameReceipt(session_id, digest, frame.width, frame.height)
+            return FrameReceipt(session_id, digest, frame.width, frame.height), frame.pixels
 
     def click(
         self, owner_id: str, session_id: str, *,
@@ -142,6 +148,28 @@ class RDPSessionController:
             session.used = True
             self.authorize(owner_id, session.node_id)
             self.backend.click(session.connection, x, y)
+
+    def type_text(
+        self, owner_id: str, session_id: str, *,
+        frame_digest: str, text: str,
+    ) -> None:
+        """Bounded printable text, never arbitrary key combinations."""
+        if not isinstance(text, str) or not (1 <= len(text) <= 512):
+            raise ValueError("Text length must be 1–512 characters")
+        if any(ord(char) < 32 or ord(char) == 127 for char in text):
+            raise ValueError("Control characters are not accepted")
+        with self._lock:
+            session = self._get(owner_id, session_id)
+            if (session.used or self.clock() - session.captured_at > self.max_frame_age
+                    or not isinstance(frame_digest, str)
+                    or not hmac.compare_digest(session.frame_digest, frame_digest)):
+                raise PermissionError("RDP frame stale or already used; observe again")
+            send = getattr(self.backend, "type_text", None)
+            if not callable(send):
+                raise RuntimeError("RDP backend does not implement text input")
+            session.used = True
+            self.authorize(owner_id, session.node_id)
+            send(session.connection, text)
 
     def close(self, owner_id: str, session_id: str) -> None:
         # Closing is always permitted for the original session owner, even
