@@ -62,7 +62,7 @@
     byId('torrentParserSave').onclick = () => onAction('torrentParserSave', async () => {
       const data = await api('/v1/torrent-parser/config', 'POST', {address: address.value.trim()});
       render(data);
-      state.textContent += ' · Сохранено';
+      state.textContent += data.pairing_error ? ' · Привязка пока не завершена: ' + data.pairing_error : ' · Сохранено';
     }, 'Сохраняю адрес…');
     byId('torrentParserTest').onclick = () => onAction('torrentParserTest', async () => {
       const data = await api('/v1/torrent-parser/test', 'POST');
