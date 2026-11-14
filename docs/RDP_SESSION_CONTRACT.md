@@ -50,3 +50,22 @@ the operation fails without dispatch.
 These methods do NOT implement RDP networking, frame decoding, keyboard scan
 codes or a language-model vision adapter. No new RDP permissions or API
 routes have been granted.
+
+## In-memory PNG observation
+
+`rdp_frame_codec.encode_frame_png` encodes **already decoded** row-major
+RGB24 or RGBA32 pixels into a standards-conformant PNG using only Python's
+standard library. Dimensions, format, exact buffer length, and the 32 MiB
+input cap are checked before compression. No files or diagnostic logs are
+written.
+
+`RDPSessionController.observe_png(owner, session)` first reauthorizes the
+verified owner, captures a fresh framebuffer, and encodes it only when the
+native backend explicitly labels the pixel format `RGB` or `RGBA`.
+Compressed/opaque RDP graphics are rejected rather than guessed.
+A failed encoding invalidates the action receipt. Returned PNG bytes are
+intended exclusively for an in-process vision model.
+
+This does not decode the RDP protocol and does not provide TLS/CredSSP,
+network sessions, keyboard scan-code translation or model reasoning.
+Do not expose screenshot bytes through an unauthenticated endpoint.
