@@ -273,7 +273,7 @@ def test_png_reauthorization_failure_consumes_receipt_after_permission_restored(
 
     def revoke_on_second_get(owner_id, session_id):
         calls[0] += 1
-        if calls[0] == 3:
+        if calls[0] == 2:
             allowed.clear()
         return original_get(owner_id, session_id)
 
