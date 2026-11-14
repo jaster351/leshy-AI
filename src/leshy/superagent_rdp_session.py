@@ -184,7 +184,16 @@ class RDPSessionController:
         """
         with self._lock:
             receipt, pixels = self.observe_frame(owner_id, session_id)
-            session = self._get(owner_id, session_id)
+            # Reauthorization can fail after capture (e.g. a grant was
+            # revoked). Never leave a usable receipt from a failed PNG
+            # observation, even if the grant is restored later.
+            session = self._sessions.get(session_id)
+            try:
+                session = self._get(owner_id, session_id)
+            except BaseException:
+                if session is not None and hmac.compare_digest(session.owner_id, owner_id):
+                    session.used = True
+                raise
             if session.pixel_format not in {"RGB", "RGBA"}:
                 session.used = True
                 raise ValueError("Native RDP backend has not decoded the framebuffer")
