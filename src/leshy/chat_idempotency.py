@@ -288,6 +288,7 @@ def install_global_chat_idempotency() -> None:
 
         done_payload: dict[str, Any] | None = None
         error_text = ""
+        parser_operation = is_explicit_parser_request(message)
         try:
             # Route explicit NAS commands BEFORE generic LLM/web-search adapters.
             # Keep the enclosing durable idempotency claim: never double-submit
@@ -297,7 +298,7 @@ def install_global_chat_idempotency() -> None:
                     self, message, owner_id=owner_id,
                     session_id=session_id, request_id=rid,
                 )
-                if is_explicit_parser_request(message)
+                if parser_operation
                 else _ORIGINAL_STREAM(
                     self, message, owner_id=owner_id,
                     session_id=session_id, request_id=rid,
@@ -315,6 +316,22 @@ def install_global_chat_idempotency() -> None:
                 yield item
         except Exception as exc:
             error_text = str(exc)
+            if parser_operation:
+                # A NAS job may already have been queued before local persistence
+                # or HTTP delivery failed. Never retry the same request_id.
+                problem("parser_command_outcome_uncertain", type(exc).__name__,
+                        request_id=rid)
+                uncertain = {
+                    "request_id": rid, "session_id": session_id or "",
+                    "answer": (
+                        "Состояние запроса Parser for Plex неизвестно. "
+                        "Проверьте очередь на NAS перед повторной командой."
+                    ),
+                    "sources": [], "outcome_uncertain": True,
+                }
+                ledger.complete(rid, uncertain, session_id=session_id or "")
+                yield StreamEvent("done", uncertain)
+                return
             ledger.fail(rid, error_text)
             raise
         else:
