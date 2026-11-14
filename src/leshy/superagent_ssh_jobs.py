@@ -152,8 +152,18 @@ def acknowledge_ssh_plan_job(policy: Any, actor: Any, job_id: str) -> dict[str, 
             raise PermissionError("SSH-задание не найдено")
         if row["status"] not in {"uncertain", "queued", "running"}:
             raise ValueError("Это задание не требует сверки")
-        if row["status"] in _BUSY and row["instance_id"] == _INSTANCE:
-            raise PermissionError("SSH-задание ещё выполняется в этом процессе")
+        if row["status"] in _BUSY:
+            if row["instance_id"] == _INSTANCE:
+                raise PermissionError("SSH-задание ещё выполняется в этом процессе")
+            # Never clear a possibly live worker simply because another HTTP
+            # process cannot see its thread. A stop must be requested first,
+            # and the last recorded activity must be sufficiently old.
+            if (not row["stop_requested"] or
+                    time.time() - float(row["updated_at"]) < 600):
+                raise PermissionError(
+                    "Сначала запросите остановку и дождитесь 10 минут без "
+                    "новой активности, затем проверьте сервер вручную"
+                )
         db.execute(
             "UPDATE superagent_ssh_plan_jobs SET status='reviewed', "
             "stop_requested=1,updated_at=? WHERE job_id=? AND owner_id=?",
