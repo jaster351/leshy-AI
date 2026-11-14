@@ -34,9 +34,9 @@
       '<button id="torrentParserPair" class="button secondary" type="button">Привязать один раз</button>',
       '</div>',
       '<p id="torrentParserState" class="hint" aria-live="polite">Загружаю настройки…</p>',
-      '<p class="hint">Первую привязку выполняют один раз в течение 15 минут после первого запуска парсера.',
-      ' Ключ сохраняется в защищённом хранилище Лешего и не показывается на странице.',
-      ' Повторная привязка возможна только после команды reset на NAS.</p>'
+      '<p class="hint">Ключ хранится в защищённом хранилище Лешего и не показывается на странице.',
+      ' Если он устарел: на NAS выполните bash nas-auth.sh repair, затем нажмите «Привязать один раз».',
+      ' Ключ не обновляется без подтверждённого владельца и открытого окна привязки.</p>'
     ].join('');
     const nasCard = byId('nasSettingsCard');
     if (nasCard && nasCard.parentNode === pane) nasCard.insertAdjacentElement('afterend', card);
@@ -48,7 +48,10 @@
       if (data.address) address.value = data.address;
       state.textContent = [
         data.configured ? 'Адрес настроен' : 'Адрес не сохранён',
-        data.paired ? 'Привязка подтверждена' : 'Привязка не выполнена'
+        data.paired ? 'NAS подтвердил ключ' :
+          (data.credential_saved && data.auth_verified === false ? 'Ключ отклонён NAS: нужна повторная привязка' :
+           data.credential_saved && data.auth_verified === null ? 'Ключ сохранён, но проверить NAS не удалось' :
+           'Привязка не выполнена')
       ].join(' · ');
     };
     const onAction = async (buttonId, callback, busyText) => {
@@ -66,8 +69,9 @@
     }, 'Сохраняю адрес…');
     byId('torrentParserTest').onclick = () => onAction('torrentParserTest', async () => {
       const data = await api('/v1/torrent-parser/test', 'POST');
-      state.textContent = data.connected ? 'NAS отвечает · ' + (data.paired ? 'Привязано' : 'Требуется привязка')
-                                         : 'NAS доступен, но сервис не подтвердил готовность';
+      state.textContent = data.connected ? 'NAS отвечает · ' + (data.paired ? 'Ключ проверен NAS' :
+        (data.credential_saved ? 'Ключ не подтверждён NAS' : 'Требуется привязка'))
+        : 'NAS доступен, но сервис не подтвердил готовность';
     }, 'Проверяю подключение…');
     byId('torrentParserPair').onclick = () => onAction('torrentParserPair', async () => {
       const data = await api('/v1/torrent-parser/pair', 'POST');
