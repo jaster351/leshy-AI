@@ -31,7 +31,7 @@ class RDPTLSProbeResult:
     selected_protocol: str
     tls_version: str
     certificate_sha256: str
-    authenticated: bool = True
+    server_tls_pinned: bool = True
     rdp_login_complete: bool = False
     rdp_desktop_available: bool = False
 
