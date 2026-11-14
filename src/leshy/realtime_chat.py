@@ -9,7 +9,7 @@ import uuid
 from typing import Any, Iterator
 
 from .diagnostics import event, problem
-from .dialogue_rules import is_direct_rule_request
+from .dialogue_rules import is_direct_rule_request, is_rule_inspection_request
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
@@ -579,6 +579,7 @@ class RealtimeChatManager:
 
         special = (
             is_direct_rule_request(message)
+            or is_rule_inspection_request(message)
             or message.lower().startswith(("/remember ", "/memories"))
             or self.app._image_prompt(message) is not None
         )
