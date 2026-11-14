@@ -122,4 +122,43 @@ def persistent_rule_context(storage, owner_id: str) -> str:
     )
 
 
-__all__ = ["is_direct_rule_request", "save_direct_rule", "persistent_rule_context"]
+def is_rule_inspection_request(message: str) -> bool:
+    """Answer a question about stored rules from SQLite, not model guesses."""
+    text = " ".join(str(message or "").casefold().replace("ё", "е").split())
+    return bool(
+        (("правила" in text or "правило" in text) and
+         ("общения" in text or "постоянн" in text or "сохраненн" in text) and
+         any(term in text for term in ("помниш", "покажи", "перечисли", "сохран", "какие", "проверь")))
+        or text.startswith("покажи мои правила")
+    )
+
+
+def verified_rule_report(storage, owner_id: str) -> str:
+    """Show only rows actually present for this owner, including provenance."""
+    owner = str(owner_id or "").strip()[:200]
+    if not owner:
+        return "Не удалось определить текущий профиль; проверить правила нельзя."
+    with storage.connection() as conn:
+        rows = conn.execute(
+            "SELECT id,content,created_at,source FROM memories "
+            "WHERE owner_id=? AND kind=? ORDER BY id ASC LIMIT ?",
+            (owner, _KIND, _MAX_RULES),
+        ).fetchall()
+    if not rows:
+        return (
+            "В долговременной памяти этого профиля нет подтверждённых постоянных "
+            "правил общения. Слова модели «запомнил» сами по себе не являются "
+            "доказательством записи."
+        )
+    return (
+        "Подтверждённые записи правил общения из локальной базы этого профиля:\n"
+        + "\n".join(
+            f"{i}. ID {row['id']}, источник: {row['source']}, "
+            f"дата: {row['created_at']}; правило: {row['content']}"
+            for i, row in enumerate(rows, 1)
+        )
+        + "\nПрименение моделью и синхронизация с другими профилями отдельно не проверены."
+    )
+
+
+__all__ = ["is_direct_rule_request", "save_direct_rule", "persistent_rule_context", "is_rule_inspection_request", "verified_rule_report"]
