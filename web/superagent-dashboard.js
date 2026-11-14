@@ -702,7 +702,7 @@
           (s.check_exit_code === undefined ? '' : ', код проверки ' + String(s.check_exit_code))
         ).join('\n') || 'Действия ещё не запускались.';
         row.append(detail);
-        if (['queued', 'running'].includes(job.status) && !job.stop_requested) {
+        if (['queued', 'running', 'unresolved'].includes(job.status) && !job.stop_requested) {
           row.append(makeButton('Остановить после текущей команды', async () => {
             if (!window.confirm('Запретить следующие SSH-шаги этого плана? ' +
               'Уже отправленную команду остановить нельзя.')) return;
@@ -718,7 +718,8 @@
           row.append(makeButton('После проверки сервера отметить сверенным', async () => {
             if (!window.confirm('Вы проверили реальное состояние сервера, убедились, ' +
               'что старый исполнитель больше не работает, и готовы разрешить новые планы? ' +
-              'Это НЕ подтверждает успех предыдущей операции.')) return;
+              'Для зависших заданий другого процесса требуется предварительно запросить остановку ' +
+              'и выждать 10 минут без активности. Это НЕ подтверждает успех предыдущей операции.')) return;
             try {
               await api('/v1/superagent/ssh/plan/jobs/review', {
                 method:'POST', body:JSON.stringify({job_id:job.job_id, confirm:true})
