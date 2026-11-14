@@ -60,7 +60,7 @@ def install_torrent_parser_chat(app_class, stream_class):
         original_stream = stream_class.stream
 
         def stream(self, message, *, owner_id="web:local", session_id=None, request_id=None):
-            if parse_request(message) is None:
+            if parse_request(message) is None and parse_premiere_request(message) is None:
                 yield from original_stream(self, message, owner_id=owner_id,
                                            session_id=session_id, request_id=request_id)
                 return
