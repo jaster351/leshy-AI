@@ -46,10 +46,13 @@
     const address = byId('torrentParserAddress');
     const render = (data) => {
       if (data.address) address.value = data.address;
-      state.textContent = [
-        data.configured ? 'Адрес настроен' : 'Адрес не сохранён',
-        data.paired ? 'Привязка подтверждена' : 'Привязка не выполнена'
-      ].join(' · ');
+      state.textContent = data.profile_mismatch
+        ? 'Настройки найдены для другого профиля. Войдите в прежний профиль Лешего; привязка не будет перезаписана.'
+        : [
+            data.configured ? 'Адрес настроен' : 'Адрес не сохранён',
+            data.paired ? 'Привязка подтверждена' : 'Привязка не выполнена',
+            data.pairing_error || ''
+          ].filter(Boolean).join(' · ');
     };
     const onAction = async (buttonId, callback, busyText) => {
       const button = byId(buttonId);
