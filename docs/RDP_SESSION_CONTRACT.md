@@ -69,3 +69,19 @@ intended exclusively for an in-process vision model.
 This does not decode the RDP protocol and does not provide TLS/CredSSP,
 network sessions, keyboard scan-code translation or model reasoning.
 Do not expose screenshot bytes through an unauthenticated endpoint.
+
+## Live-frame preflight before remote input
+
+A timestamp and one-use frame receipt are **not sufficient** for screen
+safety: a window, dialog, or button could move between the screenshot and
+input. Before any click or text input, the controller now captures a second
+frame and compares a digest of its actual bytes, dimensions, and pixel format
+to those observed previously. A mismatch, failed capture, revoked owner,
+or expiration while capturing rejects the action and consumes its receipt.
+No input is dispatched; the agent must observe again before retrying.
+
+This is an optimistic concurrency check, not an atomic RDP transaction:
+the desktop may still change between the preflight capture and the server
+processing the input. Native backends need their own connection lifecycle,
+timeouts and platform tests. Screenshots and input are still unavailable
+to the user until a real transport and an authorized integration exist.
