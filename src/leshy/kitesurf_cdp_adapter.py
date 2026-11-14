@@ -43,7 +43,9 @@ def local_kitesurf_endpoint(raw: str) -> tuple[str, str]:
         port = parsed.port
     except ValueError:
         raise ValueError("Kitesurf должен быть доступен по буквальному 127.0.0.1 или ::1") from None
-    if (parsed.scheme != "ws" or not address.is_loopback
+    if (parsed.scheme != "ws" or address not in {
+                ipaddress.IPv4Address("127.0.0.1"), ipaddress.IPv6Address("::1"),
+            }
             or parsed.username is not None or parsed.password is not None
             or parsed.query or parsed.fragment
             or parsed.path != "/devtools/browser"
