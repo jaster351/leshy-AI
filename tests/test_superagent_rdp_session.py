@@ -95,3 +95,11 @@ def test_session_limit():
     with pytest.raises(RuntimeError):
         broker.open("alice", "192.0.2.10", "f" * 64)
     assert len(backend.connected) == 1
+
+
+def test_owner_can_close_after_revocation():
+    broker, backend, _, allowed = setup_controller()
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    allowed.clear()
+    broker.close("alice", sid)
+    assert len(backend.closed) == 1
