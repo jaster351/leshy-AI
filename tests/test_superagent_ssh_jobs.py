@@ -33,6 +33,16 @@ def wait_for_job(policy, actor, job_id, statuses, timeout=3):
     raise AssertionError("SSH plan did not reach expected status: " + repr(job))
 
 
+def wait_for_first_step(policy, actor, job_id, timeout=3):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        job = list_ssh_plan_jobs(policy, actor, job_id=job_id)["jobs"][0]
+        if job["steps"] and job["steps"][0]["verdict"] == "in_progress":
+            return job
+        time.sleep(0.025)
+    raise AssertionError("SSH plan did not persist first step start")
+
+
 class PersistedSSHJobTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
@@ -104,7 +114,8 @@ class PersistedSSHJobTests(unittest.TestCase):
                                      self.plan, may_continue=lambda: True)
             self.assertEqual(job["node_id"], HOST)
             self.assertIn(job["status"], {"queued", "running"})
-            current = wait_for_job(self.policy, self.actor, job["job_id"], {"running"})
+            current = wait_for_first_step(self.policy, self.actor, job["job_id"])
+            self.assertEqual(current["status"], "running")
             self.assertEqual(current["steps"][0]["verdict"], "in_progress")
             self.release.set()
             finished = wait_for_job(self.policy, self.actor, job["job_id"], {"completed"})
@@ -128,7 +139,7 @@ class PersistedSSHJobTests(unittest.TestCase):
         ):
             job = start_ssh_plan_job(self.policy, self.actor, HOST, "server.json",
                                      self.plan, may_continue=lambda: True)
-            wait_for_job(self.policy, self.actor, job["job_id"], {"running"})
+            wait_for_first_step(self.policy, self.actor, job["job_id"])
             stopped = cancel_ssh_plan_job(self.policy, self.actor, job["job_id"])
             self.assertTrue(stopped["stop_requested"])
             self.release.set()
