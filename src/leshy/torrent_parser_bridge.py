@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import threading
 from urllib import error, parse, request
 
@@ -127,11 +129,50 @@ def _base_url(url: str) -> str:
     return parse.urlunsplit((u.scheme, u.netloc, "", "", ""))
 
 
+def _persistent_parser_root() -> Path:
+    """Per-OS-user storage independent of the executable and install folder."""
+    if os.name == "nt":
+        home = os.getenv("LOCALAPPDATA")
+        if home:
+            return Path(home) / "Leshy-AI" / "integrations" / "parser-for-plex"
+        return Path.home() / "AppData" / "Local" / "Leshy-AI" / "integrations" / "parser-for-plex"
+    base = os.getenv("XDG_STATE_HOME")
+    return (Path(base) if base else Path.home() / ".local" / "state") / "leshy-ai" / "integrations" / "parser-for-plex"
+
+
 class TorrentParserBridge:
-    def __init__(self, brain_dir: str | Path):
-        root = Path(brain_dir)
-        self.settings = root / "settings" / "torrent_parser.json"
-        self.secret = root / "secrets" / "torrent_parser_token.secret"
+    def __init__(self, brain_dir: str | Path, *, persistent_root: Path | None = None):
+        legacy = Path(brain_dir)
+        root = Path(persistent_root) if persistent_root is not None else _persistent_parser_root()
+        self.settings = root / "torrent_parser.json"
+        self.secret = root / "torrent_parser_token.secret"
+        self._migrate_legacy(legacy)
+
+    def _migrate_legacy(self, legacy: Path) -> None:
+        """Copy legacy state once, without removing private data or overwriting newer state."""
+        sources = (
+            (legacy / "settings" / "torrent_parser.json", self.settings),
+            (legacy / "secrets" / "torrent_parser_token.secret", self.secret),
+        )
+        with _LOCK:
+            for source, target in sources:
+                if not source.is_file() or target.exists():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    target.parent.chmod(0o700)
+                except OSError:
+                    pass
+                temporary = target.with_name(target.name + ".migrating")
+                try:
+                    with source.open("rb") as reader, temporary.open("xb") as writer:
+                        shutil.copyfileobj(reader, writer, 1024 * 1024)
+                    temporary.chmod(0o600)
+                    # A concurrent copy must not overwrite canonical state.
+                    if not target.exists():
+                        temporary.replace(target)
+                finally:
+                    temporary.unlink(missing_ok=True)
 
     def _read(self):
         try:
@@ -140,13 +181,33 @@ class TorrentParserBridge:
         except (OSError, ValueError):
             return {}
 
-    def status(self):
+    def status(self, owner_id: str | None = None):
         data = self._read()
-        return {
+        # Do not disclose another profile's NAS address or pairing state.
+        if owner_id is not None and not self.owner_allowed(owner_id):
+            return {
+                "address": DEFAULT_ADDRESS,
+                "configured": False,
+                "paired": False,
+                "profile_mismatch": bool(data.get("configured")),
+            }
+        try:
+            paired = bool(load_secret(self.secret))
+            secret_error = False
+        except (OSError, ValueError, RuntimeError):
+            paired = False
+            secret_error = True
+        result = {
             "address": data.get("address") or DEFAULT_ADDRESS,
             "configured": bool(data.get("configured")),
-            "paired": bool(load_secret(self.secret)),
+            "paired": paired,
         }
+        if secret_error:
+            result["pairing_error"] = (
+                "Защищённый ключ не читается в текущем профиле ОС. "
+                "Проверьте пользователя Windows и прежнее хранилище."
+            )
+        return result
 
     def owner_allowed(self, owner_id: str) -> bool:
         data = self._read()
@@ -160,10 +221,19 @@ class TorrentParserBridge:
             raise PermissionError("Требуется вход владельца в веб-интерфейс Лешего")
         with _LOCK:
             previous = self._read()
-            if previous.get("address") != base or previous.get("owner_id") != owner:
-                self.secret.unlink(missing_ok=True)
+            previous_owner = str(previous.get("owner_id") or "").strip()
+            if previous.get("configured") and previous_owner and previous_owner != owner:
+                raise PermissionError(
+                    "Parser for Plex привязан к другому профилю Лешего. "
+                    "Войдите в прежний профиль или восстановите его LeshyBrain; "
+                    "перезаписывать чужую привязку нельзя."
+                )
             payload = {"address": base, "owner_id": owner, "configured": True}
             self.settings.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                self.settings.parent.chmod(0o700)
+            except OSError:
+                pass
             temp = self.settings.with_suffix(".json.tmp")
             temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             temp.replace(self.settings)
@@ -171,7 +241,10 @@ class TorrentParserBridge:
                 self.settings.chmod(0o600)
             except OSError:
                 pass
-        return self.status()
+            if previous.get("address") != base or previous_owner != owner:
+                self.secret.unlink(missing_ok=True)
+        return self.status(owner)
+
 
     @staticmethod
     def _request(url, body=None, secret=None, timeout=4.0):
@@ -207,17 +280,17 @@ class TorrentParserBridge:
         if not self.owner_allowed(owner_id):
             raise PermissionError("Настройте адрес и войдите под владельцем")
         if load_secret(self.secret):
-            return self.status()
+            return self.status(owner_id)
         with _LOCK:
             if load_secret(self.secret):
-                return self.status()
+                return self.status(owner_id)
             base = self._read()["address"]
             reply = self._request(base + "/v1/pair", {"client_name": "Leshy"}, timeout=5)
             received = str(reply.get("token") or "")
             if len(received) < 32:
                 raise ValueError("Parser for Plex не вернул действительный ключ")
             save_secret(self.secret, received)
-        return self.status()
+        return self.status(owner_id)
 
     def submit(self, owner_id: str, kind: str, title: str, *, part: str = ""):
         if not self.owner_allowed(owner_id):
