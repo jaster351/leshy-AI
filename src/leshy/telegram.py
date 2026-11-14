@@ -11,7 +11,7 @@ from typing import Iterable
 from urllib import parse, request, error
 
 from .diagnostics import event, problem
-from .dialogue_rules import is_direct_rule_request
+from .dialogue_rules import is_direct_rule_request, is_rule_inspection_request
 from .secret_store import load_secret, save_secret
 from .telegram_social import TelegramSocialPolicy
 from .telegram_proxy import TelegramProxyTransport
@@ -522,7 +522,7 @@ class TelegramBridge:
         chat_text, reply_target_id = _telegram_reply_prompt(message, text)
         # A direct owner's preference is never overwritten by quoted Telegram
         # Reply content; only the sender's new text may create a stored rule.
-        if is_direct_rule_request(text):
+        if is_direct_rule_request(text) or is_rule_inspection_request(text):
             chat_text = text
             reply_target_id = None
         if reply_target_id is not None:
