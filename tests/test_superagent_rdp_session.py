@@ -257,3 +257,32 @@ def test_malformed_frame_does_not_publish_partial_receipt():
     with pytest.raises(PermissionError, match="stale or already used"):
         broker.click("alice", sid, frame_digest=receipt.frame_digest, x=2, y=3)
     assert backend.clicks == []
+
+
+def test_png_reauthorization_failure_consumes_receipt_after_permission_restored():
+    """A failed PNG observation must never authorize a later click."""
+    broker, _, _, allowed = setup_controller()
+    backend = ChangingScreenBackend()
+    backend.capture = lambda connection: RDPFrame(
+        1, 1, b"\\x01\\x02\\x03", pixel_format="RGB"
+    )
+    broker.backend = backend
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    original_get = broker._get
+    calls = [0]
+
+    def revoke_on_second_get(owner_id, session_id):
+        calls[0] += 1
+        if calls[0] == 3:
+            allowed.clear()
+        return original_get(owner_id, session_id)
+
+    broker._get = revoke_on_second_get
+    with pytest.raises(PermissionError):
+        broker.observe_png("alice", sid)
+    allowed.add("alice")
+    session = broker._sessions[sid]
+    assert session.used is True
+    with pytest.raises(PermissionError, match="stale or already used"):
+        broker.click("alice", sid, frame_digest=session.frame_digest, x=0, y=0)
+    assert backend.clicks == []
