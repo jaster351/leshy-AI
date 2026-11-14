@@ -754,7 +754,9 @@
         } finally {
           jobsLoading = false;
           if (jobsTimer !== null) clearTimeout(jobsTimer);
-          if (planBox.open) jobsTimer = setTimeout(refreshJobList, 2500);
+          if (planBox.open && planBox.isConnected) {
+            jobsTimer = setTimeout(refreshJobList, 2500);
+          }
         }
       };
       planBox.addEventListener('toggle', () => {
