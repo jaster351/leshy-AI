@@ -6,7 +6,7 @@ import time
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
-from .browser_agent import BrowserAction, BrowserActionResult
+from .browser_agent import BrowserAction, BrowserActionResult, BrowserRisk
 from .diagnostics import event, problem
 from .browser_launch_policy import chromium_launch_policy
 from .system_browser import ensure_system_browser
@@ -170,8 +170,10 @@ class PlaywrightBrowserAdapter:
         raise ValueError(f"Неподдерживаемый browser-шаг: {kind}")
 
     def execute(self, action: BrowserAction) -> BrowserActionResult:
-        if action.name not in {"open", "read", "extract", "workflow"}:
+        if action.name not in {"open", "read", "extract", "workflow", "research"}:
             return BrowserActionResult("unsupported", f"Playwright не поддерживает действие {action.name}")
+        if action.name == "research" and action.risk is not BrowserRisk.READ:
+            return BrowserActionResult("blocked", "Исследование через резервный браузер допускает только чтение")
         try:
             from playwright.sync_api import sync_playwright
         except Exception:
@@ -229,7 +231,9 @@ class PlaywrightBrowserAdapter:
                 return BrowserActionResult(
                     "ok",
                     "Браузерное действие выполнено и состояние страницы прочитано.",
-                    {"url": page.url, "title": page.title(), "visible_text": visible, "browser": browser_name, "elapsed_ms": elapsed_ms},
+                    {"url": page.url, "title": page.title(), "visible_text": visible,
+                     "result": visible if action.name == "research" else "",
+                     "browser": browser_name, "elapsed_ms": elapsed_ms},
                 )
             except PermissionError as exc:
                 event("browser_agent_playwright_blocked", action=action.name, error=str(exc))
