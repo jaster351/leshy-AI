@@ -142,10 +142,27 @@ class TorrentParserBridge:
 
     def status(self):
         data = self._read()
+        saved = load_secret(self.secret)
+        verified = None
+        if data.get("configured") and saved:
+            try:
+                result = self._request(
+                    _base_url(data.get("address") or DEFAULT_ADDRESS) + "/v1/auth/check",
+                    secret=saved, timeout=3,
+                )
+                verified = result.get("authorized") is True
+            except PermissionError:
+                verified = False
+            except (RuntimeError, ConnectionError, ValueError, OSError):
+                # Network unavailable or NAS still on an older release.
+                # Do not erase a local credential based on a transient error.
+                verified = None
         return {
             "address": data.get("address") or DEFAULT_ADDRESS,
             "configured": bool(data.get("configured")),
-            "paired": bool(load_secret(self.secret)),
+            "credential_saved": bool(saved),
+            "auth_verified": verified,
+            "paired": verified is True,
         }
 
     def owner_allowed(self, owner_id: str) -> bool:
@@ -206,12 +223,28 @@ class TorrentParserBridge:
     def pair(self, owner_id: str):
         if not self.owner_allowed(owner_id):
             raise PermissionError("Настройте адрес и войдите под владельцем")
-        if load_secret(self.secret):
-            return self.status()
         with _LOCK:
-            if load_secret(self.secret):
-                return self.status()
-            base = self._read()["address"]
+            base = _base_url(self._read()["address"])
+            existing = load_secret(self.secret)
+            if existing:
+                try:
+                    reply = self._request(
+                        base + "/v1/auth/check", secret=existing, timeout=4,
+                    )
+                except PermissionError:
+                    # This token is explicitly rejected by the NAS. A manual
+                    # NAS repair must have opened pairing before we retry.
+                    self.secret.unlink(missing_ok=True)
+                except RuntimeError as exc:
+                    if "HTTP 404" in str(exc):
+                        raise RuntimeError(
+                            "Обновите Parser for Plex на NAS: нет проверки ключа /v1/auth/check"
+                        ) from None
+                    raise
+                else:
+                    if reply.get("authorized") is not True:
+                        raise RuntimeError("NAS не подтвердил действительность ключа")
+                    return self.status()
             reply = self._request(base + "/v1/pair", {"client_name": "Leshy"}, timeout=5)
             received = str(reply.get("token") or "")
             if len(received) < 32:
@@ -222,9 +255,11 @@ class TorrentParserBridge:
     def submit(self, owner_id: str, kind: str, title: str, *, part: str = ""):
         if not self.owner_allowed(owner_id):
             return {"status": "not_configured", "message": "Настройте подключение к Parser for Plex в параметрах Лешего."}
+        # Verify the stored credential instead of assuming that a local file
+        # means the NAS still accepts it. Re-pair automatically only while
+        # the owner-opened NAS pairing window is available.
+        self.pair(owner_id)
         secret = load_secret(self.secret)
-        if not secret:
-            return {"status": "unpaired", "message": "Откройте настройки Лешего и выполните первичную привязку Parser for Plex."}
         data = self._request(self._read()["address"] + "/v1/jobs",
                              {"kind": kind, "query": title, "part": part, "wait_seconds": 2.5},
                              secret=secret, timeout=6)
@@ -233,9 +268,8 @@ class TorrentParserBridge:
     def watch_premieres(self, owner_id: str, enabled: bool) -> str:
         if not self.owner_allowed(owner_id):
             return "Настройте подключение к Parser for Plex в параметрах Лешего."
+        self.pair(owner_id)
         secret = load_secret(self.secret)
-        if not secret:
-            return "Parser for Plex не привязан. Проверьте настройки Лешего."
         try:
             state = self._request(
                 self._read()["address"] + "/v1/watch/premieres",
