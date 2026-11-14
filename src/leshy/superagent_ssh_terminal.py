@@ -20,6 +20,11 @@ _PIN = re.compile(r"[0-9a-f]{64}\Z")
 _OUTPUT_LIMIT = 32768
 
 
+class SSHOutcomeUnknown(RuntimeError):
+    """The remote side effect may have occurred; never retry automatically."""
+
+
+
 def _registered_pin(policy: RemotePermissionPolicy, actor: VerifiedActor,
                     node: str, capability: str) -> str:
     """No secret read or outbound TCP connection before authorization."""
@@ -163,13 +168,27 @@ def run_ssh_terminal_command(
     ) as (transport, observed):
         os_family = _detect_remote_os(transport, policy, actor, node, observed)
         policy.require(actor, node, "execute", observed_fingerprint=observed)
-        result = _bounded_exec(transport, command, timeout)
+        try:
+            result = _bounded_exec(transport, command, timeout)
+        except (TimeoutError, ConnectionError, OSError) as exc:
+            # The remote command may have run even if the result was lost.
+            # Never treat this as a safe-to-retry failure.
+            policy.storage.audit("superagent.ssh.command", {
+                "node_id": node, "os_family": os_family,
+                "command_sha256": hashlib.sha256(command.encode("utf-8")).hexdigest(),
+                "outcome": "unknown", "error_type": type(exc).__name__,
+            })
+            raise SSHOutcomeUnknown(
+                "SSH result is unknown; inspect remote state before any retry"
+            ) from exc
+    outcome = "unknown" if result["truncated"] or result["exit_code"] is None else "confirmed"
     policy.storage.audit("superagent.ssh.command", {
         "node_id": node, "os_family": os_family,
         "command_sha256": hashlib.sha256(command.encode("utf-8")).hexdigest(),
         "exit_code": result["exit_code"], "truncated": result["truncated"],
+        "outcome": outcome,
     })
-    return {"node_id": node, "os_family": os_family, **result}
+    return {"node_id": node, "os_family": os_family, "outcome": outcome, **result}
 
 
-__all__ = ["check_terminal_permission", "run_ssh_terminal_command", "verified_connection"]
+__all__ = ["SSHOutcomeUnknown", "check_terminal_permission", "run_ssh_terminal_command", "verified_connection"]
