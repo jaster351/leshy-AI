@@ -24,9 +24,10 @@ def make_handler(app, telegram, settings, model_catalog):
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": "Панель Parser for Plex не найдена"})
             if path == "/v1/torrent-parser/config":
-                if self._settings_owner() is None:
+                owner = self._settings_owner()
+                if owner is None:
                     return
-                return self._json(HTTPStatus.OK, bridge.status())
+                return self._json(HTTPStatus.OK, bridge.status(owner))
             return super().do_GET()
 
         def do_POST(self):
@@ -60,10 +61,14 @@ def make_handler(app, telegram, settings, model_catalog):
                 if path.endswith("/pair"):
                     return self._json(HTTPStatus.OK, bridge.pair(owner))
                 if path.endswith("/test"):
+                    if not bridge.owner_allowed(owner):
+                        return self._json(HTTPStatus.FORBIDDEN, {
+                            "error": "Подключение принадлежит другому профилю Лешего",
+                        })
                     result = bridge.test()
                     return self._json(HTTPStatus.OK, {"connected": bool(result.get("ok")),
                                                        "server": result.get("service", ""),
-                                                       **bridge.status()})
+                                                       **bridge.status(owner)})
             except (ValueError, PermissionError) as exc:
                 return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             except (ConnectionError, TimeoutError, RuntimeError, OSError) as exc:
