@@ -105,6 +105,7 @@ def make_handler(app, telegram, settings, model_catalog):
                     '<script src="/admin-dashboard.js"></script>',
                     '<script src="/superagent-dashboard.js"></script>',
                     '<script src="/superagent-credential-folder.js"></script>',
+                    '<script src="/torrent-parser-panel.js"></script>',
                 ):
                     if marker not in data:
                         data = data.replace("</body>", marker + "\n</body>")
