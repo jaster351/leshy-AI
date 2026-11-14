@@ -50,7 +50,13 @@ def make_handler(app, telegram, settings, model_catalog):
             try:
                 payload = self._body()
                 if path.endswith("/config"):
-                    return self._json(HTTPStatus.OK, bridge.configure(payload.get("address", ""), owner))
+                    configured = bridge.configure(payload.get("address", ""), owner)
+                    if not configured["paired"]:
+                        try:
+                            configured = bridge.pair(owner)
+                        except (PermissionError, ConnectionError, ValueError, RuntimeError) as exc:
+                            configured["pairing_error"] = str(exc)
+                    return self._json(HTTPStatus.OK, configured)
                 if path.endswith("/pair"):
                     return self._json(HTTPStatus.OK, bridge.pair(owner))
                 if path.endswith("/test"):
