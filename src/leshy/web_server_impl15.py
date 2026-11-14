@@ -61,10 +61,14 @@ def make_handler(app, telegram, settings, model_catalog):
                 if path.endswith("/pair"):
                     return self._json(HTTPStatus.OK, bridge.pair(owner))
                 if path.endswith("/test"):
+                    if not bridge.owner_allowed(owner):
+                        return self._json(HTTPStatus.FORBIDDEN, {
+                            "error": "Подключение принадлежит другому профилю Лешего",
+                        })
                     result = bridge.test()
                     return self._json(HTTPStatus.OK, {"connected": bool(result.get("ok")),
                                                        "server": result.get("service", ""),
-                                                       **bridge.status()})
+                                                       **bridge.status(owner)})
             except (ValueError, PermissionError) as exc:
                 return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             except (ConnectionError, TimeoutError, RuntimeError, OSError) as exc:
