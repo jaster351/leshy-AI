@@ -107,6 +107,12 @@ class DialogueRuleMemoryTests(unittest.TestCase):
         self.assertTrue(is_direct_rule_request(
             "Леший, запомни правило: отвечай на Вы"
         ))
+        self.assertFalse(is_direct_rule_request(
+            "Запомни, что завтра у меня встреча в 14:00"
+        ))
+        self.assertTrue(is_direct_rule_request(
+            "Запомни следующие правила: не используй шаблонные вступления"
+        ))
 
     def test_rejects_long_rule_and_secret_without_pretending_save(self):
         with tempfile.TemporaryDirectory() as temp:
