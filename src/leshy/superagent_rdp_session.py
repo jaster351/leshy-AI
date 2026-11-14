@@ -160,11 +160,16 @@ class RDPSessionController:
                 secrets.token_bytes(16) + frame.width.to_bytes(4, "big") +
                 frame.height.to_bytes(4, "big") + frame.pixels
             ).hexdigest()
+            # Compute every fallible value before publishing a new receipt.
+            # A malformed backend frame must not leave a half-updated,
+            # potentially actionable observation in the session.
+            content_digest = self._content_digest(frame)
+            captured_at = self.clock()
             session.frame_digest = digest
-            session.captured_at = self.clock()
+            session.captured_at = captured_at
             session.width, session.height = frame.width, frame.height
             session.pixel_format = frame.pixel_format
-            session.content_digest = self._content_digest(frame)
+            session.content_digest = content_digest
             session.used = False
             return FrameReceipt(session_id, digest, frame.width, frame.height), frame.pixels
 
