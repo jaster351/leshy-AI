@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-14T07:03:52.987042+00:00",
+  "url": "https://www.iana.org/assignments/character-sets/character-sets.xml",
+  "source_version": "2026-10-02",
+  "sha256": "a64184cd76a209d9873d54720165da09c3f910ec5ec68025377a95b5ff85662b",
+  "source_bytes": 111307,
+  "license": "CC0-1.0",
+  "terms_url": "https://www.iana.org/help/licensing-terms",
+  "candidates": 258,
+  "new_unique": 258,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "existing_records_scanned": 104852,
+  "semantic_review": "No existing MIBenum or charset registry identity claims. Unicode characters and locale labels are distinct facts.",
+  "cursor": {
+    "completed": true,
+    "last_mibenum": 2260,
+    "next": "Compare later registry edition"
+  },
+  "generator": "knowledge/updates/tools/generate_charsets.py",
+  "reproduce": [
+    "python",
+    "knowledge/updates/tools/generate_charsets.py",
+    "character-sets.xml",
+    "2026-11-14T07:03:52.987042+00:00",
+    "knowledge/updates/2026-11-14/1200-character-sets.jsonl"
+  ]
+}

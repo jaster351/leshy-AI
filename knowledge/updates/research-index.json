@@ -1,13 +1,20 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-14T03:08:17.701172+00:00",
+  "updated_at": "2026-11-14T07:03:52.987042+00:00",
   "last_successful_issue": {
-    "searched_at": "2026-11-14T00:59:37.893780+00:00",
-    "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
+    "searched_at": "2026-11-14T07:03:52.987042+00:00",
+    "previous_issue_at": {
+      "searched_at": "2026-11-14T00:59:37.893780+00:00",
+      "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
+      "newly_included_ids": [
+        "arXiv:2611.16492",
+        "arXiv:2611.16627"
+      ]
+    },
     "newly_included_ids": [
-      "arXiv:2611.16492",
-      "arXiv:2611.16627"
-    ]
+      "arXiv:2611.16493"
+    ],
+    "note": "First review of missed 12 Nov preprint, not presented as a new 14 Nov publication."
   },
   "previous_issue_from_owner": {
     "date": "2026-11-11",
@@ -471,6 +478,17 @@
       "record_id": "research-arxiv-2611-16627",
       "package": "knowledge/updates/2026-11-14/0557-research.jsonl",
       "evidence_scope": "abstract only"
+    },
+    {
+      "id": "arXiv:2611.16493",
+      "version": "v1",
+      "first_published_at": "2026-11-12T09:01:24Z",
+      "version_published_at": "2026-11-12T09:01:24Z",
+      "checked_at": "2026-11-14T07:03:52.987042+00:00",
+      "publication_status": "preprint",
+      "url": "https://arxiv.org/abs/2611.16493",
+      "record_id": "research-arxiv-2611-16493",
+      "package": "knowledge/updates/2026-11-14/1200-research.jsonl"
     }
   ],
   "issues": [
@@ -652,10 +670,25 @@
         "doi:10.18653/2026.findings-emnlp.1312"
       ],
       "note": "Свежие списки и целевой поиск после прошлого выпуска не выявили новой публикации последнего часа. Впервые включена ранее не покрытая рецензированная работа Findings of EMNLP 2026 о query-only memory injection с открытым экспериментальным репозиторием."
+    },
+    {
+      "searched_at": "2026-11-14T07:03:52.987042+00:00",
+      "previous_issue_at": {
+        "searched_at": "2026-11-14T00:59:37.893780+00:00",
+        "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
+        "newly_included_ids": [
+          "arXiv:2611.16492",
+          "arXiv:2611.16627"
+        ]
+      },
+      "newly_included_ids": [
+        "arXiv:2611.16493"
+      ],
+      "note": "First review of missed 12 Nov preprint, not presented as a new 14 Nov publication."
     }
   ],
   "last_search": {
-    "searched_at": "2026-11-14T03:08:17.701172+00:00",
+    "searched_at": "2026-11-14T07:03:52.987042+00:00",
     "previous_issue_at": {
       "searched_at": "2026-11-14T00:59:37.893780+00:00",
       "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
@@ -664,12 +697,10 @@
         "arXiv:2611.16627"
       ]
     },
-    "newly_included_ids": [],
-    "primary_pages_checked": [
-      "https://arxiv.org/abs/2611.02361",
-      "https://arxiv.org/html/2611.02361v1"
+    "newly_included_ids": [
+      "arXiv:2611.16493"
     ],
-    "note": "Fresh search found older work first published 2 Nov, unchanged v1, outside new-publication window; no significant new eligible research confirmed."
+    "note": "First review of missed 12 Nov preprint, not presented as a new 14 Nov publication."
   },
   "pending_primary_reviews": [
     {
