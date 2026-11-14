@@ -87,8 +87,14 @@ def run_ssh_checked_step(
             else:
                 if check["exit_code"] == 0 and not check["truncated"]:
                     output = check["stdout"] + "\n" + check["stderr"]
+                    # Exact line equality avoids the false positive where
+                    # expected "active" also matches "inactive" as a substring.
+                    # The owner should choose a verification command that
+                    # produces a single unambiguous status line.
                     verdict = "confirmed" if (
-                        not expected_text or expected_text in output
+                        not expected_text.strip()
+                        or any(line.strip() == expected_text.strip()
+                               for line in output.splitlines())
                     ) else "not_confirmed"
                 else:
                     verdict = "not_confirmed"

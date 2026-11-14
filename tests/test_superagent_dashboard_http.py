@@ -358,6 +358,79 @@ class HttpRoutingTests(unittest.TestCase):
                 execute_checked.assert_called_once()
                 self.assertEqual(execute_checked.call_args.args[1].owner_id, 'web:alice')
 
+            # Entire-plan authorization is separate from single command approvals.
+            ssh_plan = {
+                "node_id": "192.168.100.22", "credential_file": "server.json",
+                "steps": [
+                    {"command": "systemctl restart nginx",
+                     "verification_command": "systemctl is-active nginx",
+                     "expected_text": "active"},
+                    {"command": "systemctl restart redis",
+                     "verification_command": "systemctl is-active redis",
+                     "expected_text": "active"},
+                ],
+            }
+            with patch(
+                'leshy.web_server_impl14.prepare_ssh_plan',
+                return_value={'approval_token':'single-use',
+                              'plan_sha256':'f'*64,'steps':2}
+            ) as plan_prepare:
+                bad = self.Handler(
+                    path='/v1/superagent/ssh/plan/prepare', owner='web:alice',
+                    headers={**headers, 'Origin':'https://evil.invalid'},
+                    body=ssh_plan)
+                bad.cookie_value = 'session-a'
+                bad.do_POST()
+                self.assertEqual(bad.result[0], 403)
+                plan_prepare.assert_not_called()
+                ready = self.Handler(
+                    path='/v1/superagent/ssh/plan/prepare', owner='web:alice',
+                    headers=headers, body=ssh_plan)
+                ready.cookie_value = 'session-a'
+                ready.do_POST()
+                self.assertEqual(ready.result[0], 200)
+                self.assertEqual(ready.result[1]['approval']['steps'], 2)
+                self.assertEqual(plan_prepare.call_args.args[1].owner_id, 'web:alice')
+
+            plan_payload = {**ssh_plan, 'approval_token':'single-use', 'confirm':True}
+            result_plan = {
+                "node_id":"192.168.100.22", "status":"stopped",
+                "total":2, "confirmed_steps":1, "stopped_at":1,
+                "remaining_not_started":0, "steps":[], "auto_retry":False,
+            }
+            with patch('leshy.web_server_impl14.consume_ssh_plan_approval') as consume_plan, patch(
+                'leshy.web_server_impl14.execute_approved_ssh_plan',
+                return_value=result_plan
+            ) as execute_plan:
+                missing_consent = self.Handler(
+                    path='/v1/superagent/ssh/plan/execute', owner='web:alice',
+                    headers=headers, body={**plan_payload, 'confirm':False})
+                missing_consent.cookie_value = 'session-a'
+                missing_consent.do_POST()
+                self.assertEqual(missing_consent.result[0], 400)
+                consume_plan.assert_not_called()
+
+                other_site = self.Handler(
+                    path='/v1/superagent/ssh/plan/execute', owner='web:alice',
+                    headers={**headers, 'Origin':'https://evil.invalid'},
+                    body=plan_payload)
+                other_site.cookie_value = 'session-a'
+                other_site.do_POST()
+                self.assertEqual(other_site.result[0], 403)
+                consume_plan.assert_not_called()
+
+                accepted = self.Handler(
+                    path='/v1/superagent/ssh/plan/execute', owner='web:alice',
+                    headers=headers, body=plan_payload)
+                accepted.cookie_value = 'session-a'
+                accepted.do_POST()
+                self.assertEqual(accepted.result[0], 200)
+                self.assertEqual(accepted.result[1]['ssh_plan']['status'], 'stopped')
+                consume_plan.assert_called_once()
+                execute_plan.assert_called_once()
+                self.assertEqual(execute_plan.call_args.args[1].owner_id, 'web:alice')
+                self.assertTrue(callable(execute_plan.call_args.kwargs['may_continue']))
+
             request = dict(node_id='192.168.100.22', grantee_id='web:bob',
                            capability='inspect')
             hostile = self.Handler(

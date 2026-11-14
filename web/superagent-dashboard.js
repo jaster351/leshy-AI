@@ -583,7 +583,7 @@
       expectedInput.type = 'text';
       expectedInput.maxLength = 512;
       expectedInput.placeholder = 'Например: active (необязательно; без текста проверяется код 0)';
-      expectedInput.setAttribute('aria-label', 'Ожидаемый текст в результате проверки');
+      expectedInput.setAttribute('aria-label', 'Ожидаемая строка в результате проверки');
       const checkedResult = element('pre', 'sa-terminal-output');
       checkedResult.textContent = 'Результат выполнения и проверки появится здесь.';
       checkedResult.setAttribute('role', 'status');
@@ -630,7 +630,7 @@
           const check = step.verification;
           const label = step.verdict === 'confirmed'
             ? expected_text
-              ? 'ПРОВЕРКА ПРОЙДЕНА: проверочная команда завершилась успешно и ожидаемый текст найден.'
+              ? 'ПРОВЕРКА ПРОЙДЕНА: проверочная команда завершилась успешно и ожидаемая строка совпала полностью.'
               : 'ПРОВЕРКА ПРОЙДЕНА ПО КОДУ ВЫХОДА 0. Содержимое результата отдельно не сопоставлялось.'
             : step.verdict === 'action_failed'
               ? 'ОСНОВНАЯ КОМАНДА ЗАВЕРШИЛАСЬ С ОШИБКОЙ ИЛИ УСЕЧЕНИЕМ ВЫВОДА. Проверка не выполнялась; побочные изменения возможны.'
@@ -666,6 +666,252 @@
         element('label', '', 'Ожидаемый текст в выводе проверки (необязательно)'), expectedInput,
         verifyRun, checkedResult
       );
+      const planBox = element('details', 'sa-setup');
+      planBox.append(element('summary', '', 'Многошаговый SSH-план: выполнить и проверить'));
+      planBox.append(element('p', 'sa-remote-note',
+        'До 6 последовательных шагов. У каждого своя команда, проверка и ожидаемый результат. ' +
+        'Следующий шаг начнётся только после успешной проверки предыдущего. ' +
+        'Все команды показываются до единого подтверждения, повторов при ошибке нет. ' +
+        'Во время выполнения одной команды остановка из браузера пока недоступна.'));
+      const planRows = element('div', 'sa-ssh-plan-rows');
+      const planPreview = element('pre', 'sa-terminal-output');
+      planPreview.textContent = 'Добавьте шаги и нажмите «Подготовить план».';
+      planPreview.setAttribute('role', 'status');
+      const planOutput = element('pre', 'sa-terminal-output');
+      planOutput.textContent = 'Результаты шагов появятся здесь.';
+      planOutput.setAttribute('role', 'status');
+      let preparedPlan = null;
+      const executePlan = makeButton('Подтвердить и запустить весь план', async () => {
+        if (!preparedPlan || requestInFlight) return;
+        let latest;
+        try { latest = collectPlan(); } catch (error) {
+          planPreview.textContent = error.message; return;
+        }
+        if (JSON.stringify(latest) !== JSON.stringify(preparedPlan.steps) ||
+            select.value !== preparedPlan.credential_file) {
+          invalidatePlan();
+          planPreview.textContent = 'План или файл доступа изменился. Подготовьте подтверждение заново.';
+          return;
+        }
+        if (!window.confirm(
+          'Вы внимательно прочитали ВСЕ команды и проверки в предпросмотре?\n' +
+          'Компьютер: ' + node.node_id + '\nШагов: ' + preparedPlan.steps.length +
+          '\nSHA-256 плана: ' + preparedPlan.sha256 +
+          '\n\nРазрешить однократное выполнение указанной последовательности? ' +
+          'При ошибке следующие шаги не запускаются. Уже выполненные действия не откатываются.'
+        )) return;
+        requestInFlight = true;
+        executePlan.disabled = true;
+        const active = preparedPlan;
+        preparedPlan = null;
+        planOutput.textContent = 'Выполняю подтверждённый план. Не повторяйте отправку, пока результат неизвестен…';
+        try {
+          const response = await api('/v1/superagent/ssh/plan/execute', {
+            method: 'POST',
+            body: JSON.stringify({
+              node_id: node.node_id,
+              credential_file: active.credential_file,
+              steps: active.steps, approval_token: active.token, confirm: true
+            })
+          });
+          const completed = response.ssh_plan || {};
+          const state = completed.status === 'completed'
+            ? 'ВСЕ ШАГИ ПРОШЛИ ЗАДАННЫЕ ПРОВЕРКИ'
+            : completed.status === 'uncertain'
+              ? 'РЕЗУЛЬТАТ ОДНОГО ИЗ ШАГОВ НЕИЗВЕСТЕН — повторять план нельзя без проверки'
+              : 'ПЛАН ОСТАНОВЛЕН — следующие команды не запускались';
+          let summary = state + '\n' +
+            'Подтверждено: ' + completed.confirmed_steps + ' из ' + completed.total +
+            ', не начато: ' + completed.remaining_not_started + '\n';
+          (completed.steps || []).forEach((step) => {
+            summary += '\nШАГ ' + (step.index + 1) + ': ' + String(step.verdict) +
+              '\nОсновная команда: код ' + String(step.action?.exit_code ?? 'неизвестен') +
+              '\nВывод: ' + String(step.action?.stdout || '').slice(0, 2500) +
+              '\nОшибки: ' + String(step.action?.stderr || '').slice(0, 1500) +
+              '\nПроверка: ' + (step.verification ?
+                'код ' + String(step.verification.exit_code) +
+                '\nВывод: ' + String(step.verification.stdout || '').slice(0, 2500) +
+                '\nОшибки: ' + String(step.verification.stderr || '').slice(0, 1500)
+                : 'не выполнялась') + '\n';
+          });
+          planOutput.textContent = summary;
+          planOutput.className = completed.status === 'completed'
+            ? 'sa-terminal-output' : 'sa-terminal-output sa-error';
+        } catch (error) {
+          planOutput.textContent = 'СТАТУС ПЛАНА НЕИЗВЕСТЕН: ' + error.message +
+            '\nНекоторые команды могли выполниться. Не повторяйте план до проверки состояния сервера.';
+          planOutput.className = 'sa-terminal-output sa-error';
+        } finally {
+          requestInFlight = false;
+          executePlan.disabled = true;
+          planPreview.textContent = 'Подтверждение использовано или недоступно. Для нового запуска подготовьте план заново.';
+        }
+      }, true);
+      const invalidatePlan = () => {
+        preparedPlan = null;
+        executePlan.disabled = true;
+        planPreview.textContent = 'План изменён. Подготовьте подтверждение заново.';
+      };
+      select.addEventListener('change', invalidatePlan);
+      const createPlanRow = (seed = {}) => {
+        if (planRows.children.length >= 6) {
+          planPreview.textContent = 'Не более 6 шагов на один запуск.';
+          return;
+        }
+        const row = element('div', 'sa-ssh-plan-step');
+        row.style.padding = '10px 0';
+        const action = element('textarea');
+        action.rows = 2; action.maxLength = 4096;
+        action.value = seed.command || '';
+        action.placeholder = 'Например, sudo systemctl restart nginx';
+        action.setAttribute('aria-label', 'Команда действия SSH');
+        action.className = 'sa-ssh-plan-action';
+        const verify = element('textarea');
+        verify.rows = 2; verify.maxLength = 4096;
+        verify.value = seed.verification_command || '';
+        verify.placeholder = 'Например, systemctl is-active nginx';
+        verify.setAttribute('aria-label', 'Команда проверки SSH');
+        verify.className = 'sa-ssh-plan-check';
+        const expected = element('input');
+        expected.type = 'text'; expected.maxLength = 512;
+        expected.value = seed.expected_text || '';
+        expected.placeholder = 'Ожидаемая строка целиком (лучше указать; необязательно)';
+        expected.className = 'sa-ssh-plan-expected';
+        expected.setAttribute('aria-label', 'Ожидаемая строка проверки');
+        const remove = makeButton('Удалить этот шаг', () => {
+          row.remove(); renumber(); invalidatePlan();
+        });
+        row.append(element('strong', 'sa-ssh-plan-number', 'Шаг'),
+          element('label', '', 'Действие'), action,
+          element('label', '', 'Проверка результата'), verify,
+          element('label', '', 'Ожидаемая строка в выводе'), expected, remove);
+        [action, verify, expected].forEach(control =>
+          control.addEventListener('input', invalidatePlan));
+        planRows.append(row); renumber(); invalidatePlan();
+      };
+      const renumber = () => planRows.querySelectorAll('.sa-ssh-plan-number')
+        .forEach((item, index) => { item.textContent = 'Шаг ' + (index + 1); });
+      const collectPlan = () => {
+        const rows = [...planRows.querySelectorAll('.sa-ssh-plan-step')];
+        if (!rows.length) throw Error('Добавьте хотя бы один шаг.');
+        return rows.map((row, index) => {
+          const command = row.querySelector('.sa-ssh-plan-action').value;
+          const verification_command = row.querySelector('.sa-ssh-plan-check').value;
+          const expected_text = row.querySelector('.sa-ssh-plan-expected').value;
+          if (!command.trim() || !verification_command.trim())
+            throw Error('Укажите команду и проверку в шаге ' + (index + 1));
+          return {command, verification_command, expected_text};
+        });
+      };
+      const preparePlan = makeButton('Подготовить план к подтверждению', async () => {
+        if (requestInFlight) return;
+        let steps;
+        try { steps = collectPlan(); } catch (error) {
+          planPreview.textContent = error.message; return;
+        }
+        requestInFlight = true;
+        preparePlan.disabled = true;
+        executePlan.disabled = true;
+        preparedPlan = null;
+        planPreview.textContent = 'Проверяю полномочия и подготавливаю план…';
+        try {
+          const credential_file = select.value;
+          const response = await api('/v1/superagent/ssh/plan/prepare', {
+            method: 'POST', body: JSON.stringify({
+              node_id: node.node_id, credential_file, steps
+            })
+          });
+          const approval = response.approval || {};
+          preparedPlan = {
+            steps, credential_file, token: approval.approval_token,
+            sha256: approval.plan_sha256
+          };
+          planPreview.textContent =
+            'СЕРВЕР: ' + node.node_id + '\nФАЙЛ ДОСТУПА: ' + credential_file +
+            '\nОТПЕЧАТОК ПЛАНА: ' + approval.plan_sha256 +
+            '\nПодтверждение действует ' + Number(approval.expires_seconds || 0) + ' секунд.\n' +
+            steps.map((step, i) =>
+              '\nШАГ ' + (i + 1) + '\nДЕЙСТВИЕ:\n' + step.command +
+              '\nПРОВЕРКА:\n' + step.verification_command +
+              '\nОЖИДАНИЕ: ' + (step.expected_text || '(только код выхода 0)') + '\n'
+            ).join('\n');
+          executePlan.disabled = false;
+        } catch (error) {
+          planPreview.textContent = 'План не подготовлен: ' + error.message;
+        } finally {
+          requestInFlight = false;
+          preparePlan.disabled = false;
+        }
+      });
+      const importTaskPlan = makeButton('Загрузить план из последнего ответа Лешего', async () => {
+        if (requestInFlight) return;
+        requestInFlight = true;
+        importTaskPlan.disabled = true;
+        invalidatePlan();
+        planPreview.textContent = 'Ищу подходящий план в Ваших заданиях для этого компьютера…';
+        try {
+          const listing = await api('/v1/superagent/tasks?archived=0');
+          let imported = null;
+          // Each detail request is owner-authorized by the server; check the
+          // original user request, not just a model-produced report/IP.
+          const marker = 'Задание для подтверждённого SSH-сервера ' + node.node_id + '.';
+          for (const item of (listing.tasks || []).slice(0, 15)) {
+            const detail = await api('/v1/superagent/tasks?id=' + encodeURIComponent(item.id));
+            const task = detail.task || {};
+            const fromThisHost = (task.conversation || []).some(entry =>
+              entry.role === 'user' && String(entry.text || '').startsWith(marker));
+            if (!fromThisHost) continue;
+            const report = String(task.latest_report || '');
+            const blocks = /```json\s*\r?\n([\s\S]*?)\r?\n?```/gi;
+            let found;
+            while ((found = blocks.exec(report))) {
+              let parsed;
+              try { parsed = JSON.parse(found[1]); } catch { continue; }
+              const rows = parsed?.ssh_steps;
+              if (!Array.isArray(rows) || !rows.length || rows.length > 6) continue;
+              if (rows.every(step => step && typeof step === 'object' &&
+                Object.keys(step).sort().join(',') ===
+                  'command,expected_text,verification_command' &&
+                ['command','verification_command','expected_text']
+                  .every(key => typeof step[key] === 'string') &&
+                step.command.trim() && step.verification_command.trim() &&
+                new TextEncoder().encode(step.command).length <= 4096 &&
+                new TextEncoder().encode(step.verification_command).length <= 4096 &&
+                new TextEncoder().encode(step.expected_text).length <= 512)) {
+                imported = rows;
+                break;
+              }
+            }
+            if (imported) break;
+          }
+          if (!imported) {
+            planPreview.textContent = 'В последних заданиях для данного сервера нет готового JSON-плана ' +
+              'с отдельными проверками. Попросите Лешего составить план или заполните шаги вручную.';
+            return;
+          }
+          planRows.replaceChildren();
+          imported.forEach(step => createPlanRow(step));
+          planPreview.textContent = 'Импортировано ' + imported.length +
+            ' шагов. План только заполнен, ничего не выполнено. ' +
+            'Внимательно проверьте команды, затем нажмите «Подготовить план».';
+          planBox.open = true;
+        } catch (error) {
+          planPreview.textContent = 'Не удалось импортировать план: ' + error.message;
+        } finally {
+          requestInFlight = false;
+          importTaskPlan.disabled = false;
+        }
+      });
+      const addStepButton = makeButton('Добавить шаг', () => createPlanRow());
+      const copySingleStep = makeButton('Взять текущие команды из терминала', () =>
+        createPlanRow({
+          command: shellInput.value,
+          verification_command: checkInput.value,
+          expected_text: expectedInput.value
+        }));
+      planBox.append(planRows, addStepButton, copySingleStep, importTaskPlan,
+        preparePlan, planPreview, executePlan, planOutput);
+      createPlanRow();
       const suggestions = element('details', 'sa-setup');
       suggestions.append(element('summary', '', 'Команды из готовых ответов SuperAgent'));
       suggestions.append(element('p', 'sa-remote-note',
@@ -762,6 +1008,10 @@
               (distro ? ', дистрибутив: ' + distro : '') +
               '. Выбирай команды именно для этой ОС. До изменения системы уточни текущие настройки, ' +
               'права и зависимости. Не утверждай, что команда уже исполнена. ' +
+              'В конце ответа добавь отдельный Markdown-блок кода с языком json, ' +
+              'содержащий ровно объект {\u0022ssh_steps\u0022:[{\u0022command\u0022:\u0022...\u0022,' +
+              '\u0022verification_command\u0022:\u0022...\u0022,\u0022expected_text\u0022:\u0022...\u0022}]}. ' +
+              'Заполни 1–6 проверяемых шагов для обнаруженной ОС и не включай секреты. ' +
               'Для каждого шага предложи ТОЧНУЮ команду действия, отдельную команду проверки ' +
               'и ожидаемый текст в выводе (если нужен), соответствующие реальной ОС; оцени риск, ' +
               'составь критерий успеха и план отката. Код 0 без проверки состояния не считать успехом. ' +
@@ -780,7 +1030,7 @@
         }
       });
       terminal.append(element('label', '', 'Команда для SSH'), shellInput, run, output,
-        checkBox, suggestions, element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
+        checkBox, planBox, suggestions, element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
       row.append(terminal);
       if (credentials.truncated) row.append(element('p', 'sa-remote-note',
         'Показаны первые 100 файлов доступа.'));
