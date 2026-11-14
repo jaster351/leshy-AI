@@ -9,6 +9,7 @@ from leshy.superagent_rdp_session import RDPFrame, RDPSessionController
 class FakeBackend:
     def __init__(self):
         self.clicks = []
+        self.texts = []
         self.closed = []
         self.connected = []
 
@@ -21,6 +22,9 @@ class FakeBackend:
 
     def click(self, connection, x, y):
         self.clicks.append((x, y))
+
+    def type_text(self, connection, text):
+        self.texts.append(text)
 
     def close(self, connection):
         self.closed.append(connection)
@@ -103,3 +107,39 @@ def test_owner_can_close_after_revocation():
     allowed.clear()
     broker.close("alice", sid)
     assert len(backend.closed) == 1
+
+
+def test_observe_frame_and_unique_receipt_for_identical_pixels():
+    broker, _, _, _ = setup_controller()
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    first, pixels = broker.observe_frame("alice", sid)
+    second, pixels2 = broker.observe_frame("alice", sid)
+    assert pixels == pixels2 == b"test-image-bytes"
+    assert first.frame_digest != second.frame_digest
+    with pytest.raises(PermissionError):
+        broker.click("alice", sid, frame_digest=first.frame_digest, x=1, y=1)
+
+
+def test_text_input_requires_new_receipt_and_owner():
+    broker, backend, _, _ = setup_controller()
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt, _ = broker.observe_frame("alice", sid)
+    with pytest.raises(PermissionError):
+        broker.type_text("bob", sid, frame_digest=receipt.frame_digest, text="hello")
+    broker.type_text("alice", sid, frame_digest=receipt.frame_digest, text="hello")
+    assert backend.texts == ["hello"]
+    with pytest.raises(PermissionError):
+        broker.type_text("alice", sid, frame_digest=receipt.frame_digest, text="again")
+
+
+def test_text_validation_and_revocation():
+    broker, backend, _, allowed = setup_controller()
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+    for bad in ("", "a" * 513, "bad\\nvalue", "bad\\x00value"):
+        with pytest.raises(ValueError):
+            broker.type_text("alice", sid, frame_digest=receipt.frame_digest, text=bad)
+    allowed.clear()
+    with pytest.raises(PermissionError):
+        broker.type_text("alice", sid, frame_digest=receipt.frame_digest, text="safe")
+    assert backend.texts == []

@@ -28,3 +28,25 @@ or mandatory target-host agents.
 
 Mock tests cover permitted click, stale frames, replay, wrong owner,
 revoked permissions and capacity. They do not test real RDP sessions.
+
+## Frame delivery and bounded input
+
+`observe_frame(owner_id, session_id)` returns an in-process `(FrameReceipt, pixels)`
+pair for an authenticated vision adapter. The raw bytes come from the
+backend's declared pixel format; do not assume PNG or send them to a public
+endpoint. A 32 MiB size limit prevents unbounded frames. Bytes are never
+persisted or included in audit logs.
+
+Receipts have a random nonce in their digest. Even pixel-identical successive
+screens produce different receipts, so actions prepared against a previous
+observation are rejected.
+
+`type_text(..., frame_digest=..., text=...)` permits 1–512 printable
+characters. It uses the exact same owner checks, frame-age bound and one-use
+receipt as `click`. Control characters and arbitrary keyboard shortcuts are
+not accepted. A transport must explicitly implement `type_text`; otherwise
+the operation fails without dispatch.
+
+These methods do NOT implement RDP networking, frame decoding, keyboard scan
+codes or a language-model vision adapter. No new RDP permissions or API
+routes have been granted.
