@@ -10,8 +10,10 @@ from leshy.app import LeshyApp
 from leshy.config import Settings
 from leshy.dialogue_rules import (
     is_direct_rule_request,
+    is_rule_inspection_request,
     persistent_rule_context,
     save_direct_rule,
+    verified_rule_report,
 )
 from leshy.realtime_chat import RealtimeChatManager
 from leshy.storage import Storage
@@ -63,6 +65,26 @@ class DialogueRuleMemoryTests(unittest.TestCase):
                 ))
                 self.assertIn("Правило сохранено", events[-1].data.get("answer", ""))
                 self.assertIn("звёздочки", app._memory_context("web:demo"))
+                app.stop_background()
+
+    def test_memory_question_reads_database_instead_of_model_guess(self):
+        with tempfile.TemporaryDirectory() as temp:
+            env = {
+                "LESHY_INSTALL_ROOT": str(Path(temp) / "install"),
+                "LESHY_BRAIN_DIR": str(Path(temp) / "brain"),
+                "LESHY_LLM_BACKEND": "echo",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                app = LeshyApp(Settings.from_env())
+                q = "Какие постоянные правила общения со мной ты помнишь?"
+                self.assertTrue(is_rule_inspection_request(q))
+                empty = app.chat(q, owner_id="telegram:123")
+                self.assertIn("нет подтверждённых", empty["answer"])
+                app.chat("Запомни правило: отвечай коротко.", owner_id="telegram:123")
+                report = app.chat(q, owner_id="telegram:123")
+                self.assertIn("отвечай коротко", report["answer"])
+                self.assertIn("ID", report["answer"])
+                self.assertNotIn("отвечай коротко", verified_rule_report(app.storage, "telegram:456"))
                 app.stop_background()
 
     def test_only_direct_instruction_is_captured(self):
