@@ -147,10 +147,15 @@ class RDPSessionController:
     def observe_frame(self, owner_id: str, session_id: str) -> tuple[FrameReceipt, bytes]:
         """In-process frame transfer only; never expose pixels to diagnostics."""
         with self._lock:
-            session = self._get(owner_id, session_id)
-            # Starting a new observation invalidates the previous action
-            # receipt even if capture, validation or authorization fails.
+            # Check session ownership before invalidating any receipt.  The
+            # authorization check must happen AFTER invalidation: if a grant
+            # was revoked and subsequently restored, the old frame must never
+            # become actionable again.
+            session = self._sessions.get(session_id)
+            if session is None or not hmac.compare_digest(session.owner_id, owner_id):
+                raise PermissionError("RDP session unavailable")
             session.used = True
+            self.authorize(owner_id, session.node_id)
             frame = self.backend.capture(session.connection)
             # Capture may block; recheck permissions before returning any pixels.
             self.authorize(owner_id, session.node_id)
