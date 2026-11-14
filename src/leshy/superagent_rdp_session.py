@@ -14,12 +14,15 @@ import threading
 import time
 from typing import Callable, Protocol
 
+from .rdp_frame_codec import encode_frame_png
+
 
 @dataclass(frozen=True)
 class RDPFrame:
     width: int
     height: int
     pixels: bytes
+    pixel_format: str = "opaque"
 
 
 class RDPBackend(Protocol):
@@ -48,6 +51,7 @@ class _Session:
     captured_at: float = 0.0
     width: int = 0
     height: int = 0
+    pixel_format: str = "opaque"
     used: bool = True
 
 
@@ -131,8 +135,30 @@ class RDPSessionController:
             session.frame_digest = digest
             session.captured_at = self.clock()
             session.width, session.height = frame.width, frame.height
+            session.pixel_format = frame.pixel_format
             session.used = False
             return FrameReceipt(session_id, digest, frame.width, frame.height), frame.pixels
+
+    def observe_png(self, owner_id: str, session_id: str) -> tuple[FrameReceipt, bytes]:
+        """Authorized PNG screenshot for an in-process vision consumer.
+
+        The backend must supply decoded RGB or RGBA pixels. Opaque/compressed
+        RDP buffers are deliberately rejected; no implicit format guessing.
+        """
+        with self._lock:
+            receipt, pixels = self.observe_frame(owner_id, session_id)
+            session = self._get(owner_id, session_id)
+            if session.pixel_format not in {"RGB", "RGBA"}:
+                session.used = True
+                raise ValueError("Native RDP backend has not decoded the framebuffer")
+            try:
+                png = encode_frame_png(
+                    receipt.width, receipt.height, pixels, mode=session.pixel_format
+                )
+            except BaseException:
+                session.used = True
+                raise
+            return receipt, png
 
     def click(
         self, owner_id: str, session_id: str, *,
