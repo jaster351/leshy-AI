@@ -162,7 +162,7 @@ class OperatingSystemController:
             output = (out or b"").decode("utf-8", errors="replace")
             errors = (err or b"").decode("utf-8", errors="replace")
             if proc.returncode != 0:
-                raise RuntimeError(f"PowerShell exit {proc.returncode}: {self._clip(output+errors,4000)}")
+                raise RuntimeError(f"PowerShell завершился с кодом {proc.returncode}; полный вывод команды не сохраняется в лог")
             return self._clip(output + (chr(10)+errors if errors else ""))
         finally:
             if proc.poll() is None:
@@ -199,7 +199,7 @@ class OperatingSystemController:
             if proc.returncode != 0:
                 raise RuntimeError(
                     f"{shell.kind} завершился с кодом {proc.returncode}: "
-                    + self._clip(out + err, 2000)
+                    + " подробный вывод не сохраняется в лог"
                 )
             return shell.kind, self._clip(out + ("\n" + err if err else ""))
         finally:
@@ -379,7 +379,10 @@ class OperatingSystemController:
             self._gate.check(generation)
         except Exception as exc:
             result = OSActionResult(action, False, str(exc), None)
-            problem("os_action_failed", str(exc), action=action, owner_id=str(owner_id)[:200])
+            # Shell exception text can include stdout/stderr and secrets.
+            problem("os_action_failed",
+                    type(exc).__name__ if action in {"native_shell", "powershell"} else str(exc),
+                    action=action, owner_id=str(owner_id)[:200])
         finally:
             self._local.generation = None
             if generation is not None:
