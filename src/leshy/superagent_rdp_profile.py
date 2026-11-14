@@ -12,6 +12,7 @@ from typing import Any
 
 from .superagent_remote_permissions import RemotePermissionPolicy, VerifiedActor
 from .superagent_verified_ssh import _node_ip
+from .superagent_ssh_terminal import _registered_pin
 
 
 def rdp_connection_profile(
@@ -32,9 +33,10 @@ def rdp_connection_profile(
         ).fetchone()
     if registered is None:
         raise PermissionError("Сервер предварительно должен быть зарегистрирован владельцем")
-    # This grants access to connection metadata only; Windows must verify
-    # the remote RDP server certificate independently on actual connection.
-    policy.require(actor, node, "rdp")
+    # This checks the verified owner's existing registration/rdp grant,
+    # not the *live* identity of the RDP server. Windows must verify its
+    # certificate independently before any password is entered.
+    _registered_pin(policy, actor, node, "rdp")
     lines = [
         "screen mode id:i:2",
         "use multimon:i:0",
