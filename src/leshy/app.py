@@ -18,6 +18,7 @@ from .provider_support import support_draft_context, is_support_draft_request, d
 from .conversation_mode import resolve_conversation_mode, mode_instruction, conversation_rows_for_mode
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
+from .dialogue_rules import is_direct_rule_request, save_direct_rule, persistent_rule_context, is_rule_inspection_request, verified_rule_report
 from .hardware import detect_hardware
 from .image_generation import ImageGenerationManager
 from .knowledge import KnowledgeBase
@@ -259,8 +260,17 @@ class LeshyApp:
         return [dict(row) for row in rows]
 
     def _memory_context(self, owner_id: str) -> str:
-        items = self.memories(owner_id, limit=8)
-        return "\n".join(f"- {item['content']}" for item in items) if items else ""
+        # Explicit owner rules are always loaded; unrelated memories remain bounded.
+        # Neither path is controlled by the background self-learning toggle.
+        rules = persistent_rule_context(self.storage, owner_id)
+        with self.storage.connection() as conn:
+            items = conn.execute(
+                "SELECT content FROM memories WHERE owner_id=? AND kind!=? "
+                "ORDER BY importance DESC,id DESC LIMIT 8",
+                (owner_id, "dialogue_rule"),
+            ).fetchall()
+        other = "\n".join(f"- {item['content']}" for item in items)
+        return "\n\n".join(part for part in (rules, other) if part)
 
     def _catalog_matches(self, message: str, trusted: list[dict],
                          candidates: list[dict]) -> list[dict]:
@@ -394,6 +404,23 @@ class LeshyApp:
                 "SELECT role,content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 24",
                 (sid,),
             ).fetchall()
+
+        # A direct preference request is a deterministic database operation,
+        # never merely an LLM promise. The normal chat UI receives a receipt.
+        if is_direct_rule_request(message):
+            rule_id, answer = save_direct_rule(self.storage, owner_id, message)
+            event("dialogue_rule_write_checked", owner_id=owner_id, saved=rule_id is not None)
+            return {
+                "session_id": sid, "answer": answer,
+                "created_at": self._save_assistant(sid, answer), "sources": [],
+            }
+
+        if is_rule_inspection_request(message):
+            answer = verified_rule_report(self.storage, owner_id)
+            return {
+                "session_id": sid, "answer": answer,
+                "created_at": self._save_assistant(sid, answer), "sources": [],
+            }
 
         # Detect intent within this owner's current session, not by clock or
         # assistant personality. Technical work is not automatically a letter
