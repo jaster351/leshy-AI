@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import secrets
 import threading
 import time
 from typing import Any
 
 from .superagent_ssh_terminal import check_terminal_permission
+from .superagent_ssh_checked_step import validate_checked_step
 
 _LOCK = threading.RLock()
-_PENDING: dict[str, tuple[str, str, str, str, str, float]] = {}
+_PENDING: dict[str, tuple[str, str, str, str, str, str, float]] = {}
 _TTL = 90.0
 _MAX_PENDING = 128
 
@@ -38,11 +40,14 @@ def _file(name: str) -> str:
 
 
 def prepare_ssh_command(policy: Any, actor: Any, node: str,
-                        credential_file: str, command: str) -> dict[str, Any]:
+                        credential_file: str, command: str, *,
+                        approval_kind: str = "terminal-command") -> dict[str, Any]:
     """Preflight rights, produce server-side digest and single-use receipt."""
     normalized_node = check_terminal_permission(policy, actor, node)
     name = _file(credential_file)
     digest = _digest(command)
+    if approval_kind not in {"terminal-command", "checked-step"}:
+        raise ValueError("Неизвестный тип подтверждения")
     token = secrets.token_urlsafe(32)
     token_key = hashlib.sha256(token.encode("ascii")).hexdigest()
     with _LOCK:
@@ -54,7 +59,7 @@ def prepare_ssh_command(policy: Any, actor: Any, node: str,
             raise PermissionError("Слишком много неподтверждённых SSH-команд")
         _PENDING[token_key] = (
             actor.owner_id, actor.session_fingerprint, normalized_node,
-            name, digest, now + _TTL,
+            name, digest, approval_kind, now + _TTL,
         )
     return {
         "approval_token": token, "sha256": digest, "expires_seconds": 90,
@@ -63,7 +68,8 @@ def prepare_ssh_command(policy: Any, actor: Any, node: str,
 
 
 def consume_ssh_approval(policy: Any, actor: Any, token: str, node: str,
-                         credential_file: str, command: str) -> None:
+                         credential_file: str, command: str, *,
+                         approval_kind: str = "terminal-command") -> None:
     """Consume BEFORE remote effects: retries/replays cannot run twice."""
     policy._check_actor(actor)
     if not isinstance(token, str) or not 20 <= len(token) <= 128:
@@ -76,11 +82,57 @@ def consume_ssh_approval(policy: Any, actor: Any, token: str, node: str,
     expected = (
         actor.owner_id, actor.session_fingerprint,
         check_terminal_permission(policy, actor, node),
-        _file(credential_file), _digest(command),
+        _file(credential_file), _digest(command), approval_kind,
     )
-    if not all(hmac.compare_digest(str(x), str(y)) for x, y in zip(row[:5], expected)):
+    if not all(hmac.compare_digest(str(x), str(y)) for x, y in zip(row[:6], expected)):
         raise PermissionError("Подтверждение выдано для другого действия")
     # The live node key and permissions are ALSO checked inside the executor.
 
 
-__all__ = ["prepare_ssh_command", "consume_ssh_approval"]
+def _checked_step_signature(command: str, verification_command: str,
+                            expected_text: str) -> str:
+    """Canonical domain-separated digest of BOTH commands and predicate."""
+    validate_checked_step(command, verification_command, expected_text)
+    canonical = json.dumps(
+        {
+            "type": "ssh-checked-step-v1",
+            "command": command,
+            "verification_command": verification_command,
+            "expected_text": expected_text,
+        }, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")
+    return "ssh-checked-step-v1:" + hashlib.sha256(canonical).hexdigest()
+
+
+def prepare_ssh_checked_step(policy: Any, actor: Any, node: str,
+                             credential_file: str, command: str,
+                             verification_command: str,
+                             expected_text: str = "") -> dict[str, Any]:
+    """Prepare one approval for the full two-phase action, not its first command."""
+    signature = _checked_step_signature(command, verification_command, expected_text)
+    result = prepare_ssh_command(
+        policy, actor, node, credential_file, signature,
+        approval_kind="checked-step",
+    )
+    result["step_sha256"] = signature.split(":")[-1]
+    result["commands"] = 2
+    # The signature contains no raw command output or secret.
+    return result
+
+
+def consume_ssh_checked_approval(policy: Any, actor: Any, token: str, node: str,
+                                 credential_file: str, command: str,
+                                 verification_command: str,
+                                 expected_text: str = "") -> None:
+    signature = _checked_step_signature(command, verification_command, expected_text)
+    consume_ssh_approval(
+        policy, actor, token, node, credential_file, signature,
+        approval_kind="checked-step",
+    )
+
+
+__all__ = [
+    "prepare_ssh_command", "consume_ssh_approval",
+    "prepare_ssh_checked_step", "consume_ssh_checked_approval",
+]
+
