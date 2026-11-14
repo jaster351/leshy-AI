@@ -117,6 +117,8 @@ class RDPSessionController:
         with self._lock:
             session = self._get(owner_id, session_id)
             frame = self.backend.capture(session.connection)
+            # Capture may block; recheck permissions before returning any pixels.
+            self.authorize(owner_id, session.node_id)
             if not (1 <= frame.width <= 8192 and 1 <= frame.height <= 8192):
                 raise ValueError("Invalid framebuffer dimensions")
             if not isinstance(frame.pixels, bytes) or not (0 < len(frame.pixels) <= 32 * 1024 * 1024):
