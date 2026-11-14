@@ -18,7 +18,7 @@ from .provider_support import support_draft_context, is_support_draft_request, d
 from .conversation_mode import resolve_conversation_mode, mode_instruction, conversation_rows_for_mode
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
-from .dialogue_rules import is_direct_rule_request, save_direct_rule, persistent_rule_context
+from .dialogue_rules import is_direct_rule_request, save_direct_rule, persistent_rule_context, is_rule_inspection_request, verified_rule_report
 from .hardware import detect_hardware
 from .image_generation import ImageGenerationManager
 from .knowledge import KnowledgeBase
@@ -410,6 +410,13 @@ class LeshyApp:
         if is_direct_rule_request(message):
             rule_id, answer = save_direct_rule(self.storage, owner_id, message)
             event("dialogue_rule_write_checked", owner_id=owner_id, saved=rule_id is not None)
+            return {
+                "session_id": sid, "answer": answer,
+                "created_at": self._save_assistant(sid, answer), "sources": [],
+            }
+
+        if is_rule_inspection_request(message):
+            answer = verified_rule_report(self.storage, owner_id)
             return {
                 "session_id": sid, "answer": answer,
                 "created_at": self._save_assistant(sid, answer), "sources": [],
