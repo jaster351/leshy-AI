@@ -86,6 +86,27 @@ class ParserPersistenceTests(unittest.TestCase):
                              "http://10.0.0.9:8766")
             self.assertTrue(refreshed.status("original-owner")["paired"])
 
+    def test_does_not_mix_partial_canonical_secret_with_legacy_owner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state = root / "stable"
+            state.mkdir()
+            canonical_token = state / "torrent_parser_token.secret"
+            save_secret(canonical_token, "s" * 40)
+            legacy = root / "legacy"
+            config = legacy / "settings" / "torrent_parser.json"
+            config.parent.mkdir(parents=True)
+            config.write_text(json.dumps({
+                "address": "http://10.0.0.19:8766",
+                "owner_id": "legacy-owner",
+                "configured": True,
+            }), encoding="utf-8")
+            bridge = TorrentParserBridge(legacy, persistent_root=state)
+            self.assertFalse(bridge.status("legacy-owner")["configured"])
+            self.assertFalse(bridge.settings.exists())
+            self.assertEqual(canonical_token.read_bytes(),
+                             (state / "torrent_parser_token.secret").read_bytes())
+
     def test_broken_windows_pairing_fails_visible_not_silent(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
