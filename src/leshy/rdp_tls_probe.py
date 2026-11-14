@@ -14,6 +14,7 @@ import ipaddress
 import socket
 import ssl
 import struct
+import time
 
 # Request TLS, CredSSP and CredSSP with early authorization. Never offer
 # legacy PROTOCOL_RDP without authenticated server TLS identity.
@@ -36,9 +37,18 @@ class RDPTLSProbeResult:
     rdp_desktop_available: bool = False
 
 
-def _exact(sock: socket.socket, size: int) -> bytes:
+def _time_left(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("RDP handshake exceeded total timeout")
+    return remaining
+
+
+def _exact(sock: socket.socket, size: int, *, deadline: float | None = None) -> bytes:
     chunks = []
     while size:
+        if deadline is not None:
+            sock.settimeout(_time_left(deadline))
         part = sock.recv(size)
         if not part:
             raise ConnectionError("RDP peer closed during X.224 negotiation")
@@ -47,16 +57,18 @@ def _exact(sock: socket.socket, size: int) -> bytes:
     return b"".join(chunks)
 
 
-def _negotiate(sock: socket.socket) -> str:
+def _negotiate(sock: socket.socket, *, deadline: float | None = None) -> str:
+    if deadline is not None:
+        sock.settimeout(_time_left(deadline))
     sock.sendall(_X224_REQUEST)
-    tpkt = _exact(sock, 4)
+    tpkt = _exact(sock, 4, deadline=deadline)
     if tpkt[:2] != b"\x03\x00":
         raise ConnectionError("Invalid RDP TPKT header")
     length = struct.unpack(">H", tpkt[2:])[0]
     if not 11 <= length <= 256:
         raise ConnectionError("Invalid RDP negotiation packet length")
-    body = _exact(sock, length - 4)
-    if len(body) < 7 or body[0] != len(body) - 1 or body[1] != 0xD0:
+    body = _exact(sock, length - 4, deadline=deadline)
+    if len(body) < 7 or body[0] != len(body) - 1 or body[1] != 0xD0 or body[6] != 0:
         raise ConnectionError("Invalid X.224 connection confirmation")
     neg = body[7:]
     if len(neg) != 8:
@@ -91,19 +103,22 @@ def probe_rdp_tls(node_ip: str, expected_tls_sha256: str, *, port: int = 3389,
         raise PermissionError("Invalid RDP TLS SHA-256 pin") from exc
     if type(port) is not int or not (1 <= port <= 65535):
         raise ValueError("Invalid RDP port")
-    if not isinstance(timeout, (int, float)) or not (0.1 <= timeout <= 15.0):
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not (0.1 <= timeout <= 15.0):
         raise ValueError("Invalid RDP timeout")
 
+    deadline = time.monotonic() + timeout
     with closing(socket.create_connection((host, port), timeout=timeout)) as raw:
-        raw.settimeout(timeout)
-        selected = _negotiate(raw)
+        raw.settimeout(_time_left(deadline))
+        selected = _negotiate(raw, deadline=deadline)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
         # Deliberately accept self-signed certs only until the immediately
         # following constant-time exact DER SHA-256 pin comparison.
         context.verify_mode = ssl.CERT_NONE
         context.minimum_version = ssl.TLSVersion.TLSv1_2
+        raw.settimeout(_time_left(deadline))
         with context.wrap_socket(raw, server_hostname=None) as protected:
+            _time_left(deadline)
             peer_der = protected.getpeercert(binary_form=True)
             if not peer_der:
                 raise PermissionError("RDP TLS server certificate is missing")
