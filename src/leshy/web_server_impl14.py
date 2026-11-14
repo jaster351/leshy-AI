@@ -24,7 +24,10 @@ from .superagent_ssh_approvals import (
     prepare_ssh_checked_step, consume_ssh_checked_approval,
     prepare_ssh_plan, consume_ssh_plan_approval,
 )
-from .superagent_ssh_plan import execute_approved_ssh_plan
+from .superagent_ssh_jobs import (
+    start_ssh_plan_job, list_ssh_plan_jobs,
+    cancel_ssh_plan_job, acknowledge_ssh_plan_job,
+)
 from .superagent_ssh_checked_step import run_ssh_checked_step
 from .superagent_remote_access_dashboard import (
     authorized_remote_context, list_remote_access, revoke_remote_grant,
@@ -157,6 +160,28 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._json(HTTPStatus.FORBIDDEN, {
                         "error": "Не удалось выбрать файлы доступа; проверьте настройки папки"
                     })
+            if parsed.path == "/v1/superagent/ssh/plan/jobs":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                policy, actor = context
+                try:
+                    query = parse.parse_qs(parsed.query)
+                    if set(query) - {"id"} or len(query.get("id", [])) > 1:
+                        raise ValueError("Некорректный запрос состояния SSH-плана")
+                    job_id = query.get("id", [""])[0]
+                    return self._json(HTTPStatus.OK, list_ssh_plan_jobs(
+                        policy, actor, job_id=job_id,
+                    ))
+                except (ValueError, PermissionError):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "SSH-план не найден или нет разрешения"
+                    })
+                except Exception as exc:
+                    problem("superagent_ssh_plan_status_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось прочитать состояние SSH-плана"
+                    })
             if parsed.path == "/v1/superagent/remote-access":
                 context = self._remote_context()
                 if context is None:
@@ -218,6 +243,43 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_set_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить настройку"})
+            if path in {
+                "/v1/superagent/ssh/plan/jobs/cancel",
+                "/v1/superagent/ssh/plan/jobs/review",
+            }:
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Недопустимый источник запроса"
+                    })
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Чужой источник запроса"
+                    })
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется JSON"})
+                policy, actor = context
+                try:
+                    payload = self._body()
+                    if not isinstance(payload, dict) or set(payload) != {"job_id", "confirm"} or payload.get("confirm") is not True:
+                        raise ValueError("Требуется явное подтверждение действия")
+                    if path.endswith("/cancel"):
+                        job = cancel_ssh_plan_job(policy, actor, payload["job_id"])
+                    else:
+                        job = acknowledge_ssh_plan_job(policy, actor, payload["job_id"])
+                    return self._json(HTTPStatus.OK, {"ssh_job": job})
+                except (PermissionError, ValueError):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Нет прав, задание активно или неверное подтверждение"
+                    })
+                except Exception as exc:
+                    problem("superagent_ssh_plan_control_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось изменить состояние SSH-плана"
+                    })
             if path in {
                 "/v1/superagent/ssh/enroll",
                 "/v1/superagent/ssh/prepare",
@@ -291,12 +353,12 @@ def make_handler(app, telegram, settings, model_catalog):
                             policy, actor, payload["approval_token"], payload["node_id"],
                             payload["credential_file"], payload["steps"],
                         )
-                        executed_plan = execute_approved_ssh_plan(
+                        job = start_ssh_plan_job(
                             policy, actor, payload["node_id"],
                             payload["credential_file"], payload["steps"],
                             may_continue=lambda: module_enabled(app.storage, "remote-admin"),
                         )
-                        return self._json(HTTPStatus.OK, {"ssh_plan": executed_plan})
+                        return self._json(HTTPStatus.ACCEPTED, {"ssh_job": job})
                     if path == "/v1/superagent/ssh/check/prepare":
                         if set(payload) != {
                             "node_id", "credential_file", "command",
