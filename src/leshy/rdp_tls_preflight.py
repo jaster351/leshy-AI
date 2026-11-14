@@ -15,6 +15,7 @@ import re
 import socket
 import ssl
 import struct
+import time
 from typing import Callable
 
 
@@ -46,10 +47,18 @@ def _connection_request() -> bytes:
     return struct.pack(">BBH", 3, 0, 4 + len(x224)) + x224
 
 
-def _recv_exact(stream: socket.socket, size: int) -> bytes:
+def _remaining(deadline: float) -> float:
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise RDPPreflightError("RDP negotiation exceeded overall timeout")
+    return left
+
+
+def _recv_exact(stream: socket.socket, size: int, deadline: float) -> bytes:
     chunks = []
     remaining = size
     while remaining:
+        stream.settimeout(_remaining(deadline))
         part = stream.recv(remaining)
         if not part:
             raise RDPPreflightError("RDP server closed the negotiation")
@@ -106,20 +115,21 @@ def probe_rdp_tls(
         raise ValueError("RDP probe timeout must be between 1 and 15 seconds")
     trusted_pin = expected_tls_sha256.lower()
     authorize(node)
+    deadline = time.monotonic() + timeout
 
     raw = None
     secured = None
     try:
         raw = socket.create_connection((node, 3389), timeout=timeout)
-        raw.settimeout(timeout)
+        raw.settimeout(_remaining(deadline))
         raw.sendall(_connection_request())
-        header = _recv_exact(raw, 4)
+        header = _recv_exact(raw, 4, deadline)
         if header[:2] != b"\x03\x00":
             raise RDPPreflightError("Invalid RDP TPKT header")
         packet_len = int.from_bytes(header[2:4], "big")
         if packet_len < 11 or packet_len > 512:
             raise RDPPreflightError("Invalid RDP TPKT length")
-        protocol = _parse_connection_confirm(header + _recv_exact(raw, packet_len - 4))
+        protocol = _parse_connection_confirm(header + _recv_exact(raw, packet_len - 4, deadline))
 
         # RDP servers often use self-signed certificates. Pinning, not an
         # unchecked certificate, is the source of server identity here.
@@ -127,8 +137,10 @@ def probe_rdp_tls(
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
+        raw.settimeout(_remaining(deadline))
         secured = context.wrap_socket(raw, server_hostname=None)
         raw = None
+        _remaining(deadline)
         certificate = secured.getpeercert(binary_form=True)
         if not isinstance(certificate, bytes) or not certificate:
             raise RDPPreflightError("RDP TLS peer provided no certificate")
