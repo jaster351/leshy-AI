@@ -21,6 +21,10 @@ class NaturalRequestsTests(unittest.TestCase):
         self.assertEqual(parse_request("Скачай фильм, Обитель зла."),
                          ("movie", "Обитель зла"))
 
+    def test_real_telegram_and_web_command_exact_lowercase(self):
+        self.assertEqual(parse_media_request("Скачай фильм, обитель зла."),
+                         ("movie", "обитель зла", ""))
+
     def test_regular_download(self):
         self.assertEqual(parse_media_request("Скачай фильм Аватар 2009"),
                          ("movie", "Аватар 2009", ""))
@@ -36,12 +40,15 @@ class NaturalRequestsTests(unittest.TestCase):
 
 
 class ParserAccessTests(unittest.TestCase):
-    def test_verified_bot_owner_accesses_web_config(self):
+    def test_only_confirmed_telegram_link_can_access_web_config(self):
         bridge = Mock()
         bridge.owner_allowed.side_effect = lambda owner: owner == "confirmed-web-owner"
-        bridge._read.return_value = {"owner_id": "confirmed-web-owner"}
-        bot = SimpleNamespace(_is_owner=lambda telegram_id: telegram_id == "100")
-        app = SimpleNamespace(telegram=bot)
+        identity = SimpleNamespace(
+            resolve_telegram=lambda user: (
+                "confirmed-web-owner" if user == "100" else "telegram:" + user
+            )
+        )
+        app = SimpleNamespace(owner_identity=identity)
         self.assertEqual(
             authorized_owner_for_parser(app, bridge, "telegram:100"),
             "confirmed-web-owner",
@@ -49,6 +56,17 @@ class ParserAccessTests(unittest.TestCase):
         self.assertEqual(
             authorized_owner_for_parser(app, bridge, "telegram:101"),
             "telegram:101",
+        )
+
+    def test_bot_admin_does_not_implicitly_borrow_other_users_nas(self):
+        bridge = Mock()
+        bridge.owner_allowed.side_effect = lambda owner: owner == "foreign-web-owner"
+        bridge._read.return_value = {"owner_id": "foreign-web-owner"}
+        bot = SimpleNamespace(_is_owner=lambda telegram_id: telegram_id == "100")
+        app = SimpleNamespace(telegram=bot, owner_identity=None)
+        self.assertEqual(
+            authorized_owner_for_parser(app, bridge, "telegram:100"),
+            "telegram:100",
         )
 
     def test_missing_bot_owner_never_inherits_parser_secret(self):
