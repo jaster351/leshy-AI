@@ -32,3 +32,19 @@ Protocol references:
 - RDP Negotiation Response: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/b2975bdc-6d56-49ee-9c57-f2ff3a0b6817
 
 Next essential phase: real CredSSP/NLA and protocol channel setup, then RDP graphics/input. Do not claim actual desktop access before real Windows/Linux E2E.
+
+
+## Bounded total handshake time
+
+The probe enforces **one monotonic deadline** for the TCP connection,
+fragmented X.224 responses and TLS handshake. Each receive operation gets
+only the remaining time. This prevents a peer from sending a few bytes
+just before each per-read timeout and keeping a worker occupied indefinitely.
+
+The X.224 confirmation must also have the standard class/options byte set
+to zero, and a boolean value is not accepted as a timeout number.
+
+Regression tests cover a trickle-feed response, malformed X.224 options and
+invalid timeouts; the full local probe test suite passed **18/18**, including
+an ephemeral self-signed certificate with a real TCP/TLS handshake on loopback.
+These are not tests against a production Windows RDP server.
