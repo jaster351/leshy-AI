@@ -16,6 +16,7 @@ from .document_intelligence import DocumentIntelligence
 from .extension_marketplace import ExtensionMarketplace
 from .module_settings import module_enabled
 from .playwright_browser_adapter import PlaywrightBrowserAdapter
+from .kitesurf_cdp_adapter import KitesurfCdpAdapter
 from .realtime_chat import RealtimeChatManager, StreamEvent
 from .storage import utcnow
 from .tools_gateway import McpToolsGateway, ToolRegistry
@@ -101,8 +102,12 @@ class BrowserPlatform:
     def __init__(self, app):
         self.app = app
         self.browser_use = BrowserUseAdapter(LeshyBrowserUseLLM(app.llm))
+        self.kitesurf = KitesurfCdpAdapter()
         self.playwright = PlaywrightBrowserAdapter()
-        self.agent = BrowserAgent([self.browser_use, self.playwright])
+        # Experimental CDP only when explicitly enabled by the operator.
+        # Browser Use remains first for research, local Chromium stays
+        # the final fall back on a missing or incompatible Kitesurf engine.
+        self.agent = BrowserAgent([self.browser_use, self.kitesurf, self.playwright])
         self.approvals = ApprovalBroker(ttl_seconds=600)
         self.tools_registry = ToolRegistry()
         self.tools_gateway = McpToolsGateway(self.tools_registry)
