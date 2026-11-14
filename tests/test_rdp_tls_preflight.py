@@ -63,9 +63,9 @@ class FakeTLS:
 def test_x224_request_is_microsoft_wire_format():
     request = _connection_request()
     assert len(request) == 19
-    assert request[:4] == b"\\x03\\x00\\x00\\x13"
-    assert request[4:11] == b"\\x0e\\xe0\\x00\\x00\\x00\\x00\\x00"
-    assert request[11:15] == b"\\x01\\x00\\x08\\x00"
+    assert request[:4] == b"\x03\x00\x00\x13"
+    assert request[4:11] == b"\x0e\xe0\x00\x00\x00\x00\x00"
+    assert request[11:15] == b"\x01\x00\x08\x00"
     assert struct.unpack("<I", request[-4:])[0] == 0x0B
 
 
