@@ -141,3 +141,27 @@ def test_real_local_socket_rejects_legacy_rdp(local_tls_cert):
     with pytest.raises(ConnectionError, match="supported TLS"):
         probe_rdp_tls("127.0.0.1", pin, port=port)
     worker.join(3)
+
+
+def test_rejects_nonzero_x224_class_options():
+    packet = bytearray(response(2))
+    packet[10] = 1
+    with pytest.raises(ConnectionError, match="X.224"):
+        _negotiate(FragmentingSocket(bytes(packet)))
+
+
+def test_boolean_timeout_rejected_before_network(monkeypatch):
+    monkeypatch.setattr(socket, "create_connection", lambda *a, **kw: pytest.fail("unexpected network"))
+    with pytest.raises(ValueError, match="timeout"):
+        probe_rdp_tls("127.0.0.1", "a" * 64, timeout=True)
+
+
+def test_slow_drip_exceeds_total_handshake_deadline():
+    from unittest.mock import patch
+    fake = FragmentingSocket(response(2))
+    fake.settimeout = lambda _: None
+    with patch("leshy.rdp_tls_probe.time.monotonic", side_effect=[0.5, 0.6, 1.1]):
+        with pytest.raises(TimeoutError, match="total timeout"):
+            _negotiate(fake, deadline=1.0)
+    assert fake.sent is not None
+    assert len(fake.payload) == len(response(2)) - 2
