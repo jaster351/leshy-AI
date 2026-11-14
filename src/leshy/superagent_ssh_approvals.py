@@ -16,6 +16,7 @@ from typing import Any
 
 from .superagent_ssh_terminal import check_terminal_permission
 from .superagent_ssh_checked_step import validate_checked_step
+from .superagent_ssh_plan import plan_approval_signature
 
 _LOCK = threading.RLock()
 _PENDING: dict[str, tuple[str, str, str, str, str, str, float]] = {}
@@ -46,7 +47,7 @@ def prepare_ssh_command(policy: Any, actor: Any, node: str,
     normalized_node = check_terminal_permission(policy, actor, node)
     name = _file(credential_file)
     digest = _digest(command)
-    if approval_kind not in {"terminal-command", "checked-step"}:
+    if approval_kind not in {"terminal-command", "checked-step", "sequential-plan"}:
         raise ValueError("Неизвестный тип подтверждения")
     token = secrets.token_urlsafe(32)
     token_key = hashlib.sha256(token.encode("ascii")).hexdigest()
@@ -131,8 +132,32 @@ def consume_ssh_checked_approval(policy: Any, actor: Any, token: str, node: str,
     )
 
 
+def prepare_ssh_plan(policy: Any, actor: Any, node: str,
+                     credential_file: str, steps: Any) -> dict[str, Any]:
+    """One approval covers an exact ordered plan, never a free-form wildcard."""
+    signature = plan_approval_signature(steps)
+    result = prepare_ssh_command(
+        policy, actor, node, credential_file, signature,
+        approval_kind="sequential-plan",
+    )
+    result["plan_sha256"] = signature.split(":")[-1]
+    result["steps"] = len(steps)
+    return result
+
+
+def consume_ssh_plan_approval(policy: Any, actor: Any, token: str,
+                              node: str, credential_file: str,
+                              steps: Any) -> None:
+    signature = plan_approval_signature(steps)
+    consume_ssh_approval(
+        policy, actor, token, node, credential_file, signature,
+        approval_kind="sequential-plan",
+    )
+
+
 __all__ = [
     "prepare_ssh_command", "consume_ssh_approval",
     "prepare_ssh_checked_step", "consume_ssh_checked_approval",
+    "prepare_ssh_plan", "consume_ssh_plan_approval",
 ]
 
