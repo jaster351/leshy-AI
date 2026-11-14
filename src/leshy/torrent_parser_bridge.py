@@ -28,7 +28,7 @@ _FIRST_PART = re.compile(
     re.IGNORECASE,
 )
 _MEDIA_PREFIX = re.compile(
-    r"^(фильм|кино|группу|исполнителя|музыку|альбом|песню|трек)"
+    r"^(фильм|фильма|кино|группу|исполнителя|музыку|альбом|песню|трек)"
     r"\s*[,!:—-]*\s+",
     re.IGNORECASE,
 )
@@ -78,7 +78,7 @@ def parse_media_request(message: str) -> tuple[str, str, str] | None:
     media = _MEDIA_PREFIX.match(phrase)
     if media:
         word = media.group(1).casefold()
-        kind = "movie" if word in {"фильм", "кино"} else "music"
+        kind = "movie" if word in {"фильм", "фильма", "кино"} else "music"
         phrase = phrase[media.end():]
     elif part == "first":
         kind = "movie"
@@ -89,6 +89,11 @@ def parse_media_request(message: str) -> tuple[str, str, str] | None:
     if kind == "movie" and tail:
         part = "first"
         phrase = phrase[:tail.start()]
+    if kind == "movie" and not part:
+        inner = _FIRST_PART.match(phrase)
+        if inner:
+            part = "first"
+            phrase = phrase[inner.end():]
     title = phrase.strip("!?., :—-")
     return (kind, title, part) if 0 < len(title) <= 200 else None
 
