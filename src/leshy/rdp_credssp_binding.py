@@ -81,7 +81,7 @@ def certificate_subject_public_key(cert_der: bytes) -> bytes:
         if not field:
             raise RDPBindingError("Empty mandatory X.509 field")
     _, spki, pos = _der_element(tbs, pos, tag=0x30)
-    key_info = _exact_sequence(b"\x30" + _der_length(len(spki)) + spki)
+    key_info = spki
     _, algorithm, at = _der_element(key_info, 0, tag=0x30)
     if not algorithm:
         raise RDPBindingError("Invalid X.509 key algorithm")
@@ -90,12 +90,6 @@ def certificate_subject_public_key(cert_der: bytes) -> bytes:
         raise RDPBindingError("Invalid X.509 SubjectPublicKey BIT STRING")
     return key_bits[1:]
 
-
-def _der_length(value: int) -> bytes:
-    if value < 128:
-        return bytes((value,))
-    raw = value.to_bytes((value.bit_length() + 7) // 8, "big")
-    return bytes((0x80 | len(raw),)) + raw
 
 
 def _binding_hash(magic: bytes, nonce: bytes, subject_public_key: bytes) -> bytes:
