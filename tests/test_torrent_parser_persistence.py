@@ -86,6 +86,27 @@ class ParserPersistenceTests(unittest.TestCase):
                              "http://10.0.0.9:8766")
             self.assertTrue(refreshed.status("original-owner")["paired"])
 
+    def test_interrupted_legacy_copy_resumes_only_when_config_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            legacy = root / "old-brain"
+            state = root / "stable"
+            old_settings = legacy / "settings" / "torrent_parser.json"
+            old_secret = legacy / "secrets" / "torrent_parser_token.secret"
+            old_settings.parent.mkdir(parents=True)
+            old_secret.parent.mkdir(parents=True)
+            state.mkdir()
+            payload = json.dumps({
+                "address": "http://10.0.0.19:8766",
+                "owner_id": "first-owner",
+                "configured": True,
+            })
+            old_settings.write_text(payload, encoding="utf-8")
+            (state / "torrent_parser.json").write_text(payload, encoding="utf-8")
+            save_secret(old_secret, "q" * 40)
+            restored = TorrentParserBridge(legacy, persistent_root=state)
+            self.assertTrue(restored.status("first-owner")["paired"])
+
     def test_does_not_mix_partial_canonical_secret_with_legacy_owner(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
