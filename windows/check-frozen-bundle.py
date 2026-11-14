@@ -18,6 +18,8 @@ REQUIRED_MODULES = (
     "leshy.provider_support",
     "leshy.private_support_bootstrap",
     "leshy.superagent_verified_ssh",
+    "leshy.superagent_ssh_plan",
+    "leshy.superagent_ssh_jobs",
 )
 
 

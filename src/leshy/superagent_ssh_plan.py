@@ -62,6 +62,7 @@ def plan_approval_signature(steps: Any) -> str:
 def execute_approved_ssh_plan(
     policy: Any, actor: Any, node_id: str, credential_filename: str,
     steps: Any, *, may_continue: Callable[[], bool] | None = None,
+    on_step: Callable[[int, str, dict[str, Any] | None], None] | None = None,
     timeout: float = 12.0,
 ) -> dict[str, Any]:
     """Run approved steps in order, stopping on any non-confirmed or unknown.
@@ -97,11 +98,17 @@ def execute_approved_ssh_plan(
                 stopped_at = index
                 break
             try:
+                if on_step is not None:
+                    # Persist "started" BEFORE any possible remote-side effect.
+                    on_step(index, "started", None)
                 result = run_ssh_checked_step(
                     policy, actor, node, credential_filename,
                     step["command"], step["verification_command"],
                     step["expected_text"], timeout=timeout,
                 )
+                if on_step is not None:
+                    # A failure to write this progress also blocks next steps.
+                    on_step(index, "finished", result)
             except Exception:
                 # This could be AFTER the command was accepted remotely.
                 # Treat as unknown, never start the next step or auto-retry.

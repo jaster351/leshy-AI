@@ -669,17 +669,100 @@
       const planBox = element('details', 'sa-setup');
       planBox.append(element('summary', '', 'Многошаговый SSH-план: выполнить и проверить'));
       planBox.append(element('p', 'sa-remote-note',
-        'До 6 последовательных шагов. У каждого своя команда, проверка и ожидаемый результат. ' +
-        'Следующий шаг начнётся только после успешной проверки предыдущего. ' +
-        'Все команды показываются до единого подтверждения, повторов при ошибке нет. ' +
-        'Во время выполнения одной команды остановка из браузера пока недоступна.'));
+        'До 6 последовательных шагов, каждый с командой и проверкой результата. ' +
+        'План работает на сервере независимо от открытого браузера. После подтверждения можно ' +
+        'следить за прогрессом и запросить остановку перед следующим шагом. ' +
+        'Текущую SSH-команду остановка не прерывает; повтора и отката нет.'));
       const planRows = element('div', 'sa-ssh-plan-rows');
       const planPreview = element('pre', 'sa-terminal-output');
       planPreview.textContent = 'Добавьте шаги и нажмите «Подготовить план».';
       planPreview.setAttribute('role', 'status');
       const planOutput = element('pre', 'sa-terminal-output');
-      planOutput.textContent = 'Результаты шагов появятся здесь.';
+      planOutput.textContent = 'Безопасный прогресс SSH-планов появится здесь (без паролей и вывода команд).';
       planOutput.setAttribute('role', 'status');
+      const jobsPanel = element('div', 'sa-ssh-job-status');
+      const showJob = (job) => {
+        const statusNames = {
+          queued: 'Ожидает запуска', running: 'Выполняется',
+          completed: 'Все проверки пройдены', stopped: 'Остановлен',
+          uncertain: 'Результат не подтверждён', unresolved: 'Выполнялся в другом процессе / до перезапуска',
+          reviewed: 'Владелец отметил состояние как сверенное'
+        };
+        const row = element('div', 'sa-remote-card');
+        row.append(element('strong', '', 'SSH-план ' + String(job.job_id).slice(0, 8) +
+          ': ' + (statusNames[job.status] || 'Неизвестное состояние')));
+        row.append(element('p', 'sa-remote-note',
+          'Подтверждено: ' + job.confirmed_steps + '/' + job.total +
+          ', текущий шаг: ' + (job.current_step === null ? 'не начат' : Number(job.current_step) + 1) +
+          ', остановка запрошена: ' + (job.stop_requested ? 'да' : 'нет')));
+        const detail = element('pre', 'sa-terminal-output');
+        detail.textContent = (job.steps || []).map(s =>
+          'Шаг ' + (s.index + 1) + ': ' + String(s.verdict) +
+          (s.action_exit_code === undefined ? '' : ', код действия ' + String(s.action_exit_code)) +
+          (s.check_exit_code === undefined ? '' : ', код проверки ' + String(s.check_exit_code))
+        ).join('\n') || 'Действия ещё не запускались.';
+        row.append(detail);
+        if (['queued', 'running', 'unresolved'].includes(job.status) && !job.stop_requested) {
+          row.append(makeButton('Остановить после текущей команды', async () => {
+            if (!window.confirm('Запретить следующие SSH-шаги этого плана? ' +
+              'Уже отправленную команду остановить нельзя.')) return;
+            try {
+              await api('/v1/superagent/ssh/plan/jobs/cancel', {
+                method:'POST', body:JSON.stringify({job_id:job.job_id, confirm:true})
+              });
+              await refreshJobList();
+            } catch (error) { planOutput.textContent = 'Не удалось запросить остановку: ' + error.message; }
+          }));
+        }
+        if (['uncertain', 'unresolved'].includes(job.status)) {
+          row.append(makeButton('После проверки сервера отметить сверенным', async () => {
+            if (!window.confirm('Вы проверили реальное состояние сервера, убедились, ' +
+              'что старый исполнитель больше не работает, и готовы разрешить новые планы? ' +
+              'Для зависших заданий другого процесса требуется предварительно запросить остановку ' +
+              'и выждать 10 минут без активности. Это НЕ подтверждает успех предыдущей операции.')) return;
+            try {
+              await api('/v1/superagent/ssh/plan/jobs/review', {
+                method:'POST', body:JSON.stringify({job_id:job.job_id, confirm:true})
+              });
+              await refreshJobList();
+            } catch (error) { planOutput.textContent = 'Нельзя отметить план сверенным: ' + error.message; }
+          }, false, 'sa-danger'));
+        }
+        return row;
+      };
+      let jobsLoading = false;
+      let jobsTimer = null;
+      const refreshJobList = async () => {
+        if (jobsLoading) return;
+        jobsLoading = true;
+        try {
+          const response = await api('/v1/superagent/ssh/plan/jobs');
+          const jobs = (response.jobs || []).filter(job => job.node_id === node.node_id).slice(0, 8);
+          jobsPanel.replaceChildren();
+          if (!jobs.length) jobsPanel.append(element('p', 'sa-remote-note',
+            'Сохранённых SSH-планов для этого сервера нет.'));
+          jobs.forEach(job => jobsPanel.append(showJob(job)));
+          const newest = jobs[0];
+          if (newest) {
+            planOutput.textContent = 'Последний SSH-план: ' + (newest.status || 'unknown') +
+              '. Подтверждено шагов: ' + newest.confirmed_steps + '/' + newest.total +
+              '. Не начато: ' + newest.remaining_not_started +
+              '.\nИстория хранит только статусы; текст команд и вывод SSH не сохраняются.';
+          }
+        } catch (error) {
+          planOutput.textContent = 'Не удалось прочитать сохранённые SSH-планы: ' + error.message;
+        } finally {
+          jobsLoading = false;
+          if (jobsTimer !== null) clearTimeout(jobsTimer);
+          if (planBox.open && planBox.isConnected) {
+            jobsTimer = setTimeout(refreshJobList, 2500);
+          }
+        }
+      };
+      planBox.addEventListener('toggle', () => {
+        if (planBox.open) refreshJobList();
+        else if (jobsTimer !== null) { clearTimeout(jobsTimer); jobsTimer = null; }
+      });
       let preparedPlan = null;
       const executePlan = makeButton('Подтвердить и запустить весь план', async () => {
         if (!preparedPlan || requestInFlight) return;
@@ -714,29 +797,12 @@
               steps: active.steps, approval_token: active.token, confirm: true
             })
           });
-          const completed = response.ssh_plan || {};
-          const state = completed.status === 'completed'
-            ? 'ВСЕ ШАГИ ПРОШЛИ ЗАДАННЫЕ ПРОВЕРКИ'
-            : completed.status === 'uncertain'
-              ? 'РЕЗУЛЬТАТ ОДНОГО ИЗ ШАГОВ НЕИЗВЕСТЕН — повторять план нельзя без проверки'
-              : 'ПЛАН ОСТАНОВЛЕН — следующие команды не запускались';
-          let summary = state + '\n' +
-            'Подтверждено: ' + completed.confirmed_steps + ' из ' + completed.total +
-            ', не начато: ' + completed.remaining_not_started + '\n';
-          (completed.steps || []).forEach((step) => {
-            summary += '\nШАГ ' + (step.index + 1) + ': ' + String(step.verdict) +
-              '\nОсновная команда: код ' + String(step.action?.exit_code ?? 'неизвестен') +
-              '\nВывод: ' + String(step.action?.stdout || '').slice(0, 2500) +
-              '\nОшибки: ' + String(step.action?.stderr || '').slice(0, 1500) +
-              '\nПроверка: ' + (step.verification ?
-                'код ' + String(step.verification.exit_code) +
-                '\nВывод: ' + String(step.verification.stdout || '').slice(0, 2500) +
-                '\nОшибки: ' + String(step.verification.stderr || '').slice(0, 1500)
-                : 'не выполнялась') + '\n';
-          });
-          planOutput.textContent = summary;
-          planOutput.className = completed.status === 'completed'
-            ? 'sa-terminal-output' : 'sa-terminal-output sa-error';
+          const job = response.ssh_job || {};
+          if (!job.job_id) throw Error('Сервер не вернул идентификатор выполнения; проверьте список заданий.');
+          planOutput.textContent = 'SSH-план передан в фоновые задания. ID: ' + job.job_id +
+            '.\nХод выполнения доступен ниже, даже после обновления страницы. ' +
+            'Не отправляйте план повторно.';
+          await refreshJobList();
         } catch (error) {
           planOutput.textContent = 'СТАТУС ПЛАНА НЕИЗВЕСТЕН: ' + error.message +
             '\nНекоторые команды могли выполниться. Не повторяйте план до проверки состояния сервера.';
@@ -910,7 +976,8 @@
           expected_text: expectedInput.value
         }));
       planBox.append(planRows, addStepButton, copySingleStep, importTaskPlan,
-        preparePlan, planPreview, executePlan, planOutput);
+        preparePlan, planPreview, executePlan,
+        makeButton('Обновить выполнение', () => refreshJobList()), planOutput, jobsPanel);
       createPlanRow();
       const suggestions = element('details', 'sa-setup');
       suggestions.append(element('summary', '', 'Команды из готовых ответов SuperAgent'));
