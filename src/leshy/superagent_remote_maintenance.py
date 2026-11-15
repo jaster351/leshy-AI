@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import re
 import time
 from typing import Any, Callable
@@ -284,6 +285,17 @@ def run_remote_maintenance(app: Any, ticket: dict[str, Any],
     if not intent:
         return None
     owner = str(ticket.get("owner_id") or "").strip()
+    # The ticket creator must have been provider-authenticated BEFORE the
+    # ticket was submitted. A guest task cannot gain remote privileges later.
+    try:
+        mandate = json.loads(str(ticket.get("mandate_json") or "{}"))
+    except (ValueError, TypeError):
+        mandate = {}
+    if mandate.get("remote_authorized_at_creation") is not True:
+        return "blocked", (
+            "Удалённая операция не была подтверждена учётной записью "
+            "в момент создания поручения. Команды на сервер не отправлялись."
+        )
     if not module_enabled(app.storage, "remote-admin"):
         return "blocked", "Удалённое управление выключено в настройках Лешего. Никаких команд не выполнял."
     if not still_active():
