@@ -3,6 +3,7 @@ from __future__ import annotations
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 import json
+import os
 from urllib import parse
 
 from . import web_server_impl10 as previous
@@ -136,7 +137,13 @@ def make_handler(app, telegram, settings, model_catalog):
                 # Без Web-cookie переданный в JSON owner_id нельзя считать
                 # подтверждённым: иначе чужую память можно прочитать,
                 # подставив идентификатор другого профиля.
-                body["owner_id"] = "web:local"
+                expected_api_key = os.getenv("LESHY_API_TOKEN", "").strip()
+                api_authenticated = bool(
+                    expected_api_key
+                    and self.headers.get("Authorization", "") == f"Bearer {expected_api_key}"
+                )
+                if not api_authenticated:
+                    body["owner_id"] = "web:local"
             return body
 
         def do_GET(self):
