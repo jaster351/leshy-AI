@@ -18,6 +18,11 @@ def make_handler(app, telegram, settings, model_catalog):
     class Handler(Parent):
         def do_GET(self):
             path = parse.urlsplit(self.path).path
+            if path == "/v1/context/settings":
+                owner = self._settings_owner()
+                if owner is None:
+                    return
+                return self._json(HTTPStatus.OK, app.context_settings.status(app.llm))
             if path == "/torrent-parser-panel.js":
                 try:
                     return self._send_asset("torrent-parser-panel.js", "application/javascript; charset=utf-8")
@@ -32,6 +37,27 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             path = parse.urlsplit(self.path).path
+            if path == "/v1/context/settings":
+                owner = self._settings_owner()
+                if owner is None:
+                    return
+                if self.headers.get("X-Leshy-UI") != "context-settings":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Изменение настроек контекста доступно только через Web-интерфейс",
+                    })
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Недопустимый источник"})
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется application/json"})
+                try:
+                    data = self._body()
+                    mode = data.get("mode", "auto")
+                    level = data.get("level", 50)
+                    app.context_settings.save(mode=mode, level=level)
+                    return self._json(HTTPStatus.OK, app.context_settings.status(app.llm))
+                except (ValueError, TypeError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             actions = {
                 "/v1/torrent-parser/config", "/v1/torrent-parser/pair",
                 "/v1/torrent-parser/test",
