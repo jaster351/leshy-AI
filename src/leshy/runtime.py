@@ -3,6 +3,7 @@ from __future__ import annotations
 from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
 from .constitution_runtime import install_constitution_routing
+from .semantic_research_router import install_semantic_research_router
 from .config import Settings
 from .freshness_cache_runtime import install_freshness_cache_runtime
 from .freshness_memory_runtime import install_freshness_memory_runtime
@@ -29,6 +30,7 @@ class Runtime(LeshyApp):
         # повтор одного request_id не создавал второй ответ ни в одном интерфейсе.
         install_global_chat_idempotency()
         install_constitution_routing(LeshyApp)
+        install_semantic_research_router()
         super().__init__(settings or Settings.from_env())
         install_freshness_memory_runtime(self)
         self.learning_control = self.learning
