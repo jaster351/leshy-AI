@@ -45,6 +45,7 @@ _FIXED_UPGRADABLE_COUNT = (
     "LC_ALL=C /usr/bin/apt list --upgradable 2>/dev/null "
     "| /usr/bin/grep -c 'upgradable from' || true"
 )
+_FIXED_DPKG_AUDIT = "/usr/bin/dpkg --audit | /usr/bin/wc -c"
 _TIMEOUT_SECONDS = 1800
 
 
@@ -230,9 +231,15 @@ def _run_apt_update(policy: RemotePermissionPolicy, actor: VerifiedActor,
             code, line = _fixed_command(
                 transport, _FIXED_UPGRADABLE_COUNT, 12.0, None,
             )
+            audit_code, audit_bytes = _fixed_command(
+                transport, _FIXED_DPKG_AUDIT, 12.0, None,
+            )
         if code or not re.fullmatch(r"\d{1,6}", line):
             raise ValueError("Некорректный ответ apt")
+        if audit_code or not re.fullmatch(r"\d{1,6}", audit_bytes):
+            raise ValueError("Некорректный результат dpkg --audit")
         pending = int(line)
+        incomplete = int(audit_bytes)
     except Exception as exc:
         problem("superagent_apt_postcheck_failed", type(exc).__name__, node_id=node)
         return {
@@ -245,7 +252,14 @@ def _run_apt_update(policy: RemotePermissionPolicy, actor: VerifiedActor,
         "command_sha256": hashlib.sha256(_FIXED_UPGRADE.encode()).hexdigest(),
         "exit_code": rc,
         "pending_updates": pending,
+        "dpkg_audit_bytes": incomplete,
     })
+    if incomplete:
+        return {
+            "status": "blocked",
+            "report": f"apt на {node} завершился кодом 0, но dpkg --audit "
+                      "нашёл незавершённые операции. Сервер требует проверки.",
+        }
     if pending:
         return {
             "status": "blocked",
