@@ -108,6 +108,28 @@ class OperatingSystemController:
                 raise PermissionError(
                     "Управление ОС доступно только подтверждённому хозяину Telegram."
                 )
+        elif re.fullmatch(r"[0-9a-fA-F-]{36}", identity):
+            # Verified Telegram logins are canonicalized to a UUID by the
+            # identity runtime. Never treat that UUID (which may also belong
+            # to an anonymous Web guest) as proof of OS ownership.
+            telegram = getattr(self.app, "telegram", None)
+            service = getattr(self.app, "owner_identity", None)
+            check = getattr(telegram, "_is_owner", None)
+            authorized = False
+            if service is not None and callable(check):
+                try:
+                    profile = service.status(identity)
+                    authorized = any(
+                        check(str(link.get("user_id") or ""))
+                        for link in profile.get("telegram", [])
+                    )
+                except (ValueError, TypeError, KeyError):
+                    authorized = False
+            if not authorized:
+                raise PermissionError(
+                    "Управление ОС требует подтверждённого хозяина сервера. "
+                    "Привяжите Telegram в Web-профиле и настройте владельца."
+                )
 
     def is_request(self, message: str) -> bool:
         """A mention of Windows or the OS is not a request to control it.
