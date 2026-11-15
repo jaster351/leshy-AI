@@ -361,7 +361,7 @@ class RealtimeChatManager:
                         "Результаты текущего веб-поиска. Используй их для ответа, не выдавая непроверенное за факт:\n" + snippets,
                     ))
             except Exception as exc:
-                problem("chat_stream_search_failed", str(exc), query=message[:500])
+                problem("chat_stream_search_failed", type(exc).__name__, query_chars=len(message))
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + str(exc)))
 
         if search_attempted and not sources and not requires_verified_live_sources(search_query, str(plan.get("reason") or "")):
