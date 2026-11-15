@@ -149,6 +149,32 @@ def _handle_advanced(app, kind: str, payload: str, *, owner_id: str, session_id:
     raise ValueError(f"Неизвестный advanced route: {kind}")
 
 
+
+def _compose_memory_context(app, owner_id: str, original: str) -> str:
+    """Всегда сохранять проверенные правила базового профиля поверх Mem0 и GraphRAG."""
+    query = app.intelligent_memory.latest_user_query(owner_id)
+    blocks: list[str] = []
+    if original:
+        blocks.append(original)
+    if module_enabled(app.storage, "intelligent-memory"):
+        memory = app.intelligent_memory.context(owner_id, query, limit=8)
+        if memory:
+            # В исходном контексте уже есть постоянные правила и обычная память.
+            # Снова найденные записи не должны расходовать токены повторно.
+            extra = []
+            for line in memory.splitlines():
+                content = line.strip().removeprefix("- ").strip()
+                if content and (not original or content not in original):
+                    extra.append(line)
+            if extra:
+                blocks.append("Дополнительная интеллектуальная память:\n" + "\n".join(extra))
+    if module_enabled(app.storage, "knowledge-graph") and query:
+        graph = app.knowledge_graph.context(owner_id, query, limit=7)
+        if graph:
+            blocks.append("Связанные знания GraphRAG:\n" + graph)
+    return "\n\n".join(blocks)
+
+
 def install_advanced_modules(app_class, app=None) -> None:
     global _INSTALLED, _ORIGINAL_CHAT, _ORIGINAL_STREAM, _ORIGINAL_MEMORY_CONTEXT, _ORIGINAL_STOP_BACKGROUND
     if app is not None:
@@ -164,21 +190,8 @@ def install_advanced_modules(app_class, app=None) -> None:
 
     def memory_context(self, owner_id: str) -> str:
         _ensure_components(self)
-        query = self.intelligent_memory.latest_user_query(owner_id)
-        blocks: list[str] = []
-        if module_enabled(self.storage, "intelligent-memory"):
-            memory = self.intelligent_memory.context(owner_id, query, limit=8)
-            if memory:
-                blocks.append(memory)
-        else:
-            original = _ORIGINAL_MEMORY_CONTEXT(self, owner_id)
-            if original:
-                blocks.append(original)
-        if module_enabled(self.storage, "knowledge-graph") and query:
-            graph = self.knowledge_graph.context(owner_id, query, limit=7)
-            if graph:
-                blocks.append("Связанные знания GraphRAG:\n" + graph)
-        return "\n\n".join(blocks)
+        original = _ORIGINAL_MEMORY_CONTEXT(self, owner_id)
+        return _compose_memory_context(self, owner_id, original)
 
     def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None, **kwargs):
         _ensure_components(self)

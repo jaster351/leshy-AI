@@ -38,6 +38,8 @@ from .version import VERSION
 from .verified_clock import current_clock_context
 from .source_reading import read_supplied_source
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
+from .context_settings import ContextSettingsStore
+from .context_history import load_session_context
 
 
 def _inference_timeout(default: int) -> float:
@@ -60,6 +62,7 @@ class LeshyApp:
         self.github_facts = GitHubRepositoryEvidence()
         configure_diagnostics(self.settings.brain_dir, VERSION)
         self.storage = Storage(self.settings.database_path)
+        self.context_settings = ContextSettingsStore(self.settings.brain_dir)
         self.learning = LearningControl(self.storage, self.settings.idle_learning_enabled)
         self.knowledge = KnowledgeBase(self.storage, self.settings.min_trusted_confidence)
         self.knowledge.quarantine_corrupted()
@@ -195,6 +198,7 @@ class LeshyApp:
             candidates,
             cooldown_seconds=180,
             priority=("gpu", "npu", "cpu", "other"),
+            context_settings=self.context_settings,
         )
 
     def start_background(self) -> None:
@@ -400,10 +404,11 @@ class LeshyApp:
             count = conn.execute("SELECT COUNT(*) AS c FROM messages WHERE session_id=?", (sid,)).fetchone()["c"]
             if int(count) == 1:
                 conn.execute("UPDATE sessions SET title=?,updated_at=? WHERE id=?", (" ".join(message.split())[:80], now, sid))
-            rows = conn.execute(
-                "SELECT role,content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 24",
-                (sid,),
-            ).fetchall()
+            # Глобальная политика контекста применяется одинаково к Web,
+            # Telegram и обычным вызовам чата.
+            rows = load_session_context(
+                conn, sid, message, self.context_settings,
+            )
 
         # A direct preference request is a deterministic database operation,
         # never merely an LLM promise. The normal chat UI receives a receipt.

@@ -1,6 +1,7 @@
 """Owner-authenticated settings and pairing UI for Parser for Plex."""
 from __future__ import annotations
 
+import ipaddress
 from http import HTTPStatus
 from urllib import parse
 
@@ -16,8 +17,36 @@ def make_handler(app, telegram, settings, model_catalog):
     bridge = TorrentParserBridge(settings.brain_dir)
 
     class Handler(Parent):
+        def _context_settings_access(self) -> bool:
+            """Разрешить настройки доверенной Web-сессии или локальному владельцу."""
+            if not self._authorized():
+                self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API-авторизация"})
+                return False
+            getter = getattr(self, "_existing_web_owner", None)
+            owner = getter() if callable(getter) else ""
+            authenticated = bool(owner and owner != "web:local")
+            try:
+                local = ipaddress.ip_address(self.client_address[0]).is_loopback
+            except (ValueError, IndexError, TypeError, AttributeError):
+                local = False
+            if not authenticated and not local:
+                self._json(HTTPStatus.UNAUTHORIZED, {
+                    "error": "Настройка доступна владельцу после входа или локально",
+                })
+                return False
+            return True
+
         def do_GET(self):
             path = parse.urlsplit(self.path).path
+            if path == "/context-settings-panel.js":
+                try:
+                    return self._send_asset("context-settings-panel.js", "application/javascript; charset=utf-8")
+                except FileNotFoundError:
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Панель контекста не найдена"})
+            if path == "/v1/context/settings":
+                if not self._context_settings_access():
+                    return
+                return self._json(HTTPStatus.OK, app.context_settings.status(app.llm))
             if path == "/torrent-parser-panel.js":
                 try:
                     return self._send_asset("torrent-parser-panel.js", "application/javascript; charset=utf-8")
@@ -32,6 +61,26 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             path = parse.urlsplit(self.path).path
+            if path == "/v1/context/settings":
+                if not self._context_settings_access():
+                    return
+                if self.headers.get("X-Leshy-UI") != "context-settings":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Изменение настроек контекста доступно только через Web-интерфейс",
+                    })
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Недопустимый источник"})
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется application/json"})
+                try:
+                    data = self._body()
+                    mode = data.get("mode", "auto")
+                    level = data.get("level", 50)
+                    app.context_settings.save(mode=mode, level=level)
+                    return self._json(HTTPStatus.OK, app.context_settings.status(app.llm))
+                except (ValueError, TypeError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             actions = {
                 "/v1/torrent-parser/config", "/v1/torrent-parser/pair",
                 "/v1/torrent-parser/test",

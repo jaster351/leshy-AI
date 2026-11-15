@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from leshy.llm import ChatMessage
+from leshy.context_budget import apply_context_budget, estimate_tokens
 from leshy.realtime_chat import RealtimeChatManager
 from leshy.research import DdgsSearch
 from leshy.runtime_latency_fix import (
@@ -62,14 +63,19 @@ class RuntimeLatencyFixTests(unittest.TestCase):
         current = "Какая сегодня погода в Челябинске?"
         messages.append(ChatMessage("user", current))
 
-        compacted = compact_realtime_messages(messages)
-        total = sum(len(item.content) for item in compacted)
+        # Раннее ограничение 2600 символов отключено. Реальный backend
+        # выбирает бюджет токенов из n_ctx и резерва генерации.
+        prepared = compact_realtime_messages(messages)
+        self.assertEqual(prepared, messages)
+        self.assertEqual(REALTIME_CONTEXT_CHAR_BUDGET, 0)
+        result = apply_context_budget(prepared, context_size=4096, reserve_tokens=1024)
 
-        self.assertLessEqual(total, REALTIME_CONTEXT_CHAR_BUDGET)
-        self.assertEqual(compacted[-1].role, "user")
-        self.assertEqual(compacted[-1].content, current)
-        self.assertTrue(any("Результаты текущего веб-поиска" in item.content for item in compacted))
-        self.assertLess(len(compacted), len(messages))
+        self.assertLessEqual(result.tokens_after, result.budget)
+        self.assertLessEqual(estimate_tokens(result.messages), 3072)
+        self.assertEqual(result.messages[-1].role, "user")
+        self.assertEqual(result.messages[-1].content, current)
+        self.assertTrue(any("Результаты текущего веб-поиска" in item.content for item in result.messages))
+        self.assertLess(len(result.messages), len(messages))
 
     def test_short_context_is_unchanged(self):
         messages = [
