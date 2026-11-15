@@ -171,30 +171,23 @@
       <div class="item-meta" style="margin:5px 0">Google, Apple и VK ID: вход не включён. Для Web OAuth необходима регистрация приложения и допустимый адрес возврата; обычный LAN-IP не является таким адресом. Вход по IP и привязка Telegram продолжают работать независимо.</div>
       ${providerDetails}
       <div class="divider"></div>
-      <div class="item-title">Войти через Telegram</div>
-      <div class="item-meta" style="margin:6px 0">Без внешнего домена. Откройте бота и подтвердите вход кнопкой после проверки кода на экране. Гостевые диалоги сохраняются.</div>
-      ${data.telegram_login_button_available?'<button class="button small" id="ownerIdentityTelegramLogin">Войти через Telegram</button>':'<div class="item-meta warn">Чтобы войти через Telegram, настройте бот и дождитесь подключения.</div>'}
-      <div id="ownerIdentityTelegramLoginBox" class="item-meta" style="margin:9px 0"></div>
-      <div class="divider"></div>
-      <div class="item-title">Привязка Telegram (резервный способ)</div>
+      <div class="item-title">Telegram</div>
       ${linked?`
-        <div class="item-meta good" style="margin-top:6px">✓ Привязан: ${esc(who||('ID '+linked.user_id))}</div>
+        <div class="item-meta good" style="margin-top:7px">✓ Подключён: ${esc(who||('Telegram ID '+linked.user_id))}</div>
         <div class="item-meta">Telegram ID: ${esc(linked.user_id)}</div>
-        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px"><button class="button secondary small" id="ownerIdentityUnlink">Отвязать Telegram</button></div>
+        <button class="button secondary small" style="margin-top:9px" id="ownerIdentityUnlink">Отвязать Telegram</button>
       `:`
-        <div class="item-meta warn" style="margin-top:6px">Telegram пока не привязан к этому Web-профилю.</div>
-        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px"><button class="button small" id="ownerIdentityLink">Привязать Telegram / войти</button></div>
+        <div class="item-meta" style="margin:7px 0">Войдите через бота и подтвердите код. Леший автоматически привяжет Telegram к гостевому профилю или откроет ранее созданный аккаунт. Регистрация и внешний домен не требуются.</div>
+        ${data.telegram_login_button_available?'<button class="button small" id="ownerIdentityTelegramLogin">Войти через Telegram</button>':'<div class="item-meta warn">Бот Telegram не подключён. Пока можно пользоваться гостевым Web-профилем.</div>'}
       `}
-      <div id="ownerIdentityLinkBox" style="margin-top:9px"></div>
-      <div class="item-meta" style="margin-top:10px">Другие пользователи могут общаться с Лешим в Telegram без Web-авторизации. Пока они сами не привяжут профиль, у каждого остаётся отдельная сессия и отдельный owner.</div>
-      <div class="item-meta" style="margin-top:5px">Привязка объединяет Web, Telegram, память и подключённые сервисы. Telegram username используется только для отображения; идентичность подтверждается неизменяемым Telegram user_id.</div>`;
+      <div id="ownerIdentityTelegramLoginBox" class="item-meta" style="margin:9px 0"></div>
+      <div class="item-meta" style="margin-top:10px">Без входа у каждого посетителя сохраняются собственные диалоги. После подтверждения Telegram переписка текущего гостя сохраняется; чужие профили не смешиваются.</div>`;
     document.getElementById('ownerIdentitySetGravatar')?.addEventListener('click',setGravatar);
     document.getElementById('ownerIdentityClearGravatar')?.addEventListener('click',clearGravatar);
     document.getElementById('ownerIdentityBrowserPair')?.addEventListener('click',startBrowserPair);
     document.getElementById('ownerIdentityBrowserAccept')?.addEventListener('click',acceptBrowserPair);
     document.getElementById('ownerIdentityAvatar')?.addEventListener('error',e=>e.target.style.display='none');
     document.getElementById('ownerIdentityTelegramLogin')?.addEventListener('click',startTelegramLogin);
-    document.getElementById('ownerIdentityLink')?.addEventListener('click',startLink);
     document.getElementById('ownerIdentityUnlink')?.addEventListener('click',()=>unlink(linked.user_id));
   }
 
@@ -321,31 +314,13 @@
     }catch(error){status('Не удалось начать вход: '+error.message);}
   }
 
-  async function startLink(){
-    status('Создаю одноразовый код…');
-    try{
-      const data=await api('/v1/identity/telegram/link',{method:'POST',body:JSON.stringify({owner_id:ownerId()})});
-      const box=document.getElementById('ownerIdentityLinkBox');if(!box)return;
-      const deep=data.deep_link?`<a class="button small" style="display:inline-block;text-decoration:none" target="_blank" rel="noopener noreferrer" href="${esc(data.deep_link)}">Открыть Telegram</a>`:'';
-      box.innerHTML=`<div class="item" style="margin-top:7px"><div class="item-title">Код: <span class="mono" style="font-size:15px">${esc(data.code)}</span></div><div class="item-body">Отправьте боту команду <span class="mono">/link ${esc(data.code)}</span> или откройте Telegram кнопкой ниже. Код действует 5 минут и используется один раз.</div><div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">${deep}<button class="button secondary small" id="ownerIdentityCopyCode">Копировать код</button></div></div>`;
-      document.getElementById('ownerIdentityCopyCode')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(String(data.code));status('Код скопирован.')}catch(_e){status('Не удалось скопировать код.')}});
-      status(data.telegram_already_linked?'Подтвердите в Telegram — этот браузер войдёт в Ваш существующий профиль.':'Жду подтверждение из Telegram…');
-      clearInterval(pollTimer);let ticks=0;
-      pollTimer=setInterval(async()=>{
-        ticks++;
-        const profile=await loadIdentity({reloadIfChanged:true});
-        if(profile&&profile.telegram_linked){clearInterval(pollTimer);pollTimer=null;}
-        if(ticks>155){clearInterval(pollTimer);pollTimer=null;status('Время кода истекло. Создайте новый код.');}
-      },2000);
-    }catch(error){status('Не удалось создать код: '+error.message);}
-  }
-
   async function unlink(userId){
     if(!window.confirm('Отвязать Telegram от этого Web-профиля? В Telegram снова будет отдельная сессия.'))return;
     status('Отвязываю Telegram…');
     try{
       const data=await api('/v1/identity/telegram/unlink',{method:'POST',body:JSON.stringify({owner_id:ownerId(),telegram_user_id:String(userId||'')})});
-      render(data);status('Telegram отвязан. Его дальнейшие сообщения снова будут отдельным профилем.');
+      await loadIdentity({reloadIfChanged:false});
+      status('Telegram отвязан. Гостевые чаты Web остаются доступны в этом браузере.');
     }catch(error){status('Ошибка: '+error.message);}
   }
 
