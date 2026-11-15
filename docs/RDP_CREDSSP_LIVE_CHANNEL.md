@@ -1,4 +1,4 @@
-# RDP: единый TLS-канал для CredSSP без передачи пароля
+# RDP: единый TLS-канал для CredSSP и отдельно разрешаемой передачи пароля
 
 Новый модуль: `src/leshy/rdp_credssp_channel.py`.
 
