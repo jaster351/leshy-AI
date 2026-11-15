@@ -43,6 +43,20 @@ class TelegramAccessTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "хозяина"):
                 bridge.configure("", [], allow_all=True, owner_id="")
 
+    def test_reject_browser_uuid_as_telegram_owner_without_mutating_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            _, bridge, _, _ = self.make_bridge(Path(temp))
+            bridge.configure("", ["100"], owner_id="100")
+            original_allowed = bridge.allowed_path.read_text(encoding="utf-8")
+            uuid_owner = "8d058c7a-88b9-4dba-974c-d4a970a13c8a"
+            with self.assertRaisesRegex(ValueError, "числовой Telegram ID"):
+                bridge.configure("", ["200"], owner_id=uuid_owner)
+            self.assertEqual(bridge.status()["owner_id"], "100")
+            self.assertEqual(bridge.allowed_path.read_text(encoding="utf-8"), original_allowed)
+            with self.assertRaisesRegex(ValueError, "числовой Telegram ID"):
+                bridge._save_access(allow_all=False, owner_id=uuid_owner)
+            self.assertEqual(bridge.status()["owner_id"], "100")
+
     def test_allow_all_allows_chat_but_not_admin_for_stranger(self):
         with tempfile.TemporaryDirectory() as temp:
             app, bridge, sent, answers = self.make_bridge(Path(temp))
