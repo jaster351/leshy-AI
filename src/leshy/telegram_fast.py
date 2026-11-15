@@ -424,14 +424,19 @@ class FastTelegramBridge(RichTelegramBridge):
             return
 
         owner = self._is_owner(user_id)
+        from .role_authority import role_for_telegram, ROLE_DISPLAY
+        verified_role = role_for_telegram(self, user_id)
         # Распознаём владельца по проверенному Telegram ID, не по имени,
         # аватарке, пересланному сообщению или тексту «я хозяин».
         from .identity_runtime import CREATOR_FULL_NAME, is_owner_identity_question
         if is_owner_identity_question(text):
-            if owner:
-                self._send(chat_id, f"Вы — {CREATOR_FULL_NAME}, создатель и хозяин Лешего.")
+            if verified_role == "creator":
+                self._send(chat_id, "Ваш Telegram ID подтверждён как Создатель Федерации Леших." +
+                           (" Вы также хозяин этого сервера." if owner else " Это не даёт доступа к чужим серверам без разрешения их владельца."))
+            elif owner:
+                self._send(chat_id, f"Вы подтверждены как хозяин этого сервера. Создатель проекта — {CREATOR_FULL_NAME}.")
             else:
-                self._send(chat_id, "Я вижу ваш Telegram ID, но он не назначен хозяином Лешего. Проверить настройку можно через /status.")
+                self._send(chat_id, "Вы сейчас пользователь этого сервера. Имя, сообщение или Web-гость сами по себе не предоставляют административных прав. Проверьте привязку Telegram в профиле Web.")
             return
         command = text.split(maxsplit=1)[0].lower()
         if command in _ADMIN_COMMANDS and not owner:
@@ -446,9 +451,25 @@ class FastTelegramBridge(RichTelegramBridge):
                 self._send(chat_id, "Управление операционной системой доступно только хозяину Лешего.")
                 return
 
+        if text in {"/whoami", "/id"}:
+            if chat.get("type") != "private":
+                self._send(chat_id, "Проверяйте Telegram ID в личном чате с ботом: /whoami")
+            else:
+                self._send(chat_id, f"Ваш Telegram ID: {user_id}\nРоль: {ROLE_DISPLAY.get(verified_role, 'пользователь')}\nХозяин этого сервера: {'да' if owner else 'нет'}")
+            return
         if text == "/status":
             status = self.app.status()
-            self._send(chat_id, f"Леший {status['version']}\nМодель: {status['model']}\nСамообучение: {'ВКЛ' if status['learning_enabled'] else 'ВЫКЛ'}\nРоль: {'хозяин' if owner else 'пользователь'}\nTelegram realtime: ВКЛ")
+            extra = ""
+            if not owner and verified_role != "creator":
+                extra = "\nЧтобы получить права на собственном компьютере, привяжите Telegram в Web-профиле и подтвердите владельца на локальном ПК. Команда /whoami покажет Ваш ID."
+            self._send(
+                chat_id,
+                f"Леший {status['version']}\nМодель: {status['model']}\n"
+                f"Самообучение: {'ВКЛ' if status['learning_enabled'] else 'ВЫКЛ'}\n"
+                f"Роль: {ROLE_DISPLAY.get(verified_role, 'пользователь')}\n"
+                f"Хозяин этого сервера: {'да' if owner else 'нет'}\n"
+                f"Telegram realtime: ВКЛ" + extra,
+            )
             return
         if text == "/learning_on":
             self.app.set_learning(True); self._send(chat_id, "Самообучение включено."); return
