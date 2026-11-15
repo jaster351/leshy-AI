@@ -8,7 +8,10 @@ send full personal conversations or user identifiers to logs or search queries.
 from __future__ import annotations
 
 from datetime import date, datetime
+from hashlib import sha256
+from collections import OrderedDict
 import re
+import threading
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -68,6 +71,10 @@ def _items(rows: list[Any], role: str) -> list[str]:
     return result
 
 
+_SEMANTIC_CACHE: OrderedDict[str, bool] = OrderedDict()
+_SEMANTIC_CACHE_LOCK = threading.Lock()
+_SEMANTIC_CACHE_MAX = 96
+
 _SEMANTIC_RECHECK_GUIDANCE = (
     "Определи смысл ПОСЛЕДНЕЙ реплики пользователя на фоне предыдущего "
     "фактического утверждения ассистента. Ответь ровно одним словом: "
@@ -107,6 +114,11 @@ def is_factual_challenge(
         text,
     ):
         return False
+    key = sha256((past[0][:340] + "\0" + text).encode("utf-8")).hexdigest()
+    with _SEMANTIC_CACHE_LOCK:
+        if key in _SEMANTIC_CACHE:
+            _SEMANTIC_CACHE.move_to_end(key)
+            return _SEMANTIC_CACHE[key]
     try:
         from .semantic_research_router import _resident_model, _short_local_inference
         if not _resident_model(app):
@@ -119,7 +131,13 @@ def is_factual_challenge(
         reply = _short_local_inference(
             app, prompt, guidance=_SEMANTIC_RECHECK_GUIDANCE,
         )
-        return bool(re.fullmatch(r"(?i)\s*RECHECK\s*[.!]?\s*", reply))
+        result = bool(re.fullmatch(r"(?i)\s*RECHECK\s*[.!]?\s*", reply))
+        with _SEMANTIC_CACHE_LOCK:
+            _SEMANTIC_CACHE[key] = result
+            _SEMANTIC_CACHE.move_to_end(key)
+            while len(_SEMANTIC_CACHE) > _SEMANTIC_CACHE_MAX:
+                _SEMANTIC_CACHE.popitem(last=False)
+        return result
     except Exception:
         return False
 
