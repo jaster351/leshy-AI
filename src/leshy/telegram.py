@@ -204,7 +204,10 @@ class TelegramBridge:
         return default
 
     def _save_access(self, *, allow_all: bool, owner_id: str) -> None:
-        payload = {"allow_all": bool(allow_all), "owner_id": str(owner_id or "").strip()}
+        owner = str(owner_id or "").strip()
+        if owner and not re.fullmatch(r"[1-9][0-9]{1,19}", owner):
+            raise ValueError("Хозяин Telegram должен иметь числовой Telegram ID, а не Web UUID")
+        payload = {"allow_all": bool(allow_all), "owner_id": owner}
         tmp = self.access_path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, self.access_path)
@@ -223,8 +226,6 @@ class TelegramBridge:
         infer_owner_from_allowed: bool = True,
     ) -> None:
         token = str(token or "").strip()
-        if token:
-            save_secret(self.token_path, token)
         allowed = sorted({str(value).strip() for value in allowed_users if str(value).strip()})
         # When Web saves token/allow-list without specifying a new owner,
         # preserve the already verified server owner across updates.
@@ -234,8 +235,12 @@ class TelegramBridge:
         # a singleton allow-list. The public Web endpoint disables this.
         if not owner and len(allowed) == 1 and infer_owner_from_allowed:
             owner = allowed[0]
+        if owner and not re.fullmatch(r"[1-9][0-9]{1,19}", owner):
+            raise ValueError("Хозяин Telegram должен иметь числовой Telegram ID, а не Web UUID")
         if allow_all and not owner:
             raise ValueError("Для режима «отвечать всем» укажите Telegram ID хозяина")
+        if token:
+            save_secret(self.token_path, token)
         self.allowed_path.write_text("\n".join(allowed) + ("\n" if allowed else ""), encoding="utf-8")
         try:
             os.chmod(self.allowed_path, 0o600)
