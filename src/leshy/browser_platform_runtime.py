@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import re
+import threading
 from threading import RLock
 from typing import Any, Iterator
 from urllib.parse import urlparse
