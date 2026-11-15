@@ -123,6 +123,8 @@ class TelegramBrowserLogin:
         sender_id = str(telegram_user_id or "")
         if not re.fullmatch(r"[A-Za-z0-9_-]{20,45}", key) or not sender_id.isdecimal():
             raise ValueError("Некорректное подтверждение")
+        if str(sender.get("id") or "") != sender_id:
+            raise PermissionError("Подтверждение не принадлежит отправителю Telegram")
         now = time.time()
         with self.storage.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
