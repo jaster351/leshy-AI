@@ -378,6 +378,10 @@ def source_dispute_requires_review(
     # No citation means the model may be relying on its own former answer.
     if not linked:
         return True
+    # A legitimate correction may quote the former mistake to explain why it
+    # was wrong. Don't discard that new answer just for mentioning old words.
+    if re.search(r"(?i)(?:ошибк|ошибал|ошибс|исправля|неверн|неправильн|уточняю|неs+соответств)", answer):
+        return False
     # Citing a site without reconsidering an identical old answer is not enough.
     return bool(
         len(old_value) >= 25
