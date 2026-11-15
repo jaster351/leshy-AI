@@ -66,7 +66,36 @@ def make_handler(app, telegram, settings, model_catalog):
             )
 
         def _existing_web_owner(self) -> str:
-            return identity.owner_for_web_cookie(self._cookie_value(identity.cookie_name))
+            return (
+                str(getattr(self, "_guest_owner_id", "") or "")
+                or identity.owner_for_web_cookie(self._cookie_value(identity.cookie_name))
+            )
+
+        def _token_authenticated(self) -> bool:
+            # Explicit machine-to-machine API clients keep their bearer-token
+            # identity contract. A browser without a token is always a guest.
+            token = os.getenv("LESHY_API_TOKEN", "").strip()
+            return bool(token and self.headers.get("Authorization", "") == f"Bearer {token}")
+
+        def _existing_or_guest_owner(self) -> str:
+            owner = self._existing_web_owner()
+            if owner:
+                return owner
+            if self._token_authenticated():
+                return ""
+            owner, cookie, _ = identity.ensure_web_session("", "web:local")
+            self._guest_owner_id = owner
+            self._guest_cookie = cookie
+            return owner
+
+        def end_headers(self):
+            # Parent APIs call self._json() and streaming endpoints send their
+            # own headers. Attach the newly created guest cookie to either one.
+            cookie = getattr(self, "_guest_cookie", None)
+            if cookie and not getattr(self, "_guest_cookie_sent", False):
+                self.send_header("Set-Cookie", self._identity_cookie_header(cookie))
+                self._guest_cookie_sent = True
+            return super().end_headers()
 
         def _identity_cookie_header(self, new_cookie: str | None) -> str:
             if not new_cookie:
@@ -107,43 +136,54 @@ def make_handler(app, telegram, settings, model_catalog):
             return payload
 
         def _rewrite_owner_query(self) -> None:
-            owner_id = self._existing_web_owner()
-            if not owner_id:
-                return
             parsed = parse.urlparse(self.path)
             if not parsed.path.startswith("/v1/"):
                 return
+            owner_id = self._existing_or_guest_owner()
+            if not owner_id:  # explicitly authenticated API client
+                return
             pairs = parse.parse_qsl(parsed.query, keep_blank_values=True)
             changed = False
+            has_owner = False
             rewritten = []
             for key, value in pairs:
                 if key == "owner_id":
                     value = owner_id
+                    has_owner = True
                     changed = True
                 rewritten.append((key, value))
+            # Never use the shared 'web:local' fallback for owner-scoped
+            # endpoints even when the browser omitted the owner_id parameter.
+            if not has_owner and parsed.path in {
+                "/v1/overview", "/v1/history", "/v1/sessions", "/v1/memories",
+                "/v1/tasks",
+            }:
+                rewritten.append(("owner_id", owner_id))
+                changed = True
             if changed:
-                self.path = parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, parse.urlencode(rewritten), parsed.fragment))
+                self.path = parse.urlunparse((
+                    parsed.scheme, parsed.netloc, parsed.path, parsed.params,
+                    parse.urlencode(rewritten), parsed.fragment,
+                ))
 
         def _body(self):
             body = super()._body()
             if not isinstance(body, dict):
                 return body
-            owner_id = self._existing_web_owner()
             path = parse.urlparse(self.path).path
-            # Для Web-чата серверная cookie имеет приоритет над owner_id из JSON.
-            if owner_id and (path in {"/v1/chat", "/v1/chat/stream"} or "owner_id" in body):
+            if not path.startswith("/v1/"):
+                return body
+            owner_id = self._existing_or_guest_owner()
+            if not owner_id:
+                return body  # independently authenticated API token
+            owner_scoped = path in {
+                "/v1/chat", "/v1/chat/stream", "/v1/memory", "/v1/tasks",
+                "/v1/tasks/update", "/v1/sessions/update", "/v1/sessions/delete",
+            }
+            # Only the server-issued session identifies a Web guest. Never
+            # trust a caller-provided owner_id or default to shared web:local.
+            if owner_scoped or ("owner_id" in body and path != "/v1/telegram/config"):
                 body["owner_id"] = owner_id
-            elif not owner_id and path in {"/v1/chat", "/v1/chat/stream"}:
-                # Без Web-cookie переданный в JSON owner_id нельзя считать
-                # подтверждённым: иначе чужую память можно прочитать,
-                # подставив идентификатор другого профиля.
-                expected_api_key = os.getenv("LESHY_API_TOKEN", "").strip()
-                api_authenticated = bool(
-                    expected_api_key
-                    and self.headers.get("Authorization", "") == f"Bearer {expected_api_key}"
-                )
-                if not api_authenticated:
-                    body["owner_id"] = "web:local"
             return body
 
         def do_GET(self):
