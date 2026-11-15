@@ -122,7 +122,7 @@ class LeshyApp:
         if backend != "native":
             raise ValueError(f"Неизвестный LLM backend: {backend}")
 
-        cpu_llm = NativeGGUFLLM(self.model_path, n_ctx=self.settings.native_context_size, n_gpu_layers=0, ensure_model=self._require_model)
+        cpu_llm = NativeGGUFLLM(self.model_path, n_ctx=self.settings.native_context_size, n_gpu_layers=0, ensure_model=self._require_model, brain_dir=self.settings.brain_dir)
         cpu_server = LlamaServerLLM(
             self.accelerator_runtime,
             "cpu",
@@ -185,6 +185,7 @@ class LeshyApp:
                         n_ctx=self.settings.native_context_size,
                         n_gpu_layers=-1,
                         ensure_model=self._require_model,
+                        brain_dir=self.settings.brain_dir,
                     ),
                 ))
             candidates.append(("cpu-native", cpu_llm))
