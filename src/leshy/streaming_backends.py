@@ -383,7 +383,7 @@ def _adaptive_stream(self, messages, *, cancel_event: threading.Event | None = N
         # Отказ оценки контекста не означает, что backend недоступен.
         # Не переводим живой Vulkan/OpenVINO в cooldown за длинный prompt.
         try:
-            budgeted = self._budget_for(state, prepared)
+            budgeted = self._budget_for(state, prepared, getattr(self, 'context_settings', None))
         except LLMUnavailable as exc:
             event("adaptive_llm_stream_context_rejected", backend=state.name)
             errors.append(f"{state.name}: {str(exc)[:180]}")
