@@ -61,8 +61,8 @@ def contextual_search_query(message: str, history: list) -> tuple[str, bool]:
     # A separate cross-check must be explicitly requested.
     if supplied_public_url(text):
         crosscheck = bool(re.search(
-            r"(?i)(?:друг(?:ие|их|ой)\\s+источник|независим\\w*\\s+провер|"
-            r"сравни\\s+с\\s+друг|также\\s+поищи\\s+в\\s+интернете)",
+            r"(?i)(?:друг(?:ие|их|ой)\s+источник|независим\w*\s+провер|"
+            r"сравни\s+с\s+друг|также\s+поищи\s+в\s+интернете)",
             text,
         ))
         return text, crosscheck
