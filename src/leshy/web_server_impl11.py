@@ -3,6 +3,7 @@ from __future__ import annotations
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 import json
+import os
 from urllib import parse
 
 from . import web_server_impl10 as previous
@@ -133,11 +134,15 @@ def make_handler(app, telegram, settings, model_catalog):
             if owner_id and (path in {"/v1/chat", "/v1/chat/stream"} or "owner_id" in body):
                 body["owner_id"] = owner_id
             elif not owner_id and path in {"/v1/chat", "/v1/chat/stream"}:
-                # Без cookie обычный чат остаётся совместимым, но нельзя
-                # подменить владельца при создании опасного Browser Approval.
-                from .browser_platform_runtime import parse_browser_conversation_intent
-                intent = parse_browser_conversation_intent(str(body.get("message") or ""))
-                if intent is not None and intent.kind in {"commit", "financial"}:
+                # Без Web-cookie переданный в JSON owner_id нельзя считать
+                # подтверждённым: иначе чужую память можно прочитать,
+                # подставив идентификатор другого профиля.
+                expected_api_key = os.getenv("LESHY_API_TOKEN", "").strip()
+                api_authenticated = bool(
+                    expected_api_key
+                    and self.headers.get("Authorization", "") == f"Bearer {expected_api_key}"
+                )
+                if not api_authenticated:
                     body["owner_id"] = "web:local"
             return body
 

@@ -188,6 +188,9 @@ class RealtimeChatManager:
                     "SELECT role,content FROM messages WHERE session_id=? "
                     "ORDER BY id DESC LIMIT 24", (sid,),
                 ).fetchall()
+        recall = getattr(self.app, "semantic_recall", None)
+        if recall is not None:
+            recall.schedule(owner_id)
         return sid, rows
 
     def _search_plan(self, message: str) -> dict[str, Any]:
@@ -228,6 +231,7 @@ class RealtimeChatManager:
         *,
         search_plan: dict[str, Any] | None = None,
         lookup_query: str | None = None,
+        session_id: str | None = None,
     ) -> tuple[list[ChatMessage], list[dict[str, str]], bool]:
         context: list[ChatMessage] = [
             ChatMessage(
@@ -279,6 +283,18 @@ class RealtimeChatManager:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
 
         search_query = lookup_query or message
+        recall = getattr(self.app, "semantic_recall", None)
+        if recall is not None:
+            try:
+                evidence = recall.context(
+                    owner_id, search_query, session_id=session_id or "",
+                    exclude_ids=[row["id"] for row in rows if "id" in row.keys()],
+                )
+                if evidence:
+                    context.append(ChatMessage("system", evidence))
+            except Exception as exc:
+                problem("semantic_recall_context_failed", type(exc).__name__)
+
         if search_query != message:
             context.append(ChatMessage(
                 "system", "Текущий запрос пользователя уточняет тему из этого же диалога: "
@@ -677,6 +693,7 @@ class RealtimeChatManager:
 
             messages, sources, search_attempted = self._build_context(
                 message, owner_id, rows, search_plan=plan, lookup_query=lookup_query,
+                session_id=sid,
             )
             layout_hint = layout_context(message)
             if layout_hint:

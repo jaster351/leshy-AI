@@ -29,6 +29,7 @@ dependencies = [
   "PySocks>=1.7.1,<2",
   "cryptography>=43,<47",
   "paramiko>=3.5,<5",
+  "fastembed>=0.8,<1",
 ]
 
 [project.optional-dependencies]

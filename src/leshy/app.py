@@ -40,6 +40,7 @@ from .source_reading import read_supplied_source
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
 from .context_settings import ContextSettingsStore
 from .context_history import load_session_context
+from .semantic_recall import SemanticDialogueRecall
 
 
 def _inference_timeout(default: int) -> float:
@@ -62,6 +63,7 @@ class LeshyApp:
         self.github_facts = GitHubRepositoryEvidence()
         configure_diagnostics(self.settings.brain_dir, VERSION)
         self.storage = Storage(self.settings.database_path)
+        self.semantic_recall = SemanticDialogueRecall(self.storage, self.settings.brain_dir)
         self.context_settings = ContextSettingsStore(self.settings.brain_dir)
         self.learning = LearningControl(self.storage, self.settings.idle_learning_enabled)
         self.knowledge = KnowledgeBase(self.storage, self.settings.min_trusted_confidence)
@@ -409,6 +411,7 @@ class LeshyApp:
             rows = load_session_context(
                 conn, sid, message, self.context_settings,
             )
+        self.semantic_recall.schedule(owner_id)
 
         # A direct preference request is a deterministic database operation,
         # never merely an LLM promise. The normal chat UI receives a receipt.
@@ -558,6 +561,15 @@ class LeshyApp:
         memory_context = self._memory_context(owner_id)
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
+        try:
+            recall = self.semantic_recall.context(
+                owner_id, lookup_query, session_id=sid,
+                exclude_ids=[row["id"] for row in rows if "id" in row.keys()],
+            )
+            if recall:
+                context.append(ChatMessage("system", recall))
+        except Exception as exc:
+            problem("semantic_recall_context_failed", type(exc).__name__)
 
         trusted = self.knowledge.search(lookup_query, trusted_only=True, limit=5)
         candidates = self.knowledge.search_candidates(lookup_query, limit=5)
@@ -712,6 +724,7 @@ class LeshyApp:
             "logs_dir": str(self.settings.brain_dir / "logs"),
             "learning_enabled": self.learning.is_enabled(),
             "learning_worker": self.self_learning.status(),
+            "semantic_recall": self.semantic_recall.status(),
             "telegram": self.telegram.status() if self.telegram is not None else {"configured": False, "running": False},
             "stats": stats,
             "hardware": hardware,
