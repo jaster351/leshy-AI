@@ -144,6 +144,8 @@
       ${profile.provider==='telegram'?'<div class="item-meta good">✓ Подтверждён через Telegram</div>':'<div class="item-meta">Гостевой доступ: регистрация для общения не требуется.</div>'}
       ${displayAvatar?`<img src="${esc(displayAvatar)}" alt="Фото профиля" referrerpolicy="no-referrer" width="54" height="54" style="border-radius:50%;object-fit:cover;margin:6px 0">`:''}
       <div class="row"><span>Owner ID</span><span class="mono" title="${esc(data.owner_id||'')}">${esc(shortId(data.owner_id))}</span></div>
+      <div class="row"><span>Проверенная роль</span><b>${esc(data.verified_role_label||'пользователь')}</b></div>
+      ${data.creator_bootstrap_available?'<div class="item-meta" style="margin:8px 0">После подтверждения входа через Telegram Вы можете зарегистрировать Создателя на ЭТОМ компьютере. Для этого нужно открыть Web через localhost. Это не даёт доступа к чужим серверам.</div><button class="button small" id="ownerIdentityClaimCreator">Назначить меня Создателем</button>':''}
       ${profile.provider==='telegram'?`
         ${profile.username?`<div class="row"><span>Telegram</span><b>@${esc(profile.username)}</b></div>`:''}
         ${profile.language_code?`<div class="row"><span>Язык профиля</span><b>${esc(profile.language_code)}</b></div>`:''}
@@ -189,6 +191,7 @@
     document.getElementById('ownerIdentityAvatar')?.addEventListener('error',e=>e.target.style.display='none');
     document.getElementById('ownerIdentityTelegramLogin')?.addEventListener('click',startTelegramLogin);
     document.getElementById('ownerIdentityUnlink')?.addEventListener('click',()=>unlink(linked.user_id));
+    document.getElementById('ownerIdentityClaimCreator')?.addEventListener('click',claimCreator);
   }
 
   async function loadIdentity({reloadIfChanged=true}={}){
@@ -227,6 +230,16 @@
       status(data.telegram_linked?'Web и Telegram используют единый профиль.':'Гостевой профиль сохранён. Можно общаться без авторизации.');
       return data;
     }catch(error){status('Ошибка профиля: '+error.message);return null;}
+  }
+
+  async function claimCreator(){
+    if(!window.confirm('Подтвердить назначение этого проверенного Telegram-аккаунта Создателем Федерации на ДАННОМ компьютере?'))return;
+    status('Проверяю Telegram и локальные полномочия…');
+    try{
+      await api('/v1/identity/creator/claim',{method:'POST',body:JSON.stringify({confirm:'I_AM_CREATOR'})});
+      await loadIdentity({reloadIfChanged:false});
+      status('Создатель назначен на этом компьютере. В Telegram команда /status покажет роль «создатель».');
+    }catch(error){status('Назначение роли не выполнено: '+error.message);}
   }
 
   async function setGravatar(){
