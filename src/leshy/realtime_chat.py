@@ -23,7 +23,7 @@ from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
 from .verified_clock import current_clock_context, grounded_countdown_answer
 from .source_reading import read_supplied_source, supplied_public_url
-from .fact_recheck import is_factual_challenge, recent_user_source, recheck_instruction, grounded_release_from_context
+from .fact_recheck import is_factual_challenge, recent_user_source, recheck_instruction, grounded_release_from_context, source_dispute_requires_review, source_dispute_instruction, source_dispute_fallback
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
 from .context_history import load_session_context
 
@@ -853,6 +853,26 @@ class RealtimeChatManager:
                 if grounded is not None:
                     answer = grounded
                     event("chat_countdown_grounded", request_id=rid, source_count=len(sources))
+            if not stopped and source_dispute_requires_review(message, rows, sources, answer):
+                try:
+                    instruction = ChatMessage(
+                        "system", source_dispute_instruction(sources),
+                    )
+                    revised_parts = []
+                    for delta in self._llm_stream(messages + [instruction], cancel, owner_id):
+                        if cancel.is_set():
+                            break
+                        revised_parts.append(str(delta or ""))
+                    if not cancel.is_set():
+                        revised = "".join(revised_parts).strip()
+                        answer = (
+                            revised if revised and not source_dispute_requires_review(
+                                message, rows, sources, revised,
+                            ) else source_dispute_fallback(sources)
+                        )
+                except Exception as exc:
+                    problem("source_dispute_recheck_failed", type(exc).__name__)
+                    answer = source_dispute_fallback(sources)
             if not stopped and search_attempted and not (is_casual_checkin(message) or is_local_dialogue_request(message)) and self.app._answer_needs_research(answer):
                 event("chat_stream_web_refusal_detected", request_id=rid, source_count=len(sources))
                 if sources:
