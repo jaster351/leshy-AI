@@ -48,7 +48,7 @@ def prepare_ssh_command(policy: Any, actor: Any, node: str,
     normalized_node = check_terminal_permission(policy, actor, node)
     name = _file(credential_file)
     digest = _digest(command)
-    if approval_kind not in {"terminal-command", "checked-step", "sequential-plan"}:
+    if approval_kind not in {"terminal-command", "checked-step", "sequential-plan", "pty-input"}:
         raise ValueError("Неизвестный тип подтверждения")
     token = secrets.token_urlsafe(32)
     token_key = hashlib.sha256(token.encode("ascii")).hexdigest()
