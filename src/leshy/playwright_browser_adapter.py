@@ -136,7 +136,14 @@ class PlaywrightBrowserAdapter:
     def _goto(self, page, url: str, allowed_hosts: tuple[str, ...]) -> None:
         if not self._host_allowed(url, allowed_hosts):
             raise PermissionError(f"Переход на неподтверждённый домен заблокирован: {url}")
-        page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+        # GitHub and other interactive pages can never fire domcontentloaded
+        # within 30 seconds, even though response headers and content exist.
+        # Commit navigation early; allow a short optional DOM readiness wait.
+        page.goto(url, wait_until="commit", timeout=self.timeout_ms)
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=min(5_000, self.timeout_ms))
+        except Exception:
+            pass
         if not self._host_allowed(page.url, allowed_hosts):
             raise PermissionError(f"Перенаправление на неподтверждённый домен заблокировано: {page.url}")
 
@@ -183,6 +190,9 @@ class PlaywrightBrowserAdapter:
         if not allowed_hosts or not self._host_allowed(action.url, allowed_hosts):
             return BrowserActionResult("blocked", "Стартовый URL не разрешён политикой Browser Agent")
 
+        cancel = action.arguments.get("_cancel_event")
+        if getattr(cancel, "is_set", lambda: False)():
+            return BrowserActionResult("cancelled", "Браузерная задача остановлена.")
         started = time.monotonic()
         with sync_playwright() as pw:
             browser = None
@@ -193,6 +203,8 @@ class PlaywrightBrowserAdapter:
                 page = context.pages[0] if context.pages else context.new_page()
                 page.set_default_timeout(self.timeout_ms)
                 self._goto(page, action.url, allowed_hosts)
+                if getattr(cancel, "is_set", lambda: False)():
+                    return BrowserActionResult("cancelled", "Браузерная задача остановлена.")
                 initial_text = self._visible_text(page)
                 if self._needs_user(initial_text):
                     return BrowserActionResult(
@@ -208,9 +220,13 @@ class PlaywrightBrowserAdapter:
                     if len(steps) > 64:
                         raise ValueError("workflow содержит слишком много шагов")
                     for index, raw_step in enumerate(steps):
+                        if getattr(cancel, "is_set", lambda: False)():
+                            return BrowserActionResult("cancelled", "Браузерная задача остановлена.")
                         if not isinstance(raw_step, dict):
                             raise ValueError(f"Шаг {index + 1} должен быть объектом")
                         self._run_step(page, dict(raw_step), allowed_hosts)
+                        if getattr(cancel, "is_set", lambda: False)():
+                            return BrowserActionResult("cancelled", "Браузерная задача остановлена.")
                         if not self._host_allowed(page.url, allowed_hosts):
                             raise PermissionError(f"После шага {index + 1} открыт неподтверждённый домен: {page.url}")
                         visible = self._visible_text(page)
@@ -226,6 +242,8 @@ class PlaywrightBrowserAdapter:
                 except Exception:
                     pass
                 visible = self._visible_text(page, limit=int(action.arguments.get("text_limit", 20_000)))
+                if getattr(cancel, "is_set", lambda: False)():
+                    return BrowserActionResult("cancelled", "Браузерная задача остановлена.")
                 elapsed_ms = int((time.monotonic() - started) * 1000)
                 event("browser_agent_playwright_completed", action=action.name, url=page.url, elapsed_ms=elapsed_ms)
                 return BrowserActionResult(
@@ -242,17 +260,24 @@ class PlaywrightBrowserAdapter:
                 problem("browser_agent_playwright_failed", str(exc), action=action.name)
                 return BrowserActionResult("failed", str(exc))
             finally:
-                if context is not None:
-                    self._persist(context)
+                # Only the private context/browser created by this action.
+                # Never close the system user's existing Chrome/Edge tabs.
+                try:
+                    if context is not None:
+                        if not getattr(cancel, "is_set", lambda: False)():
+                            self._persist(context)
+                finally:
                     try:
-                        context.close()
-                    except Exception:
+                        if context is not None:
+                            context.close()
+                    except BaseException:
                         pass
-                if browser is not None:
                     try:
-                        browser.close()
-                    except Exception:
+                        if browser is not None:
+                            browser.close()
+                    except BaseException:
                         pass
+                    event("browser_agent_playwright_closed", action=action.name)
 
 
 __all__ = ["PlaywrightBrowserAdapter"]

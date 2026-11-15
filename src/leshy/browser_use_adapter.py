@@ -128,19 +128,48 @@ class BrowserUseAdapter:
         return target
 
     @staticmethod
-    def _run_sync(awaitable: Awaitable[Any]) -> Any:
+    def _run_sync(awaitable: Awaitable[Any], *, cancel_event: threading.Event | None = None) -> Any:
+        """Run Browser Use and propagate a Web Stop to the running async task.
+
+        Browser Use creates its own asyncio tasks and Chromium process. Merely
+        setting RealtimeChatManager's cancellation flag never stopped them.
+        """
+        async def monitored():
+            if cancel_event is None:
+                return await awaitable
+            loop = asyncio.get_running_loop()
+            task = asyncio.create_task(awaitable)
+            finished = threading.Event()
+
+            def watch_stop() -> None:
+                while not finished.wait(0.1):
+                    if cancel_event.is_set():
+                        loop.call_soon_threadsafe(task.cancel)
+                        return
+
+            watcher = threading.Thread(
+                target=watch_stop, name="leshy-browser-stop-watcher", daemon=True,
+            )
+            watcher.start()
+            try:
+                if cancel_event.is_set():
+                    task.cancel()
+                return await task
+            finally:
+                finished.set()
+
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(awaitable)
+            return asyncio.run(monitored())
 
         result: dict[str, Any] = {}
         error: dict[str, BaseException] = {}
 
         def worker() -> None:
             try:
-                result["value"] = asyncio.run(awaitable)
-            except BaseException as exc:  # pragma: no cover
+                result["value"] = asyncio.run(monitored())
+            except BaseException as exc:
                 error["value"] = exc
 
         thread = threading.Thread(target=worker, name="leshy-browser-use", daemon=True)
@@ -278,14 +307,16 @@ class BrowserUseAdapter:
             excluded=list(excluded),
             isolated_profile=profile_dir != self.profile_dir,
         )
-        agent = Agent(
-            task=user_task + self._guard(action, hosts),
-            llm=self.llm,
-            browser=browser,
-            tools=self._tools_for_action(action),
-            use_vision=bool(action.arguments.get("use_vision", default_vision)),
-        )
         try:
+            # Construct inside try: even an Agent() validation failure must
+            # release the Chromium instance created above.
+            agent = Agent(
+                task=user_task + self._guard(action, hosts),
+                llm=self.llm,
+                browser=browser,
+                tools=self._tools_for_action(action),
+                use_vision=bool(action.arguments.get("use_vision", default_vision)),
+            )
             history = await agent.run(
                 max_steps=min(self.max_steps, int(action.arguments.get("max_steps", self.max_steps)))
             )
@@ -302,14 +333,20 @@ class BrowserUseAdapter:
             )
             return response
         finally:
+            # Always relinquish our own browser, including cancellation or
+            # TimeoutError from navigation. For externally attached CDP
+            # profiles keep the user's existing browser window alive.
             try:
                 close = getattr(browser, "stop", None) or getattr(browser, "close", None)
                 if close is not None:
                     value = close()
                     if hasattr(value, "__await__"):
-                        await value
-            except Exception:
-                pass
+                        await asyncio.wait_for(value, timeout=10)
+                event("browser_agent_browser_use_closed", action=action.name,
+                      attached_to_existing_window=bool(cdp_url))
+            except BaseException as exc:
+                problem("browser_agent_browser_use_cleanup_failed",
+                        type(exc).__name__, action=action.name)
 
     def _fallback_read(self, action: BrowserAction, cause: str) -> BrowserActionResult:
         """Read-only fallback when Browser Use or Edge/CDP cannot start.
@@ -361,13 +398,24 @@ class BrowserUseAdapter:
             return BrowserActionResult("blocked", "Стартовый URL не входит в разрешённые домены")
         if not self.available():
             return BrowserActionResult("unavailable", "Browser Use или совместимая LLM недоступны")
+        cancel = action.arguments.get("_cancel_event")
+        if not isinstance(cancel, threading.Event):
+            cancel = None
+        if cancel is not None and cancel.is_set():
+            return BrowserActionResult("cancelled", "Браузерная задача прервана пользователем.")
         try:
-            result = self._run_sync(self._run(action))
+            result = self._run_sync(self._run(action), cancel_event=cancel)
+            if cancel is not None and cancel.is_set():
+                return BrowserActionResult("cancelled", "Браузерная задача прервана пользователем.")
             if result.status == "failed" and action.risk is BrowserRisk.READ:
                 return self._fallback_read(action, result.message)
             return result
+        except asyncio.CancelledError:
+            return BrowserActionResult("cancelled", "Браузерная задача прервана, вкладка закрыта.")
         except Exception as exc:
-            problem("browser_agent_browser_use_failed", str(exc), risk=action.risk.value, action=action.name)
+            problem("browser_agent_browser_use_failed", type(exc).__name__, risk=action.risk.value, action=action.name)
+            if cancel is not None and cancel.is_set():
+                return BrowserActionResult("cancelled", "Браузерная задача прервана, вкладка закрыта.")
             if action.risk is BrowserRisk.READ:
                 return self._fallback_read(action, str(exc))
             message = str(exc)

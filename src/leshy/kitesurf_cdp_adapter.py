@@ -170,55 +170,73 @@ class KitesurfCdpAdapter:
         started = time.monotonic()
         try:
             with sync_playwright() as pw:
-                browser = pw.chromium.connect_over_cdp(endpoint, timeout=min(self.timeout_ms, 7500))
-                # New context isolates pages/cookies from all other owners.
-                # If Kitesurf's partial CDP omits contexts or Fetch interception,
-                # do not navigate; Chromium can handle the read instead.
-                context = browser.new_context(
-                    locale="ru-RU",
-                    viewport={"width": 1366, "height": 768},
-                    service_workers="block",
-                )
-
-                def authorize_request(route: Any) -> None:
-                    if _target_ok(str(route.request.url), hosts):
-                        route.continue_()
-                    else:
-                        route.abort()
-
-                context.route("**/*", authorize_request)
-                page = context.new_page()
-                page.set_default_timeout(self.timeout_ms)
-                page.goto(action.url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-                if not _target_ok(page.url, hosts):
-                    return BrowserActionResult("blocked", "Переход на чужой домен запрещён")
-                text = page.locator("body").inner_text(timeout=min(self.timeout_ms, 8000))
-                title = page.title()
-                final_url = page.url
-                if any(marker in text.lower() for marker in _CHALLENGE):
-                    return BrowserActionResult(
-                        "needs_user_action",
-                        "Сайт требует участия владельца (CAPTCHA/challenge).",
-                        {"url": final_url, "browser": self.adapter_id},
+                try:
+                    browser = pw.chromium.connect_over_cdp(endpoint, timeout=min(self.timeout_ms, 7500))
+                    # New context isolates pages/cookies from all other owners.
+                    # If Kitesurf's partial CDP omits contexts or Fetch interception,
+                    # do not navigate; Chromium can handle the read instead.
+                    context = browser.new_context(
+                        locale="ru-RU",
+                        viewport={"width": 1366, "height": 768},
+                        service_workers="block",
                     )
-                compact = "\n".join(line.strip() for line in text.splitlines() if line.strip())
-                if len(compact) < 40:
+
+                    def authorize_request(route: Any) -> None:
+                        if _target_ok(str(route.request.url), hosts):
+                            route.continue_()
+                        else:
+                            route.abort()
+
+                    context.route("**/*", authorize_request)
+                    page = context.new_page()
+                    page.set_default_timeout(self.timeout_ms)
+                    page.goto(action.url, wait_until="commit", timeout=self.timeout_ms)
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=min(5_000, self.timeout_ms))
+                    except Exception:
+                        pass
+                    if not _target_ok(page.url, hosts):
+                        return BrowserActionResult("blocked", "Переход на чужой домен запрещён")
+                    text = page.locator("body").inner_text(timeout=min(self.timeout_ms, 8000))
+                    title = page.title()
+                    final_url = page.url
+                    if any(marker in text.lower() for marker in _CHALLENGE):
+                        return BrowserActionResult(
+                            "needs_user_action",
+                            "Сайт требует участия владельца (CAPTCHA/challenge).",
+                            {"url": final_url, "browser": self.adapter_id},
+                        )
+                    compact = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+                    if len(compact) < 40:
+                        return BrowserActionResult(
+                            "unavailable", "Kitesurf пока не смог извлечь достаточно текста",
+                        )
+                    limit = max(1000, min(int(action.arguments.get("text_limit", 12000)), 20000))
+                    compact = compact[:limit]
+                    elapsed = int((time.monotonic() - started) * 1000)
+                    event("browser_kitesurf_read_completed", host=(urlsplit(final_url).hostname or ""),
+                          chars=len(compact), elapsed_ms=elapsed)
                     return BrowserActionResult(
-                        "unavailable", "Kitesurf пока не смог извлечь достаточно текста",
+                        "ok", "Страница прочитана локальным CDP-движком Kitesurf",
+                        {
+                            "url": final_url, "title": title[:500],
+                            "visible_text": compact, "result": compact,
+                            "browser": self.adapter_id, "elapsed_ms": elapsed,
+                        },
                     )
-                limit = max(1000, min(int(action.arguments.get("text_limit", 12000)), 20000))
-                compact = compact[:limit]
-                elapsed = int((time.monotonic() - started) * 1000)
-                event("browser_kitesurf_read_completed", host=(urlsplit(final_url).hostname or ""),
-                      chars=len(compact), elapsed_ms=elapsed)
-                return BrowserActionResult(
-                    "ok", "Страница прочитана локальным CDP-движком Kitesurf",
-                    {
-                        "url": final_url, "title": title[:500],
-                        "visible_text": compact, "result": compact,
-                        "browser": self.adapter_id, "elapsed_ms": elapsed,
-                    },
-                )
+                finally:
+                    # Close the private CDP context while Playwright's driver
+                    # is still connected. Never close unrelated Kitesurf tabs.
+                    try:
+                        if context is not None:
+                            context.close()
+                    except BaseException:
+                        pass
+                    try:
+                        if browser is not None:
+                            browser.close()
+                    except BaseException:
+                        pass
         except Exception as exc:
             # Do not publish user URL, cookies or raw page text to diagnostics.
             problem("browser_kitesurf_cdp_unavailable", type(exc).__name__)
@@ -226,17 +244,6 @@ class KitesurfCdpAdapter:
                 "unavailable",
                 "Экспериментальный CDP-движок не поддержал действие; доступен обычный Chromium",
             )
-        finally:
-            if context is not None:
-                try:
-                    context.close()
-                except Exception:
-                    pass
-            if browser is not None:
-                try:
-                    browser.close()
-                except Exception:
-                    pass
 
 
 __all__ = ["KitesurfCdpAdapter", "local_kitesurf_endpoint"]
