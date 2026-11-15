@@ -146,7 +146,7 @@ def _arm_stream_watchdog(
 
 def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None):
     cancel_event = cancel_event or threading.Event()
-    with self._chat_lock:
+    with self._chat_activity():
         # llama-server rejects system messages after user/assistant for Qwen3.5.
         base_messages = _normalize_system_messages(list(messages))
         active_messages = list(base_messages)
