@@ -77,9 +77,35 @@
     const telegram=Array.isArray(data.telegram)?data.telegram:[];
     const linked=telegram[0]||null;
     const who=linked?(linked.label||('@'+(linked.username||''))||('Telegram '+linked.user_id)):'';
+    const avatar=data.avatar||{};
+    const providers=Array.isArray(data.providers)?data.providers:[];
+    const oauth=providers.filter(item=>item.type==='oauth');
+    const providerDetails=oauth.map(item=>`<div class="item-meta" style="margin:4px 0"><b>${esc(item.title)}:</b> ${esc(item.reason||'Недоступно')}</div>`).join('');
     host.innerHTML=`
       <div class="row"><span>Профиль</span><b>${esc(data.display_name||'Профиль Лешего')}</b></div>
       <div class="row"><span>Owner ID</span><span class="mono" title="${esc(data.owner_id||'')}">${esc(shortId(data.owner_id))}</span></div>
+      <div class="divider"></div>
+      <div class="item-title">Аватар Gravatar</div>
+      <div class="item-meta" style="margin:5px 0">Не используется для входа. При включении браузер получает изображение с Gravatar по хешу email.</div>
+      <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:8px 0">
+        ${avatar.url?`<img id="ownerIdentityAvatar" src="${esc(avatar.url)}" alt="Аватар" referrerpolicy="no-referrer" width="52" height="52" style="border-radius:50%;object-fit:cover">`:''}
+        <input id="ownerIdentityGravatarEmail" type="email" autocomplete="off" placeholder="Email для аватара" style="min-width:190px;flex:1" />
+        <button class="button small" id="ownerIdentitySetGravatar">Применить</button>
+        ${avatar.url?'<button class="button secondary small" id="ownerIdentityClearGravatar">Убрать</button>':''}
+      </div>
+      <div class="divider"></div>
+      <div class="item-title">Вход на другом компьютере по IP</div>
+      <div class="item-meta" style="margin:5px 0">На устройстве с текущим профилем создайте одноразовый код. На другом откройте Лешего по локальному IP и введите его здесь. Код действителен 5 минут. Только для доверенной локальной сети: на HTTP код не защищён от перехвата в сети.</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">
+        <button class="button small" id="ownerIdentityBrowserPair">Получить код для другого ПК</button>
+        <input id="ownerIdentityBrowserCode" placeholder="Одноразовый код с первого ПК" autocomplete="off" spellcheck="false" style="flex:1;min-width:180px" />
+        <button class="button secondary small" id="ownerIdentityBrowserAccept">Войти по коду</button>
+      </div>
+      <div id="ownerIdentityBrowserPairCode" class="item-meta mono" style="margin:7px 0;overflow-wrap:anywhere"></div>
+      <div class="divider"></div>
+      <div class="item-title">Внешние провайдеры</div>
+      <div class="item-meta" style="margin:5px 0">Google, Apple и VK ID: вход не включён. Для Web OAuth необходима регистрация приложения и допустимый адрес возврата; обычный LAN-IP не является таким адресом. Вход по IP и привязка Telegram продолжают работать независимо.</div>
+      ${providerDetails}
       <div class="divider"></div>
       <div class="item-title">Telegram</div>
       ${linked?`
@@ -93,6 +119,11 @@
       <div id="ownerIdentityLinkBox" style="margin-top:9px"></div>
       <div class="item-meta" style="margin-top:10px">Другие пользователи могут общаться с Лешим в Telegram без Web-авторизации. Пока они сами не привяжут профиль, у каждого остаётся отдельная сессия и отдельный owner.</div>
       <div class="item-meta" style="margin-top:5px">Привязка объединяет Web, Telegram, память и подключённые сервисы. Telegram username используется только для отображения; идентичность подтверждается неизменяемым Telegram user_id.</div>`;
+    document.getElementById('ownerIdentitySetGravatar')?.addEventListener('click',setGravatar);
+    document.getElementById('ownerIdentityClearGravatar')?.addEventListener('click',clearGravatar);
+    document.getElementById('ownerIdentityBrowserPair')?.addEventListener('click',startBrowserPair);
+    document.getElementById('ownerIdentityBrowserAccept')?.addEventListener('click',acceptBrowserPair);
+    document.getElementById('ownerIdentityAvatar')?.addEventListener('error',e=>e.target.style.display='none');
     document.getElementById('ownerIdentityLink')?.addEventListener('click',startLink);
     document.getElementById('ownerIdentityUnlink')?.addEventListener('click',()=>unlink(linked.user_id));
   }
@@ -115,6 +146,51 @@
       render(data);status(data.telegram_linked?'Web и Telegram используют единый профиль.':'Web-профиль готов. Telegram можно привязать одноразовым кодом.');
       return data;
     }catch(error){status('Ошибка профиля: '+error.message);return null;}
+  }
+
+  async function setGravatar(){
+    const field=document.getElementById('ownerIdentityGravatarEmail');
+    const email=String(field?.value||'').trim();
+    if(!email){status('Укажите email, к которому привязан Gravatar.');return;}
+    try{
+      await api('/v1/identity/gravatar',{method:'POST',body:JSON.stringify({email})});
+      await loadIdentity({reloadIfChanged:false});
+      status('Аватар Gravatar включён. Email не хранится в Лешем, сохраняется его SHA-256.');
+    }catch(error){status('Ошибка аватара: '+error.message);}
+  }
+
+  async function clearGravatar(){
+    try{
+      await api('/v1/identity/gravatar/clear',{method:'POST',body:'{}'});
+      await loadIdentity({reloadIfChanged:false});
+      status('Gravatar отключён.');
+    }catch(error){status('Ошибка отключения аватара: '+error.message);}
+  }
+
+  async function startBrowserPair(){
+    try{
+      const result=await api('/v1/identity/browser/pair',{method:'POST',body:'{}'});
+      const node=document.getElementById('ownerIdentityBrowserPairCode');
+      if(node)node.textContent='Код: '+String(result.code)+' (5 минут, один раз)';
+      status('Код создан. Введите его на другом устройстве.');
+    }catch(error){status('Не удалось создать код: '+error.message);}
+  }
+
+  async function acceptBrowserPair(){
+    const code=String(document.getElementById('ownerIdentityBrowserCode')?.value||'').trim();
+    if(!/^[a-fA-F0-9]{32}$/.test(code)){
+      status('Введите 32-значный код с первого устройства.');return;
+    }
+    try{
+      const result=await api('/v1/identity/browser/accept',{
+        method:'POST',body:JSON.stringify({code})
+      });
+      if(result.owner_id){
+        localStorage.setItem(OWNER_KEY,String(result.owner_id));
+        status('Профиль подтверждён. Обновляю интерфейс…');
+        location.reload();
+      }
+    }catch(error){status('Не удалось войти по коду: '+error.message);}
   }
 
   async function startLink(){
