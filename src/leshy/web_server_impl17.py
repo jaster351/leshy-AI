@@ -46,9 +46,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 "verified_role": current_role,
                 "verified_role_label": ROLE_DISPLAY.get(current_role, "пользователь"),
                 "creator_configured": bool(creator_id),
-                "creator_bootstrap_available": bool(
-                    not creator_id and from_loopback and payload.get("telegram_linked")
-                ),
+                "creator_bootstrap_available": False,
                 "server_owner": current_role in {"creator", "server_owner"} and
                     bool(telegram._is_owner(next((
                         str(item.get("user_id") or "")
@@ -161,35 +159,11 @@ def make_handler(app, telegram, settings, model_catalog):
                 except (ValueError, PermissionError) as exc:
                     return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             if route == "/v1/identity/creator/claim":
-                # One-time explicit bootstrap on the actual local computer,
-                # never from LAN/internet, Telegram text, model, or a guest.
-                if not self._identity_write_allowed():
-                    return
-                if str(self.client_address[0]) not in {"127.0.0.1", "::1"}:
-                    return self._identity_json(HTTPStatus.FORBIDDEN, {
-                        "error": "Первичная регистрация Создателя доступна только на самом компьютере Лешего (localhost)",
-                    })
-                owner = self._existing_web_owner()
-                try:
-                    body = self._body()
-                    if body.get("confirm") != "I_AM_CREATOR":
-                        raise ValueError("Не подтверждено назначение Создателя")
-                    profile = identity.status(owner)
-                    linked = [
-                        str(row.get("user_id") or "").strip()
-                        for row in profile.get("telegram", [])
-                    ]
-                    if len(linked) != 1 or not linked[0].isdecimal():
-                        raise ValueError("Сначала подтвердите вход в Web через свой Telegram в личном чате бота")
-                    result = register_local_creator(telegram, linked[0])
-                    return self._identity_json(HTTPStatus.OK, result)
-                except (ValueError, PermissionError) as exc:
-                    return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-                except Exception as exc:
-                    problem("creator_role_registration_failed", type(exc).__name__)
-                    return self._identity_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
-                        "error": "Не удалось сохранить роль Создателя на локальном узле",
-                    })
+                # A Telegram login and access to localhost do not establish
+                # federation-wide creator authority. Never self-appoint here.
+                return self._identity_json(HTTPStatus.FORBIDDEN, {
+                    "error": "Самоназначение Создателя отключено. Вход через Telegram подтверждает только личность.",
+                })
             if route != "/v1/identity/telegram/login/start":
                 return super().do_POST()
             if not self._identity_write_allowed():
