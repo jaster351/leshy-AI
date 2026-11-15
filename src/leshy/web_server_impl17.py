@@ -119,6 +119,47 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             route = urlsplit(self.path).path
+            if route == "/v1/telegram/config":
+                # This global administrator setting must never be writable
+                # by an arbitrary Web guest, even when LESHY_API_TOKEN is unset.
+                if not self._identity_write_allowed():
+                    return
+                current = telegram._access()
+                current_owner = str(current.get("owner_id") or "").strip()
+                creator = creator_telegram_id(telegram)
+                role = role_for_web(telegram, identity, self._existing_web_owner())
+                local = str(self.client_address[0]) in {"127.0.0.1", "::1"}
+                if current_owner or creator:
+                    if role not in {"creator", "server_owner"}:
+                        return self._identity_json(HTTPStatus.FORBIDDEN, {
+                            "error": "Настройки Telegram доступны только подтверждённому хозяину сервера",
+                        })
+                elif not local:
+                    return self._identity_json(HTTPStatus.FORBIDDEN, {
+                        "error": "Первичная настройка Telegram доступна только на localhost",
+                    })
+                try:
+                    body = self._body()
+                    # Never accept a caller-selected owner ID. New assignments
+                    # require the separately verified local creator claim.
+                    if "owner_id" in body and str(body["owner_id"] or "").strip() != current_owner:
+                        raise PermissionError("Хозяина нельзя менять через настройки Telegram")
+                    users = body.get("allowed_users", [])
+                    if isinstance(users, str):
+                        users = [part.strip() for part in users.replace(",", "\\n").splitlines() if part.strip()]
+                    if not isinstance(users, list):
+                        raise ValueError("Неверный список разрешённых Telegram ID")
+                    preserved_owner = current_owner or (creator if role == "creator" else "")
+                    telegram.configure(
+                        str(body.get("token") or ""), users,
+                        allow_all=bool(body.get("allow_all", current.get("allow_all", False))),
+                        owner_id=preserved_owner,
+                        infer_owner_from_allowed=False,
+                    )
+                    telegram.start()
+                    return self._identity_json(HTTPStatus.OK, telegram.status())
+                except (ValueError, PermissionError) as exc:
+                    return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             if route == "/v1/identity/creator/claim":
                 # One-time explicit bootstrap on the actual local computer,
                 # never from LAN/internet, Telegram text, model, or a guest.
