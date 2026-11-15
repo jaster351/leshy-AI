@@ -71,7 +71,7 @@ def contextual_search_query(message: str, history: list) -> tuple[str, bool]:
         if question:
             # If the user has ALREADY provided a primary URL, read it again,
             # don't search for an unrelated answer on the open web.
-            return question, not bool(recent_user_source(history))
+            return (text, False) if recent_user_source(history) else (question, True)
         return text, False
     if not _FOLLOWUP.search(text):
         return text, False
