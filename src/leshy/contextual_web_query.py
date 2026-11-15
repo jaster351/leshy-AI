@@ -56,7 +56,14 @@ def contextual_search_query(message: str, history: list) -> tuple[str, bool]:
         return url_query, True
     if not _FOLLOWUP.search(text):
         return text, False
-    for row in history[1:16]:
+    initial = re.search(
+        r"(?i)(?:первоначальн|перв(?:ый|ого|ому) вопрос|исходн(?:ый|ому) вопрос)",
+        text,
+    )
+    # «Ответить на первоначальный вопрос» означает самый ранний содержательный
+    # вопрос этой сессии, а не случайное близкое сообщение.
+    candidates = reversed(history[1:]) if initial else history[1:]
+    for row in candidates:
         try:
             if row["role"] != "user":
                 continue
