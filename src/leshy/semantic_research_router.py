@@ -22,6 +22,7 @@ from .adaptive_internet_policy import (
 )
 from .diagnostics import event
 from .cinema_research import cinema_query
+from .source_reading import supplied_public_url
 from .research_policy import (
     _current_user_text,
     external_freshness_requested,
@@ -215,6 +216,10 @@ def choose_research(
             or is_internal_knowledge_request(current)
             or is_offline_creative_request(current)):
         return False, "разговор или локальные данные"
+    if supplied_public_url(current) and not force_search:
+        # User gave an exact primary page; read it. A second general search
+        # can only dilute/override the author's actual published evidence.
+        return False, "чтение предоставленного первоисточника"
     if force_search or is_explicit_web_request(current):
         return True, "явный запрос интернет-поиска"
     # Personal updates are conversational facts, even if they contain "today".
