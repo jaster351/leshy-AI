@@ -100,6 +100,17 @@ def review_search_query(message: str, rows: list[Any]) -> str:
     original = prior_factual_question(rows)
     if not original:
         return ""
+    # External search engines must not receive an earlier user's secrets,
+    # identifiers, messages about their own servers, files, finances or health.
+    if re.search(
+        r"(?i)(?:@|https?://|\b(?:парол\w*|токен\w*|секрет\w*|"
+        r"личн\w*|приватн\w*|мой\s+сервер|наш\s+сервер|"
+        r"мой\s+компьютер|мои\s+документ\w*|моя\s+зарплат\w*|"
+        r"мой\s+диагноз|моё\s+здоровье)\b|"
+        r"\+?\d{1,3}[\s(-]?\d{3}[\s)-]?\d{3}[\s-]?\d{2}[\s-]?\d{2})",
+        original,
+    ):
+        return ""
     # A request to reassess requires evidence, not the model's opinion.
     return (original[:200] + " официальный первоисточник актуальные данные").strip()
 
@@ -181,8 +192,17 @@ def source_release_fact(
     ]
     days = (release - current).days
     if days > 0:
-        result.append(f"На сегодня до указанной даты остаётся {days} дней.")
-        result.append("По этой странице игра/продукт ещё не должен считаться выпущенным.")
+        number = abs(days)
+        unit = (
+            "дней" if 11 <= number % 100 <= 14
+            else "день" if number % 10 == 1
+            else "дня" if number % 10 in (2, 3, 4)
+            else "дней"
+        )
+        result.append(f"На сегодня до указанной даты остаётся {days} {unit}.")
+        result.append(
+            "Дата предзаказа или предзагрузки не означает наступление релиза."
+        )
     elif days == 0:
         result.append("Указанная дата наступила сегодня; факт начала продаж требует отдельной проверки.")
     else:
