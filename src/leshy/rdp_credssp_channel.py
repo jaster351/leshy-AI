@@ -1,8 +1,9 @@
-"""Live pinned TLS RDP channel for credential-free CredSSP server binding.
+"""Pinned TLS RDP channel for CredSSP binding and separately approved credentials.
 
 Unlike rdp_tls_probe, this keeps the SAME socket through X.224, TLS and
-the protected CredSSP TSRequest exchange. No TSCredentials/authInfo are
-implemented: server binding is NOT RDP login or a desktop session.
+the protected CredSSP TSRequest exchange. A separately owner-approved
+internal credential step may follow successful binding. This is NOT a
+confirmed Windows logon or an RDP desktop session.
 
 This internal transport has no HTTP, Telegram or LLM entry point. Its
 authorize callback must verify a provider-authenticated owner, an enrolled
@@ -33,7 +34,7 @@ _MAX_ROUND_TRIPS = 18
 
 
 class RDPChannelError(RuntimeError):
-    """Credential-free RDP connection failure, without raw wire data."""
+    """RDP channel failure without raw wire data or credentials."""
 
 
 @dataclass(frozen=True)
