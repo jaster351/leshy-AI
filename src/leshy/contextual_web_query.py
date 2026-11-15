@@ -8,6 +8,7 @@ import re
 from urllib.parse import unquote, urlsplit
 
 from .source_reading import supplied_public_url
+from .fact_recheck import is_factual_challenge, review_search_query, recent_user_source
 from .research_policy import is_internal_knowledge_request, is_explicit_offline_request, is_casual_checkin, is_local_dialogue_request
 
 _FOLLOWUP = re.compile(
@@ -55,9 +56,23 @@ def contextual_search_query(message: str, history: list) -> tuple[str, bool]:
     if (is_explicit_offline_request(text) or is_internal_knowledge_request(text)
             or is_casual_checkin(text) or is_local_dialogue_request(text)):
         return text, False
-    url_query = url_search_query(text)
-    if url_query:
-        return url_query, True
+    # The URL itself is evidence; fetch the exact user-supplied page rather
+    # than substituting a site: search result and ignoring the opened page.
+    # A separate cross-check must be explicitly requested.
+    if supplied_public_url(text):
+        crosscheck = bool(re.search(
+            r"(?i)(?:друг(?:ие|их|ой)\\s+источник|независим\\w*\\s+провер|"
+            r"сравни\\s+с\\s+друг|также\\s+поищи\\s+в\\s+интернете)",
+            text,
+        ))
+        return text, crosscheck
+    if is_factual_challenge(text, history):
+        question = review_search_query(text, history)
+        if question:
+            # If the user has ALREADY provided a primary URL, read it again,
+            # don't search for an unrelated answer on the open web.
+            return question, not bool(recent_user_source(history))
+        return text, False
     if not _FOLLOWUP.search(text):
         return text, False
     # "Проверь Конституцию" or "открой память" refers to local data,
