@@ -3,7 +3,7 @@
 New modules:
 - `src/leshy/native_spnego.py` — system GSSAPI (POSIX), target validation and OS selection.
 - `src/leshy/native_spnego_windows.py` — Windows `Secur32.dll` SSPI `Negotiate`.
-- `src/leshy/rdp_credssp_negotiator.py` — owner-guarded CredSSP token and TLS public-key binding state machine, **without password delegation**.
+- `src/leshy/rdp_credssp_negotiator.py` — owner-guarded CredSSP token and TLS public-key binding state machine, with a **separately approved, internal-only** credential-handoff stage.
 
 ## What is actually implemented
 
