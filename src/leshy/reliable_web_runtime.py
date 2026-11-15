@@ -265,7 +265,7 @@ def install_reliable_web_runtime(app_class, app=None) -> None:
         )
         return any(marker in value for marker in markers)
 
-    def build_context(self, message, owner_id, rows, *, search_plan=None, lookup_query=None):
+    def build_context(self, message, owner_id, rows, *, search_plan=None, lookup_query=None, session_id=None):
         plan = search_plan or self._search_plan(message)
         messages, sources, attempted = _ORIGINAL_BUILD_CONTEXT(
             self,
@@ -274,6 +274,7 @@ def install_reliable_web_runtime(app_class, app=None) -> None:
             rows,
             search_plan=plan,
             lookup_query=lookup_query,
+            session_id=session_id,
         )
         reason = str(plan.get("reason") or "")
         explicit = reason == "явный запрос интернет-поиска"
