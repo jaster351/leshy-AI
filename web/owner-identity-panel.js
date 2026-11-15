@@ -6,6 +6,8 @@
   const originalFetch=window.fetch.bind(window);
   let pollTimer=null;
   let currentProfile=null;
+  let photoRefreshTimer=null;
+  let photoRefreshAttempts=0;
 
   const ownerId=()=>String(localStorage.getItem(OWNER_KEY)||'web:local').trim().slice(0,200)||'web:local';
   const esc=value=>String(value==null?'':value).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
@@ -82,7 +84,10 @@
     const name=document.querySelector('#profileCopy b');
     const subtitle=document.querySelector('#profileCopy span');
     const avatar=document.getElementById('profileAvatar');
-    if(avatar&&avatarUrl&&avatar.dataset.profileAvatarFailed===avatarUrl)avatarUrl='';
+    if(avatar&&avatarUrl&&avatar.dataset.profileAvatarFailed===avatarUrl){
+      if(Date.now()<Number(avatar.dataset.profileAvatarRetryAt||0))avatarUrl='';
+      else avatar.dataset.profileAvatarFailed='';
+    }
     if(name&&name.textContent!==display)name.textContent=display;
     if(subtitle&&subtitle.textContent!==provider)subtitle.textContent=provider;
     if(avatar){
@@ -97,7 +102,24 @@
           img.referrerPolicy='no-referrer';
           img.width=32;img.height=32;
           img.style.cssText='width:32px;height:32px;object-fit:cover;border-radius:50%';
-          img.onerror=()=>{avatar.dataset.profileAvatarFailed=avatarUrl;avatar.dataset.profileAvatarUrl='';avatar.replaceChildren();avatar.textContent=initials;};
+          img.onerror=()=>{
+            const attempts=Number(avatar.dataset.profileAvatarRetryCount||0)+1;
+            const delay=Math.min(30000,attempts*5000);
+            avatar.dataset.profileAvatarRetryCount=String(attempts);
+            avatar.dataset.profileAvatarFailed=avatarUrl;
+            avatar.dataset.profileAvatarRetryAt=String(Date.now()+delay);
+            avatar.dataset.profileAvatarUrl='';
+            avatar.replaceChildren();
+            avatar.textContent=initials;
+            // Network/proxy errors can be temporary; never permanently blacklist
+            // a locally served image just because the first fetch failed.
+            if(attempts<=4)setTimeout(()=>{if(currentProfile)applySidebarProfile(currentProfile);},delay+100);
+          };
+          img.onload=()=>{
+            avatar.dataset.profileAvatarRetryCount='0';
+            avatar.dataset.profileAvatarFailed='';
+            avatar.dataset.profileAvatarRetryAt='0';
+          };
           avatar.appendChild(img);
         }else avatar.textContent=initials;
       }
@@ -194,6 +216,21 @@
       currentProfile=data;
       render(data);
       applySidebarProfile(data);
+      // Telegram confirms the browser before the Bot API photo is fetched.
+      // Refresh only while the server reports the avatar as pending; no
+      // repeated login and no endless polling for users without photos.
+      if(data.profile?.provider==='telegram'&&data.profile.photo_pending){
+        if(!photoRefreshTimer&&photoRefreshAttempts<18){
+          photoRefreshTimer=setTimeout(()=>{
+            photoRefreshTimer=null;
+            photoRefreshAttempts++;
+            loadIdentity({reloadIfChanged:false});
+          },4000);
+        }
+      }else{
+        if(photoRefreshTimer){clearTimeout(photoRefreshTimer);photoRefreshTimer=null;}
+        photoRefreshAttempts=0;
+      }
       status(data.telegram_linked?'Web и Telegram используют единый профиль.':'Гостевой профиль сохранён. Можно общаться без авторизации.');
       return data;
     }catch(error){status('Ошибка профиля: '+error.message);return null;}
