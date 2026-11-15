@@ -67,3 +67,24 @@ References:
 - [Microsoft Negotiate EncryptMessage](https://learn.microsoft.com/en-us/windows/win32/secauthn/encryptmessage--negotiate)
 - [GSS-API RFC 2744](https://www.rfc-editor.org/rfc/rfc2744)
 - [MS-CSSP CredSSP](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/)
+
+
+## Windows SSPI decrypted-buffer hardening (2026-11-15)
+
+The SSPI `DecryptMessage` provider can adjust the pointer of the decrypted
+`SECBUFFER_DATA` inside its caller-allocated input buffer. The Windows
+adapter now validates the decrypted pointer, its length, its buffer type and
+the owning allocation range *before* copying bytes. It reads from the
+provider-returned address rather than blindly taking a prefix of the original
+ciphertext allocation. Any invalid offset, empty data or unexpected QOP
+(including `SECQOP_WRAP_NO_ENCRYPT`) fails closed and terminates the
+context. This does not establish remote interoperability.
+
+Mocked SSPI ctypes regression tests are in
+`tests/test_native_spnego_windows_buffers.py`, runnable without a Windows
+RDP host. Python RDP pytest tests are now explicitly included in the existing
+`.github/workflows/ci.yml` manual workflow. A separate
+`.github/workflows/rdp-windows-manual.yml` runs analogous checks on a
+Windows runner when manually dispatched. GitHub Actions remain
+**manual-only until the repository's existing 2026-12-01 limit date**:
+no automatic pull-request or push triggers were enabled.
