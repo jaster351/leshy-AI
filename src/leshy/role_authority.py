@@ -74,6 +74,14 @@ def register_local_creator(telegram, telegram_user_id: str) -> dict[str, Any]:
     user_id = _telegram_id(telegram_user_id)
     if not user_id:
         raise ValueError("Не подтверждён числовой Telegram ID")
+    # Creator is a project-wide identity, not the first Telegram user
+    # who opens the Web UI of an uninitialized node.
+    provisioned = _telegram_id(os.getenv("LESHY_CREATOR_TELEGRAM_ID", ""))
+    if not provisioned or user_id != provisioned:
+        raise PermissionError(
+            "Создатель должен быть предварительно закреплён доверенной локальной "
+            "конфигурацией. Telegram-вход не позволяет назначать Создателя."
+        )
     current = creator_telegram_id(telegram)
     if current and current != user_id:
         raise PermissionError("Создатель этой установки уже зарегистрирован")
