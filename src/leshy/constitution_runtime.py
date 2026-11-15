@@ -149,9 +149,9 @@ def constitution_answer(app, message: str) -> str | None:
 
 
 _SHORT_ACKNOWLEDGEMENT = re.compile(
-    r"(?iu)^\\s*(?:молодец|молодчина|умница|отлично|"
-    r"спасибо(?:\\s+большое)?|благодарю|супер|класс|хорошо|"
-    r"понятно|ясно|ок(?:ей)?)[\\s.!?👍👏🙏]*$"
+    r"(?iu)^\s*(?:молодец|молодчина|умница|отлично|"
+    r"спасибо(?:\s+большое)?|благодарю|супер|класс|хорошо|"
+    r"понятно|ясно|ок(?:ей)?)[\s.!?👍👏🙏]*$"
 )
 
 
@@ -182,13 +182,13 @@ def constitution_acknowledgement(
         last = str(row["content"] or "")
         if not last.startswith(
             "Конституция Федерации Леших — общий документ проекта"
-        ) or f"Источник на этом узле: {PUBLIC_PATH}\\n" not in last:
+        ) or f"Источник на этом узле: {PUBLIC_PATH}\n" not in last:
             return None
         verified = _verified_document(app)
         if verified is None:
             return None
         digest = verified[1]
-        if f"SHA-256 фактических байтов локального файла: {digest}\\n" not in last:
+        if f"SHA-256 фактических байтов локального файла: {digest}\n" not in last:
             return None
         return "Спасибо!"
     except (OSError, ValueError, TypeError, KeyError):
