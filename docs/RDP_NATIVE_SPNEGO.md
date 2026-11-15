@@ -29,7 +29,10 @@ from PR #230, transmits **only GSS-encrypted `pubKeyAuth`**, and verifies the
 peer's authenticated GSS-unwrapped server binding before marking
 `server_bound=True`.
 
-The TSRequest `authInfo` credentials field is **not sent or supported**.
+The generic TSRequest codec still forbids inbound `authInfo`. A dedicated,
+internal, separately approved step can now send GSS-encrypted `authInfo` after
+a successful, independently pinned server binding. This is **not** available
+to the LLM, Telegram or the public Web UI.
 Successful server binding is not equivalent to RDP logon. These components
 are private Python APIs and must not be exposed to untrusted clients, Web,
 Telegram or a model-generated action with an unsafe authorizer.
@@ -39,9 +42,9 @@ Telegram or a model-generated action with an unsafe authorizer.
 The existing TLS preflight disconnects after certificate checking; it does
 not hand out a persistent encrypted socket. Therefore these SPNEGO classes
 are **not wired to a real RDP server** yet. A full implementation still needs
-a long-lived pinned TLS transport and framed TSRequest exchange, additional
-CredSSP completion checks, a deliberate owner-approved credential delivery
-method where appropriate, RDP MCS/channel negotiation, graphics and input.
+further verification of real Windows credential acceptance, RDP MCS/channel
+negotiation, graphics and input. The long-lived pinned TLS channel and
+credential encoder are internal components; full desktop interop remains untested.
 
 On Linux, the OS must have a GSSAPI shared library and a valid Kerberos ticket
 for `TERMSRV` service authentication; these cannot be silently synthesized.
