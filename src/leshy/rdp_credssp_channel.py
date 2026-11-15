@@ -23,6 +23,9 @@ from typing import Callable, Any
 from .rdp_tls_probe import _negotiate, _time_left
 from .rdp_credssp_tsrequest import MAX_MESSAGE, decode_tsrequest
 from .rdp_credssp_negotiator import CredSSPClient
+from .rdp_credssp_credentials import (
+    RDPCredentials, validate_sealed_authinfo_tsrequest,
+)
 from .native_spnego import _check_target, new_native_spnego
 
 _CERT_SHA256 = re.compile(r"[a-fA-F0-9]{64}\Z")
@@ -166,6 +169,53 @@ class PinnedRDPCredSSPChannel:
             self.close()
             if mechanism is not None and self._credssp is None:
                 mechanism.close()
+            raise
+
+    def delegate_password_credentials(
+        self, credentials: RDPCredentials, *,
+        authorize_delegation: Callable[[str, str], None],
+    ) -> RDPBindingStatus:
+        """Transmit exactly ONE owner-approved, GSS-encrypted authInfo frame.
+
+        This is an internal API. The owner must explicitly approve supplying
+        credentials to the independently pinned RDP host, and the caller must
+        already have a trusted local credential source. It does not implement
+        Windows logon/MCS, or prove the target accepted the credential.
+        """
+        if not callable(authorize_delegation):
+            raise PermissionError("Separate owner approval for RDP credentials required")
+        if (self._credssp is None or not self._credssp.server_bound
+                or self._credssp.credentials_delegated):
+            raise RDPChannelError("RDP server binding must finish before credential transfer")
+
+        def revalidate_delegation() -> None:
+            self._check()
+            authorize_delegation(self._ip, self._dns)
+            self._check()
+
+        try:
+            revalidate_delegation()
+            packet = self._credssp.prepare_password_delegation(
+                credentials, authorize_delegation=revalidate_delegation,
+            )
+            # Inbound/ordinary TSRequest decoding STILL forbids authInfo.
+            # Only this frame freshly constructed from authenticated GSS Wrap
+            # may be sent through the dedicated credential path.
+            validate_sealed_authinfo_tsrequest(packet)
+            revalidate_delegation()
+            self._tls.settimeout(_time_left(self._deadline))
+            self._tls.sendall(packet)
+            self._check()
+            self._credssp.mark_password_sent()
+            return RDPBindingStatus(
+                self._selected, str(self._tls.version() or "unknown"),
+                pinned_certificate=True, server_bound=True,
+                credentials_delegated=True, rdp_desktop_available=False,
+            )
+        except BaseException:
+            # Even on send failure the peer might have received authInfo.
+            # Never retry automatically and never re-use this GSS channel.
+            self.close()
             raise
 
     def close(self) -> None:
