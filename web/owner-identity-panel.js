@@ -13,14 +13,14 @@
   const esc=value=>String(value==null?'':value).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
 
   // Старые части Web UI ещё передают owner_id='web:local'. Пока они постепенно
-  // переводятся на Owner Identity, подменяем только owner_id в запросах /v1/ на
-  // подтверждённый UUID текущего браузера. Остальные поля/URL не меняются.
+  // переводятся на Owner Identity, подменяем ТОЛЬКО legacy 'web:local'.
+  // Никогда не меняем Telegram owner_id: там требуется числовой Telegram ID.
   window.fetch=function(input,init){
     try{
       const requestUrl=typeof input==='string'?input:(input&&input.url)||'';
       const url=new URL(requestUrl,location.origin);
       if(url.origin===location.origin&&url.pathname.startsWith('/v1/')){
-        if(url.searchParams.has('owner_id'))url.searchParams.set('owner_id',ownerId());
+        if(url.searchParams.get('owner_id')==='web:local')url.searchParams.set('owner_id',ownerId());
         if(typeof input==='string')input=url.pathname+url.search+url.hash;
         else if(input instanceof Request)input=new Request(url.toString(),input);
         if(init&&typeof init.body==='string'&&(init.headers||{})){
@@ -28,7 +28,7 @@
           if(contentType.includes('application/json')){
             try{
               const body=JSON.parse(init.body);
-              if(body&&typeof body==='object'&&Object.prototype.hasOwnProperty.call(body,'owner_id')){
+              if(body&&typeof body==='object'&&body.owner_id==='web:local'&&url.pathname!=='/v1/telegram/config'){
                 body.owner_id=ownerId();
                 init=Object.assign({},init,{body:JSON.stringify(body)});
               }
