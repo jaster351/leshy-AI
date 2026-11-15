@@ -166,7 +166,7 @@ def review_search_query(message: str, rows: list[Any]) -> str:
     # External search engines must not receive an earlier user's secrets,
     # identifiers, messages about their own servers, files, finances or health.
     if re.search(
-        r"(?i)(?:@|https?://|\b(?:парол\w*|токен\w*|секрет\w*|"
+        r"(?i)(?:@|https?://|\b(?:мой|моя|моё|мои|моего|моей|у\s+меня|мне|меня|наша|наши|наш|наших|парол\w*|токен\w*|секрет\w*|"
         r"личн\w*|приватн\w*|мой\s+сервер|наш\s+сервер|"
         r"мой\s+компьютер|мои\s+документ\w*|моя\s+зарплат\w*|"
         r"мой\s+диагноз|моё\s+здоровье)\b|"
