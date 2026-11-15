@@ -41,7 +41,7 @@ class CredSSPClient:
 
     @property
     def server_bound(self) -> bool:
-        return self._state == "bound" and not self._closed
+        return self._state in ("bound", "credentials_sealed") and not self._closed
 
     @property
     def credentials_delegated(self) -> bool:
@@ -112,6 +112,30 @@ class CredSSPClient:
             self._authorize()
             self._state = "bound"
             return None
+        except BaseException:
+            self.close()
+            raise
+
+    def seal_approved_credentials(self, credentials_der: bytes) -> bytes:
+        """GSS-confidentiality-wrap TSCredentials after verified server binding.
+
+        Caller must separately obtain single-use owner approval and a secret
+        from a trusted owner vault. The context is consumed before wrapping;
+        this operation can never be retried with the same security context.
+        """
+        if self._closed or self._state != "bound":
+            raise AuthenticationError("CredSSP server binding is not ready for credentials")
+        if not isinstance(credentials_der, bytes) or not 0 < len(credentials_der) <= 64 * 1024:
+            raise ValueError("Invalid credentials DER buffer")
+        self._state = "credentials_sealing"
+        try:
+            self._authorize()
+            sealed = self._mechanism.wrap(credentials_der)
+            if not isinstance(sealed, bytes) or not 0 < len(sealed) <= 128 * 1024:
+                self._abort()
+            self._authorize()
+            self._state = "credentials_sealed"
+            return sealed
         except BaseException:
             self.close()
             raise
