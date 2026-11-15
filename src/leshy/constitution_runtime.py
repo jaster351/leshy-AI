@@ -28,9 +28,15 @@ def is_federation_constitution_question(message: str) -> bool:
     current = " ".join(str(message or "").lower().replace("ё", "е").split())
     law = "конституц" in current or "основной закон" in current
     leshy = bool(re.search(r"\bлеш\w*\b", current))
+    federation = bool(re.search(r"\bфедерац\w*\b", current))
+    local_possession = bool(re.search(
+        r"\b(?:моя|наша|твоя|твою|твоей|ваша|вашу)\b.{0,50}\bконституц\w*|"
+        r"\bконституц\w*\b.{0,50}\b(?:тебя|вас|лешего|леших)\b",
+        current,
+    ))
     russian = bool(re.search(r"\b(?:рф|росси\w*|российск\w*)\b", current))
     # "Леший, покажи Конституцию РФ" is NOT the federation document.
-    return law and leshy and not russian
+    return law and (leshy or federation or local_possession) and not russian
 
 
 def _candidate_paths(app) -> list[Path]:
