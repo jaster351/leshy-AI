@@ -1,0 +1,43 @@
+# Separate opt-in RDP checks. Do not enable automatic triggers before
+# 2026-12-01: preserve the existing GitHub Actions usage limit policy.
+name: Native RDP Windows security checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rdp-windows-manual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install RDP test-only packages
+        run: python -m pip install "pytest>=8,<10" "cryptography>=43,<47"
+      - name: Check Python syntax
+        run: python -m compileall -q src/leshy tests
+      - name: Native SSPI and RDP protocol regressions
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python -m pytest -q -ra `
+            tests/test_native_spnego.py `
+            tests/test_native_spnego_windows_buffers.py `
+            tests/test_rdp_credssp_tsrequest.py `
+            tests/test_rdp_credssp_binding.py `
+            tests/test_rdp_credssp_binding_x509.py `
+            tests/test_rdp_credssp_negotiator.py `
+            tests/test_rdp_credssp_channel.py `
+            tests/test_rdp_credssp_channel_loopback.py `
+            tests/test_rdp_tls_probe.py `
+            tests/test_rdp_frame_codec.py `
+            tests/test_superagent_rdp_session.py
