@@ -28,7 +28,7 @@ def mock_context(*, qop=0, pointer_offset=2):
         assert signature.cbBuffer == 4
         assert encrypted.cbBuffer == 8
         base = encrypted.pvBuffer
-        if pointer_offset < 8:
+        if 0 <= pointer_offset <= 6:
             C.memmove(base + pointer_offset, b"OK", 2)
         encrypted.pvBuffer = base + pointer_offset
         encrypted.cbBuffer = 2
