@@ -281,6 +281,73 @@ class LlamaServerLLM:
         self._ready_since: float | None = None
         self._performance_profile: LocalInferenceProfile | None = None
         self._last_health_error = ""
+        # Auto-sleep is ON by default and persists across restarts.
+        # Only our own llama-server processes are unloaded, never the OS.
+        self._idle_sleep_enabled = True
+        self._idle_sleep_seconds = 60
+        self._idle_sleep_unloads = 0
+        self._idle_last_used = time.monotonic()
+        self._idle_sleep_stop = threading.Event()
+        self._load_idle_sleep_config()
+        self._idle_sleep_thread = threading.Thread(
+            target=self._idle_sleep_watch,
+            name="leshy-idle-model-" + str(self.backend)[:35],
+            daemon=True,
+        )
+        self._idle_sleep_thread.start()
+
+    def _load_idle_sleep_config(self) -> None:
+        path = Path(self.manager.brain_dir) / "settings" / "idle_sleep.json"
+        try:
+            if path.is_file():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    if isinstance(payload.get("enabled"), bool):
+                        self._idle_sleep_enabled = payload["enabled"]
+                    self._idle_sleep_seconds = max(30, min(
+                        86400, int(payload.get("idle_seconds", 60))
+                    ))
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                staged = path.with_name(path.name + ".tmp")
+                staged.write_text(
+                    json.dumps({"enabled": True, "idle_seconds": 60}, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                os.replace(staged, path)
+        except (OSError, TypeError, ValueError) as exc:
+            event("accelerator_idle_sleep_settings_error", error_type=type(exc).__name__)
+
+    def _idle_sleep_watch(self) -> None:
+        # Never interrupt a chat/stream (both hold _chat_lock) or warmup
+        # (_ensure_server holds _lock). Release only after 60s of real idle.
+        while not self._idle_sleep_stop.wait(3.0):
+            if not self._idle_sleep_enabled or self._process is None:
+                continue
+            if not self._chat_lock.acquire(blocking=False):
+                self._idle_last_used = time.monotonic()
+                continue
+            try:
+                if not self._lock.acquire(blocking=False):
+                    self._idle_last_used = time.monotonic()
+                    continue
+                try:
+                    if (self._process is not None
+                            and self._process.poll() is None
+                            and time.monotonic() - self._idle_last_used >= self._idle_sleep_seconds):
+                        self._stop_process()
+                        self._idle_sleep_unloads += 1
+                        event(
+                            "accelerator_auto_sleep",
+                            backend=self.backend,
+                            device=self.device,
+                            idle_seconds=self._idle_sleep_seconds,
+                            unloads=self._idle_sleep_unloads,
+                        )
+                finally:
+                    self._lock.release()
+            finally:
+                self._chat_lock.release()
 
     def _stop_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
@@ -313,6 +380,7 @@ class LlamaServerLLM:
 
     def _ensure_server(self) -> str:
         with self._lock:
+            self._idle_last_used = time.monotonic()
             if self._process is not None and self._process.poll() is None and self._port:
                 base = f"http://127.0.0.1:{self._port}"
                 if self._is_healthy(base):
@@ -415,6 +483,10 @@ class LlamaServerLLM:
             "port": self._port if alive else None,
             "ready_seconds": round(time.monotonic() - self._ready_since, 1) if alive and self._ready_since else 0.0,
             "performance": self._performance_profile.as_dict() if alive and self._performance_profile else None,
+            "auto_sleep_enabled": self._idle_sleep_enabled,
+            "idle_timeout_seconds": self._idle_sleep_seconds,
+            "auto_sleep_unloads": self._idle_sleep_unloads,
+            "sleeping": bool(self._idle_sleep_enabled and not alive and self._idle_sleep_unloads > 0),
         }
 
     def chat(self, messages: list[ChatMessage]) -> str:
@@ -476,5 +548,10 @@ class LlamaServerLLM:
                 raise LLMUnavailable(f"Ускоренный backend {self.backend} не смог выполнить запрос: {exc}") from exc
 
     def close(self) -> None:
-        with self._lock:
-            self._stop_process()
+        self._idle_sleep_stop.set()
+        # Same lock order as chat and the auto-sleep worker.
+        with self._chat_lock:
+            with self._lock:
+                self._stop_process()
+        if self._idle_sleep_thread is not threading.current_thread():
+            self._idle_sleep_thread.join(timeout=1.0)
