@@ -18,6 +18,11 @@ def make_handler(app, telegram, settings, model_catalog):
     class Handler(Parent):
         def do_GET(self):
             path = parse.urlsplit(self.path).path
+            if path == "/context-settings-panel.js":
+                try:
+                    return self._send_asset("context-settings-panel.js", "application/javascript; charset=utf-8")
+                except FileNotFoundError:
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Панель контекста не найдена"})
             if path == "/v1/context/settings":
                 owner = self._settings_owner()
                 if owner is None:
