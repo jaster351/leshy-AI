@@ -368,7 +368,8 @@ def source_dispute_requires_review(
     value = " ".join(str(answer or "").casefold().split())
     old_value = " ".join(old.casefold().split())
     linked = any(
-        str(source.get("url") or "") in answer
+        (str(source.get("url") or "") in answer
+         or safe_source_reference(str(source.get("url") or "")) in answer)
         for source in sources
         if source.get("url")
     )
