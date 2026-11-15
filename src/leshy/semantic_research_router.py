@@ -82,7 +82,7 @@ def _resident_model(app: Any) -> bool:
     return False
 
 
-def _short_local_inference(app: Any, query: str) -> str:
+def _short_local_inference(app: Any, query: str, *, guidance: str | None = None) -> str:
     """A bounded, small-token judgement, never a full second chat reply."""
     llm = getattr(app, "llm", None)
     providers = [llm]
@@ -103,7 +103,7 @@ def _short_local_inference(app: Any, query: str) -> str:
                     from .accelerator_runtime import _open_local_llama, _visible_answer_options
                     payload = {
                         "messages": [
-                            {"role": "system", "content": _GUIDANCE},
+                            {"role": "system", "content": guidance or _GUIDANCE},
                             {"role": "user", "content": "Запрос: " + query[:600] + "\nРешение:"},
                         ],
                         "stream": False, "max_tokens": 24, "temperature": 0,
@@ -132,7 +132,7 @@ def _short_local_inference(app: Any, query: str) -> str:
         try:
             response = model.create_chat_completion(
                 messages=[
-                    {"role": "system", "content": _GUIDANCE},
+                    {"role": "system", "content": guidance or _GUIDANCE},
                     {"role": "user", "content": "Запрос: " + query[:600] + "\nРешение:"},
                 ],
                 temperature=0,
