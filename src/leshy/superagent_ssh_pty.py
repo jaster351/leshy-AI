@@ -7,7 +7,8 @@ no Docker, Guacamole, daemon, or target-host agent is installed.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import codecs
 import hashlib
 import hmac
 import secrets
@@ -54,6 +55,7 @@ class _PTY:
     context: Any
     channel: Any
     expires: float
+    decoder: Any = field(default_factory=lambda: codecs.getincrementaldecoder("utf-8")("replace"))
 
 
 class InteractiveSSHBroker:
@@ -172,7 +174,7 @@ class InteractiveSSHBroker:
                 chunks.extend(part)
             truncated = bool(session.channel.recv_ready())
             return {
-                "text": chunks.decode("utf-8", errors="replace"),
+                "text": session.decoder.decode(bytes(chunks), final=False),
                 "more_output": truncated,
                 "session_open": not bool(getattr(session.channel, "closed", False)),
             }
