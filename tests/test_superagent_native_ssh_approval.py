@@ -27,7 +27,7 @@ class NativeApprovalBridgeTests(unittest.TestCase):
         self.assertEqual(result["username"], "operator")
         prepare.assert_called_once_with(
             mock.sentinel.policy, mock.sentinel.actor,
-            "127.0.0.1", "operator", "id",
+            "127.0.0.1", "operator", "id", approval_kind="native-openssh",
         )
 
     def test_approval_consumed_before_transport(self):
