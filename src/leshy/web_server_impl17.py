@@ -10,6 +10,7 @@ from .telegram_browser_login import TelegramBrowserLogin
 from .telegram_browser_login_runtime import install_telegram_browser_login_runtime
 from .constitution_runtime import install_constitution_routing
 from .semantic_research_router import install_semantic_research_router
+from .research_tuning import store_for
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
 
 
@@ -70,8 +71,33 @@ def make_handler(app, telegram, settings, model_catalog):
             )
             return payload
 
+        def _research_owner_allowed(self) -> bool:
+            if not self._authorized() or not self._existing_web_owner():
+                self._identity_json(HTTPStatus.UNAUTHORIZED, {
+                    "error": "Требуется подтверждённая Web-сессия",
+                })
+                return False
+            role = role_for_web(telegram, identity, self._existing_web_owner())
+            if role not in {"creator", "server_owner"}:
+                self._identity_json(HTTPStatus.FORBIDDEN, {
+                    "error": "Настройки интернет-поиска доступны только хозяину этого сервера",
+                })
+                return False
+            return True
+
         def do_GET(self):
             route = urlsplit(self.path).path
+            if route == "/research-settings-panel.js":
+                try:
+                    return self._send_asset(
+                        "research-settings-panel.js", "application/javascript; charset=utf-8",
+                    )
+                except FileNotFoundError:
+                    return self._identity_json(HTTPStatus.NOT_FOUND, {"error": "Панель поиска не найдена"})
+            if route == "/v1/research/settings":
+                if not self._research_owner_allowed():
+                    return
+                return self._identity_json(HTTPStatus.OK, store_for(app).status())
             if route == "/v1/identity/telegram/login/status":
                 if not self._authorized() or not self._existing_web_owner():
                     return self._identity_json(HTTPStatus.UNAUTHORIZED, {
@@ -119,6 +145,22 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             route = urlsplit(self.path).path
+            if route == "/v1/research/settings":
+                if not self._research_owner_allowed() or not self._identity_write_allowed():
+                    return
+                try:
+                    body = self._body()
+                    store_for(app).save(
+                        mode=str(body.get("mode", "auto")),
+                        level=body.get("level", "5.00"),
+                    )
+                    return self._identity_json(HTTPStatus.OK, store_for(app).status())
+                except (ValueError, TypeError) as exc:
+                    return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                except OSError:
+                    return self._identity_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось сохранить настройки интернет-поиска",
+                    })
             if route == "/v1/identity/creator/claim":
                 # One-time explicit bootstrap on the actual local computer,
                 # never from LAN/internet, Telegram text, model, or a guest.
