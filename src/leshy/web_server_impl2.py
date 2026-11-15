@@ -87,7 +87,12 @@ def make_handler(app, telegram, settings, model_catalog):
                 args = parse.parse_qs(parsed.query)
                 owner = self._arg(args, "owner_id", "web:local")
                 session_id = self._arg(args, "session_id", "")
-                return self._json(HTTPStatus.OK, {"items": controller.pending(owner_id=owner, session_id=session_id)})
+                try:
+                    items = controller.pending(owner_id=owner, session_id=session_id)
+                except PermissionError:
+                    # Unverified LAN/browser clients must not see approval details.
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Нет прав на просмотр подтверждений управления ОС"})
+                return self._json(HTTPStatus.OK, {"items": items})
 
             if parsed.path == "/v1/huggingface/status":
                 if not self._authorized():
