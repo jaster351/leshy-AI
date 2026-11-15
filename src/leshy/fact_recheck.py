@@ -305,13 +305,14 @@ def grounded_release_from_context(
     rows: list[Any],
     messages: list[Any],
     sources: list[dict[str, str]],
+    *, app: Any | None = None,
 ) -> str | None:
     """Prefer actual page heading to a contradictory LLM-generated release date.
 
     Only the exact page read this turn is eligible, never another search result,
     Knowledge candidate, old model text or an arbitrary date in the chat.
     """
-    review = is_factual_challenge(message, rows)
+    review = is_factual_challenge(message, rows, app=app)
     previous_question = prior_factual_question(rows)
     # The user may answer a false release-year assertion with ONLY a link.
     # Its meaning is "compare with this primary source", not "browse a
@@ -352,6 +353,7 @@ def source_dispute_requires_review(
     rows: list[Any],
     sources: list[dict[str, str]],
     answer: str,
+    *, app: Any | None = None,
 ) -> bool:
     """Require a source-grounded revision if an old claim is merely repeated."""
     if not sources:
@@ -360,7 +362,7 @@ def source_dispute_requires_review(
     if not old or not _FACTUAL.search(old):
         return False
     question = prior_factual_question(rows)
-    challenge = is_factual_challenge(message, rows) or bool(
+    challenge = is_factual_challenge(message, rows, app=app) or bool(
         supplied_public_url(message) and question
     )
     if not challenge:
