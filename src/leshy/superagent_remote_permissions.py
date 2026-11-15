@@ -59,8 +59,8 @@ class RemotePermissionPolicy:
         """Only a valid server-side cookie can create a Web actor.
 
         A profile UUID, localStorage owner_id, API bearer token or request JSON
-        is not sufficient. OAuth provider identity must be verified separately
-        before node administration is enabled.
+        is not sufficient. A previously verified OAuth or Telegram Bot API
+        identity must be linked to the live Web cookie before node management.
         """
         raw = str(cookie or "")
         if not raw:
@@ -85,9 +85,11 @@ class RemotePermissionPolicy:
                 (actor.session_fingerprint, actor.owner_id, time.time()),
             ).fetchone()
             # An anonymous Web cookie is NOT equivalent to a provider login.
+            # Telegram links are created only from confirmed Bot API callbacks.
+            # The active Web session is checked separately above.
             verified = conn.execute(
                 "SELECT 1 FROM owner_identity_links WHERE owner_id=? "
-                "AND provider IN ('github','google','microsoft','wordpress') LIMIT 1",
+                "AND provider IN ('github','google','microsoft','wordpress','telegram') LIMIT 1",
                 (actor.owner_id,),
             ).fetchone()
         if session is None or verified is None:

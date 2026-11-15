@@ -109,6 +109,39 @@ class RemotePolicyTests(unittest.TestCase):
             self.policy.require(VerifiedActor("owner", "valid", "telegram"), "server1",
                                 "inspect", observed_fingerprint="x"*32)
 
+    def test_telegram_verified_web_cookie_can_admin_enrolled_node(self):
+        import hashlib
+        self.identity.owner_for_web_cookie.side_effect = lambda cookie: {
+            "telegram-cookie": "telegram-user",
+        }.get(cookie, "")
+        with self.storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO owner_web_sessions VALUES(?,?,?)",
+                (hashlib.sha256(b"telegram-cookie").hexdigest(),
+                 "telegram-user", time.time() + 120),
+            )
+            conn.execute(
+                "INSERT INTO owner_identity_links VALUES(?,?,?)",
+                ("telegram", "telegram-user", "bot-api-confirmed-id"),
+            )
+        actor = self.policy.actor_from_web_cookie("telegram-cookie")
+        self.policy.register_verified_node(
+            actor, "server-telegram", "b"*32, enrollment_proof='signed-attestation',
+        )
+        self.policy.require(
+            actor, "server-telegram", "inspect",
+            observed_fingerprint="b"*32,
+        )
+        with self.storage.connection() as conn:
+            conn.execute(
+                "DELETE FROM owner_identity_links WHERE owner_id='telegram-user'"
+            )
+        with self.assertRaises(PermissionError):
+            self.policy.require(
+                actor, "server-telegram", "inspect",
+                observed_fingerprint="b"*32,
+            )
+
     def test_no_wildcard_capability(self):
         self.policy.register_verified_node(self.owner, "server1", "x"*32, enrollment_proof='signed-attestation')
         with self.assertRaises(PermissionError):
