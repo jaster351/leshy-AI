@@ -46,7 +46,7 @@ def url_search_query(message: str) -> str | None:
     return f"site:{host} {suffix}".strip() if suffix else f"site:{host}"
 
 
-def contextual_search_query(message: str, history: list) -> tuple[str, bool]:
+def contextual_search_query(message: str, history: list, *, app=None) -> tuple[str, bool]:
     """Получить осмысленный запрос, используя только историю ЭТОЙ сессии.
 
     История передаётся вызывающим кодом из сессии с проверенным owner_id.
@@ -66,7 +66,7 @@ def contextual_search_query(message: str, history: list) -> tuple[str, bool]:
             text,
         ))
         return text, crosscheck
-    if is_factual_challenge(text, history):
+    if is_factual_challenge(text, history, app=app):
         question = review_search_query(text, history)
         if question:
             # If the user has ALREADY provided a primary URL, read it again,
