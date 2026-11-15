@@ -59,6 +59,20 @@ CREATE TABLE IF NOT EXISTS owner_link_tokens(
     used_at REAL
 );
 CREATE INDEX IF NOT EXISTS ix_owner_link_tokens_expiry ON owner_link_tokens(expires_at,used_at);
+CREATE TABLE IF NOT EXISTS owner_profile_avatars(
+    owner_id TEXT PRIMARY KEY,
+    gravatar_hash TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS owner_browser_pairings(
+    token_hash TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    originating_session_hash TEXT NOT NULL,
+    expires_at REAL NOT NULL,
+    consumed_at REAL
+);
+CREATE INDEX IF NOT EXISTS ix_owner_browser_pairings_expiry
+ON owner_browser_pairings(expires_at,consumed_at);
 """
 
 
@@ -91,6 +105,7 @@ class OwnerIdentityService:
             conn.executescript(_SCHEMA)
             conn.execute("DELETE FROM owner_web_sessions WHERE expires_at<?", (time.time(),))
             conn.execute("DELETE FROM owner_link_tokens WHERE expires_at<? OR used_at IS NOT NULL", (time.time(),))
+            conn.execute("DELETE FROM owner_browser_pairings WHERE expires_at<? OR consumed_at IS NOT NULL", (time.time(),))
 
     @staticmethod
     def _hash_secret(value: str) -> str:
@@ -243,7 +258,115 @@ class OwnerIdentityService:
             "telegram": telegram,
             "telegram_linked": bool(telegram),
             "web_session_server_side": True,
+            "avatar": self.gravatar_for_owner(owner),
         }
+
+    def gravatar_for_owner(self, owner_id: str) -> dict[str, Any]:
+        """External avatar is optional; a hash is not proof of ownership of an email."""
+        with self.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT gravatar_hash FROM owner_profile_avatars WHERE owner_id=?",
+                (str(owner_id),),
+            ).fetchone()
+        if row is None:
+            return {"provider": "local", "url": "", "external_request": False}
+        digest = str(row["gravatar_hash"])
+        return {
+            "provider": "gravatar",
+            "url": f"https://gravatar.com/avatar/{digest}?s=96&d=404",
+            "external_request": True,
+        }
+
+    def configure_gravatar(self, owner_id: str, email: str) -> dict[str, Any]:
+        """Store only the SHA256 identifier, never raw email. Not a login method."""
+        owner = str(owner_id or "").strip()
+        if not self._profile_exists(owner):
+            raise PermissionError("Нет подтверждённого профиля")
+        value = str(email or "").strip().lower()
+        if not value or len(value) > 254 or not re.fullmatch(
+            r"[^@\s]+@[^@\s]+\.[^@\s]+", value
+        ):
+            raise ValueError("Укажите корректный адрес email для Gravatar")
+        digest = sha256(value.encode("utf-8")).hexdigest()
+        with self.storage.connection() as conn:
+            conn.execute(
+                "INSERT INTO owner_profile_avatars(owner_id,gravatar_hash,updated_at) VALUES(?,?,?) "
+                "ON CONFLICT(owner_id) DO UPDATE SET "
+                "gravatar_hash=excluded.gravatar_hash,updated_at=excluded.updated_at",
+                (owner, digest, utcnow()),
+            )
+        return self.gravatar_for_owner(owner)
+
+    def clear_gravatar(self, owner_id: str) -> dict[str, Any]:
+        owner = str(owner_id or "").strip()
+        if not self._profile_exists(owner):
+            raise PermissionError("Нет подтверждённого профиля")
+        with self.storage.connection() as conn:
+            conn.execute("DELETE FROM owner_profile_avatars WHERE owner_id=?", (owner,))
+        return self.gravatar_for_owner(owner)
+
+    def create_browser_pairing(self, owner_id: str, session_hash: str) -> dict[str, Any]:
+        """A signed-in Web browser issues a short-lived 128-bit one-time login code."""
+        owner = str(owner_id or "").strip()
+        session = str(session_hash or "").strip()
+        now = time.time()
+        with self.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT owner_id FROM owner_web_sessions WHERE session_hash=? AND expires_at>?",
+                (session, now),
+            ).fetchone()
+            if row is None or str(row["owner_id"]) != owner:
+                raise PermissionError("Сеанс профиля не подтверждён")
+            conn.execute(
+                "DELETE FROM owner_browser_pairings WHERE expires_at<? OR consumed_at IS NOT NULL",
+                (now,),
+            )
+            code = secrets.token_hex(16)
+            conn.execute(
+                "INSERT INTO owner_browser_pairings(token_hash,owner_id,originating_session_hash,expires_at) "
+                "VALUES(?,?,?,?)",
+                (self._hash_secret(code), owner, session, now + _LINK_TTL_SECONDS),
+            )
+        return {"code": code, "expires_in": _LINK_TTL_SECONDS}
+
+    def consume_browser_pairing(self, code: str, session_hash: str) -> dict[str, Any]:
+        """Switch only the presented browser session to the verified owner."""
+        raw = str(code or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{32}", raw):
+            raise ValueError("Неверный формат кода")
+        digest = self._hash_secret(raw)
+        session = str(session_hash or "").strip()
+        now = time.time()
+        with self.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT p.owner_id, p.originating_session_hash FROM owner_browser_pairings p "
+                "JOIN owner_web_sessions s ON s.session_hash=p.originating_session_hash "
+                "WHERE p.token_hash=? AND p.consumed_at IS NULL AND p.expires_at>? "
+                "AND s.expires_at>? AND s.owner_id=p.owner_id",
+                (digest, now, now),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Код истёк или уже использован")
+            target = conn.execute(
+                "SELECT owner_id FROM owner_web_sessions WHERE session_hash=? AND expires_at>?",
+                (session, now),
+            ).fetchone()
+            if target is None:
+                raise PermissionError("Нет действующей сессии браузера")
+            owner = str(row["owner_id"])
+            updated = conn.execute(
+                "UPDATE owner_browser_pairings SET consumed_at=? "
+                "WHERE token_hash=? AND consumed_at IS NULL AND expires_at>?",
+                (now, digest, now),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("Код уже использован")
+            conn.execute(
+                "UPDATE owner_web_sessions SET owner_id=?,last_seen_at=? WHERE session_hash=?",
+                (owner, utcnow(), session),
+            )
+        event("owner_identity_browser_paired", owner_id=owner)
+        return {"owner_id": owner, "mode": "login"}
 
     def create_telegram_link(self, owner_id: str, web_session_hash: str) -> dict[str, Any]:
         owner = str(owner_id or "").strip()
