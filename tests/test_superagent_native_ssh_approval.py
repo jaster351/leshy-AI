@@ -56,7 +56,11 @@ class NativeApprovalBridgeTests(unittest.TestCase):
                 "receipt", "127.0.0.1", "operator", "id",
             )
         self.assertEqual(result["exit_code"], 0)
-        consume.assert_called_once()
+        consume.assert_called_once_with(
+            mock.sentinel.policy, mock.sentinel.actor,
+            "receipt", "127.0.0.1", "operator", "id",
+            approval_kind="native-openssh",
+        )
         execute.assert_called_once()
 
     def test_invalid_username_never_creates_approval(self):
