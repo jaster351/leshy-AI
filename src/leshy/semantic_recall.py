@@ -226,8 +226,9 @@ class SemanticDialogueRecall:
                 JOIN sessions s ON s.id=m.session_id
                 WHERE s.owner_id=? AND v.owner_id=? AND v.model=?
                   AND v.session_id=s.id AND m.role='user'
+                  AND (?!='web:local' OR v.session_id=?)
                 ORDER BY v.message_id DESC
-            """, (owner_id, owner_id, MODEL_VERSION))
+            """, (owner_id, owner_id, MODEL_VERSION, owner_id, session_id))
             for row in cursor:
                 mid = int(row["message_id"])
                 if mid in excludes:
