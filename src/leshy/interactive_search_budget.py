@@ -62,7 +62,7 @@ def install_interactive_search_budget(app_class) -> None:
                 event(
                     "interactive_search_capacity_exhausted",
                     active_detached=_ACTIVE_DETACHED,
-                    query=str(query or "")[:300],
+                    query_chars=len(str(query or "")),
                 )
                 raise TimeoutError("Интернет-поиск временно занят предыдущими медленными источниками")
             _ACTIVE_DETACHED += 1
@@ -93,7 +93,7 @@ def install_interactive_search_budget(app_class) -> None:
             report_search("тайм-аут", elapsed_ms)
             event(
                 "interactive_search_budget_exceeded",
-                query=str(query or "")[:300],
+                query_chars=len(str(query or "")),
                 reason=str(reason or "")[:200],
                 budget_seconds=budget,
                 elapsed_ms=elapsed_ms,
