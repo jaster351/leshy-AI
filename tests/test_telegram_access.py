@@ -71,6 +71,22 @@ class TelegramAccessTests(unittest.TestCase):
             bridge.configure("", ["77"])
             self.assertEqual(bridge.status()["owner_id"], "77")
 
+    def test_web_save_without_owner_keeps_existing_server_owner(self):
+        with tempfile.TemporaryDirectory() as temp:
+            _, bridge, _, _ = self.make_bridge(Path(temp))
+            bridge.configure("", ["100", "200"], owner_id="100")
+            bridge.configure("", ["100", "200"], owner_id=None, infer_owner_from_allowed=False)
+            self.assertEqual(bridge.status()["owner_id"], "100")
+            self.assertTrue(bridge._is_owner("100"))
+            self.assertFalse(bridge._is_owner("200"))
+
+    def test_new_web_configuration_does_not_promote_allowed_guest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            _, bridge, _, _ = self.make_bridge(Path(temp))
+            bridge.configure("", ["200"], owner_id="", infer_owner_from_allowed=False)
+            self.assertEqual(bridge.status()["owner_id"], "")
+            self.assertFalse(bridge._is_owner("200"))
+
     def test_plain_message_is_not_rewritten_without_reply(self):
         with tempfile.TemporaryDirectory() as temp:
             app, bridge, _, _ = self.make_bridge(Path(temp))
