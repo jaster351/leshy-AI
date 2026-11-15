@@ -121,6 +121,15 @@ def recent_user_source(rows: list[Any], *, max_messages: int = 8) -> str:
         url = supplied_public_url(message)
         if url:
             return url
+        if _REVIEW.search(message) or len(message) < 12:
+            continue
+        # Do not reuse a web page from another subject earlier in the chat.
+        if re.search(
+            r"(?i)(?:\?|^когда\b|^что\b|^почему\b|^какая\b|^какой\b|"
+            r"^объясни\b|^расскажи\b|^проверь\b)",
+            message,
+        ):
+            return ""
     return ""
 
 
