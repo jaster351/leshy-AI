@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import re
 import secrets
+import threading
 import time
 from typing import Any
 from urllib import request
@@ -46,6 +47,8 @@ class TelegramBrowserLogin:
     def __init__(self, identity):
         self.identity = identity
         self.storage = identity.storage
+        self._photo_refresh_lock = threading.Lock()
+        self._photo_refresh_last: dict[str, float] = {}
         with self.storage.connection() as conn:
             conn.executescript(_SCHEMA)
 
@@ -283,6 +286,44 @@ class TelegramBrowserLogin:
                 (name, utcnow(), str(row["owner_id"])),
             )
 
+    def ensure_photo_refresh(self, telegram, owner_id: str) -> bool:
+        """Refresh missing Telegram avatars asynchronously, with bounded retries.
+
+        The login callback and browser reload can race the Bot API image
+        request. A failed attempt must not permanently hide the avatar.
+        """
+        with self.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT provider_user_id,metadata_json FROM owner_identity_links "
+                "WHERE provider='telegram' AND owner_id=? "
+                "ORDER BY linked_at DESC LIMIT 1", (str(owner_id),),
+            ).fetchone()
+        if row is None:
+            return False
+        user_id = str(row["provider_user_id"])
+        try:
+            metadata = json.loads(str(row["metadata_json"] or "{}"))
+        except (ValueError, TypeError):
+            metadata = {}
+        if metadata.get("photo_file_id") or not user_id.isdecimal():
+            return False
+        now = time.monotonic()
+        with self._photo_refresh_lock:
+            if now - self._photo_refresh_last.get(user_id, -999999) < 45:
+                return False
+            self._photo_refresh_last[user_id] = now
+            if len(self._photo_refresh_last) > 512:
+                cutoff = now - 1800
+                self._photo_refresh_last = {
+                    k: v for k, v in self._photo_refresh_last.items() if v >= cutoff
+                }
+        threading.Thread(
+            target=self.sync_verified_telegram_profile,
+            args=(telegram, user_id),
+            name="leshy-telegram-avatar-refresh", daemon=True,
+        ).start()
+        return True
+
     def sync_verified_telegram_profile(self, telegram, user_id: str) -> None:
         """Keep photo and public Telegram data, never the bot token or raw file URL."""
         user_id = str(user_id).strip()
@@ -345,6 +386,7 @@ class TelegramBrowserLogin:
             "language_code": str(meta.get("language_code") or ""),
             "telegram_user_id": str(row["provider_user_id"]),
             "avatar_url": "/v1/identity/telegram/avatar" if file_id else str(fallback_avatar.get("url") or ""),
+            "photo_pending": not bool(file_id),
         }
 
     def avatar(self, telegram, owner_id: str) -> tuple[bytes, str] | None:
