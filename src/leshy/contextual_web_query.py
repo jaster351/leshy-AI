@@ -8,6 +8,7 @@ import re
 from urllib.parse import unquote, urlsplit
 
 from .source_reading import supplied_public_url
+from .research_policy import is_internal_knowledge_request, is_explicit_offline_request, is_casual_checkin, is_local_dialogue_request
 
 _FOLLOWUP = re.compile(
     r"(?i)(?:зайди|посети|посмотри|проверь|открой|первоначальн(?:ый|ому|ое)|"
@@ -51,10 +52,23 @@ def contextual_search_query(message: str, history: list) -> tuple[str, bool]:
     Возвращаемый флаг требует онлайн-проверки для ссылок и явных продолжений.
     """
     text = str(message or "").strip()
+    if (is_explicit_offline_request(text) or is_internal_knowledge_request(text)
+            or is_casual_checkin(text) or is_local_dialogue_request(text)):
+        return text, False
     url_query = url_search_query(text)
     if url_query:
         return url_query, True
     if not _FOLLOWUP.search(text):
+        return text, False
+    # "Проверь Конституцию" or "открой память" refers to local data,
+    # not to a web site from a previous message.
+    external_followup = bool(re.search(
+        r"(?i)(?:\b(?:сайт|источник|ссылк|интернет|в\s+сети|онлайн)\b|"
+        r"^(?:зайди|посети)\b|"
+        r"\b(?:предыдущ(?:ий|ую)|исходн(?:ый|ую)|перв(?:ый|ую))\s+вопрос\b)",
+        text,
+    ))
+    if not external_followup:
         return text, False
     initial = re.search(
         r"(?i)(?:первоначальн|перв(?:ый|ого|ому) вопрос|исходн(?:ый|ому) вопрос)",
