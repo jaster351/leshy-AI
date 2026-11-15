@@ -21,6 +21,7 @@ from .superagent_ticket_pool import ParallelTicketPool
 from .superagent_worker_capacity import worker_ceiling, available_worker_slots
 from .superagent_plan_bridge import SuperAgentPlanBridge
 from .superagent_plan_runner import execute_ready_plan_reads
+from .superagent_remote_maintenance import maintenance_intent, run_remote_maintenance
 from .cognitive_journal import CognitiveStepJournal
 from .cognitive_lease import SuperAgentProcessLease
 from .diagnostics import event, problem
@@ -230,11 +231,22 @@ class SuperAgentService:
         exhausted = 0
         with self.storage.connection() as conn:
             rows = conn.execute(
-                "SELECT id,attempt FROM superagent_tickets WHERE state='working'"
+                "SELECT id,attempt,request_text FROM superagent_tickets WHERE state='working'"
             ).fetchall()
             for row in rows:
                 ticket_id = str(row["id"])
-                if int(row["attempt"] or 0) >= self.max_attempts:
+                # An apt transaction could have started before process death.
+                # Never replay a remote mutation automatically after restart.
+                if maintenance_intent(str(row["request_text"] or "")) == "apt_upgrade":
+                    conn.execute(
+                        "UPDATE superagent_tickets SET state='blocked',latest_report=?,"
+                        "attention='',next_run_epoch=0,delivered=0,updated_at=? "
+                        "WHERE id=? AND state='working'",
+                        ("Работа Лешего прервана во время обслуживания сервера. "
+                         "Результат apt неизвестен; повторять обновление без "
+                         "новой проверки состояния нельзя.", now, ticket_id),
+                    )
+                elif int(row["attempt"] or 0) >= self.max_attempts:
                     # A repeated crash must not cause an unbounded recovery
                     # loop; a human can explicitly retry a failed task.
                     conn.execute(
@@ -571,6 +583,16 @@ class SuperAgentService:
     def _execute(self, ticket: dict[str, Any]) -> tuple[str, str, str, list[dict[str, str]]]:
         ticket_id = str(ticket["id"])
         request = str(ticket["request_text"])
+        # A natural-language request to update an enrolled Debian/Ubuntu server
+        # runs a typed SSH maintenance workflow, NOT an LLM-suggested shell
+        # command. This path reports only actual remote receipts/verdicts.
+        # The model never sees the SSH password or trusted JSON file contents.
+        if maintenance_intent(request):
+            result = run_remote_maintenance(
+                self.app, ticket, still_active=lambda: self._ticket_working(ticket_id),
+            )
+            if result is not None:
+                return result[0], result[1], "", []
         inputs = self._inputs(ticket_id)
         sources: list[dict[str, str]] = []
         movie_evidence: list[dict[str, str]] = []
@@ -896,7 +918,9 @@ class SuperAgentService:
             self._deliver(ticket_id)
         except Exception as exc:
             transient = self._transient(exc)
-            retry = transient and attempt < self.max_attempts
+            # Never retry a mutation whose first attempt may have taken effect.
+            retry = (transient and attempt < self.max_attempts
+                     and maintenance_intent(str(ticket.get("request_text") or "")) != "apt_upgrade")
             ended = utcnow()
             with self.storage.connection() as conn:
                 current = conn.execute(
