@@ -5,10 +5,13 @@ from types import SimpleNamespace
 import unittest
 
 from leshy.contextual_web_query import contextual_search_query
+from leshy.browser_agent import BrowserActionResult
+from leshy.browser_platform_runtime import BrowserPlatform, BrowserConversationIntent
 from leshy.fact_recheck import (
     grounded_release_from_context,
     is_factual_challenge,
     prior_factual_question,
+    review_search_query,
     release_date_from_page,
     source_release_fact,
 )
@@ -130,6 +133,32 @@ class FactRecheckTests(unittest.TestCase):
         self.assertIsNotNone(answer)
         self.assertIn("19 ноября 2026", answer)
         self.assertIn(url, answer)
+
+    def test_browser_agent_extracted_page_controls_release_answer(self):
+        url = "https://www.rockstargames.com/VI"
+        platform = BrowserPlatform.__new__(BrowserPlatform)
+        platform.kitesurf = SimpleNamespace(available=lambda: False)
+        platform.agent = SimpleNamespace(execute=lambda _action: BrowserActionResult(
+            "ok", "Прочитана страница",
+            {"visible_text": "ПРЕДЗАГРУЗКА НАЧАЛАСЬ. ВЫХОДИТ 19 НОЯБРЯ 2026 ГОДА"},
+        ))
+        platform._remember_results = lambda _sid, _rows: None
+        platform.app = SimpleNamespace(history=lambda _owner, _sid, limit=30: list(reversed(_history())))
+        intent = BrowserConversationIntent("research_url", "Открой официальный сайт " + url, url)
+        answer, sources = platform.research_url(
+            intent, owner_id="test-owner", session_id="test-session",
+        )
+        self.assertIn("19 ноября 2026", answer)
+        self.assertNotIn("2025", answer)
+        self.assertEqual(sources[0]["url"], url)
+
+    def test_no_private_history_in_external_verification_query(self):
+        rows = [
+            {"role": "user", "content": "Ты не прав"},
+            {"role": "assistant", "content": "Рост составляет 170 см, запись 2025 года."},
+            {"role": "user", "content": "Сколько мой рост?"},
+        ]
+        self.assertEqual(review_search_query("Ты не прав", rows), "")
 
     def test_release_year_not_inferred_from_unmarked_publication_date(self):
         self.assertIsNone(release_date_from_page(
