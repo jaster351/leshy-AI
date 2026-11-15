@@ -644,6 +644,20 @@ class SuperAgentService:
             + (f"\nАктуальные веб-данные:\n{research_text}\n" if research_text else "")
         )
         messages = [ChatMessage("system", system), ChatMessage("user", user)]
+        # Предыдущие указания того же владельца — только справочный контекст,
+        # не разрешение инструментальных действий и не новая команда.
+        recall = getattr(self.app, "semantic_recall", None)
+        owner = str(ticket.get("owner_id") or "").strip()
+        if recall is not None and owner:
+            recall.schedule(owner)
+            try:
+                evidence = recall.context(
+                    owner, request, session_id=str(ticket.get("session_id") or ""),
+                )
+                if evidence:
+                    messages.insert(1, ChatMessage("system", evidence))
+            except Exception as exc:
+                problem("superagent_semantic_recall_failed", type(exc).__name__)
         seen_calls: set[str] = set()
         for tool_step in range(3):
             if not self._ticket_working(ticket_id):
