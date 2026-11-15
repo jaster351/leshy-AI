@@ -136,7 +136,7 @@ def test_text_validation_and_revocation():
     broker, backend, _, allowed = setup_controller()
     sid = broker.open("alice", "192.0.2.10", "a" * 64)
     receipt = broker.observe("alice", sid)
-    for bad in ("", "a" * 513, "bad\\nvalue", "bad\\x00value"):
+    for bad in ("", "a" * 513, "bad\nvalue", "bad\x00value"):
         with pytest.raises(ValueError):
             broker.type_text("alice", sid, frame_digest=receipt.frame_digest, text=bad)
     allowed.clear()
