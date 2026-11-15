@@ -9,6 +9,8 @@ from urllib import parse, error
 
 from .diagnostics import event, problem
 from .realtime_chat import RealtimeChatManager
+from .research_tuning import store_for
+from .role_authority import role_for_telegram
 from .telegram_vision import (LocalTelegramVision, image_attachment, VisionUnavailable, VisionNotConfigured, TelegramImageError)
 from .telegram_vision_context import RecentTelegramPhotos
 from .photo_geolocation import is_photo_geolocation_request
@@ -317,6 +319,57 @@ class FastTelegramBridge(RichTelegramBridge):
             problem("telegram_access_denied", "Telegram ID не разрешён", telegram_user_id=user_id)
             if not self._social.is_group(message):
                 self._send(chat_id, "Доступ к Лешему не настроен для этого Telegram ID.")
+            return
+
+        command = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text else ""
+        if command in {"/websearch", "/searchmode"}:
+            # Telegram commands are not authorization by themselves: check the
+            # verified sender ID (never the message text or reply target).
+            if str(chat.get("type") or "") != "private":
+                self._send(chat_id, "Настройки интернет-поиска меняются только в личном чате.")
+                return
+            if role_for_telegram(self, user_id) not in {"creator", "server_owner"}:
+                self._send(chat_id, "Настройки поиска доступны только хозяину сервера.")
+                return
+            try:
+                store = store_for(self.app)
+                args = text.split(maxsplit=2)
+                action = args[1].strip().lower() if len(args) > 1 else "status"
+                if action in {"status", "diag", "diagnostics", "диагностика"}:
+                    info = store.status(5)
+                    lines = [
+                        "Поиск: " + ("Авто" if info["mode"] == "auto" else "Вручную"),
+                        "Уровень: " + info["level"] + " (0,00–10,00; шаг 0,01)",
+                    ]
+                    if action != "status":
+                        for row in reversed(info["decisions"]):
+                            w = row.get("weights") or {}
+                            lines.append(
+                                ("Интернет" if row.get("search") else "Локально")
+                                + " | " + row.get("level", "5.00")
+                                + " | " + row.get("reason_code", "")
+                                + " | " + ", ".join(f"{k}={v}" for k, v in w.items())
+                            )
+                    else:
+                        lines.append("Команды: /websearch auto, /websearch 1.01, /websearch diag")
+                    self._send(chat_id, "\n".join(lines)[:3900])
+                    return
+                if action in {"auto", "авто"}:
+                    current = store.load()
+                    store.save("auto", current["level"])
+                elif action == "manual" and len(args) > 2:
+                    store.save("manual", args[2].strip())
+                else:
+                    store.save("manual", action)
+                info = store.load()
+                self._send(
+                    chat_id,
+                    "Настройки поиска сохранены: "
+                    + ("Авто" if info["mode"] == "auto" else "Вручную")
+                    + ", уровень " + info["level"] + ".",
+                )
+            except (ValueError, OSError, RuntimeError) as exc:
+                self._send(chat_id, "Не удалось изменить поиск: " + str(exc)[:250])
             return
 
         # A following "Кто это?" must refer to the last photo by this sender,

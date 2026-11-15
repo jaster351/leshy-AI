@@ -7,6 +7,7 @@ The classifier uses the local model and never sends private text to a provider.
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextvars import ContextVar
 import json
 import os
 import re
@@ -33,12 +34,14 @@ from .research_policy import (
     normalize_query,
 )
 from .realtime_chat import RealtimeChatManager
+from .research_tuning import manual_research_score, store_for
 
 _BUSY = threading.BoundedSemaphore(1)
 _DECISION_BUDGET_SECONDS = 3.5
 _CACHED: OrderedDict[str, str] = OrderedDict()
 _CACHE_GUARD = threading.Lock()
 _MAX_CACHE = 128
+_DECISION_META: ContextVar[dict] = ContextVar('leshy_research_decision', default={})
 _STRICT_WEB_REASONS = frozenset((
     "явный запрос интернет-поиска",
     "требуются актуальные данные",
@@ -205,36 +208,50 @@ def choose_research(
     The LLM is advisory. It cannot override offline consent, trigger tools
     by itself, impersonate retrieved sources, or declare web success.
     """
+    _DECISION_META.set({})
+    try:
+        config = store_for(app).load()
+    except (OSError, ValueError, RuntimeError):
+        config = {"mode": "auto", "level": "5.00"}
+
+    def finish(needed: bool, reason: str, code: str,
+               weights: dict | None = None) -> tuple[bool, str]:
+        _DECISION_META.set({
+            "mode": config["mode"], "level": config["level"],
+            "reason_code": code, "weights": dict(weights or {"policy": code}),
+        })
+        return needed, reason
+
     current = _current_user_text(query).strip()
     trusted = list(trusted or [])
     candidates = list(candidates or [])
     if not current:
-        return False, ""
+        return finish(False, "", "auto_local")
     if (is_explicit_offline_request(current)
             or is_casual_checkin(current)
             or is_local_dialogue_request(current)
             or is_internal_knowledge_request(current)
             or is_offline_creative_request(current)):
-        return False, "разговор или локальные данные"
+        return finish(False, "разговор или локальные данные", "local_dialogue")
     if supplied_public_url(current) and not force_search:
         # User gave an exact primary page; read it. A second general search
         # can only dilute/override the author's actual published evidence.
-        return False, "чтение предоставленного первоисточника"
+        return finish(False, "чтение предоставленного первоисточника", "trusted_source")
     if force_search or is_explicit_web_request(current):
-        return True, "явный запрос интернет-поиска"
+        return finish(True, "явный запрос интернет-поиска", "explicit_request")
     # Personal updates are conversational facts, even if they contain "today".
     if (re.match(r"(?i)^(?:я|мы|мне|у меня|нам|у нас)\b", current)
             and "?" not in current
             and not re.search(r"(?i)\b(?:найди|поищи|узнай|проверь|расскажи|объясни)\b", current)):
-        return False, "сообщение о личном опыте"
+        return finish(False, "сообщение о личном опыте", "local_dialogue")
     if cinema_query(current):
-        return True, "внешний кино-каталог"
+        return finish(True, "внешний кино-каталог", "strict_freshness")
     # An external live fact needs a source regardless of the model's memory.
     old = initial_reason
     if old is None:
         old = adaptive_research_reason(current, trusted, candidates)
     if old in _STRICT_WEB_REASONS:
-        return True, str(old)
+        return finish(True, str(old), "strict_freshness")
     # With fresh local knowledge answer immediately. An instruction to "find",
     # "check" or "research" without an explicit location is semantically
     # ambiguous: the model should choose whether it refers to local or web.
@@ -242,21 +259,39 @@ def choose_research(
         r"(?i)^(?:леший[,!:]?\s+)?(?:найди|поищи|проверь|узнай|исследуй|сравни)\b",
         current,
     ))
+    if config["mode"] == "manual":
+        # Manual bias applies ONLY to unresolved external-vs-local choices.
+        # Offline instructions and mandatory fresh-source checks above win.
+        if len(current) < 20 and not old and not ambiguous_action:
+            return finish(False, "короткая реплика без внешнего запроса", "auto_local")
+        model_choice = _classify_locally(app, current)
+        if model_choice == "ASK":
+            return finish(False, "модель рекомендует уточнить вопрос", "model_ask",
+                          {"model_vote": "ASK"})
+        weights = manual_research_score(
+            config["level"], bool(old), ambiguous_action, model_choice,
+        )
+        required = weights["score"] >= weights["threshold"]
+        return finish(
+            required,
+            "оценка ручного уровня: " + ("поиск" if required else "локально"),
+            "manual_score", weights,
+        )
     if not old and not ambiguous_action:
-        return False, "достаточно локальных знаний"
+        return finish(False, "достаточно локальных знаний", "auto_local")
     # A factual knowledge gap is NOT automatically permission to search.
     # A local model may judge that the subject actually needs external data.
     if len(current) < 20:
-        return False, "короткая реплика без внешнего запроса"
+        return finish(False, "короткая реплика без внешнего запроса", "auto_local")
     model_choice = _classify_locally(app, current)
     if model_choice == "WEB":
-        return True, "модель определила необходимость внешних данных"
+        return finish(True, "модель определила необходимость внешних данных", "auto_semantic", {"model_vote": "WEB"})
     if model_choice == "ASK":
-        return False, "модель рекомендует уточнить предмет вопроса"
+        return finish(False, "модель рекомендует уточнить предмет вопроса", "model_ask", {"model_vote": "ASK"})
     if model_choice == "LOCAL":
-        return False, "смысловая оценка модели: локальный ответ"
+        return finish(False, "смысловая оценка модели: локальный ответ", "auto_semantic", {"model_vote": "LOCAL"})
     # No model ready or available: don't force a broken search for generic facts.
-    return False, "локальная генерация с обозначением неопределённости"
+    return finish(False, "локальная генерация с обозначением неопределённости", "auto_local")
 
 
 def install_semantic_research_router() -> None:
@@ -282,6 +317,23 @@ def install_semantic_research_router() -> None:
         plan["reason"] = reason
         if not needed:
             plan["stale"] = []
+        detail = dict(_DECISION_META.get() or {})
+        if plan.get("freshness_satisfied") and not needed:
+            detail["reason_code"] = "fresh_cache"
+            detail["weights"] = {"policy": "fresh_cache", "override": True}
+        try:
+            record = store_for(self.app).record(
+                mode=detail.get("mode", "auto"),
+                level=detail.get("level", "5.00"),
+                needed=needed,
+                reason=detail.get("reason_code", "auto_heuristic"),
+                weights=detail.get("weights", {}),
+                overridden=bool(detail.get("reason_code") == "fresh_cache"),
+            )
+            plan["research_decision"] = record
+            self.app._last_research_decision = record
+        except (OSError, ValueError, RuntimeError) as exc:
+            event("research_decision_record_failed", kind=type(exc).__name__)
         event("semantic_research_route", online=needed, decision=reason[:100])
         return plan
 
