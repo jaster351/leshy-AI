@@ -198,7 +198,8 @@ class BrowserPlatform:
         lines.append("\nВыберите вариант, например: «забронируй первый» или «купи вариант 2». Перед действием Леший отдельно попросит подтверждение.")
         return "\n".join(lines)
 
-    def research(self, query: str, *, owner_id: str, session_id: str) -> tuple[str, list[dict[str, str]]]:
+    def research(self, query: str, *, owner_id: str, session_id: str,
+                 cancel_event: threading.Event | None = None) -> tuple[str, list[dict[str, str]]]:
         result = self.app.live_search(query, limit=8, reason="Browser Agent: запрос пользователя")
         rows = list(result.get("results") or [])
         self._remember_results(session_id, rows)
@@ -220,6 +221,7 @@ class BrowserPlatform:
                 "allowed_hosts": hosts,
                 "use_vision": False,
                 "max_steps": 28,
+                **({"_cancel_event": cancel_event} if cancel_event is not None else {}),
                 **self._profile_arguments(owner_id),
             },
             description=query,
@@ -233,7 +235,8 @@ class BrowserPlatform:
         sources = [{"title": row["title"], "url": row["url"]} for row in safe_rows]
         return answer, sources
 
-    def research_url(self, intent: BrowserConversationIntent, *, owner_id: str, session_id: str) -> tuple[str, list[dict[str, str]]]:
+    def research_url(self, intent: BrowserConversationIntent, *, owner_id: str, session_id: str,
+                     cancel_event: threading.Event | None = None) -> tuple[str, list[dict[str, str]]]:
         host = self._host(intent.url)
         if not host:
             raise ValueError("Некорректный URL")
@@ -241,7 +244,10 @@ class BrowserPlatform:
             "research",
             intent.url,
             BrowserRisk.READ,
-            {"task": intent.text, "allowed_hosts": (host,), "use_vision": False, "max_steps": 20, **self._profile_arguments(owner_id)},
+            {"task": intent.text, "allowed_hosts": (host,), "use_vision": False,
+             "max_steps": 20,
+             **({"_cancel_event": cancel_event} if cancel_event is not None else {}),
+             **self._profile_arguments(owner_id)},
             description=intent.text,
         )
         # A specifically configured local Kitesurf is tried first for a
@@ -336,15 +342,22 @@ class BrowserPlatform:
         )
         return result
 
-    def handle(self, text: str, *, owner_id: str, session_id: str) -> tuple[str, list[dict[str, str]], dict[str, Any] | None]:
+    def handle(self, text: str, *, owner_id: str, session_id: str,
+               cancel_event: threading.Event | None = None) -> tuple[str, list[dict[str, str]], dict[str, Any] | None]:
         intent = parse_browser_conversation_intent(text)
         if intent is None:
             raise ValueError("Сообщение не является Browser Agent intent")
         if intent.kind == "research":
-            answer, sources = self.research(intent.text, owner_id=owner_id, session_id=session_id)
+            answer, sources = self.research(
+                intent.text, owner_id=owner_id, session_id=session_id,
+                cancel_event=cancel_event,
+            )
             return answer, sources, None
         if intent.kind == "research_url":
-            answer, sources = self.research_url(intent, owner_id=owner_id, session_id=session_id)
+            answer, sources = self.research_url(
+                intent, owner_id=owner_id, session_id=session_id,
+                cancel_event=cancel_event,
+            )
             return answer, sources, None
         pending = self.request_external_action(intent, owner_id=owner_id, session_id=session_id)
         answer = (
@@ -429,7 +442,10 @@ def install_browser_platform_routing(app_class, app=None) -> None:
             yield StreamEvent("start", {"request_id": rid, "session_id": sid, "browser_agent": True})
             yield StreamEvent("activity", {"kind": "browser_agent", "phase": "working", "text": "Работаю в браузере…"})
             try:
-                answer, sources, pending = platform.handle(str(message), owner_id=owner_id, session_id=sid)
+                answer, sources, pending = platform.handle(
+                    str(message), owner_id=owner_id, session_id=sid,
+                    cancel_event=cancel,
+                )
             except Exception as exc:
                 problem("browser_platform_stream_failed", str(exc), session_id=sid)
                 answer, sources, pending = str(exc), [], None
