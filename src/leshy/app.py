@@ -511,7 +511,7 @@ class LeshyApp:
                 "image_job": job,
             }
 
-        lookup_query, force_search = contextual_search_query(message, rows)
+        lookup_query, force_search = contextual_search_query(message, rows, app=self)
         context: list[ChatMessage] = [
             ChatMessage(
                 "system",
@@ -545,7 +545,7 @@ class LeshyApp:
         if is_self_capability_question(message):
             context.append(ChatMessage("system", self.capabilities.context_for_question(self)))
         source_context, source_links = read_supplied_source(self, message)
-        factual_challenge = is_factual_challenge(message, rows)
+        factual_challenge = is_factual_challenge(message, rows, app=self)
         if factual_challenge and not source_links:
             previous_url = recent_user_source(rows)
             if previous_url:
