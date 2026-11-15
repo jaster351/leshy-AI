@@ -146,7 +146,7 @@ def make_handler(app, telegram, settings, model_catalog):
                         raise PermissionError("Хозяина нельзя менять через настройки Telegram")
                     users = body.get("allowed_users", [])
                     if isinstance(users, str):
-                        users = [part.strip() for part in users.replace(",", "\\n").splitlines() if part.strip()]
+                        users = [part.strip() for part in users.replace(",", "\n").splitlines() if part.strip()]
                     if not isinstance(users, list):
                         raise ValueError("Неверный список разрешённых Telegram ID")
                     preserved_owner = current_owner or (creator if role == "creator" else "")
