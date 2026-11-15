@@ -643,7 +643,7 @@ class LeshyApp:
                     context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
             except Exception as exc:
                 search_error = str(exc)
-                problem("live_search_failed", type(search_error).__name__, query_chars=len(message))
+                problem("live_search_failed", type(exc).__name__, query_chars=len(message))
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
         reason = None if creative else adaptive_research_reason(lookup_query, trusted, candidates)
