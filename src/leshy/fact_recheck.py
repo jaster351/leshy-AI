@@ -235,8 +235,17 @@ def grounded_release_from_context(
     Knowledge candidate, old model text or an arbitrary date in the chat.
     """
     review = is_factual_challenge(message, rows)
-    original_question = prior_factual_question(rows) if review else message
-    if not (review or _RELEASE_REQUEST.search(original_question)):
+    previous_question = prior_factual_question(rows)
+    # The user may answer a false release-year assertion with ONLY a link.
+    # Its meaning is "compare with this primary source", not "browse a
+    # random page and keep the old date".
+    linked_followup = bool(
+        supplied_public_url(message)
+        and previous_question
+        and _RELEASE_REQUEST.search(previous_question)
+    )
+    original_question = previous_question if review or linked_followup else message
+    if not (review or linked_followup or _RELEASE_REQUEST.search(original_question)):
         return None
     for msg in messages:
         text = str(getattr(msg, "content", "") or "")
