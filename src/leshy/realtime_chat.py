@@ -178,9 +178,16 @@ class RealtimeChatManager:
                     "UPDATE sessions SET title=?,title_source=?,updated_at=? WHERE id=?",
                     (" ".join(message.split())[:80], "auto", now, sid),
                 )
-            rows = load_session_context(
-                conn, sid, message, self.app.context_settings,
-            )
+            context_settings = getattr(self.app, "context_settings", None)
+            if context_settings is not None:
+                rows = load_session_context(conn, sid, message, context_settings)
+            else:
+                # Совместимость с тестовыми и подключаемыми экземплярами app,
+                # где ещё нет нового глобального хранилища настроек.
+                rows = conn.execute(
+                    "SELECT role,content FROM messages WHERE session_id=? "
+                    "ORDER BY id DESC LIMIT 24", (sid,),
+                ).fetchall()
         return sid, rows
 
     def _search_plan(self, message: str) -> dict[str, Any]:
