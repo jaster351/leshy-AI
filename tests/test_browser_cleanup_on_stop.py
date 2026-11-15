@@ -60,7 +60,7 @@ class BrowserCleanupTests(unittest.TestCase):
                             stop_event.set()
                         def begin_run():
                             begin.set()
-                        agent_class.on_start = begin_run
+                        agent_class.on_start = staticmethod(begin_run)
                         watcher = threading.Thread(target=setter, daemon=True)
                         watcher.start()
                         try:
