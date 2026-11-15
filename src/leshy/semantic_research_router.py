@@ -18,6 +18,7 @@ from .adaptive_internet_policy import (
     is_offline_creative_request,
 )
 from .diagnostics import event
+from .cinema_research import cinema_query
 from .llm import ChatMessage
 from .research_policy import (
     _current_user_text,
@@ -155,14 +156,27 @@ def choose_research(
         return False, "разговор или локальные данные"
     if force_search or is_explicit_web_request(current):
         return True, "явный запрос интернет-поиска"
+    # Personal updates are conversational facts, even if they contain "today".
+    if (re.match(r"(?i)^(?:я|мы|мне|у меня|нам|у нас)\b", current)
+            and "?" not in current
+            and not re.search(r"(?i)\b(?:найди|поищи|узнай|проверь|расскажи|объясни)\b", current)):
+        return False, "сообщение о личном опыте"
+    if cinema_query(current):
+        return True, "внешний кино-каталог"
     # An external live fact needs a source regardless of the model's memory.
     old = initial_reason
     if old is None:
         old = adaptive_research_reason(current, trusted, candidates)
     if old in _STRICT_WEB_REASONS:
         return True, str(old)
-    # Reliable existing knowledge can answer the question without a new trip.
-    if not old:
+    # With fresh local knowledge answer immediately. An instruction to "find",
+    # "check" or "research" without an explicit location is semantically
+    # ambiguous: the model should choose whether it refers to local or web.
+    ambiguous_action = bool(re.match(
+        r"(?i)^(?:леший[,!:]?\s+)?(?:найди|поищи|проверь|узнай|исследуй|сравни)\b",
+        current,
+    ))
+    if not old and not ambiguous_action:
         return False, "достаточно локальных знаний"
     # A factual knowledge gap is NOT automatically permission to search.
     # A local model may judge that the subject actually needs external data.
