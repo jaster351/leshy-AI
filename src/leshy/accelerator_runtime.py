@@ -349,6 +349,21 @@ class LlamaServerLLM:
             finally:
                 self._chat_lock.release()
 
+    def _chat_activity(self):
+        """Hold the inference lock and start the idle countdown AFTER completion."""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def active():
+            with self._chat_lock:
+                self._idle_last_used = time.monotonic()
+                try:
+                    yield
+                finally:
+                    self._idle_last_used = time.monotonic()
+
+        return active()
+
     def _stop_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
             try:
@@ -495,7 +510,7 @@ class LlamaServerLLM:
         # Qwen3.5 chat templates accept a system message only at position zero.
         # Direct calls to this backend may bypass AdaptiveLLM context preparation.
         messages = _normalize_system_messages(list(messages))
-        with self._chat_lock:
+        with self._chat_activity():
             try:
                 base = self._ensure_server()
                 payload = json.dumps({
