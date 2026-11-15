@@ -15,7 +15,7 @@ class NativeSSHValidationTests(unittest.TestCase):
             ("hostname.local", "operator", "id", 20),
             ("127.0.0.1", "-oProxyCommand=evil", "id", 20),
             ("127.0.0.1", "operator", "", 20),
-            ("127.0.0.1", "operator", "id\\x00evil", 20),
+            ("127.0.0.1", "operator", "id\x00evil", 20),
             ("127.0.0.1", "operator", "id", 31),
             ("127.0.0.1", "operator", "x" * 4097, 20),
         ]
@@ -38,7 +38,7 @@ class NativeSSHValidationTests(unittest.TestCase):
             side_effect=lambda name: name,
         ), mock.patch(
             "leshy.superagent_native_ssh.subprocess.run",
-            return_value=mock.Mock(returncode=0, stdout=b"127.0.0.1 ssh-ed25519 AAAA\\n"),
+            return_value=mock.Mock(returncode=0, stdout=b"127.0.0.1 ssh-ed25519 AAAA\n"),
         ) as run:
             with self.assertRaises(PermissionError):
                 run_native_ssh_command(policy, actor, "127.0.0.1", "operator", "id")
