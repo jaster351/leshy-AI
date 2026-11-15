@@ -77,6 +77,23 @@ class SemanticRecallTests(unittest.TestCase):
             "owner-B", "Какой графический ускоритель у меня?",
         ))
 
+    def test_anonymous_web_owner_can_only_recall_its_current_session(self):
+        self.add("other-tab", "web:local", "Установлена видеокарта RTX 3070.")
+        self.add("my-tab", "web:local", "Слушаю музыку.")
+        self.indexed("web:local")
+        # Недостаточно знать фиксированное имя web:local: история чужой
+        # вкладки не должна попадать в ответ текущей.
+        self.assertEqual(
+            self.recall.find(
+                "web:local", "Какая видеокарта установлена?",
+                session_id="my-tab",
+            ),
+            [],
+        )
+        self.assertEqual(self.recall.find(
+            "web:local", "Какая видеокарта установлена?",
+        ), [])
+
     def test_edit_and_delete_invalidate_recalled_evidence(self):
         mid = self.add("old", "owner-A", "Установлена видеокарта RTX 3070.")
         self.indexed("owner-A")
