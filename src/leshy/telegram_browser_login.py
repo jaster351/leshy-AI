@@ -151,14 +151,20 @@ class TelegramBrowserLogin:
                 (sender_id,),
             ).fetchone()
             target_owner = str(existing["owner_id"]) if existing else original_owner
-            if not existing:
-                linked_to_current = conn.execute(
-                    "SELECT provider_user_id FROM owner_identity_links "
-                    "WHERE provider='telegram' AND owner_id=? LIMIT 1",
-                    (original_owner,),
-                ).fetchone()
-                if linked_to_current and str(linked_to_current["provider_user_id"]) != sender_id:
-                    raise PermissionError("Этот профиль привязан к другому Telegram")
+            linked_to_current = conn.execute(
+                "SELECT provider_user_id FROM owner_identity_links "
+                "WHERE provider='telegram' AND owner_id=? LIMIT 1",
+                (original_owner,),
+            ).fetchone()
+            current_provider_user = (
+                str(linked_to_current["provider_user_id"])
+                if linked_to_current else ""
+            )
+            if not existing and current_provider_user and current_provider_user != sender_id:
+                raise PermissionError("Этот профиль привязан к другому Telegram")
+            # Switching accounts on a shared browser must NEVER move the
+            # previous user's private chat history into the new account.
+            migrate_guest = not current_provider_user and original_owner != target_owner
             name, username, metadata = self._sender_data(sender)
             if not existing:
                 conn.execute(
@@ -202,7 +208,7 @@ class TelegramBrowserLogin:
         # Do not merge someone else's browser identity: session_hash had to
         # match the browser that initiated and confirmed the request.
         try:
-            if original_owner != target_owner:
+            if migrate_guest:
                 self.identity._migrate_owner_rows(original_owner, target_owner)
                 self.identity._migrate_lenta_profile(original_owner, target_owner)
             if mode == "linked":
