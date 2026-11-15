@@ -79,6 +79,16 @@ def register_local_creator(telegram, telegram_user_id: str) -> dict[str, Any]:
         raise PermissionError("Создатель этой установки уже зарегистрирован")
     if os.getenv("LESHY_CREATOR_TELEGRAM_ID", "") and current != user_id:
         raise PermissionError("Создатель установлен локальной конфигурацией")
+    # A verified Telegram login is not permission to overwrite an *existing*
+    # server owner's identity. If the owner is another Telegram account, the
+    # local administrator must first correct the server-owner configuration.
+    configured_owner = _telegram_id(telegram._access().get("owner_id"))
+    if configured_owner and configured_owner != user_id:
+        raise PermissionError(
+            "На сервере уже назначен другой Telegram-хозяин. "
+            "Для изменения обратитесь к локальной настройке владельца; "
+            "вход через чужой Web-профиль не заменяет его разрешение."
+        )
     path = _creator_store(telegram)
     if not current:
         path.parent.mkdir(parents=True, exist_ok=True)
