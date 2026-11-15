@@ -46,19 +46,19 @@ class OperatingSystemController:
         r"останови\s+процесс|закрой\s+программ|скопируй\s+файл|перемести\s+файл|удали\s+файл)\b)"
     )
     _OS_TARGET_RE = re.compile(
-        r"(?i)\\b(?:windows|виндовс|операционн\\w*\\s+систем\\w*|"
-        r"на\\s+(?:компьютер\\w*|пк)|shell|powershell|терминал|командн\\w*\\s+строк\\w*)\\b"
+        r"(?i)\b(?:windows|виндовс|операционн\w*\s+систем\w*|"
+        r"на\s+(?:компьютер\w*|пк)|shell|powershell|терминал|командн\w*\s+строк\w*)\b"
     )
     _OS_ACTION_RE = re.compile(
-        r"(?i)\\b(?:выполн\\w*|запуст\\w*|откро\\w*|покаж\\w*|удал\\w*|"
-        r"настро\\w*|измен\\w*|поменя\\w*|выключ\\w*|включ\\w*|"
-        r"перезагруз\\w*|останов\\w*|закро\\w*|созда\\w*|прочита\\w*|"
-        r"скопиру\\w*|перемест\\w*|проверь|провер\\w*|установ\\w*)\\b"
+        r"(?i)\b(?:выполн\w*|запуст\w*|откро\w*|покаж\w*|удал\w*|"
+        r"настро\w*|измен\w*|поменя\w*|выключ\w*|включ\w*|"
+        r"перезагруз\w*|останов\w*|закро\w*|созда\w*|прочита\w*|"
+        r"скопиру\w*|перемест\w*|проверь|провер\w*|установ\w*)\b"
     )
     _OS_NEGATED_RE = re.compile(
-        r"(?i)\\b(?:не\\s+(?:меняй|изменяй|трогай|запускай|выполняй|"
+        r"(?i)\b(?:не\s+(?:меняй|изменяй|трогай|запускай|выполняй|"
         r"удаляй|выключай|перезагружай|проверяй)|"
-        r"(?:никаких|без)\\s+(?:изменений|действий|команд)\\b)"
+        r"(?:никаких|без)\s+(?:изменений|действий|команд)\b)"
     )
     _DANGEROUS_RE = re.compile(
         r"(?i)(?:format(?:-volume)?\b|clear-disk\b|remove-partition\b|diskpart\b|"
@@ -116,7 +116,7 @@ class OperatingSystemController:
         memory/constitution must remain safe normal chat for every user.
         """
         text = str(message or "").strip()
-        if re.match(r"(?i)^/os(?:\\s|$)", text):
+        if re.match(r"(?i)^/os(?:\s|$)", text):
             return True
         if self._OS_NEGATED_RE.search(text):
             return False
