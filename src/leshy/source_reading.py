@@ -45,7 +45,7 @@ def read_supplied_source(app, message: str) -> tuple[str, list[dict[str, str]]]:
         if cves and not all(cve.lower() in text.lower() for cve in cves):
             raise ValueError("текст страницы не содержит запрошенную CVE; возможно, сайт отдаёт заглушку")
     except Exception as exc:
-        problem("user_source_read_failed", type(exc).__name__, url=url[:400])
+        problem("user_source_read_failed", type(exc).__name__, source_host=parse.urlsplit(url).hostname or "")
         return (
             "Пользователь прислал URL, но приложение НЕ смогло прочитать страницу "
             f"{url}: {type(exc).__name__}. Не выдумывай содержание страницы, "
@@ -81,7 +81,7 @@ def read_supplied_source(app, message: str) -> tuple[str, list[dict[str, str]]]:
                 f"Проверь сведения на странице {url}",
                 reason="проверка прочитанного материала при включённом обучении",
             )
-    event("user_source_read", url=url[:400], characters=len(text), learned_candidates=learned)
+    event("user_source_read", source_host=parse.urlsplit(url).hostname or "", characters=len(text), learned_candidates=learned)
     note = (
         f"Прочитана исходная веб-страница: {url}. "
         f"Дата получения по часам компьютера: {utcnow()}. "
