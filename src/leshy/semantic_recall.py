@@ -132,15 +132,19 @@ class SemanticDialogueRecall:
                 owner = self._queue.get(timeout=60.0)
             except Empty:
                 return
+            unfinished = False
             try:
-                # Не занимать общий GPU и не блокировать поток диалога.
-                # Один запрос обрабатывает только небольшую пачку.
-                for _ in range(80):
+                # Весь архив индексируем небольшими порциями без блокировки чата.
+                for _ in range(40):
                     if time.monotonic() < self._retry_after:
                         break
                     if not self._index_batch(owner):
+                        unfinished = False
                         break
+                    unfinished = True
+                    time.sleep(0.03)
             except Exception as exc:
+                unfinished = False
                 self._last_error = type(exc).__name__
                 self._retry_after = time.monotonic() + 900.0
                 problem("semantic_recall_index_unavailable", type(exc).__name__)
@@ -148,6 +152,8 @@ class SemanticDialogueRecall:
                 with self._state_lock:
                     self._pending.discard(owner)
                 self._queue.task_done()
+                if unfinished and time.monotonic() >= self._retry_after:
+                    self.schedule(owner)
 
     def _index_batch(self, owner_id: str) -> bool:
         with self.storage.connection() as db:
@@ -205,6 +211,13 @@ class SemanticDialogueRecall:
         excludes = set(int(x) for x in exclude_ids)
         top: list[tuple[float, int, dict]] = []
         with self.storage.connection() as db:
+            if session_id:
+                recent = db.execute(
+                    "SELECT m.id FROM messages m JOIN sessions s ON s.id=m.session_id "
+                    "WHERE s.owner_id=? AND m.session_id=? "
+                    "ORDER BY m.id DESC LIMIT 32", (owner_id, session_id),
+                ).fetchall()
+                excludes.update(int(row["id"]) for row in recent)
             cursor = db.execute("""
                 SELECT v.message_id,v.session_id,v.vector,v.text_hash,
                        m.content,COALESCE(m.edited_at,'') AS edited_at
@@ -212,7 +225,7 @@ class SemanticDialogueRecall:
                 JOIN messages m ON m.id=v.message_id
                 JOIN sessions s ON s.id=m.session_id
                 WHERE s.owner_id=? AND v.owner_id=? AND v.model=?
-                  AND m.role='user'
+                  AND v.session_id=s.id AND m.role='user'
                 ORDER BY v.message_id DESC
             """, (owner_id, owner_id, MODEL_VERSION))
             for row in cursor:
