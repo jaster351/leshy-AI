@@ -269,7 +269,7 @@ class RealtimeChatManager:
         if _local_learning_question(message):
             context.append(ChatMessage("system", _today_learning_context(self.app)))
         source_context, source_links = read_supplied_source(self.app, message)
-        factual_challenge = is_factual_challenge(message, rows)
+        factual_challenge = is_factual_challenge(message, rows, app=self.app)
         if factual_challenge and not source_links:
             # Short objection after an official URL: re-read that exact page.
             # No redundant third-party search can replace the user's evidence.
@@ -707,7 +707,7 @@ class RealtimeChatManager:
                     "stopped": bool(cancel.is_set()),
                 })
                 return
-            lookup_query, force_search = contextual_search_query(message, rows)
+            lookup_query, force_search = contextual_search_query(message, rows, app=self.app)
             plan = self._search_plan(lookup_query)
             if force_search:
                 plan["needed"] = True
@@ -825,7 +825,7 @@ class RealtimeChatManager:
             # успевает появиться в Telegram до финального редактирования.
             hold_search_answer = bool(
                 search_attempted or supplied_public_url(message)
-                or (is_factual_challenge(message, rows) and recent_user_source(rows))
+                or (is_factual_challenge(message, rows, app=self.app) and recent_user_source(rows))
             )
             stream_formatter = LayoutStreamFormatter(message)
             for delta in self._llm_stream(messages, cancel, owner_id):
