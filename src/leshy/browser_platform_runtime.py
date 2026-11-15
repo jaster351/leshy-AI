@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from .action_approvals import ApprovalBroker
 from .browser_agent import BrowserAction, BrowserActionResult, BrowserAgent, BrowserRisk
+from .fact_recheck import prior_factual_question, source_release_fact
 from .browser_use_adapter import BrowserUseAdapter
 from .browser_use_llm import LeshyBrowserUseLLM
 from .diagnostics import event, problem
@@ -263,7 +264,30 @@ class BrowserPlatform:
         if result.status != "ok":
             raise RuntimeError(result.message)
         self._remember_results(session_id, [{"title": intent.url, "url": intent.url, "snippet": ""}])
-        return str(result.data.get("result") or result.message), [{"title": intent.url, "url": intent.url}]
+        extracted = str(
+            result.data.get("visible_text")
+            or result.data.get("result")
+            or result.message
+        ).strip()
+        # The Browser Agent already visited the exact user-supplied site.
+        # Use its extracted text as evidence for the current factual dispute,
+        # instead of returning a generic browser transcript and continuing
+        # to insist on an unsupported date from model memory.
+        original_question = ""
+        try:
+            chronological = self.app.history(owner_id, session_id, limit=30)
+            original_question = prior_factual_question(list(reversed(chronological)))
+        except (OSError, ValueError, TypeError, KeyError, PermissionError):
+            pass
+        grounded = source_release_fact(
+            original_question or intent.text,
+            extracted,
+            intent.url,
+        )
+        if grounded:
+            event("browser_primary_source_release_grounded", result_chars=len(extracted))
+            return grounded, [{"title": host, "url": intent.url}]
+        return extracted, [{"title": host, "url": intent.url}]
 
     def _selected_url(self, intent: BrowserConversationIntent, session_id: str) -> str:
         if intent.url:
