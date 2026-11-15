@@ -1130,10 +1130,14 @@
           if (data.pty?.session_open === false) {
             ptySid = '';
             ptyOutput.textContent += '\n[SSH-сеанс завершён]';
+            ptyOpen.disabled = false; ptyClose.disabled = true;
+            ptySend.disabled = true; ptyRead.disabled = true;
           }
         } catch(error) {
           ptyOutput.textContent += '\n[Ошибка чтения: ' + error.message + ']';
           ptySid = '';
+          ptyOpen.disabled = false; ptyClose.disabled = true;
+          ptySend.disabled = true; ptyRead.disabled = true;
         }
       };
       const ptyPoll = async () => {
