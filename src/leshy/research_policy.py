@@ -106,7 +106,7 @@ def is_casual_checkin(query: str) -> bool:
     q = re.sub(r"^(?:(?:слушай|леший|леша|эй)\s*[,!:]\s*)+", "", q)
     return bool(
         _TODAY_CONVERSATION_RE.fullmatch(q)
-        _CASUAL_CHECKIN_RE.fullmatch(q)
+        or _CASUAL_CHECKIN_RE.fullmatch(q)
         or _ASSISTANT_SOCIAL_RE.fullmatch(q)
         or q.rstrip(" ?!.") in _SMALL_TALK
         or re.fullmatch(r"(?:привет|здравствуй|здравствуйте),?\s+(?:леший|леша)[!?.]*", q)
