@@ -1,8 +1,8 @@
-"""Owner-bound CredSSP SPNEGO + TLS public-key binding without credentials.
+"""Owner-bound CredSSP SPNEGO, TLS binding and opt-in credential delegation.
 
-This state machine stops at server binding. It cannot send authInfo or
-establish a logged-in RDP desktop. The SPNEGO engine must provide authenticated
-confidentiality before any pubKeyAuth is constructed or verified.
+Binding remains separate from a one-shot, explicitly approved password
+handoff. The engine cannot establish a logged-in RDP desktop. SPNEGO must
+provide authenticated confidentiality before pubKeyAuth or authInfo is sent.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class NativeMechanism(Protocol):
 
 
 class CredSSPClient:
-    """SPNEGO-only NLA preparation with owner revalidation on every phase."""
+    """SPNEGO NLA and one-shot opt-in credential transfer with live owner checks."""
 
     def __init__(self, mechanism: NativeMechanism, tls_cert_der: bytes,
                  pinned_tls_sha256: str, *, authorize: Callable[[], None]):
