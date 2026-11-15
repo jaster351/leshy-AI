@@ -140,6 +140,25 @@ def is_local_dialogue_request(query: str) -> bool:
     return bool(_LOCAL_DIALOGUE_RE.fullmatch(q))
 
 
+_LESHY_CONSTITUTION_RE = re.compile(
+    r"\\b(?:конституц\\w*|закон\\w*|правил\\w*)\\b.{0,130}\\bлеш\\w*\\b|"
+    r"\\bлеш\\w*\\b.{0,130}\\b(?:конституц\\w*|закон\\w*|правил\\w*)\\b",
+    re.IGNORECASE,
+)
+_LOCAL_MEMORY_RE = re.compile(
+    r"\\b(?:вспомни|найди|покажи|перечисли|прочитай|что\\s+ты\\s+помнишь)\\b"
+    r".{0,130}\\b(?:в\\s+(?:своей|твоей|моей|нашей)\\s+(?:памяти|базе)|"
+    r"из\\s+(?:памяти|knowledge)|(?:мои|наши)\\s+(?:записи|правила))\\b",
+    re.IGNORECASE,
+)
+
+
+def is_internal_knowledge_request(query: str) -> bool:
+    """User asks about Leshy's own saved documents, not public law or news."""
+    current = normalize_query(_current_user_text(query))
+    return bool(_LESHY_CONSTITUTION_RE.search(current) or _LOCAL_MEMORY_RE.search(current))
+
+
 def external_freshness_requested(query: str) -> bool:
     """Меняющиеся внешние сведения (не любое вхождение трёх букв)."""
     return bool(_EXTERNAL_FRESH_RE.search(normalize_query(_current_user_text(query))))
@@ -166,7 +185,7 @@ def research_reason(
         return None
     if q.startswith("/search ") or any(marker in q for marker in _EXPLICIT_WEB_MARKERS) or any(pattern.search(q) for pattern in _EXPLICIT_WEB_PATTERNS):
         return "явный запрос интернет-поиска"
-    if is_casual_checkin(current) or is_local_dialogue_request(current):
+    if is_casual_checkin(current) or is_local_dialogue_request(current) or is_internal_knowledge_request(current):
         return None
     if external_freshness_requested(current):
         return "требуются актуальные данные"
