@@ -88,12 +88,24 @@ def _current_user_text(query: str) -> str:
     return str(query or "").rsplit("[Текущий текст пользователя]", 1)[-1].strip()
 
 
+# Short conversational prompts about Leshy's day are not requests for news.
+# Match the entire utterance: "как сегодня погода?" must remain a web query.
+_TODAY_CONVERSATION_RE = re.compile(
+    r"^(?:как\s+сегодня(?:\s+(?:дела|настроение))?|"
+    r"как\s+(?:ты|у\s+тебя)\s+сегодня|"
+    r"как\s+прош[её]л\s+(?:твой\s+)?день(?:\s+сегодня)?|"
+    r"что\s+(?:ты\s+)?сегодня\s+(?:делал|делаешь))\s*[?!.]*$",
+    re.IGNORECASE,
+)
+
+
 def is_casual_checkin(query: str) -> bool:
     """Разговор или вопрос о самом Лешем — не основание для веб-поиска."""
     q = normalize_query(_current_user_text(query))
     # Обращение или вводное слово не меняет смысл короткого вопроса.
     q = re.sub(r"^(?:(?:слушай|леший|леша|эй)\s*[,!:]\s*)+", "", q)
     return bool(
+        _TODAY_CONVERSATION_RE.fullmatch(q)
         _CASUAL_CHECKIN_RE.fullmatch(q)
         or _ASSISTANT_SOCIAL_RE.fullmatch(q)
         or q.rstrip(" ?!.") in _SMALL_TALK
