@@ -142,12 +142,17 @@ class BrowserAgent:
             raise ApprovalRequired(action)
 
         read_failure: BrowserActionResult | None = None
+        cancel = action.arguments.get("_cancel_event")
         for adapter in self.adapters:
+            if getattr(cancel, "is_set", lambda: False)():
+                return BrowserActionResult("cancelled", "Браузерная задача отменена пользователем.")
             try:
                 if not adapter.available():
                     continue
                 event("browser_agent_adapter_selected", adapter=adapter.adapter_id, action=action.name, risk=action.risk.value)
                 result = adapter.execute(action)
+                if getattr(cancel, "is_set", lambda: False)():
+                    return BrowserActionResult("cancelled", "Браузерная задача отменена пользователем.")
             except Exception as exc:
                 event("browser_agent_adapter_failed", adapter=getattr(adapter, "adapter_id", "unknown"), action=action.name, error=str(exc))
                 continue
