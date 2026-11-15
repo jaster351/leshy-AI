@@ -125,8 +125,10 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
         kept = render()
         if estimator(kept) <= budget:
             break
-        if 0 in selected_parts and len(parts[0]) > 220:
-            target = max(220, (len(parts[0]) * 2) // 3)
+        if 0 in selected_parts and len(parts[0]) > 96:
+            # В очень маленьком n_ctx сокращаем persona раньше актуального
+            # вопроса, сохраняя обе границы вопроса и последнее уточнение.
+            target = max(96, (len(parts[0]) * 2) // 3)
             parts[0] = _strict_clip(parts[0], target, preserve_edges=True)
         elif latest_user is not None:
             current = partial_dialogue.get(latest_user, dialogue[latest_user])
