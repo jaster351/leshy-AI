@@ -702,7 +702,7 @@ class LeshyApp:
         isolated_rows = conversation_rows_for_mode(rows, mode.kind)
         history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
         messages = context + history_messages
-        grounded_fact = grounded_release_from_context(message, rows, messages, sources)
+        grounded_fact = grounded_release_from_context(message, rows, messages, sources, app=self)
         if grounded_fact:
             event("chat_primary_source_release_grounded", source_count=len(sources))
             return {
@@ -716,7 +716,7 @@ class LeshyApp:
         event("chat_generation_started", session_id=sid, owner_id=owner_id, context_messages=len(messages))
         try:
             answer = self.llm.chat(messages)
-            if source_dispute_requires_review(message, rows, sources, answer):
+            if source_dispute_requires_review(message, rows, sources, answer, app=self):
                 try:
                     revised = self.llm.chat(
                         messages + [ChatMessage(
@@ -725,7 +725,7 @@ class LeshyApp:
                     )
                     answer = (
                         revised if revised and not source_dispute_requires_review(
-                            message, rows, sources, revised,
+                            message, rows, sources, revised, app=self,
                         ) else source_dispute_fallback(sources)
                     )
                 except Exception as exc:
