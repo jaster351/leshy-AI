@@ -9,6 +9,7 @@ from .diagnostics import problem
 from .telegram_browser_login import TelegramBrowserLogin
 from .telegram_browser_login_runtime import install_telegram_browser_login_runtime
 from .constitution_runtime import install_constitution_routing
+from .semantic_research_router import install_semantic_research_router
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
 
 
@@ -26,6 +27,7 @@ def make_handler(app, telegram, settings, model_catalog):
     # Apply after the other Web/Telegram runtime wrappers; use the verified
     # local Constitution file without web search or an LLM-generated path.
     install_constitution_routing(type(app))
+    install_semantic_research_router()
 
     class Handler(Parent):
         def _identity_status_payload(self, owner_id: str) -> dict:
