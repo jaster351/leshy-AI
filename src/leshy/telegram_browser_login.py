@@ -375,7 +375,7 @@ class TelegramBrowserLogin:
             if not token:
                 return None
             url = f"https://api.telegram.org/file/bot{token}/{path}"
-            with request.urlopen(url, timeout=10) as response:
+            with telegram.proxy.open(request.Request(url, method="GET"), timeout=10) as response:
                 raw = response.read(2_000_001)
             kind = self._image_kind(raw)
             if not kind or len(raw) > 2_000_000:
