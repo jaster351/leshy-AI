@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T09:06:47.720743+00:00",
+  "candidates": 408,
+  "new_unique": 408,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated": 0,
+  "retracted": 0,
+  "jsonl_bytes": 856696,
+  "total_latest": 71402,
+  "source_manifest": "knowledge/updates/datasets/iana-dns-20261113.manifest.json",
+  "cursor": {
+    "last_registry": "dsync-location-of-synchronization-endpoints",
+    "last_key": "128-255",
+    "processed": 408,
+    "remaining": 0
+  },
+  "registry_counts": {
+    "dns-parameters-2": 11,
+    "dns-parameters-4": 110,
+    "dns-parameters-5": 8,
+    "dns-parameters-6": 27,
+    "dns-parameters-8": 6,
+    "dns-parameters-9": 5,
+    "dhcid-rr-digest-type-codes": 3,
+    "dns-parameters-10": 6,
+    "dns-parameters-11": 34,
+    "dns-parameters-12": 7,
+    "dns-parameters-13": 4,
+    "dns-parameters-14": 2,
+    "csync-flags": 3,
+    "underscored-globally-scoped-dns-node-names": 74,
+    "dns-dso-type-codes": 12,
+    "extended-dns-error-codes": 38,
+    "extra-text-json-names": 5,
+    "contact-uri-schemes": 2,
+    "extended-dns-sub-error-codes": 8,
+    "zonemd-schemes": 5,
+    "zonemd-hash-algorithms": 6,
+    "server-cookie-methods": 7,
+    "dns-quic-error-codes": 7,
+    "dns-catalog-zones": 5,
+    "dns-resolver-information-keys": 4,
+    "zoneversion-type-values": 4,
+    "dsync-location-of-synchronization-endpoints": 5
+  },
+  "source_version": "2026-11-09",
+  "deduplication": "All prior IDs, canonical keys and normalized claims checked. Existing DNS-related records concern media types and support diagnostics, not these assignments. RCODE contexts and cookie lengths disambiguated; ranges preserved without expansion.",
+  "research": {
+    "window_start": "2026-11-13T08:08:43+00:00",
+    "window_end": "2026-11-13T09:06:47.720743+00:00",
+    "new_significant_confirmed": 0,
+    "opened": [
+      "https://arxiv.org/abs/2611.14326"
+    ],
+    "unavailable": [
+      "https://arxiv.org/abs/2610.35089"
+    ],
+    "note": "FGSE remains v1 Nov 10; survey search result dates Oct 26 and primary fetch failed, not included as new."
+  },
+  "limitations": [
+    "Full DNS record elements covered; registration-policy ranges are metadata, not additional facts.",
+    "Registry facts do not imply server support or recommendation of obsolete/experimental assignments.",
+    "No local import, training, builds or tests."
+  ],
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-13/1403-iana-dns-01.jsonl",
+      "bytes": 856696,
+      "sha256": "4694ad310a7247311438c2c951e2e009933444bf3641fe261870471eef77a69c"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-12T14:04:01.745934+00:00",
+  "research_window": "2026-11-11 through 2026-11-12; indexing lookback includes 2026-11-10",
+  "candidates_reviewed": 3,
+  "exact_identifier_duplicates": 1,
+  "semantic_duplicates": 0,
+  "new_records": 2,
+  "updated_records": 0,
+  "retracted_records": 0,
+  "package": "knowledge/updates/2026-11-12/1900-personalized-memory-and-file-learning.jsonl",
+  "jsonl_bytes": 4713,
+  "corpus_records_scanned": 47494,
+  "deduplication": "All JSONL versions scanned by normalized arXiv identifier, id and claim; research claims reviewed for paraphrase overlap. MemoryDojo v1 excluded as already present.",
+  "held_batches": [
+    {
+      "dataset": "NASA PS default snapshot",
+      "rows": 6470,
+      "status": "not published",
+      "reason": "Prepared rowupdate was incorrectly assigned to published_at; parameter qualifiers and provenance need re-audit before publication.",
+      "cursor": "restart validation of all rows; no records committed"
+    },
+    {
+      "dataset": "NIST CODATA 2022 allascii",
+      "status": "not published",
+      "reason": "NIST SRD licensing differs from general government works; blanket public-domain permission not established.",
+      "cursor": "license verification before transformation"
+    }
+  ],
+  "research_cursor": [
+    "2611.14017v1",
+    "2611.14009v1"
+  ],
+  "monitor_head": "93a584765460c2fb0ad58380bba476f2149df138",
+  "local_import": "not observed"
+}

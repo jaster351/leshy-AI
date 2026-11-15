@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T14:04:39.040505+00:00",
+  "source_rows_received": 1351,
+  "candidates_considered": 693,
+  "new_unique_records": 693,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "source_rows_consolidated": 659,
+  "updated_versions": 0,
+  "retracted_versions": 0,
+  "new_jsonl_bytes": 2923638,
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-13/1901-iana-tls-01.jsonl",
+      "records": 461,
+      "bytes": 2094191,
+      "sha256": "dc7a5064fa2829e133144641399401f2e4617cd1e4ee8828e0c44b75d5de3cf0"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1901-iana-tls-02.jsonl",
+      "records": 231,
+      "bytes": 826415,
+      "sha256": "2fce0ea1223d3146ace98812f1e6f9da91c23a2ebf52567fd0bbd71eb06b3aa6"
+    },
+    {
+      "path": "knowledge/updates/2026-11-13/1901-memory-research.jsonl",
+      "records": 1,
+      "bytes": 3032,
+      "sha256": "135dfe487349f3a9fd488605dc080baedae4cc9bb231d7a397f9042d44439b9f"
+    }
+  ],
+  "cursor": {
+    "processed_source_records": 1351,
+    "remaining": 0,
+    "last_registry": "tls-rrc-message-types"
+  },
+  "source_manifest": "knowledge/updates/datasets/iana-tls-20261113.manifest.json",
+  "deduplication": "All historical ids, canonical keys, normalized claims compared. TLS topic/source matches reviewed: DNS TLSA, IP TLSP and media tlsrpt are distinct assignments. Identical source meanings with identical applicability/status/comments consolidated into lists of literal ranges.",
+  "research": {
+    "window_start": "2026-11-13T13:11:00.423695+00:00",
+    "window_end": "2026-11-13T14:04:39.040505+00:00",
+    "new_ids": [
+      "2611.15729v1"
+    ],
+    "primary_sources_opened": [
+      "https://arxiv.org/abs/2611.15729",
+      "https://arxiv.org/html/2611.15729v1"
+    ]
+  },
+  "limitations": [
+    "Complete TLS Parameters registry only; TLS Extensions separate and not processed",
+    "DISCERN code and dataset release not confirmed",
+    "No local import, model training, builds or autotests performed"
+  ],
+  "encoding_validation": {
+    "files": 246,
+    "json_objects": 96118,
+    "issues": 0
+  },
+  "identity_policy": "IDs depend on registry and literal values/ranges (or exporter label), not recommendation status. Status/content rechecks require new versions, never overwrite published id/version."
+}

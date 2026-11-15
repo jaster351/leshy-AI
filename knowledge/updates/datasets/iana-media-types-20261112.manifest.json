@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "source": {
+    "url": "https://www.iana.org/assignments/media-types/media-types.xml",
+    "sha256": "018b355e0d521c3a9b20a853ccb3d118100fbf9cb7a5fb46909f6edb7ce4c60d",
+    "checked_at": "2026-11-12T20:06:47.102719+00:00",
+    "registry_updated": "2026-11-10"
+  },
+  "snapshot": "knowledge/updates/datasets/iana-media-types-20261112.normalized.json",
+  "snapshot_sha256": "cf00ce6f07a47372c7f7834a73d41f9c91de59debabfa2d20ba83921b25f9de7",
+  "license": "CC0-1.0",
+  "license_url": "https://www.iana.org/help/licensing-terms",
+  "license_scope": "IANA protocol registry data only; linked specifications excluded.",
+  "groups": {
+    "application": 1823,
+    "audio": 166,
+    "example": 0,
+    "font": 6,
+    "haptics": 3,
+    "image": 89,
+    "message": 27,
+    "model": 45,
+    "multipart": 17,
+    "text": 110,
+    "video": 97
+  },
+  "source_rows": 2383,
+  "normalization": "Extract every direct registry/record, including deprecated entries. Render inline RFC xrefs in labels. Identity from group/name first token, not template target (aliases may share target). Preserve date attributes without assigning publication meaning. Omit people/contact directory and person xrefs; retain technical RFC/URI refs. No missing date converted to zero.",
+  "cursor": {
+    "last_media_type": "video/VP9",
+    "processed": 2383,
+    "remaining": 0
+  },
+  "generator": "knowledge/updates/tools/generate_iana_media_types.py"
+}

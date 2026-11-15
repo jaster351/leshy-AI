@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-14T00:59:37.893780+00:00",
+  "candidates_considered": 120,
+  "new_unique_records": 120,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated_versions": 0,
+  "retracted_versions": 0,
+  "new_jsonl_bytes": 214142,
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-14/0057-element-identities.jsonl",
+      "records": 118,
+      "bytes": 209615,
+      "sha256": "2058f2430eb7c8bab8f9e6791c84ea88ef95adbd70c6238b2099e56bec462c75"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0557-research.jsonl",
+      "records": 2,
+      "bytes": 4527,
+      "sha256": "0210336555f5022977514fa45afccdf9c157e4af9b1eb019fee1567be85f9bf7"
+    }
+  ],
+  "cursor": {
+    "last_atomic_number": 118,
+    "remaining_identities": 0
+  },
+  "deduplication": "All historic ids, canonical keys and normalized claims compared; chemistry and element-related records reviewed semantically. Existing definitions of atomic number, isotopes and charge do not contain individual element identities.",
+  "research": {
+    "window_start": "2026-11-13T19:22:41.046492+00:00",
+    "window_end": "2026-11-14T00:59:37.893780+00:00",
+    "new_ids": [
+      "2611.16492v1",
+      "2611.16627v1"
+    ],
+    "unchanged_checked": [
+      "2611.15729v1"
+    ]
+  },
+  "limitations": [
+    "Complete identity mapping for atomic numbers 1 through 118 processed",
+    "Experimental property columns excluded pending source licensing, provenance, units and applicability review",
+    "No local import, model training, builds or autotests performed",
+    "Two new research summaries based on abstracts only, marked candidate. Prior publication interrupted by temporary usage limit; source hash and main catalog rechecked."
+  ],
+  "encoding_validation": {
+    "files": 270,
+    "json_jsonl_records": 103769,
+    "issues": 0
+  }
+}

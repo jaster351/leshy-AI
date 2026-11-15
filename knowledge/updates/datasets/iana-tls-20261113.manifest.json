@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T14:03:54.802001+00:00",
+  "source_url": "https://www.iana.org/assignments/tls-parameters/tls-parameters.xml",
+  "source_sha256": "aa977bbbf31983f5e91bf6f84d5d318d316382722ee362842cc6461b20969c3f",
+  "source_bytes": 313088,
+  "normalized_sha256": "3f0b0f67ecb9e1a356c20a506f0f46197edddbd6795aabf3c337455d8eea0ebc",
+  "source_version": "2026-11-05",
+  "license": "CC0-1.0",
+  "license_url": "https://www.iana.org/help/licensing-terms",
+  "source_records": 1351,
+  "normalized_records": 692,
+  "registry_count": 21,
+  "cursor": {
+    "processed_source_records": 1351,
+    "remaining": 0,
+    "last_registry": "tls-rrc-message-types"
+  },
+  "generator": "knowledge/updates/tools/generate_tls_parameters.py",
+  "normalization": "Identical descriptions, statuses and comments grouped within each registry; literal values/ranges and union of references retained; no contact fields. Public registry notes retained except contact-bearing procedural notes."
+}

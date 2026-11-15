@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-14T07:03:52.987042+00:00",
+  "candidates": 259,
+  "new_unique_records": 259,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated": 0,
+  "retracted": 0,
+  "jsonl_bytes": 397272,
+  "cursor": {
+    "completed": true,
+    "last_mibenum": 2260,
+    "next": "Compare later registry edition"
+  },
+  "validation": {
+    "files": 283,
+    "json_jsonl_objects": 105172,
+    "encoding_errors": 0,
+    "schema_records": 259,
+    "schema_errors": 0
+  },
+  "limitations": "Entire 258-entry charset registry processed. Byte mapping tables excluded: require separate sources; research benchmark release pending.",
+  "local_import_observed": false
+}

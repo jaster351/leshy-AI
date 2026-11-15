@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leshy-ai"
+dynamic = ["version"]
+description = "Леший — локальный автономный AI-ассистент"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-2.0-only"
+authors = [{name = "Leshy AI"}]
+dependencies = [
+  "ddgs>=9,<10",
+  "tzdata>=2025.2",
+  "yt-dlp>=2026.10.26,<2027",
+  "faster-whisper>=1.2,<2",
+  "av>=11,<19",
+  "pypdf>=6,<7",
+  "playwright>=1.55,<2",
+  "browser-use>=0.13.14,<0.14",
+  "markitdown[docx,xlsx,pptx,pdf]>=0.1.9,<0.2",
+  "mcp>=2,<3",
+  "mss>=10,<11",
+  "pyautogui>=0.9.54,<1",
+  "huggingface_hub>=0.36,<2",
+  "hf_xet>=1.1,<2",
+  "phonenumbers>=8.13,<10",
+  "PySocks>=1.7.1,<2",
+  "cryptography>=43,<47",
+  "paramiko>=3.5,<5",
+  "fastembed>=0.8,<1",
+]
+
+[project.optional-dependencies]
+native = ["llama-cpp-python>=0.3.27,<0.4", "diskcache>=5.6.1,<6"]
+build = ["pyinstaller>=6.11,<7"]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+leshy = "leshy.web_server:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "leshy.version.VERSION"}

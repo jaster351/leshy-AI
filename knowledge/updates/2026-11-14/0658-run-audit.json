@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-14T02:02:26.426539+00:00",
+  "candidates": 312,
+  "new_unique_records": 312,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated": 0,
+  "retracted": 0,
+  "jsonl_bytes": 553472,
+  "source_manifest": "knowledge/updates/datasets/iana-tz1970-2026f.manifest.json",
+  "cursor": {
+    "completed": true,
+    "table": "zone1970.tab",
+    "last_zone": "Africa/Johannesburg",
+    "next": "Check a later tzdb edition and version changed identities"
+  },
+  "research_previous_issue": {
+    "searched_at": "2026-11-14T00:59:37.893780+00:00",
+    "previous_issue_at": "2026-11-13T19:22:41.046492+00:00",
+    "newly_included_ids": [
+      "arXiv:2611.16492",
+      "arXiv:2611.16627"
+    ]
+  },
+  "research_new_eligible": 0,
+  "limitations": "Complete zone1970 table only. zone.tab overlaps and is not imported separately; offsets and transitions require separate validated conversion.",
+  "validation": {
+    "files": 274,
+    "json_jsonl_objects": 104083,
+    "encoding_errors": 0,
+    "schema_records": 312,
+    "schema_errors": 0
+  },
+  "local_import_observed": false
+}

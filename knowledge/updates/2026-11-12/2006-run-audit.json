@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-12T20:08:04.864762+00:00",
+  "previous_records": 54117,
+  "candidates": 2384,
+  "new_unique": 2384,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated": 0,
+  "retracted": 0,
+  "jsonl_bytes": 4974686,
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-12/2006-biomem-research.jsonl",
+      "records": 1,
+      "bytes": 2325,
+      "sha256": "46b2122c0ffe9dd247751b3b1cb785ac3f9eddf58aebcc755e79e9c7c33d2585"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2006-iana-media-types-part-01.jsonl",
+      "records": 1000,
+      "bytes": 2095259,
+      "sha256": "e97dc4b87650b600792d6145e27cd555063838a89cef27ea70c49bf69c7446bd"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2006-iana-media-types-part-02.jsonl",
+      "records": 994,
+      "bytes": 2096749,
+      "sha256": "51733a94e761fe317013a9785c12d59f5d3b08f127392f564fff8cb2447c8adb"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/2006-iana-media-types-part-03.jsonl",
+      "records": 389,
+      "bytes": 780353,
+      "sha256": "19798dc0a6e1db29f668b134b8233e7dc84d3f5065d85183fcd8cb759eef76bb"
+    }
+  ],
+  "deduplication": {
+    "scope": "All published JSONL versions and current index",
+    "old_record_versions": 54117,
+    "method": "Normalized stable ID, canonical key and claim equality; topic/entity candidate retrieval across all claims, manual semantic review of MIME/media-type/Content-Type and media-type token matches plus all research claims.",
+    "semantic_findings": "Only MIME word hit was SHAVIAN LETTER MIME Unicode name, unrelated. No media-type assignment or BioMem HMRU result in old corpus; related provenance/retrieval papers are different experimental claims."
+  },
+  "cursor": {
+    "last_media_type": "video/VP9",
+    "processed": 2383,
+    "remaining": 0
+  },
+  "source_manifest": "knowledge/updates/datasets/iana-media-types-20261112.manifest.json",
+  "research": {
+    "window": "2026-11-12T19:01:04.475444+00:00 to 2026-11-12T20:08:04.864762+00:00",
+    "delayed_discovery": "BioMem v1 (2026-11-10), absent from previous corpus and supplied history; not claimed newly published today.",
+    "new_ids": [
+      "2611.13426v1"
+    ],
+    "unchanged_excluded": [
+      "2611.14320v1",
+      "2611.14326v1",
+      "2611.09721v1"
+    ],
+    "queries": [
+      "site.arxiv.org agent memory November 2026",
+      "site.arxiv.org/abs/2611 memory poisoning",
+      "site.arxiv.org/abs/2611 BioMem"
+    ]
+  },
+  "limits": [
+    "Complete selected registry processed; registration documents, format semantics and security properties not inferred.",
+    "Clinical datasets and contact directory not redistributed.",
+    "No training, local import, build or automated tests performed."
+  ],
+  "total_latest_records": 56501
+}

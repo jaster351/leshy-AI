@@ -1,0 +1,18 @@
+.autobuild/
+build/
+dist/
+Leshy.spec
+LeshyBrain/
+/log/leshy-auto.log
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+**/private/support_profile.enc
+**/private/support_profile.key
+
+# Private local support keys and old owner-only export bundles.
+Leshy-Support-Key.key
+Local-Support-Profile*.zip
+support_profile.key
+support.key.dpapi

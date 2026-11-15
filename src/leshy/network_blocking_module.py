@@ -1,0 +1,1119 @@
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, field, replace
+import ipaddress
+import json
+import re
+import socket
+import time
+from typing import Any
+from urllib import parse, request
+
+from .diagnostics import event, problem
+from .modules import ModuleManifest, ModuleRequest, ModuleResponse
+from .network_service_fingerprint import collect_service_fingerprint
+from .verified_tool_receipts import VerifiedToolReceipts, ToolReceipt
+
+
+DEFAULT_PORTS = (22, 3389)
+GEO_PORTS = (22, 3389)
+WEB_PORTS = (80, 443)
+CHEBURCHECK_ENDPOINT = "https://cheburcheck.ru/api/v1/check"
+CHEBURCHECK_PROBE_ENDPOINT = "https://cheburcheck.ru/api/v1/probe/{query_id}"
+CHECK_HOST_NODES_ENDPOINT = "https://check-host.net/nodes/hosts"
+CHECK_HOST_START_ENDPOINT = "https://check-host.net/check-tcp"
+CHECK_HOST_RESULT_ENDPOINT = "https://check-host.net/check-result/{request_id}"
+
+_IPV4_RE = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
+_HOST_RE = re.compile(r"(?<![A-Za-z0-9.-])([A-Za-z0-9](?:[A-Za-z0-9.-]{1,251}[A-Za-z0-9])?\.[A-Za-z]{2,63})(?![A-Za-z0-9.-])")
+
+
+@dataclass(frozen=True, slots=True)
+class TcpObservation:
+    source: str
+    port: int
+    status: str
+    country_code: str = ""
+    country: str = ""
+    city: str = ""
+    node: str = ""
+    latency_ms: int | None = None
+    address: str = ""
+    error: str = ""
+    source_url: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CheburcheckEvidence:
+    ok: bool
+    blocked: bool | None = None
+    target: str = ""
+    target_type: str = ""
+    query_id: str = ""
+    rkn_domain: str = ""
+    blocked_subnets: tuple[str, ...] = ()
+    cdn_providers: tuple[str, ...] = ()
+    whitelisted: bool = False
+    source_url: str = ""
+    error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CheburProbeObservation:
+    probe_id: str
+    region: str = ""
+    provider: str = ""
+    asn: str = ""
+    verdicts: tuple[str, ...] = ()
+    target_hop: int | None = None
+    dpi_hop: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CheburProbeSummary:
+    ok: bool
+    online_probes: int = 0
+    responded_probes: int = 0
+    observations: tuple[CheburProbeObservation, ...] = ()
+    finished: bool = False  # True only after the server's SSE "done" event.
+    error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class BlockingAssessment:
+    target: str
+    profile: str
+    service_ports: tuple[int, ...]
+    tspu_probability: int
+    verdict: str
+    availability_percent: int
+    local: tuple[TcpObservation, ...]
+    remote: tuple[TcpObservation, ...]
+    cheburcheck: CheburcheckEvidence
+    chebur_probe: CheburProbeSummary
+    reasons: tuple[str, ...]
+    checked_at_epoch: float
+    tool_receipts: tuple[ToolReceipt, ...] = ()
+    matched_ports: tuple[int, ...] = ()
+    signals_met: int = 0
+    three_signal_confirmed: bool = False
+    check_host_complete: bool = False
+    os_fingerprint: dict[str, Any] = field(default_factory=dict)
+
+
+class NetworkBlockingChecker:
+    """Отдельная диагностика IP/доменов и вероятной фильтрации ТСПУ.
+
+    Последовательность соответствует согласованной схеме:
+    1. сначала TCP connect (эквивалент Telnet-проверки доступности) из сети Лешего
+       одновременно на SSH/22 и RDP/3389;
+    2. затем публичный Cheburcheck `/api/v1/check` для реестров РКН/CDN;
+    3. по подписанному query id запускается официальный `/api/v1/probe/<id>` SSE,
+       который использует сайт: распределённые probe-узлы и TCP traceroute после DPI;
+    4. параллельно выполняется независимая TCP-проверка Check-Host из российских
+       и зарубежных точек.
+
+    PROBE_ID/PROBE_TOKEN не нужны: без token Cheburcheck использует публичные
+    видимые probe-узлы. Токен нужен только для адресного собственного probe.
+    """
+
+    def __init__(
+        self,
+        *,
+        local_timeout_seconds: float = 5.0,
+        http_timeout_seconds: float = 12.0,
+        check_host_wait_seconds: float = 120.0,
+        chebur_probe_wait_seconds: float = 125.0,
+    ) -> None:
+        self.local_timeout_seconds = max(0.5, min(float(local_timeout_seconds), 30.0))
+        self.http_timeout_seconds = max(3.0, min(float(http_timeout_seconds), 30.0))
+        self.check_host_wait_seconds = max(3.0, min(float(check_host_wait_seconds), 150.0))
+        self.chebur_probe_wait_seconds = max(10.0, min(float(chebur_probe_wait_seconds), 135.0))
+        self._nodes_cache: tuple[float, dict[str, dict[str, Any]]] = (0.0, {})
+        self._receipts = VerifiedToolReceipts()
+
+    @staticmethod
+    def normalize_target(value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            raise ValueError("IP-адрес или домен не указан")
+        if "://" in raw:
+            raw = parse.urlparse(raw).hostname or raw
+        raw = raw.strip().strip("[]").rstrip(".")
+        try:
+            ip = ipaddress.ip_address(raw)
+            if not ip.is_global:
+                raise ValueError("Диагностика локальных, служебных и частных IP-адресов запрещена")
+            return str(ip)
+        except ValueError as exc:
+            if "запрещена" in str(exc):
+                raise
+            pass
+        if len(raw) > 253 or not re.fullmatch(r"[A-Za-z0-9.-]+", raw) or "." not in raw:
+            raise ValueError("Некорректный IP-адрес или домен")
+        return raw.lower()
+
+    @staticmethod
+    def extract_target(text: str) -> str:
+        raw = str(text or "").strip()
+        for candidate in _IPV4_RE.findall(raw):
+            try:
+                return str(ipaddress.ip_address(candidate))
+            except ValueError:
+                continue
+        for token in re.split(r"\s+", raw):
+            cleaned = token.strip("[](){}<>,;!?'\"")
+            if ":" in cleaned and cleaned.count(":") >= 2:
+                try:
+                    return str(ipaddress.ip_address(cleaned))
+                except ValueError:
+                    pass
+        match = _HOST_RE.search(raw)
+        return match.group(1).lower() if match else ""
+
+    @classmethod
+    def looks_like_request(cls, text: str) -> bool:
+        raw = " ".join(str(text or "").split()).strip()
+        if not raw:
+            return False
+        target = cls.extract_target(raw)
+        if not target:
+            return False
+        if raw == target or raw.strip("[]") == target:
+            try:
+                ipaddress.ip_address(target)
+                return True
+            except ValueError:
+                return False
+        lower = raw.lower().replace("ё", "е")
+        markers = (
+            "тспу", "блокиров", "заблок", "доступ", "доступен", "доступность",
+            "проверь ip", "проверить ip", "проверка ip", "порт", "ssh", "rdp",
+            "connection timeout", "таймаут", "чебур", "check-host",
+        )
+        return any(marker in lower for marker in markers)
+
+    @staticmethod
+    def _request(url: str, *, accept: str, timeout: float):
+        req = request.Request(
+            url,
+            headers={
+                "Accept": accept,
+                "User-Agent": "Leshy-NetworkDiagnostics/1.0 (+https://github.com/jaster351/leshy-AI)",
+            },
+            method="GET",
+        )
+        return request.urlopen(req, timeout=timeout)
+
+    @classmethod
+    def _http_json(cls, url: str, *, timeout: float) -> Any:
+        with cls._request(url, accept="application/json", timeout=timeout) as response:
+            payload = response.read(2_000_000)
+        return json.loads(payload.decode("utf-8", errors="replace"))
+
+    def _local_check(self, target: str, port: int) -> TcpObservation:
+        started = time.monotonic()
+        try:
+            with socket.create_connection((target, int(port)), timeout=self.local_timeout_seconds) as sock:
+                address = ""
+                try:
+                    address = str(sock.getpeername()[0])
+                except Exception:
+                    pass
+            return TcpObservation(
+                source="local",
+                port=int(port),
+                status="connected",
+                latency_ms=max(0, int((time.monotonic() - started) * 1000)),
+                address=address,
+            )
+        except (socket.timeout, TimeoutError) as exc:
+            return TcpObservation(source="local", port=int(port), status="timeout", error=str(exc) or "timeout")
+        except ConnectionRefusedError as exc:
+            return TcpObservation(source="local", port=int(port), status="refused", error=str(exc))
+        except OSError as exc:
+            text = str(exc)
+            status = "timeout" if "timed out" in text.lower() else "error"
+            return TcpObservation(source="local", port=int(port), status=status, error=text)
+
+    def _check_local_ports(self, target: str) -> tuple[TcpObservation, ...]:
+        with ThreadPoolExecutor(max_workers=len(DEFAULT_PORTS), thread_name_prefix="leshy-block-local") as pool:
+            futures = {pool.submit(self._local_check, target, port): port for port in DEFAULT_PORTS}
+            results = [future.result() for future in as_completed(futures)]
+        return tuple(sorted(results, key=lambda item: item.port))
+
+    def _cheburcheck(self, target: str) -> CheburcheckEvidence:
+        url = CHEBURCHECK_ENDPOINT + "?" + parse.urlencode({"target": target})
+        try:
+            payload = self._http_json(url, timeout=self.http_timeout_seconds)
+            if not isinstance(payload, dict) or type(payload.get("blocked")) is not bool:
+                raise ValueError("Cheburcheck вернул неполный или некорректный ответ")
+            response_target = str(payload.get("target") or target).strip()
+            if response_target.lower() != target.lower():
+                raise ValueError("Cheburcheck вернул ответ для другой цели")
+            providers = payload.get("cdn_providers") or {}
+            whitelist = payload.get("whitelist")
+            return CheburcheckEvidence(
+                ok=True,
+                blocked=bool(payload.get("blocked")),
+                target=str(payload.get("target") or target),
+                target_type=str(payload.get("target_type") or ""),
+                query_id=str(payload.get("id") or ""),
+                rkn_domain=str(payload.get("rkn_domain") or ""),
+                blocked_subnets=tuple(str(x) for x in (payload.get("blocked_subnets") or [])[:100]),
+                cdn_providers=tuple(sorted(str(x) for x in providers.keys())),
+                whitelisted=bool(whitelist),
+                source_url=url,
+            )
+        except Exception as exc:
+            problem("network_blocking_cheburcheck_failed", str(exc), target=target)
+            return CheburcheckEvidence(ok=False, target=target, source_url=url, error=str(exc))
+
+    @staticmethod
+    def _dispatch_sse_event(event_name: str, data_lines: list[str], state: dict[str, Any]) -> bool:
+        if not data_lines:
+            return False
+        try:
+            payload = json.loads("\n".join(data_lines))
+        except Exception:
+            return False
+        if event_name == "started" and isinstance(payload, dict):
+            state["online_probes"] = int(payload.get("online_probes") or 0)
+        elif event_name == "result" and isinstance(payload, dict):
+            verdicts = tuple(str(value) for value in (payload.get("verdicts") or []) if value)
+            state.setdefault("observations", []).append(
+                CheburProbeObservation(
+                    probe_id=str(payload.get("probe_id") or ""),
+                    region=str(payload.get("region") or ""),
+                    provider=str(payload.get("provider") or ""),
+                    asn=str(payload.get("asn") or ""),
+                    verdicts=verdicts,
+                    target_hop=int(payload["target_hop"]) if payload.get("target_hop") is not None else None,
+                    dpi_hop=int(payload["dpi_hop"]) if payload.get("dpi_hop") is not None else None,
+                )
+            )
+        elif event_name == "done" and isinstance(payload, dict):
+            count = payload.get("response_count")
+            if count is None:
+                count = payload.get("responded_probes")
+            if count is None:
+                count = payload.get("responses")
+            state["responded_probes"] = int(count) if count is not None else len(state.get("observations", []))
+            if payload.get("online_probes") is not None:
+                state["online_probes"] = int(payload.get("online_probes") or 0)
+            state["finished"] = True
+            return True
+        return False
+
+    def _chebur_probe(self, query_id: str) -> CheburProbeSummary:
+        if not query_id:
+            return CheburProbeSummary(ok=False, error="Cheburcheck не выдал id для динамической проверки")
+        url = CHEBURCHECK_PROBE_ENDPOINT.format(query_id=parse.quote(query_id, safe=""))
+        state: dict[str, Any] = {"online_probes": 0, "responded_probes": 0, "observations": [], "finished": False}
+        deadline = time.monotonic() + self.chebur_probe_wait_seconds
+        event_name = "message"
+        data_lines: list[str] = []
+        try:
+            with self._request(
+                url,
+                accept="text/event-stream",
+                timeout=self.chebur_probe_wait_seconds + 10.0,
+            ) as response:
+                for raw_line in response:
+                    if time.monotonic() > deadline:
+                        break
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if not line:
+                        done = self._dispatch_sse_event(event_name, data_lines, state)
+                        event_name = "message"
+                        data_lines = []
+                        if done:
+                            break
+                        continue
+                    if line.startswith(":"):
+                        continue
+                    if line.startswith("event:"):
+                        event_name = line[6:].strip() or "message"
+                    elif line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                if data_lines:
+                    self._dispatch_sse_event(event_name, data_lines, state)
+            observations = tuple(state.get("observations") or ())
+            responded = int(state.get("responded_probes") or len(observations))
+            finished = bool(state.get("finished"))
+            return CheburProbeSummary(
+                ok=finished,
+                finished=finished,
+                online_probes=int(state.get("online_probes") or 0),
+                responded_probes=responded,
+                observations=observations,
+                error="" if finished else "Cheburcheck: поток завершился без события done",
+            )
+        except Exception as exc:
+            problem("network_blocking_chebur_probe_failed", str(exc))
+            return CheburProbeSummary(
+                ok=False,
+                online_probes=int(state.get("online_probes") or 0),
+                responded_probes=len(state.get("observations") or ()),
+                observations=tuple(state.get("observations") or ()),
+                error=str(exc),
+            )
+
+    def _nodes(self) -> dict[str, dict[str, Any]]:
+        stamp, cached = self._nodes_cache
+        if cached and time.monotonic() - stamp < 3600.0:
+            return cached
+        payload = self._http_json(CHECK_HOST_NODES_ENDPOINT, timeout=self.http_timeout_seconds)
+        nodes = payload.get("nodes") if isinstance(payload, dict) else None
+        normalized = dict(nodes or {})
+        self._nodes_cache = (time.monotonic(), normalized)
+        return normalized
+
+    @staticmethod
+    def _node_location(meta: Any) -> tuple[str, str, str]:
+        if isinstance(meta, dict):
+            location = meta.get("location") or []
+        elif isinstance(meta, (list, tuple)):
+            location = meta[:3]
+        else:
+            location = []
+        code = str(location[0] if len(location) > 0 else "").lower()
+        country = str(location[1] if len(location) > 1 else "")
+        city = str(location[2] if len(location) > 2 else "")
+        return code, country, city
+
+    def _select_nodes(self) -> dict[str, dict[str, Any]]:
+        nodes = self._nodes()
+        ru: list[tuple[str, dict[str, Any]]] = []
+        foreign: list[tuple[str, dict[str, Any]]] = []
+        preferred = {"de": 0, "fi": 1, "nl": 2, "pl": 3, "se": 4, "us": 5}
+        for name, meta in nodes.items():
+            code, _country, _city = self._node_location(meta)
+            if code == "ru":
+                ru.append((name, meta))
+            elif code:
+                foreign.append((name, meta))
+        ru.sort(key=lambda item: item[0])
+        foreign.sort(key=lambda item: (preferred.get(self._node_location(item[1])[0], 99), item[0]))
+        selected = ru[:2] + foreign[:4]
+        if not selected:
+            selected = list(nodes.items())[:6]
+        return dict(selected)
+
+    @staticmethod
+    def _parse_check_host_result(node: str, meta: Any, port: int, value: Any) -> TcpObservation | None:
+        code, country, city = NetworkBlockingChecker._node_location(meta)
+        if value is None:
+            return None
+        row = value[0] if isinstance(value, list) and value else value
+        if isinstance(row, list) and row:
+            row = row[0]
+        if isinstance(row, dict):
+            error_text = str(row.get("error") or "")
+            if error_text:
+                lower = error_text.lower()
+                if "timed out" in lower or "timeout" in lower:
+                    status = "timeout"
+                elif "refused" in lower:
+                    status = "refused"
+                else:
+                    status = "error"
+                return TcpObservation(
+                    source="check-host",
+                    port=port,
+                    status=status,
+                    country_code=code,
+                    country=country,
+                    city=city,
+                    node=node,
+                    error=error_text,
+                )
+            latency = row.get("time")
+            address = str(row.get("address") or "")
+            if latency is not None or address:
+                try:
+                    latency_ms = int(float(latency) * 1000) if latency is not None else None
+                except (TypeError, ValueError):
+                    latency_ms = None
+                return TcpObservation(
+                    source="check-host",
+                    port=port,
+                    status="connected",
+                    country_code=code,
+                    country=country,
+                    city=city,
+                    node=node,
+                    latency_ms=latency_ms,
+                    address=address,
+                )
+        text = str(row or "")
+        if text:
+            lower = text.lower()
+            status = "timeout" if "timeout" in lower or "timed out" in lower else "refused" if "refused" in lower else "error"
+            return TcpObservation(
+                source="check-host",
+                port=port,
+                status=status,
+                country_code=code,
+                country=country,
+                city=city,
+                node=node,
+                error=text[:500],
+            )
+        return None
+
+    @staticmethod
+    def _host_port(target: str, port: int) -> str:
+        try:
+            address = ipaddress.ip_address(target)
+            if address.version == 6:
+                return f"[{target}]:{port}"
+        except ValueError:
+            pass
+        return f"{target}:{port}"
+
+    def _check_host_port(self, target: str, port: int, nodes: dict[str, dict[str, Any]]) -> tuple[TcpObservation, ...]:
+        query: list[tuple[str, str]] = [("host", self._host_port(target, port))]
+        query.extend(("node", node) for node in nodes)
+        start_url = CHECK_HOST_START_ENDPOINT + "?" + parse.urlencode(query)
+        try:
+            start = self._http_json(start_url, timeout=self.http_timeout_seconds)
+            request_id = str(start.get("request_id") or "") if isinstance(start, dict) else ""
+            if not request_id or start.get("ok") != 1:
+                raise RuntimeError("Check-Host не подтвердил запуск диагностики")
+            result_url = CHECK_HOST_RESULT_ENDPOINT.format(request_id=parse.quote(request_id, safe=""))
+            report_url = str(start.get("permanent_link") or "")
+            if not (report_url.startswith("https://check-host.net/check-report/") and len(report_url) < 240):
+                report_url = result_url
+            deadline = time.monotonic() + self.check_host_wait_seconds
+            latest: dict[str, Any] = {}
+            while time.monotonic() < deadline:
+                payload = self._http_json(result_url, timeout=self.http_timeout_seconds)
+                if isinstance(payload, dict):
+                    latest = payload
+                if latest and all(latest.get(node) is not None for node in nodes):
+                    break
+                time.sleep(0.8)
+            observations: list[TcpObservation] = []
+            for node, meta in nodes.items():
+                parsed_result = self._parse_check_host_result(node, meta, int(port), latest.get(node))
+                if parsed_result is None:
+                    code, country, city = self._node_location(meta)
+                    parsed_result = TcpObservation(
+                        source="check-host",
+                        port=int(port),
+                        status="pending",
+                        country_code=code,
+                        country=country,
+                        city=city,
+                        node=node,
+                        error="Результат не получен до истечения времени ожидания",
+                    )
+                observations.append(replace(parsed_result, source_url=report_url))
+            return tuple(observations)
+        except Exception as exc:
+            problem("network_blocking_check_host_failed", str(exc), target=target, port=port)
+            return tuple(
+                TcpObservation(
+                    source="check-host", port=int(port), status="error",
+                    country_code=self._node_location(meta)[0], node=name,
+                    error=f"Ошибка сервиса Check-Host: {type(exc).__name__}: {str(exc)[:180]}",
+                )
+                for name, meta in nodes.items()
+            )
+
+    def _check_host(self, target: str, ports: tuple[int, ...] = GEO_PORTS) -> tuple[TcpObservation, ...]:
+        try:
+            nodes = self._select_nodes()
+        except Exception as exc:
+            problem("network_blocking_check_host_nodes_failed", str(exc), target=target)
+            return tuple(
+                TcpObservation(
+                    source="check-host", port=port, status="error",
+                    error=f"Не удалось получить список узлов Check-Host: {type(exc).__name__}",
+                )
+                for port in ports
+            )
+        if not nodes:
+            return ()
+        observations: list[TcpObservation] = []
+        with ThreadPoolExecutor(max_workers=len(ports), thread_name_prefix="leshy-block-checkhost") as pool:
+            futures = {pool.submit(self._check_host_port, target, port, nodes): port for port in ports}
+            for future in as_completed(futures):
+                observations.extend(future.result())
+        return tuple(sorted(observations, key=lambda item: (item.port, item.country_code, item.node)))
+
+    @staticmethod
+    def _service_profile(local: tuple[TcpObservation, ...], remote: tuple[TcpObservation, ...]) -> tuple[str, tuple[int, ...]]:
+        open_ports: list[int] = []
+        for port in DEFAULT_PORTS:
+            if any(item.port == port and item.status == "connected" for item in (*local, *remote)):
+                open_ports.append(port)
+        if open_ports == [22]:
+            return "Linux/SSH", (22,)
+        if open_ports == [3389]:
+            return "Windows/RDP", (3389,)
+        if set(open_ports) == {22, 3389}:
+            return "SSH + RDP (ОС неоднозначна)", (22, 3389)
+        return "Не определён", ()
+
+    @staticmethod
+    def _assessment(
+        target: str,
+        local: tuple[TcpObservation, ...],
+        remote: tuple[TcpObservation, ...],
+        chebur: CheburcheckEvidence,
+        probe: CheburProbeSummary | None = None,
+        expected_ports: tuple[int, ...] = GEO_PORTS,
+    ) -> BlockingAssessment:
+        probe = probe or CheburProbeSummary(ok=False, error="Динамический probe не выполнялся")
+        profile, service_ports = NetworkBlockingChecker._service_profile(local, remote)
+        reasons: list[str] = []
+        score = 0
+
+        # An early/partial SSE result is never a completed Cheburcheck verdict.
+        official_tspu = probe.ok and probe.finished and any(
+            "tspu_block" in item.verdicts for item in probe.observations
+        )
+        official_ok = probe.ok and probe.finished and bool(probe.observations) and all(
+            item.verdicts and all(verdict in {"ok", "uncertain"} for verdict in item.verdicts)
+            for item in probe.observations
+        ) and any("ok" in item.verdicts for item in probe.observations)
+
+        ports_to_assess = tuple(dict.fromkeys((*service_ports, *expected_ports)))
+        local_timeouts = any(item.port in ports_to_assess and item.status == "timeout" for item in local)
+        # Check-Host is finished only after BOTH requested ports have actual
+        # node-level responses. A pending node / service failure is not "timeout".
+        check_host_complete = (
+            bool(remote)
+            and all(any(item.port == port and item.node for item in remote) for port in expected_ports)
+            and all(
+                item.status != "pending"
+                and not (item.status == "error" and "Ошибка сервиса Check-Host" in item.error)
+                for item in remote if item.port in expected_ports
+            )
+        )
+        ru_timeout_ports = {
+            item.port for item in remote
+            if item.country_code.lower() == "ru" and item.status == "timeout"
+        } if check_host_complete else set()
+        matched_ports = tuple(
+            port for port in expected_ports
+            if port in ru_timeout_ports
+            and any(item.port == port and item.status == "timeout" for item in local)
+            and any(
+                item.port == port and item.country_code not in ("", "ru")
+                and item.status == "connected" for item in remote
+            )
+        )
+        signals_met = (
+            int(local_timeouts)
+            + int(bool(ru_timeout_ports))
+            + int(bool(official_tspu))
+        )
+        three_signal_confirmed = bool(matched_ports) and check_host_complete and bool(official_tspu)
+        if signals_met == 3 and not matched_ports:
+            # Local and Russian timeouts refer to different ports: not 3/3.
+            signals_met = 2
+        completed_remote = tuple(
+            item for item in remote
+            if item.port in ports_to_assess and item.status in {"connected", "timeout", "refused"}
+        )
+        successful_observations = sum(
+            item.status == "connected" for item in (*local, *completed_remote)
+            if item.port in ports_to_assess and item.status in {"connected", "timeout", "refused"}
+        )
+        total_observations = sum(
+            item.port in ports_to_assess and item.status in {"connected", "timeout", "refused"}
+            for item in (*local, *completed_remote)
+        )
+        geographic_tspu = False
+        foreign_success_any = False
+        ru_success_any = False
+        for port in ports_to_assess:
+            ru = [item for item in completed_remote if item.port == port and item.country_code == "ru"]
+            foreign = [
+                item for item in completed_remote
+                if item.port == port and item.country_code and item.country_code != "ru"
+            ]
+            ru_timeout = any(item.status == "timeout" for item in ru)
+            ru_connected = any(item.status == "connected" for item in ru)
+            foreign_connected = any(item.status == "connected" for item in foreign)
+            foreign_success_any = foreign_success_any or foreign_connected
+            ru_success_any = ru_success_any or ru_connected
+            if ru_timeout and foreign_connected and not ru_connected:
+                geographic_tspu = True
+                reasons.append(
+                    f"TCP/{port}: узел Check-Host в РФ получает timeout, а зарубежный подключается. "
+                    "Это признак сетевой фильтрации, не доказательство механизма ТСПУ."
+                )
+            if ru_timeout and foreign_connected and ru_connected:
+                reasons.append(
+                    f"TCP/{port}: ответы российских узлов противоречивы; некоторые узлы подключаются."
+                )
+
+        # Diagnostic index, not a calibrated probability. External services and
+        # multiple independent vantage points are required for a high score.
+        score = 0
+        if local_timeouts:
+            score += 20
+            reasons.append("Локальный TCP Connect завершился тайм-аутом.")
+        if chebur.ok and chebur.blocked:
+            score += 25
+            reasons.append("Cheburcheck сообщил о наличии цели в проверяемых списках.")
+        elif chebur.ok and chebur.blocked is False:
+            reasons.append("Cheburcheck не нашёл цель в проверяемых списках.")
+        elif not chebur.ok:
+            reasons.append("Чебурчек не предоставил достоверный ответ.")
+
+        if official_tspu:
+            score += 45
+            reasons.append(
+                "Распределённый Cheburcheck Probe сообщил tspu_block. "
+                "Вердикт сервиса — сильный признак, но не прямое доказательство ТСПУ."
+            )
+        elif official_ok:
+            reasons.append("Динамический Cheburcheck Probe сообщил о доступности.")
+
+        if geographic_tspu:
+            score += 35
+            reasons.append(
+                "Различие TCP-доступности из России и из-за рубежа подтверждено "
+                "измерениями Check-Host."
+            )
+        elif foreign_success_any and ru_success_any:
+            reasons.append("Есть успешные подключения и из России, и из-за рубежа.")
+
+        if geographic_tspu and (official_tspu or (chebur.ok and chebur.blocked)):
+            score += 10
+            reasons.append(
+                "Географический признак Check-Host согласуется с независимыми данными Чебурчека."
+            )
+
+        if official_ok and not official_tspu and not geographic_tspu:
+            score = min(score, 20)
+        if foreign_success_any and ru_success_any and not official_tspu and not geographic_tspu:
+            score = min(score, 20)
+        if chebur.ok and chebur.whitelisted and not official_tspu:
+            score = min(score, 30)
+            reasons.append("Cheburcheck сообщает об исключении/белом списке.")
+
+        if completed_remote and all(item.status == "refused" for item in completed_remote):
+            reasons.append(
+                "Все завершённые ответы Check-Host — Connection Refused: "
+                "это не признак региональной ТСПУ-фильтрации само по себе."
+            )
+            if not official_tspu:
+                score = min(score, 35 if chebur.ok and chebur.blocked else 10)
+
+        if not completed_remote:
+            reasons.append("Check-Host не предоставил завершённых TCP-измерений.")
+        if not check_host_complete:
+            reasons.append("Check-Host: не получены итоговые ответы всех проверочных узлов по обоим портам.")
+        if probe.observations and not probe.finished:
+            reasons.append("Cheburcheck: результаты предварительные, событие done не получено.")
+        if not probe.observations:
+            reasons.append("Нет завершённых измерений распределённого Cheburcheck Probe.")
+        availability = int(round(successful_observations * 100 / total_observations)) if total_observations else 0
+        if three_signal_confirmed:
+            score = max(score, 95)
+            port_labels = ", ".join(str(port) for port in matched_ports)
+            verdict = f"Блокировка ТСПУ подтверждена по трём диагностическим признакам (3/3, TCP/{port_labels})"
+            reasons.append(
+                "Совпали: тайм-аут прямого TCP, тайм-аут из РФ в полном отчёте "
+                "Check-Host на том же порту и итоговый tspu_block от Cheburcheck."
+            )
+        elif signals_met >= 2:
+            score = max(score, 65)
+            verdict = "Вероятная блокировка (2/3 признака), но блокировка ТСПУ не подтверждена"
+        elif score >= 70:
+            verdict = "Есть серьёзные признаки фильтрации, но блокировка ТСПУ не подтверждена"
+        elif score >= 30:
+            verdict = "Есть косвенные признаки фильтрации, но блокировка ТСПУ не подтверждена"
+        else:
+            verdict = "Блокировка ТСПУ не подтверждена"
+
+        if not service_ports:
+            reasons.append("Ни TCP/22, ни TCP/3389 не подтвердили работающий сервис; ОС не угадывается по закрытым портам.")
+        if probe.ok and probe.online_probes and not probe.observations:
+            reasons.append("Cheburcheck сообщил о доступных probe-узлах, но ни один результат не успел вернуться.")
+
+        return BlockingAssessment(
+            target=target,
+            profile=profile,
+            service_ports=service_ports,
+            tspu_probability=max(0, min(99, int(score))),
+            verdict=verdict,
+            availability_percent=max(0, min(100, availability)),
+            local=local,
+            remote=remote,
+            cheburcheck=chebur,
+            chebur_probe=probe,
+            reasons=tuple(dict.fromkeys(reasons)),
+            checked_at_epoch=time.time(),
+            matched_ports=matched_ports,
+            signals_met=signals_met,
+            three_signal_confirmed=three_signal_confirmed,
+            check_host_complete=check_host_complete,
+        )
+
+    def check(self, target: str, *, include_web: bool = False) -> BlockingAssessment:
+        normalized = self.normalize_target(target)
+        expected_ports = GEO_PORTS + (WEB_PORTS if include_web else ())
+        event("network_blocking_check_started", target=normalized, ports=list(expected_ports))
+
+        # Stage 1: identify *observable services*, then infer an OS with
+        # explicitly limited confidence. Never equate SSH=Linux or RDP=Windows.
+        initial_local = self._check_local_ports(normalized)
+        try:
+            fingerprint = collect_service_fingerprint(
+                normalized, [asdict(item) for item in initial_local],
+                timeout=min(self.local_timeout_seconds, 2.0),
+                include_web=include_web,
+            )
+        except Exception as exc:
+            problem("network_os_fingerprint_failed", str(exc), target=normalized)
+            fingerprint = {
+                "os_family": "не определена", "confidence": "отсутствует",
+                "evidence": [f"Проверка баннеров недоступна: {type(exc).__name__}"],
+                "ports": [], "completed": False,
+            }
+        extra_local = tuple(
+            TcpObservation(
+                "local", int(item["port"]), str(item["status"]),
+                latency_ms=item.get("latency_ms"),
+                error=str(item.get("detail") or "")[:180],
+            )
+            for item in fingerprint.get("ports", [])
+            if int(item.get("port") or 0) in (80, 443, 445)
+        )
+        local = tuple(sorted((*initial_local, *extra_local), key=lambda item: item.port))
+
+        # Stage 2: independent Russian/foreign vantage points + Cheburcheck.
+        def cheburcheck_pipeline() -> tuple[CheburcheckEvidence, CheburProbeSummary]:
+            evidence = self._cheburcheck(normalized)
+            return evidence, self._chebur_probe(evidence.query_id)
+
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="leshy-blocking") as pool:
+            remote_future = (
+                pool.submit(self._check_host, normalized, expected_ports)
+                if include_web else pool.submit(self._check_host, normalized)
+            )
+            chebur_future = pool.submit(cheburcheck_pipeline)
+            remote = remote_future.result()
+            chebur, probe = chebur_future.result()
+
+        result = replace(
+            self._assessment(normalized, local, remote, chebur, probe, expected_ports),
+            os_fingerprint=fingerprint,
+        )
+        receipts = [
+            self._receipts.record(
+                "tcp.connect", "success" if local else "error",
+                {"tcp": [asdict(x) for x in local], "os_fingerprint": fingerprint},
+            ),
+            self._receipts.record("cheburcheck.check", "success" if chebur.ok else "error", asdict(chebur)),
+            self._receipts.record(
+                "check_host.tcp",
+                "success" if any(x.status in {"connected", "refused", "timeout"} for x in remote) else "error",
+                [asdict(x) for x in remote],
+            ),
+        ]
+        if chebur.query_id:
+            receipts.append(self._receipts.record(
+                "cheburcheck.probe",
+                "success" if probe.ok and probe.observations else "error",
+                asdict(probe),
+            ))
+        result = replace(result, tool_receipts=tuple(receipts))
+        event(
+            "network_blocking_check_finished",
+            target=normalized,
+            profile=result.profile,
+            detected_os=fingerprint.get("os_family", ""),
+            os_confidence=fingerprint.get("confidence", ""),
+            tspu_probability=result.tspu_probability,
+            availability_percent=result.availability_percent,
+            chebur_blocked=result.cheburcheck.blocked,
+            chebur_probe_results=result.chebur_probe.responded_probes,
+            chebur_probe_tspu=any("tspu_block" in item.verdicts for item in result.chebur_probe.observations),
+        )
+        return result
+
+    @staticmethod
+    def _os_hypothesis(
+        local: tuple[TcpObservation, ...],
+        remote: tuple[TcpObservation, ...],
+    ) -> tuple[str, str]:
+        """Port-based service hint, never a verified OS fingerprint."""
+        connected_ports = {
+            item.port for item in (*local, *remote)
+            if item.port in DEFAULT_PORTS and item.status == "connected"
+        }
+        if connected_ports == {22}:
+            return (
+                "Возможно Linux/Unix: доступен TCP/22 (обычно SSH). "
+                "Но SSH поддерживается и на Windows, поэтому ОС не подтверждена.",
+                "possible_linux_unix",
+            )
+        if connected_ports == {3389}:
+            return (
+                "Возможно Windows: доступен TCP/3389 (обычно RDP). "
+                "Но этот порт бывает открыт и на Linux, поэтому ОС не подтверждена.",
+                "possible_windows",
+            )
+        if connected_ports == {22, 3389}:
+            return (
+                "ОС не подтверждена: доступны TCP/22 (SSH) и TCP/3389 (RDP). "
+                "Оба сервиса могут работать на разных операционных системах.",
+                "ambiguous",
+            )
+        return (
+            "ОС определить невозможно: нет подтверждения доступности ни TCP/22 (SSH), "
+            "ни TCP/3389 (RDP). Это не означает, что тесты не выполнялись.",
+            "unknown",
+        )
+
+    @staticmethod
+    def _port_results(result: BlockingAssessment) -> dict[int, dict[str, Any]]:
+        """Always surface both port probes and remote country results."""
+        data: dict[int, dict[str, Any]] = {}
+        for port in sorted({*GEO_PORTS, 445, *(item.port for item in result.local), *(item.port for item in result.remote)}):
+            local = next((item for item in result.local if item.port == port), None)
+            remote = [item for item in result.remote if item.port == port]
+            data[port] = {
+                "service": {22: "SSH", 80: "HTTP", 443: "HTTPS", 445: "SMB", 3389: "RDP"}[port],
+                "local_status": local.status if local else "not_checked",
+                "local_error": local.error if local else "",
+                "remote": [
+                    {
+                        "node": item.node,
+                        "country_code": item.country_code,
+                        "status": item.status,
+                        "error": item.error,
+                    }
+                    for item in remote
+                ],
+                "any_connected": any(
+                    item.status == "connected"
+                    for item in (*result.local, *result.remote)
+                    if item.port == port
+                ),
+            }
+        return data
+
+    @staticmethod
+    def format(result: BlockingAssessment) -> str:
+        local_by_port = {item.port: item for item in result.local}
+        checked = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(result.checked_at_epoch))
+        lines = [
+            f"Проверка {result.target}",
+            f"Время проверки: {checked}",
+            f"Оценка уверенности в признаках блокировки ТСПУ: {result.tspu_probability}% (условный диагностический индекс, не статистическая вероятность).",
+            (
+                "Статус подтверждения: блокировка ТСПУ подтверждена по методике 3/3."
+                if result.three_signal_confirmed
+                else "Статус подтверждения: блокировка ТСПУ не подтверждена."
+            ),
+            f"Совпавшие признаки: {result.signals_met}/3. Полный Check-Host: {'да' if result.check_host_complete else 'нет'}.",
+            f"Профиль по доступным портам (не подтверждение ОС): {result.profile}",
+            "Проверка сервисов: SSH TCP/22 и RDP TCP/3389 — оба порта тестируются независимо.",
+            (
+                f"Этап 1 — ОС по ответам служб: {result.os_fingerprint['os_family']} "
+                f"(уверенность: {result.os_fingerprint['confidence']}; не подтверждение ОС)."
+                if result.os_fingerprint
+                else f"Предположение об ОС: {NetworkBlockingChecker._os_hypothesis(result.local, result.remote)[0]}"
+            ),
+        ]
+        for port, label in ((22, "SSH/Linux"), (3389, "RDP/Windows")):
+            item = local_by_port.get(port)
+            if item is None:
+                lines.append(f"Локально TCP/{port} ({label}): нет результата")
+            elif item.status == "connected":
+                latency = f" за {item.latency_ms} мс" if item.latency_ms is not None else ""
+                lines.append(f"Локально TCP/{port} ({label}): доступен{latency}")
+            else:
+                lines.append(f"Локально TCP/{port} ({label}): {item.status}" + (f" ({item.error[:180]})" if item.error else ""))
+
+        if result.os_fingerprint:
+            for row in result.os_fingerprint.get("ports", []):
+                port = int(row.get("port") or 0)
+                if port in (22, 3389):
+                    banner = str(row.get("banner") or "")
+                    if banner:
+                        lines.append(f"Этап 1 — TCP/{port}: баннер {banner[:120]}")
+                else:
+                    lines.append(
+                        f"Этап 1 — TCP/{port} ({row.get('service') or 'TCP'}): "
+                        f"{row.get('status') or 'unknown'}"
+                        + (f"; {str(row.get('detail'))[:100]}" if row.get("detail") else "")
+                        + (f"; Server: {str(row.get('banner'))[:100]}" if row.get("banner") else "")
+                    )
+            lines.append("Обоснование ОС: " + "; ".join(result.os_fingerprint.get("evidence", [])))
+
+        chebur = result.cheburcheck
+        if chebur.ok:
+            state = "найден в блокировочных списках" if chebur.blocked else "не найден в блокировочных списках"
+            extra: list[str] = []
+            if chebur.rkn_domain:
+                extra.append(f"домен РКН: {chebur.rkn_domain}")
+            if chebur.blocked_subnets:
+                extra.append("подсети: " + ", ".join(chebur.blocked_subnets[:4]))
+            if chebur.cdn_providers:
+                extra.append("CDN: " + ", ".join(chebur.cdn_providers[:4]))
+            if chebur.whitelisted:
+                extra.append("есть исключение/белый список")
+            lines.append("Cheburcheck: " + state + (("; " + "; ".join(extra)) if extra else ""))
+        else:
+            lines.append("Cheburcheck: проверить не удалось" + (f" ({chebur.error})" if chebur.error else ""))
+
+        probe = result.chebur_probe
+        if probe.ok:
+            if probe.observations:
+                parts: list[str] = []
+                for item in probe.observations:
+                    location = item.region or item.provider or ("probe " + item.probe_id)
+                    verdicts = ",".join(item.verdicts) or "uncertain"
+                    parts.append(f"{location}: {verdicts}")
+                lines.append(
+                    f"Cheburcheck Probe ({probe.responded_probes}/{probe.online_probes or probe.responded_probes}): "
+                    + "; ".join(parts)
+                )
+            else:
+                lines.append(f"Cheburcheck Probe: результатов нет ({probe.responded_probes}/{probe.online_probes})")
+        elif probe.error:
+            lines.append("Cheburcheck Probe: " + probe.error)
+        else:
+            lines.append("Cheburcheck Probe: результат отсутствует")
+
+        for port in sorted({*GEO_PORTS, *(item.port for item in result.remote)}):
+            observations = [item for item in result.remote if item.port == port]
+            if not observations:
+                lines.append(
+                    f"Check-Host TCP/{port} ({ {22: 'SSH', 80: 'HTTP', 443: 'HTTPS', 3389: 'RDP'}[port]}): "
+                    "нет результатов по российским и зарубежным узлам"
+                )
+                continue
+            parts = []
+            for item in observations:
+                location = "/".join(x for x in (item.country_code.upper(), item.city) if x) or item.node
+                parts.append(f"{location}: {item.status}" + (f" ({item.error[:180]})" if item.error else ""))
+            lines.append(f"Check-Host TCP/{port}: " + "; ".join(parts))
+            russian = [item for item in observations if item.country_code.lower() == "ru" and item.node]
+            foreign = [item for item in observations if item.country_code.lower() != "ru" and item.node]
+            lines.append(
+                f"TCP/{port} локации: РФ {sum(x.status == 'connected' for x in russian)}/{len(russian)} "
+                f"успешно, timeout {sum(x.status == 'timeout' for x in russian)}; "
+                f"зарубежные {sum(x.status == 'connected' for x in foreign)}/{len(foreign)} успешно; "
+                f"ожидают {sum(x.status == 'pending' for x in observations)}."
+            )
+
+        lines.append(f"Вывод по ТСПУ: {result.verdict}.")
+        lines.append("Расчётный балл признаков не является процентом достоверности блокировки.")
+        if not result.remote:
+            lines.append("Check-Host: результатов нет; проверить российские и зарубежные узлы не удалось.")
+        lines.append(f"Успешные TCP-подключения среди завершённых наблюдений: {result.availability_percent}% (не вероятность блокировки).")
+        if result.reasons:
+            lines.append("Почему: " + " ".join(result.reasons))
+        if chebur.ok and chebur.source_url:
+            lines.append("Источник Cheburcheck: " + chebur.source_url)
+        report_links = sorted({item.source_url for item in result.remote if item.source_url and item.status not in {"pending", "error"}})
+        for link in report_links:
+            lines.append("Отчёт Check-Host: " + link)
+        if result.tool_receipts:
+            lines.append("Запуски инструментов (ID; статус; время UTC):")
+            for receipt in result.tool_receipts:
+                lines.append(f"{receipt.tool}: {receipt.receipt_id}; {receipt.status}; {receipt.timestamp_utc}")
+        return "\n".join(lines)
+
+
+@dataclass(slots=True)
+class NetworkBlockingModule:
+    checker: NetworkBlockingChecker = field(default_factory=NetworkBlockingChecker)
+    manifest: ModuleManifest = field(
+        default_factory=lambda: ModuleManifest(
+            name="network-blocking",
+            version="0.3.0",
+            description="OS service fingerprint, TCP/22/80/443/3389, Cheburcheck Probe и Check-Host (РФ/зарубежье) для диагностики ТСПУ",
+            priority=850,
+        )
+    )
+
+    def can_handle(self, request: ModuleRequest) -> bool:
+        event_name = str(request.metadata.get("event") or "").strip()
+        return event_name == "network_blocking_check" or self.checker.looks_like_request(request.text)
+
+    def handle(self, request: ModuleRequest) -> ModuleResponse:
+        target = str(request.metadata.get("target") or "").strip() or self.checker.extract_target(request.text)
+        if not target:
+            return ModuleResponse(handled=False)
+        lower_request = request.text.lower().replace("ё", "е")
+        include_web = (
+            "http://" in lower_request or "https://" in lower_request
+            or any(marker in lower_request for marker in (
+                "сайт", "веб", "http", "https", "website", "web-сервер",
+            ))
+            or bool(request.metadata.get("include_web"))
+        )
+        result = self.checker.check(target, include_web=include_web)
+        return ModuleResponse(
+            handled=True,
+            text=self.checker.format(result),
+            metadata={
+                "module": self.manifest.name,
+                "target": result.target,
+                "profile": result.profile,
+                "service_ports": list(result.service_ports),
+                "tested_ports": sorted({item.port for item in result.local} | {item.port for item in result.remote}),
+                "os_fingerprint": result.os_fingerprint,
+                "os_hypothesis": (
+                    f"{result.os_fingerprint.get('os_family')} (уверенность: {result.os_fingerprint.get('confidence')})"
+                    if result.os_fingerprint
+                    else self.checker._os_hypothesis(result.local, result.remote)[0]
+                ),
+                "os_hypothesis_status": (
+                    "fingerprinted_service_hint" if result.os_fingerprint
+                    else self.checker._os_hypothesis(result.local, result.remote)[1]
+                ),
+                "port_results": self.checker._port_results(result),
+                "tspu_probability": result.tspu_probability,
+                "diagnostic_score": result.tspu_probability,
+                "diagnostic_score_type": "heuristic_not_calibrated_probability",
+                "blocking_attribution": "confirmed_three_signals" if result.three_signal_confirmed else "unconfirmed",
+                "signals_met": result.signals_met,
+                "three_signal_confirmed": result.three_signal_confirmed,
+                "matched_ports": list(result.matched_ports),
+                "check_host_complete": result.check_host_complete,
+                "copyable_conclusion": (
+                    f"IP {result.target}: блокировка подтверждена по 3/3 диагностическим признакам "
+                    f"(TCP {', '.join(str(p) for p in result.matched_ports)})."
+                    if result.three_signal_confirmed else ""
+                ),
+                "availability_percent": result.availability_percent,
+                "verdict": result.verdict,
+                "local": [asdict(item) for item in result.local],
+                "remote": [asdict(item) for item in result.remote],
+                "cheburcheck": asdict(result.cheburcheck),
+                "chebur_probe": asdict(result.chebur_probe),
+                "reasons": list(result.reasons),
+                "checked_at_epoch": result.checked_at_epoch,
+                "tool_receipts": [asdict(r) for r in result.tool_receipts],
+            },
+        )
+
+
+def create_network_blocking_module() -> NetworkBlockingModule:
+    return NetworkBlockingModule()
+
+
+__all__ = [
+    "BlockingAssessment",
+    "CheburProbeObservation",
+    "CheburProbeSummary",
+    "CheburcheckEvidence",
+    "NetworkBlockingChecker",
+    "NetworkBlockingModule",
+    "TcpObservation",
+    "create_network_blocking_module",
+]

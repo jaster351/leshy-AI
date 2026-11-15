@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T19:21:25.540792+00:00",
+  "source_url": "https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.csv",
+  "source_sha256": "ee7416ab54a15a77de38cc2c03cc5ed6da8f59597bdbfff795360de3ffd8a719",
+  "source_bytes": 1158925,
+  "source_rows": 14545,
+  "named_rows": 12818,
+  "normalized_records": 7386,
+  "omitted_unnamed_rows": 1727,
+  "license": "CC0-1.0",
+  "license_url": "https://www.iana.org/help/licensing-terms",
+  "cursor": {
+    "processed_rows": 14545,
+    "remaining_rows": 0,
+    "scope": "complete named services; unnamed reserved/unassigned rows excluded"
+  },
+  "generator": "knowledge/updates/tools/generate_service_ports.py",
+  "normalization": "Group by exact service name and port; preserve per-transport description, dates and service code. Omit contact, assignee, references and free-form notes. Do not infer running service from port number."
+}

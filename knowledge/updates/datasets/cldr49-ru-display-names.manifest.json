@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "dataset_id": "unicode-cldr-49-ru-display-names",
+  "title": "Русские отображаемые названия языковых и территориальных кодов Unicode CLDR 49",
+  "source": {
+    "repository": "unicode-org/cldr",
+    "tag": "release-49",
+    "path": "common/main/ru.xml",
+    "url": "https://github.com/unicode-org/cldr/blob/release-49/common/main/ru.xml",
+    "published_at": "2026-10-21T22:13:30Z",
+    "checked_at": "2026-11-11T18:03:19Z",
+    "bytes": 975269,
+    "checksum": {
+      "algorithm": "git_blob_sha1",
+      "value": "0307a700b08204fa8f0df18934b1c6f5ee30689c"
+    }
+  },
+  "license": {
+    "spdx": "Unicode-3.0",
+    "url": "https://github.com/unicode-org/cldr/blob/release-49/LICENSE",
+    "checksum": {
+      "algorithm": "git_blob_sha1",
+      "value": "b4132054a5d2b95b6f1a4c8b511a211086023e55"
+    },
+    "bytes": 3193
+  },
+  "selection": {
+    "description": "Все прямые элементы language и territory русской локали, у которых единственный атрибут — type; варианты alt, menu, draft и унаследованные маркеры исключены.",
+    "sections": [
+      {
+        "xpath": "localeDisplayNames/languages/language",
+        "records": 574,
+        "complete": true
+      },
+      {
+        "xpath": "localeDisplayNames/territories/territory",
+        "records": 295,
+        "complete": true
+      }
+    ],
+    "deduplication_key": "dataset_section + type",
+    "missing_values_policy": "Отсутствующие и унаследованные значения не превращаются в пустую строку или ноль."
+  },
+  "outputs": [
+    {
+      "path": "knowledge/updates/2026-11-11/1800-cldr49-russian-language-display-names.jsonl",
+      "records": 574,
+      "bytes": 992681
+    },
+    {
+      "path": "knowledge/updates/2026-11-11/1800-cldr49-russian-territory-display-names.jsonl",
+      "records": 295,
+      "bytes": 526701
+    }
+  ],
+  "generator": "knowledge/updates/tools/generate_cldr49_ru_display_names.py",
+  "generated_at": "2026-11-11T18:03:19Z",
+  "cursor": {
+    "completed_sections": [
+      "languages",
+      "territories"
+    ],
+    "next_candidate_section": "scripts",
+    "note": "Выбранные разделы обработаны полностью; остальные разделы CLDR не входят в этот выпуск и могут быть импортированы отдельными тематическими пакетами."
+  },
+  "validation": {
+    "unique_ids": 869,
+    "duplicate_keys": 0,
+    "max_file_bytes": 2097152,
+    "all_output_files_under_limit": true
+  }
+}

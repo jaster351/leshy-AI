@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T01:40:08.249026+00:00",
+  "source_url": "https://current.geneontology.org/ontology/go-basic.obo",
+  "source_sha256": "b08d45b268b8c24ccb2513dbbbc7d4df9f6521c099b413f79eb31e06e0fa3bcc",
+  "source_bytes": 32227785,
+  "source_version": "releases/2026-07-26",
+  "license": "CC-BY-4.0",
+  "license_url": "https://geneontology.org/docs/go-citation-policy/",
+  "attribution": "Gene Ontology Consortium",
+  "recommended_citations": [
+    "https://doi.org/10.1038/75556",
+    "https://doi.org/10.1093/nar/gkaf1292"
+  ],
+  "normalized_sha256": "63bc05d127519505589f3587dadcaf767c13eaa592a7243c1160ef0ce260d791",
+  "active_terms": 4077,
+  "obsolete_excluded": 523,
+  "scope": "Complete cellular_component namespace; definitions and direct relations only. No gene annotations.",
+  "cursor": {
+    "namespace": "cellular_component",
+    "last_id": "GO:7770088",
+    "processed": 4600,
+    "remaining_in_namespace": 0,
+    "next_namespace": "molecular_function"
+  },
+  "generator": "knowledge/updates/tools/generate_go_cellular_components.py",
+  "excluded_semantic_duplicates": {
+    "GO:0005694": "biology-nuclear-chromosome-dna-protein already covers DNA/protein hereditary structure; omitted conservatively"
+  }
+}

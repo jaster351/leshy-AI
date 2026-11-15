@@ -1,0 +1,397 @@
+"""Owner-scoped bridge between Leshy and the separate Parser for Plex NAS service.
+
+No torrent parsing or downloading happens in Leshy. All commands are handled
+by the separately installed Parser for Plex server.
+"""
+from __future__ import annotations
+
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import threading
+from urllib import error, parse, request
+
+from .secret_store import load_secret, save_secret
+
+
+DEFAULT_ADDRESS = "http://192.168.0.19:8766"
+_DOWNLOAD = re.compile(
+    r"^\s*(?:(?:алиса[,! ]*)?попроси\s+помощника\s+по\s+дому\s+)?"
+    r"(?:скачай|скачать|загрузи|загрузить|найди\s+торрент\s+на|"
+    r"найти\s+торрент\s+на)\s*[,!:—-]*\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+_FIRST_PART = re.compile(
+    r"^(?:(?:самую\s+)?первую|1-?(?:ю|ую))\s+часть\s+"
+    r"|^первый\s+фильм\s+",
+    re.IGNORECASE,
+)
+_MEDIA_PREFIX = re.compile(
+    r"^(фильм|фильма|кино|группу|исполнителя|музыку|альбом|песню|трек)"
+    r"\s*[,!:—-]*\s+",
+    re.IGNORECASE,
+)
+
+_PREMIERE_INTENT = re.compile(
+    r"\b(?:следи|отслеживай|мониторь|отслеживать|следить|проверяй)\b",
+    re.IGNORECASE,
+)
+_PREMIERE_STOP = re.compile(r"\b(?:перестань|прекрати|останови|отключи|не\s+надо)\b", re.IGNORECASE)
+_PREMIERE_TOPIC = re.compile(
+    r"\b(?:кинопремьер\w*|нов\w*\s+фильм\w*|фильм\w*\s+в\s+кинотеатр\w*|"
+    r"вышедш\w*\s+в\s+кинотеатр\w*|релиз\w*\s+фильм\w*)",
+    re.IGNORECASE,
+)
+
+
+def parse_premiere_request(message: str) -> bool | None:
+    phrase = str(message or "").strip()
+    if not _PREMIERE_TOPIC.search(phrase):
+        return None
+    if _PREMIERE_STOP.search(phrase):
+        return False
+    if _PREMIERE_INTENT.search(phrase):
+        return True
+    return None
+
+
+_LOCK = threading.RLock()
+_OPENER = request.build_opener(request.ProxyHandler({}))
+
+
+def parse_media_request(message: str) -> tuple[str, str, str] | None:
+    """Identify an explicit download command, including ordinary Russian word order.
+
+    The first-part marker is *intent*, not a hard-coded title/year mapping.
+    The NAS selects the first theatrical release using verified search results.
+    """
+    match = _DOWNLOAD.fullmatch(str(message or "").strip())
+    if not match:
+        return None
+    phrase = match.group(1).strip().strip("!?., ")
+    part = ""
+    initial = _FIRST_PART.match(phrase)
+    if initial:
+        part = "first"
+        phrase = phrase[initial.end():].lstrip(" ,:—-")
+    media = _MEDIA_PREFIX.match(phrase)
+    if media:
+        word = media.group(1).casefold()
+        kind = "movie" if word in {"фильм", "фильма", "кино"} else "music"
+        phrase = phrase[media.end():]
+    elif part == "first":
+        kind = "movie"
+    else:
+        return None
+    # "скачай фильм Аватар, первую часть", or "фильм Обитель зла, самую первую часть"
+    tail = re.search(r"\s*[,;:—-]\s*(?:самую\s+)?первую\s+часть\s*$", phrase, re.I)
+    if kind == "movie" and tail:
+        part = "first"
+        phrase = phrase[:tail.start()]
+    if kind == "movie" and not part:
+        inner = _FIRST_PART.match(phrase)
+        if inner:
+            part = "first"
+            phrase = phrase[inner.end():]
+    title = phrase.strip("!?., :—-")
+    return (kind, title, part) if 0 < len(title) <= 200 else None
+
+
+def parse_request(message: str) -> tuple[str, str] | None:
+    parsed = parse_media_request(message)
+    return (parsed[0], parsed[1]) if parsed else None
+
+
+def _base_url(url: str) -> str:
+    raw = str(url or "").strip().rstrip("/")
+    u = parse.urlsplit(raw)
+    if not u.hostname or u.username or u.password or u.query or u.fragment or u.scheme not in {"http", "https"}:
+        raise ValueError("Укажите http(s) адрес сервера Parser for Plex")
+    if u.path not in {"", "/", "/alice", "/v1/jobs"}:
+        raise ValueError("Адрес должен заканчиваться на порт, /alice или /v1/jobs")
+    # Unencrypted HTTP is acceptable only inside the user's trusted LAN.
+    if u.scheme == "http":
+        try:
+            host = ipaddress.ip_address(u.hostname)
+        except ValueError:
+            raise ValueError("Для HTTP используйте LAN IP; для DNS-имён нужен HTTPS") from None
+        if not (host.is_private or host.is_loopback):
+            raise ValueError("Для внешнего адреса требуется HTTPS")
+    try:
+        port = u.port
+    except ValueError:
+        raise ValueError("Некорректный порт") from None
+    if port is not None and not (1 <= port <= 65535):
+        raise ValueError("Некорректный порт")
+    return parse.urlunsplit((u.scheme, u.netloc, "", "", ""))
+
+
+def _persistent_parser_root() -> Path:
+    """Installation-independent owner OS state; never place credentials in Git."""
+    if os.name == "nt":
+        home = os.getenv("LOCALAPPDATA")
+        base = Path(home) if home else Path.home() / "AppData" / "Local"
+        return base / "Leshy-AI" / "integrations" / "parser-for-plex"
+    xdg = os.getenv("XDG_STATE_HOME")
+    return (Path(xdg) if xdg else Path.home() / ".local" / "state") / "leshy-ai" / "integrations" / "parser-for-plex"
+
+
+class TorrentParserBridge:
+    def __init__(self, brain_dir: str | Path, *, persistent_root: Path | None = None):
+        root = Path(persistent_root) if persistent_root is not None else _persistent_parser_root()
+        self.settings = root / "torrent_parser.json"
+        self.secret = root / "torrent_parser_token.secret"
+        self._migrate_legacy(Path(brain_dir))
+
+    def _migrate_legacy(self, legacy: Path) -> None:
+        """Copy prior LeshyBrain state once; never delete legacy credentials.
+
+        An interrupted copy may resume only for byte-identical configuration,
+        preventing a token being mixed with another installation's owner.
+        """
+        config = legacy / "settings" / "torrent_parser.json"
+        secret = legacy / "secrets" / "torrent_parser_token.secret"
+        with _LOCK:
+            if self.settings.exists():
+                if self.secret.exists() or not config.is_file() or not secret.is_file():
+                    return
+                if self.settings.read_bytes() != config.read_bytes():
+                    return
+                sources = ((secret, self.secret),)
+            elif self.secret.exists():
+                return
+            else:
+                sources = ((config, self.settings), (secret, self.secret))
+            for source, target in sources:
+                if not source.is_file() or target.exists():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    target.parent.chmod(0o700)
+                except OSError:
+                    pass
+                temporary = target.with_name(target.name + ".migrating")
+                # Stale temporary files from interrupted writes are not trusted.
+                temporary.unlink(missing_ok=True)
+                try:
+                    with source.open("rb") as reader, temporary.open("xb") as writer:
+                        shutil.copyfileobj(reader, writer, 1024 * 1024)
+                    temporary.chmod(0o600)
+                    if not target.exists():
+                        temporary.replace(target)
+                finally:
+                    temporary.unlink(missing_ok=True)
+
+    def _read(self):
+        try:
+            data = json.loads(self.settings.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def status(self, owner_id: str | None = None):
+        data = self._read()
+        if owner_id is not None and not self.owner_allowed(owner_id):
+            # Do not reveal private NAS addresses or contact somebody else's NAS.
+            return {
+                "address": DEFAULT_ADDRESS,
+                "configured": False,
+                "credential_saved": False,
+                "auth_verified": None,
+                "paired": False,
+                "profile_mismatch": bool(data.get("configured")),
+            }
+        try:
+            saved = load_secret(self.secret)
+            secret_error = False
+        except (RuntimeError, OSError, ValueError):
+            saved = ""
+            secret_error = True
+        verified = None
+        if data.get("configured") and saved:
+            try:
+                result = self._request(
+                    _base_url(data.get("address") or DEFAULT_ADDRESS) + "/v1/auth/check",
+                    secret=saved, timeout=3,
+                )
+                verified = result.get("authorized") is True
+            except PermissionError:
+                verified = False
+            except (RuntimeError, ConnectionError, ValueError, OSError):
+                # Network unavailable or NAS still on an older release.
+                # Do not erase a local credential based on a transient error.
+                verified = None
+        state = {
+            "address": data.get("address") or DEFAULT_ADDRESS,
+            "configured": bool(data.get("configured")),
+            "credential_saved": bool(saved),
+            "auth_verified": verified,
+            "paired": verified is True,
+        }
+        if secret_error:
+            state["pairing_error"] = (
+                "Защищённый ключ нельзя прочитать в текущем профиле ОС. "
+                "Проверьте учётную запись Windows и прежний LeshyBrain."
+            )
+        return state
+
+    def owner_allowed(self, owner_id: str) -> bool:
+        data = self._read()
+        return bool(data.get("configured") and data.get("owner_id")
+                    and str(owner_id) == data["owner_id"])
+
+    def configure(self, address: str, owner_id: str):
+        base = _base_url(address)
+        owner = str(owner_id or "").strip()
+        if not owner or owner == "web:local":
+            raise PermissionError("Требуется вход владельца в веб-интерфейс Лешего")
+        with _LOCK:
+            previous = self._read()
+            old_owner = str(previous.get("owner_id") or "").strip()
+            if previous.get("configured") and old_owner and old_owner != owner:
+                raise PermissionError(
+                    "Подключение привязано к другому профилю Лешего. "
+                    "Войдите в прежний профиль. Чужие настройки нельзя перезаписывать."
+                )
+            payload = {"address": base, "owner_id": owner, "configured": True}
+            self.settings.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                self.settings.parent.chmod(0o700)
+            except OSError:
+                pass
+            temp = self.settings.with_suffix(".json.tmp")
+            temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp.replace(self.settings)
+            try:
+                self.settings.chmod(0o600)
+            except OSError:
+                pass
+            if previous.get("address") != base or old_owner != owner:
+                self.secret.unlink(missing_ok=True)
+        return self.status(owner)
+
+    @staticmethod
+    def _request(url, body=None, secret=None, timeout=4.0):
+        headers = {"Accept": "application/json"}
+        if body is not None:
+            headers["Content-Type"] = "application/json; charset=utf-8"
+        if secret:
+            headers["Authorization"] = "Bearer " + secret
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+        req = request.Request(url, data=data, headers=headers, method="POST" if body is not None else "GET")
+        try:
+            with _OPENER.open(req, timeout=timeout) as response:
+                raw = response.read(65537)
+                if len(raw) > 65536:
+                    raise ValueError("Слишком большой ответ Parser for Plex")
+                result = json.loads(raw.decode("utf-8"))
+                return result if isinstance(result, dict) else {}
+        except error.HTTPError as exc:
+            if exc.code == 401:
+                raise PermissionError("Ключ парсера не принят. Сброс выполняется только на NAS") from None
+            if exc.code == 409:
+                raise PermissionError("Первичная привязка закрыта или уже выполнена. Для повторной нужен reset на NAS") from None
+            raise RuntimeError("Parser for Plex: HTTP " + str(exc.code)) from None
+        except (error.URLError, TimeoutError, OSError) as exc:
+            raise ConnectionError("Parser for Plex недоступен: " + type(exc).__name__) from None
+
+    def test(self):
+        data = self._read()
+        addr = _base_url(data.get("address") or DEFAULT_ADDRESS)
+        return self._request(addr + "/health", timeout=3)
+
+    def pair(self, owner_id: str):
+        if not self.owner_allowed(owner_id):
+            raise PermissionError("Настройте адрес и войдите под владельцем")
+        with _LOCK:
+            base = _base_url(self._read()["address"])
+            existing = load_secret(self.secret)
+            if existing:
+                try:
+                    reply = self._request(
+                        base + "/v1/auth/check", secret=existing, timeout=4,
+                    )
+                except PermissionError:
+                    # This token is explicitly rejected by the NAS. A manual
+                    # NAS repair must have opened pairing before we retry.
+                    self.secret.unlink(missing_ok=True)
+                except RuntimeError as exc:
+                    if "HTTP 404" in str(exc):
+                        raise RuntimeError(
+                            "Обновите Parser for Plex на NAS: нет проверки ключа /v1/auth/check"
+                        ) from None
+                    raise
+                else:
+                    if reply.get("authorized") is not True:
+                        raise RuntimeError("NAS не подтвердил действительность ключа")
+                    return self.status(owner_id)
+            reply = self._request(base + "/v1/pair", {"client_name": "Leshy"}, timeout=5)
+            received = str(reply.get("token") or "")
+            if len(received) < 32:
+                raise ValueError("Parser for Plex не вернул действительный ключ")
+            save_secret(self.secret, received)
+        return self.status(owner_id)
+
+    def submit(self, owner_id: str, kind: str, title: str, *, part: str = ""):
+        if not self.owner_allowed(owner_id):
+            # Distinguish missing setup from an owner mismatch; do not reveal
+            # the NAS address or any pairing credential to the caller.
+            configured = bool(self._read().get("configured"))
+            return {
+                "status": "owner_mismatch" if configured else "not_configured",
+                "message": (
+                    "Подключение Parser for Plex уже сохранено, но текущий Telegram/Web профиль "
+                    "не связан с профилем, выполнившим настройку. Откройте Web Лешего "
+                    "под прежним профилем и подтвердите привязку Telegram. "
+                    "Сбрасывать NAS и ключ не нужно."
+                    if configured else
+                    "Настройте подключение к Parser for Plex в параметрах Лешего."
+                ),
+            }
+        # Verify the stored credential instead of assuming that a local file
+        # means the NAS still accepts it. Re-pair automatically only while
+        # the owner-opened NAS pairing window is available.
+        self.pair(owner_id)
+        secret = load_secret(self.secret)
+        data = self._request(self._read()["address"] + "/v1/jobs",
+                             {"kind": kind, "query": title, "part": part, "wait_seconds": 2.5},
+                             secret=secret, timeout=6)
+        return data
+
+    def watch_premieres(self, owner_id: str, enabled: bool) -> str:
+        if not self.owner_allowed(owner_id):
+            return "Настройте подключение к Parser for Plex в параметрах Лешего."
+        self.pair(owner_id)
+        secret = load_secret(self.secret)
+        try:
+            state = self._request(
+                self._read()["address"] + "/v1/watch/premieres",
+                {"enabled": bool(enabled)}, secret=secret, timeout=6,
+            )
+        except RuntimeError as exc:
+            if "HTTP 400" in str(exc):
+                return ("Для мониторинга кинопремьер нужен бесплатный ключ TMDB на NAS. "
+                        "Пока мониторинг не включён.")
+            raise
+        if enabled:
+            return ("Начал отслеживать новинки кинопроката. "
+                    "Буду проверять появление подходящих раздач и ставить их в очередь. "
+                    "Передача .torrent ещё не означает завершение загрузки фильма.")
+        return "Остановил отслеживание новых кинопремьер."
+
+    def execute_chat(self, owner_id: str, message: str):
+        premiere = parse_premiere_request(message)
+        command = parse_media_request(message)
+        if premiere is None and not command:
+            return None
+        try:
+            if premiere is not None:
+                return self.watch_premieres(owner_id, premiere)
+            kind, title, part = command
+            info = self.submit(owner_id, kind, title, part=part)
+            return str(info.get("message") or "Команда принята.")
+        except (ConnectionError, ValueError, RuntimeError, PermissionError) as exc:
+            return str(exc)

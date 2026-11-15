@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "dataset_id": "unicode-ucd-17.0.0-unicodedata",
+  "title": "Свойства кодовых точек Unicode Character Database 17.0.0 — последовательная часть UnicodeData.txt",
+  "source": {
+    "organization": "Unicode, Inc.",
+    "version": "17.0.0",
+    "status": "final",
+    "date": "2025-08-15",
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+    "mirror_url": "https://github.com/unicode-org/unicodetools/blob/main/unicodetools/data/ucd/17.0.0/UnicodeData.txt",
+    "bytes": 2198209,
+    "lines": 40575,
+    "checksum": {
+      "algorithm": "git_blob_sha1",
+      "value": "fca68e3e154e62e49727ecf69f1df442582bfa96",
+      "scope": "byte-identical GitHub mirror blob"
+    }
+  },
+  "documentation": {
+    "url": "https://www.unicode.org/reports/tr44/",
+    "format": "15 semicolon-delimited fields per UnicodeData record"
+  },
+  "license": {
+    "spdx": "Unicode-3.0",
+    "url": "https://www.unicode.org/license.txt",
+    "repository_copy_url": "https://github.com/unicode-org/unicodetools/blob/main/LICENSE",
+    "git_blob_sha1": "d7e7973c2fd6f2586a8999a69dc21e39af26be0f"
+  },
+  "selection": {
+    "description": "Первые 3000 строк UnicodeData.txt в исходном порядке; служебные строки границ диапазонов <..., First>/<..., Last> исключены, остальные 15 полей сохранены без подстановки отсутствующих значений нулём.",
+    "source_line_start": 1,
+    "source_line_end": 3000,
+    "source_code_point_start": "0000",
+    "source_code_point_end": "0D13",
+    "raw_source_records": 3000,
+    "range_boundary_records_excluded": 0,
+    "eligible_candidates": 3000,
+    "missing_values_policy": "Пустые поля сохраняются как null; они не превращаются в ноль.",
+    "deduplication_key": "dataset version + code point"
+  },
+  "outputs": [
+    {
+      "path": "knowledge/updates/2026-11-12/0200-ucd17-unicodedata-part-01.jsonl",
+      "records": 974,
+      "bytes": 1848833,
+      "first_code_point": "0000",
+      "last_code_point": "03D6"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0200-ucd17-unicodedata-part-02.jsonl",
+      "records": 978,
+      "bytes": 1849191,
+      "first_code_point": "03D7",
+      "last_code_point": "07D6"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0200-ucd17-unicodedata-part-03.jsonl",
+      "records": 989,
+      "bytes": 1849921,
+      "first_code_point": "07D7",
+      "last_code_point": "0CB6"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0200-ucd17-unicodedata-part-04.jsonl",
+      "records": 59,
+      "bytes": 110260,
+      "first_code_point": "0CB7",
+      "last_code_point": "0D13"
+    }
+  ],
+  "generator": "knowledge/updates/tools/generate_ucd17_unicodedata.py",
+  "generated_at": "2026-11-11T21:04:30Z",
+  "deduplication_audit": {
+    "raw_source_records": 3000,
+    "range_boundary_records_excluded": 0,
+    "eligible_candidates": 3000,
+    "exact_id_duplicates": 0,
+    "exact_claim_duplicates": 0,
+    "canonical_key_duplicates": 0,
+    "semantic_duplicates": 0,
+    "updated_versions": 0,
+    "retracted_versions": 0,
+    "new_unique_records": 3000
+  },
+  "cursor": {
+    "source_line_end": 3000,
+    "last_seen_code_point": "0D13",
+    "next_source_line": 3001,
+    "remaining_source_records": 37575,
+    "note": "Следующий запуск продолжает с source line 3001; границы диапазонов требуют отдельного контролируемого разворачивания и сейчас не импортируются."
+  },
+  "validation": {
+    "unique_ids": 3000,
+    "duplicate_keys": 0,
+    "max_file_bytes": 2097152,
+    "all_output_files_under_limit": true,
+    "field_count": 15
+  }
+}

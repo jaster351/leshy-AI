@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "dataset_id": "unicode-ucd-17.0.0-unicodedata-lines-15001-18000",
+  "title": "Свойства кодовых точек и диапазонов UCD 17.0.0 — строки 15001–18000 UnicodeData.txt",
+  "predecessor_manifest": "knowledge/updates/datasets/ucd17-unicodedata-lines-12001-15000.manifest.json",
+  "source": {
+    "organization": "Unicode, Inc.",
+    "version": "17.0.0",
+    "status": "final",
+    "date": "2025-08-15",
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+    "mirror_url": "https://github.com/unicode-org/unicodetools/blob/main/unicodetools/data/ucd/17.0.0/UnicodeData.txt",
+    "bytes": 2198209,
+    "lines": 40575,
+    "checksum": {
+      "algorithm": "git_blob_sha1",
+      "value": "fca68e3e154e62e49727ecf69f1df442582bfa96",
+      "scope": "byte-identical GitHub mirror blob"
+    }
+  },
+  "documentation": {
+    "url": "https://www.unicode.org/reports/tr44/tr44-36.html",
+    "version": "UAX #44 revision 36 for Unicode 17.0.0",
+    "format": "15 semicolon-delimited fields; First/Last adjacent pairs encode ranges"
+  },
+  "license": {
+    "spdx": "Unicode-3.0",
+    "url": "https://www.unicode.org/license.txt",
+    "repository_copy_url": "https://github.com/unicode-org/unicodetools/blob/main/LICENSE",
+    "git_blob_sha1": "d7e7973c2fd6f2586a8999a69dc21e39af26be0f"
+  },
+  "selection": {
+    "description": "Строки 15001–18000 UnicodeData.txt в исходном порядке; обычные строки преобразуются по одной, а каждая соседняя пара <..., First>/<..., Last> — в одну диапазонную запись; отсутствующие значения не превращаются в ноль.",
+    "source_line_start": 15001,
+    "source_line_end": 18000,
+    "source_code_point_start": "AAEE",
+    "source_code_point_end": "10558",
+    "raw_source_records": 3000,
+    "individual_source_records": 2990,
+    "range_boundary_records": 10,
+    "range_records_created": 5,
+    "eligible_candidates": 2995,
+    "missing_values_policy": "Пустые поля сохраняются как null.",
+    "deduplication_key": "dataset version + code point or normalized range"
+  },
+  "outputs": [
+    {
+      "path": "knowledge/updates/2026-11-12/0700-ucd17-unicodedata-part-01.jsonl",
+      "records": 967,
+      "bytes": 1848663,
+      "first_code_point": "AAEE",
+      "last_code_point": "FBCA"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0700-ucd17-unicodedata-part-02.jsonl",
+      "records": 951,
+      "bytes": 1848535,
+      "first_code_point": "FBCB",
+      "last_code_point": "FFB1"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0700-ucd17-unicodedata-part-03.jsonl",
+      "records": 975,
+      "bytes": 1849817,
+      "first_code_point": "FFB2",
+      "last_code_point": "104E6"
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0700-ucd17-unicodedata-part-04.jsonl",
+      "records": 102,
+      "bytes": 193430,
+      "first_code_point": "104E7",
+      "last_code_point": "10558"
+    }
+  ],
+  "generator": "knowledge/updates/tools/generate_ucd17_unicodedata_page.py",
+  "generated_at": "2026-11-12T01:57:32Z",
+  "deduplication_audit": {
+    "raw_source_records": 3000,
+    "individual_source_records": 2990,
+    "range_boundary_records": 10,
+    "range_records_created": 5,
+    "eligible_candidates": 2995,
+    "exact_id_duplicates": 0,
+    "exact_claim_duplicates": 0,
+    "canonical_key_duplicates": 0,
+    "semantic_duplicates": 0,
+    "updated_versions": 0,
+    "retracted_versions": 0,
+    "new_unique_records": 2995
+  },
+  "cursor": {
+    "source_line_end": 18000,
+    "last_seen_code_point": "10558",
+    "next_source_line": 18001,
+    "remaining_source_records": 22575,
+    "note": "Следующая последовательная часть начинается со строки 18001."
+  },
+  "validation": {
+    "unique_ids": 2995,
+    "duplicate_keys": 0,
+    "max_file_bytes": 2097152,
+    "all_output_files_under_limit": true,
+    "field_count": 15,
+    "range_pairs_validated": true
+  }
+}

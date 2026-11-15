@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "dataset_id": "unicode-cldr-49-ru-locale-technical-names",
+  "title": "Русские имена ключей и значений локали, валютных кодов и длинных названий единиц CLDR 49",
+  "source": {
+    "repository": "unicode-org/cldr",
+    "tag": "release-49",
+    "path": "common/main/ru.xml",
+    "url": "https://github.com/unicode-org/cldr/blob/release-49/common/main/ru.xml",
+    "published_at": "2026-10-21T22:13:30Z",
+    "checked_at": "2026-11-11T20:05:11Z",
+    "bytes": 975269,
+    "checksum": {
+      "algorithm": "git_blob_sha1",
+      "value": "0307a700b08204fa8f0df18934b1c6f5ee30689c"
+    }
+  },
+  "license": {
+    "spdx": "Unicode-3.0",
+    "url": "https://github.com/unicode-org/cldr/blob/release-49/LICENSE",
+    "bytes": 3193,
+    "checksum": {
+      "algorithm": "git_blob_sha1",
+      "value": "b4132054a5d2b95b6f1a4c8b511a211086023e55"
+    }
+  },
+  "selection": {
+    "description": "Базовые displayName без дополнительных атрибутов и унаследованных маркеров: все keys, базовые types, валюты и длинные названия единиц.",
+    "raw_source_elements": 757,
+    "excluded_by_selection": 164,
+    "sections": [
+      {
+        "section": "localeDisplayNames/keys",
+        "records": 37,
+        "excluded": 0,
+        "complete_for_selection": true
+      },
+      {
+        "section": "localeDisplayNames/types",
+        "records": 89,
+        "excluded": 145,
+        "complete_for_selection": true
+      },
+      {
+        "section": "numbers/currencies/base-displayName",
+        "records": 282,
+        "excluded": 0,
+        "complete_for_selection": true
+      },
+      {
+        "section": "units/unitLength-long/base-displayName",
+        "records": 185,
+        "excluded": 19,
+        "complete_for_selection": true
+      }
+    ],
+    "deduplication_key": "dataset_section + source key",
+    "missing_values_policy": "Отсутствующие и унаследованные значения не превращаются в пустую строку или ноль."
+  },
+  "outputs": [
+    {
+      "path": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-key-names.jsonl",
+      "records": 37,
+      "bytes": 62909
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0100-cldr49-russian-locale-type-names.jsonl",
+      "records": 89,
+      "bytes": 159516
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0100-cldr49-russian-currency-display-names.jsonl",
+      "records": 282,
+      "bytes": 502614
+    },
+    {
+      "path": "knowledge/updates/2026-11-12/0100-cldr49-russian-long-unit-display-names.jsonl",
+      "records": 185,
+      "bytes": 325277
+    }
+  ],
+  "generator": "knowledge/updates/tools/generate_cldr49_ru_locale_technical_names.py",
+  "generated_at": "2026-11-11T20:05:11Z",
+  "deduplication_audit": {
+    "raw_source_elements": 757,
+    "excluded_by_selection": 164,
+    "eligible_candidates": 593,
+    "exact_id_duplicates": 0,
+    "exact_claim_duplicates": 0,
+    "canonical_key_duplicates": 0,
+    "semantic_duplicates": 0,
+    "updated_versions": 0,
+    "retracted_versions": 0,
+    "new_unique_records": 593
+  },
+  "cursor": {
+    "completed_sections": [
+      "keys",
+      "types",
+      "currencies/base-displayName",
+      "units/long/base-displayName"
+    ],
+    "next_candidate_source_family": "different_structured_primary_dataset",
+    "note": "Выбранные разделы завершены. Следующий выпуск должен сменить предметную область; 164 вариантных/унаследованных значения сознательно исключены."
+  },
+  "validation": {
+    "unique_ids": 593,
+    "duplicate_keys": 0,
+    "max_file_bytes": 2097152,
+    "all_output_files_under_limit": true
+  }
+}

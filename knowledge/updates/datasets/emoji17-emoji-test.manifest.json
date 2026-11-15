@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "dataset_id": "unicode-emoji-17.0-emoji-test",
+  "title": "Полный тестовый набор последовательностей Unicode Emoji 17.0",
+  "source": {
+    "organization": "Unicode, Inc.",
+    "version": "Emoji 17.0",
+    "status": "final",
+    "date": "2025-08-04T20:55:31Z",
+    "url": "https://www.unicode.org/Public/17.0.0/emoji/emoji-test.txt",
+    "bytes": 669326,
+    "lines": 5518,
+    "checksum": {"algorithm":"sha256","value":"1d8a944f88d7952f7ef7c5167fef3c67995bcae24543949710231b03a201acda"}
+  },
+  "documentation": {
+    "url": "https://www.unicode.org/reports/tr51/tr51-29.html",
+    "version": "UTS #51 revision 29 for Unicode Emoji 17.0",
+    "date": "2025-09-04",
+    "format": "code point sequence; qualification status # sample Emoji-version English-name"
+  },
+  "license": {
+    "spdx": "Unicode-3.0",
+    "url": "https://www.unicode.org/license.txt"
+  },
+  "selection": {
+    "description": "Все 5225 непустых тестовых записей emoji-test.txt 17.0; комментарии и заголовки групп используются как метаданные, но не создают отдельные факты.",
+    "raw_source_records": 5225,
+    "eligible_candidates": 5225,
+    "status_counts": {
+      "component": 9,
+      "fully-qualified": 3944,
+      "minimally-qualified": 1029,
+      "unqualified": 243
+    },
+    "deduplication_key": "qualification status + ordered Unicode code point sequence",
+    "missing_values_policy": "Записи без полного соответствия формату отклоняются; отсутствие не превращается в пустую строку или ноль."
+  },
+  "outputs": [
+    {"path":"knowledge/updates/2026-11-12/1600-emoji17-test-part-01.jsonl","records":768,"bytes":1848469,"first_source_line":40,"last_source_line":860},
+    {"path":"knowledge/updates/2026-11-12/1600-emoji17-test-part-02.jsonl","records":748,"bytes":1849873,"first_source_line":861,"last_source_line":1610},
+    {"path":"knowledge/updates/2026-11-12/1600-emoji17-test-part-03.jsonl","records":739,"bytes":1847951,"first_source_line":1611,"last_source_line":2353},
+    {"path":"knowledge/updates/2026-11-12/1600-emoji17-test-part-04.jsonl","records":733,"bytes":1847885,"first_source_line":2354,"last_source_line":3088},
+    {"path":"knowledge/updates/2026-11-12/1600-emoji17-test-part-05.jsonl","records":709,"bytes":1849949,"first_source_line":3089,"last_source_line":3819},
+    {"path":"knowledge/updates/2026-11-12/1600-emoji17-test-part-06.jsonl","records":794,"bytes":1847759,"first_source_line":3820,"last_source_line":4713},
+    {"path":"knowledge/updates/2026-11-12/1600-emoji17-test-part-07.jsonl","records":734,"bytes":1719954,"first_source_line":4714,"last_source_line":5507}
+  ],
+  "generator": "knowledge/updates/tools/generate_emoji17_test_data.py",
+  "generated_at": "2026-11-12T11:04:30Z",
+  "deduplication_audit": {
+    "raw_source_records": 5225,
+    "eligible_candidates": 5225,
+    "exact_id_duplicates": 0,
+    "exact_claim_duplicates": 0,
+    "canonical_key_duplicates": 0,
+    "semantic_duplicates": 0,
+    "updated_versions": 0,
+    "retracted_versions": 0,
+    "new_unique_records": 5225
+  },
+  "cursor": {
+    "last_source_line": 5507,
+    "remaining_source_records": 0,
+    "status": "complete",
+    "next_candidate_source_family": "different_structured_primary_dataset"
+  }
+}

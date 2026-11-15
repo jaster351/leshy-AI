@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T19:22:41.046492+00:00",
+  "source_rows_received": 14545,
+  "named_source_rows": 12818,
+  "omitted_unnamed_rows": 1727,
+  "consolidated_transport_rows": 5432,
+  "candidates_considered": 7387,
+  "new_unique_records": 7387,
+  "exact_duplicates": 0,
+  "semantic_duplicates": 0,
+  "updated_versions": 0,
+  "retracted_versions": 0,
+  "new_jsonl_bytes": 17126093,
+  "packages": [
+    {
+      "path": "knowledge/updates/2026-11-14/0019-research.jsonl",
+      "records": 1,
+      "bytes": 2811,
+      "sha256": "670b2e2d464e7d5a64e213bcc1466e9736af707b55ced3ba6527337e110bdbc9"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0019-service-ports-01.jsonl",
+      "records": 901,
+      "bytes": 2096655,
+      "sha256": "17abc97bce4d9dfd9bd6664b4000bce28b7266e557e572b9234c8d34e94a3049"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0019-service-ports-02.jsonl",
+      "records": 902,
+      "bytes": 2096865,
+      "sha256": "d96b6d0e99a25e6b6e5e4dc05e7a7340fd4185b0f77b3fd211ba3793f792959c"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0019-service-ports-03.jsonl",
+      "records": 900,
+      "bytes": 2096676,
+      "sha256": "0237846a80e59e0e37fd9001ec0c17c6c5e7f2dfc2d3ed3e8990ecb6b1bba829"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0019-service-ports-04.jsonl",
+      "records": 894,
+      "bytes": 2095685,
+      "sha256": "96a185f9ca6143751e254f55ef7284302b452919e93e5d0c99fbda91765a22ff"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0019-service-ports-05.jsonl",
+      "records": 900,
+      "bytes": 2096786,
+      "sha256": "0eaee88ca01ec5e762b2615b669267d4c931061336679f7395f23a46d7cf8e19"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0019-service-ports-06.jsonl",
+      "records": 902,
+      "bytes": 2095319,
+      "sha256": "295ceeac7c9fd8cf933a10b0dcd0e52e8dd2d7a305d36e2590c2224d42e2ae84"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0019-service-ports-07.jsonl",
+      "records": 908,
+      "bytes": 2096984,
+      "sha256": "e88d5dd5bbd84e45b61c26205c1dcb14c85e7fff2e4f832a000147019b5f52d1"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0019-service-ports-08.jsonl",
+      "records": 923,
+      "bytes": 2095478,
+      "sha256": "765c6fed923f8b0a91eb0fd306b604a3484aac834fc579e782be53b068868304"
+    },
+    {
+      "path": "knowledge/updates/2026-11-14/0019-service-ports-09.jsonl",
+      "records": 156,
+      "bytes": 352834,
+      "sha256": "869e29800f74cbcc0e8b536bb84e902fa5273d23c7aef9382718501412d606ad"
+    }
+  ],
+  "cursor": {
+    "processed_rows": 14545,
+    "remaining_rows": 0,
+    "scope": "named services complete"
+  },
+  "deduplication": "Compared all historical ids, canonical keys and NFKC/casefold claims; semantic review of 12 technology/security/support records mentioning transports/services found no equivalent service-port assignments. DNS types, IP protocol numbers, media types and ALPN are distinct namespaces.",
+  "research": {
+    "window_start": "2026-11-13T19:08:46.407144+00:00",
+    "window_end": "2026-11-13T19:22:41.046492+00:00",
+    "new_ids": [
+      "2611.16366v1"
+    ],
+    "unchanged_checked": [
+      "2611.16590v1",
+      "2611.09721v1"
+    ]
+  },
+  "limitations": [
+    "NIST SRD 121 bulk source deferred: redistribution permission not established; no NIST data published",
+    "Unnamed unassigned/reserved rows excluded from service facts",
+    "Complete named-service source exhausted; no arbitrary record ceiling",
+    "No local import or model training, builds or autotests performed"
+  ],
+  "encoding_validation": {
+    "files": 265,
+    "json_jsonl_records": 103647,
+    "issues": 0
+  }
+}

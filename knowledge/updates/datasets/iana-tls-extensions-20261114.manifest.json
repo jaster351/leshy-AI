@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-13T19:05:05.640129+00:00",
+  "source_url": "https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xml",
+  "source_sha256": "833b37d4a788b2057e6bc012ceeb646b413acaece46812d0012bbad289db2a16",
+  "source_bytes": 51016,
+  "normalized_sha256": "e63f02cfafe4c52dcf0d71eaff26669941d7455c37bb873208295bcf46e25bee",
+  "source_version": "2026-11-12",
+  "license": "CC0-1.0",
+  "license_url": "https://www.iana.org/help/licensing-terms",
+  "source_records": 186,
+  "normalized_records": 136,
+  "registry_count": 6,
+  "cursor": {
+    "processed_source_records": 186,
+    "remaining": 0,
+    "last_registry": "tls-certificate-compression-algorithm-ids"
+  },
+  "generator": "knowledge/updates/tools/generate_tls_extensions.py",
+  "normalization": "Identical names/descriptions, statuses and comments grouped within each registry; literal values/ranges, reference union and non-contact registry notes retained; no absent value converted to zero. ALPN description contains wire identifier and value contains protocol name; normalized to code/value and description/name before grouping."
+}
