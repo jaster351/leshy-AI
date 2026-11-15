@@ -24,6 +24,13 @@ def make_handler(app, telegram, settings, model_catalog):
 
     class Handler(Parent):
         def _identity_status_payload(self, owner_id: str) -> dict:
+            # The verified owner is read from the server-side Web cookie. Repair
+            # earlier Telegram conversations before telling the UI to reload.
+            try:
+                login.reconcile_linked_telegram_history(owner_id)
+            except Exception as exc:
+                problem("telegram_web_history_reconcile_status_failed",
+                        type(exc).__name__)
             payload = super()._identity_status_payload(owner_id)
             payload["profile"] = login.profile(
                 owner_id, payload.get("avatar") or {},
@@ -76,6 +83,14 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.end_headers()
                 self.wfile.write(raw)
                 return
+            if route in {"/v1/sessions", "/v1/history", "/v1/memories"}:
+                owner = self._existing_web_owner()
+                if owner:
+                    try:
+                        login.reconcile_linked_telegram_history(owner)
+                    except Exception as exc:
+                        problem("telegram_web_history_reconcile_list_failed",
+                                type(exc).__name__)
             return super().do_GET()
 
         def do_POST(self):
