@@ -1096,8 +1096,129 @@
           requestInFlight = false; plan.disabled = false;
         }
       });
+      // An interactive PTY retains cwd and shell variables until closed.
+      // Only exact user-approved input lines can be sent to the live shell.
+      const ptyPanel = element('details', 'sa-setup');
+      ptyPanel.append(element('summary', '', 'Постоянный SSH-терминал (PTY)'));
+      ptyPanel.append(element('p', 'sa-remote-note',
+        'Рабочий каталог и переменные окружения сохраняются между командами. ' +
+        'Каждая отправляемая строка требует отдельного подтверждения. ' +
+        'Вывод не записывается в историю Лешего. Сеанс автоматически закрывается после 10 минут бездействия.'));
+      const ptyOutput = element('pre', 'sa-terminal-output');
+      ptyOutput.setAttribute('aria-label', 'Вывод постоянного SSH-сеанса');
+      ptyOutput.textContent = 'Сеанс не открыт.';
+      const ptyInput = element('input');
+      ptyInput.type = 'text';
+      ptyInput.maxLength = 2048;
+      ptyInput.placeholder = 'Одна команда; без Enter и управляющих сочетаний';
+      let ptySid = '';
+      let ptyBusy = false;
+      let ptyPolling = false;
+      let ptyFile = '';
+      const ptyRefresh = async () => {
+        if (!ptySid || ptyBusy) return;
+        try {
+          const data = await api('/v1/superagent/ssh/pty/read', {
+            method:'POST', body:JSON.stringify({session_id:ptySid})
+          });
+          const chunk = String(data.pty?.text || '');
+          if (chunk) {
+            // Avoid storing unlimited terminal history in the DOM.
+            ptyOutput.textContent = (ptyOutput.textContent + chunk).slice(-60000);
+            ptyOutput.scrollTop = ptyOutput.scrollHeight;
+          }
+          if (data.pty?.session_open === false) {
+            ptySid = '';
+            ptyOutput.textContent += '\n[SSH-сеанс завершён]';
+          }
+        } catch(error) {
+          ptyOutput.textContent += '\n[Ошибка чтения: ' + error.message + ']';
+          ptySid = '';
+        }
+      };
+      const ptyPoll = async () => {
+        if (ptyPolling) return;
+        ptyPolling = true;
+        while (ptySid && ptyPanel.isConnected) {
+          await ptyRefresh();
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+        ptyPolling = false;
+      };
+      const ptyOpen = makeButton('Открыть SSH-сеанс', async () => {
+        if (ptyBusy || ptySid || !select.value) return;
+        if (!window.confirm('Открыть интерактивную SSH-оболочку на ' + node.node_id +
+          '? Любые вводимые команды могут изменить удалённую ОС.')) return;
+        ptyBusy = true; ptyOpen.disabled = true;
+        ptyOutput.textContent = 'Проверяю права и SSH-ключ, подключаю оболочку…\n';
+        try {
+          ptyFile = select.value;
+          const data = await api('/v1/superagent/ssh/pty/open', {
+            method:'POST', body:JSON.stringify({
+              node_id:node.node_id, credential_file:ptyFile, confirm:true
+            })
+          });
+          ptySid = String(data.pty?.session_id || '');
+          if (!ptySid) throw Error('Сервер не вернул идентификатор SSH-сеанса');
+          ptyOutput.textContent = '[SSH-сеанс открыт на ' + node.node_id + ']\n';
+          ptyClose.disabled = false; ptySend.disabled = false; ptyRead.disabled = false;
+          void ptyPoll();
+        } catch(error) {
+          ptyOutput.textContent = 'Не удалось открыть SSH-сеанс: ' + error.message;
+          ptyOpen.disabled = false;
+        } finally { ptyBusy = false; }
+      });
+      const ptyRead = makeButton('Получить вывод', async () => {
+        await ptyRefresh();
+      }, true);
+      const ptySend = makeButton('Подтвердить и отправить строку', async () => {
+        const line = ptyInput.value;
+        if (ptyBusy || !ptySid || !line.trim()) return;
+        if (/[\x00-\x1f\x7f]/.test(line)) {
+          ptyOutput.textContent += '\n[Разрешена только одна строка без управляющих символов]';
+          return;
+        }
+        ptyBusy = true; ptySend.disabled = true;
+        try {
+          const prepared = await api('/v1/superagent/ssh/pty/prepare', {
+            method:'POST', body:JSON.stringify({session_id:ptySid,line})
+          });
+          if (!window.confirm('Сервер: ' + node.node_id +
+              '\n\nВыполнить в текущей интерактивной SSH-оболочке:\n' + line +
+              '\n\nПодтверждаете точную команду?')) return;
+          await api('/v1/superagent/ssh/pty/write', {
+            method:'POST', body:JSON.stringify({
+              session_id:ptySid,line,
+              approval_token:prepared.approval.approval_token,confirm:true
+            })
+          });
+          ptyInput.value = '';
+          ptyOutput.textContent += '\n[Строка отправлена, результат ещё не проверен]\n';
+          await ptyRefresh();
+        } catch(error) {
+          ptyOutput.textContent += '\n[Результат отправки неизвестен: ' +
+            error.message + '; не повторяйте вслепую]\n';
+        } finally { ptyBusy = false; ptySend.disabled = !ptySid; }
+      }, true);
+      const ptyClose = makeButton('Закрыть SSH-сеанс', async () => {
+        if (!ptySid || ptyBusy) return;
+        const sid = ptySid; ptyBusy = true;
+        try {
+          await api('/v1/superagent/ssh/pty/close', {
+            method:'POST', body:JSON.stringify({session_id:sid})
+          });
+          ptySid = '';
+          ptyOutput.textContent += '\n[SSH-сеанс закрыт]';
+          ptyOpen.disabled = false; ptyClose.disabled = true;
+          ptySend.disabled = true; ptyRead.disabled = true;
+        } catch(error) {
+          ptyOutput.textContent += '\n[Не удалось закрыть: ' + error.message + ']';
+        } finally { ptyBusy = false; }
+      }, true);
+      ptyPanel.append(ptyOutput, ptyInput, ptyOpen, ptySend, ptyRead, ptyClose);
+
       terminal.append(element('label', '', 'Команда для SSH'), shellInput, run, output,
-        checkBox, planBox, suggestions, element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
+        ptyPanel, checkBox, planBox, suggestions, element('label', '', 'Или сформулируйте задачу обычными словами'), natural, plan);
       row.append(terminal);
       if (credentials.truncated) row.append(element('p', 'sa-remote-note',
         'Показаны первые 100 файлов доступа.'));
