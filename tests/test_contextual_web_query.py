@@ -45,6 +45,20 @@ class ContextualWebQueryTests(unittest.TestCase):
         self.assertTrue(forced)
         self.assertIn("GTA 6", query)
 
+    def test_first_question_restored_even_when_beyond_previous_15_messages(self):
+        first = {"role": "user", "content": "Расскажи, когда выйдет GTA 6 и сколько дней осталось?"}
+        rows = [{"role": "user", "content": "Ответь на мой первоначальный вопрос"}]
+        for index in range(35):
+            rows.extend([
+                {"role": "assistant", "content": "Ответ по промежуточному обсуждению"},
+                {"role": "user", "content": f"Промежуточное обсуждение номер {index}"},
+            ])
+        rows.append(first)
+        query, forced = contextual_search_query(rows[0]["content"], rows)
+        self.assertTrue(forced)
+        self.assertIn("GTA 6", query)
+        self.assertNotIn("номер 0", query)
+
     def test_non_followup_does_not_reuse_another_topic(self):
         rows = [
             {"role": "user", "content": "Придумай рецепт супа"},
