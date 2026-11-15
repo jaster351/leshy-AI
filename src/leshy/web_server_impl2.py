@@ -84,8 +84,13 @@ def make_handler(app, telegram, settings, model_catalog):
                 controller = getattr(app, "os_control", None)
                 if controller is None or not callable(getattr(controller, "pending", None)):
                     return self._json(HTTPStatus.OK, {"items": []})
+                # Never trust owner_id supplied in a query string. A valid API
+                # token alone does not establish the identity of an OS owner.
+                owner_getter = getattr(self, "_existing_web_owner", None)
+                owner = owner_getter() if callable(owner_getter) else None
+                if not owner or owner == "web:local":
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Для управления ОС требуется подтверждённая Web-сессия владельца"})
                 args = parse.parse_qs(parsed.query)
-                owner = self._arg(args, "owner_id", "web:local")
                 session_id = self._arg(args, "session_id", "")
                 try:
                     items = controller.pending(owner_id=owner, session_id=session_id)
@@ -161,7 +166,11 @@ def make_handler(app, telegram, settings, model_catalog):
                     controller = getattr(app, "os_control", None)
                     if controller is None or not callable(getattr(controller, "resolve", None)):
                         raise RuntimeError("Модуль подтверждения системных действий недоступен")
-                    result = controller.resolve(str(body.get("id") or ""), owner_id=str(body.get("owner_id") or "web:local"), allow=bool(body.get("allow")))
+                    owner_getter = getattr(self, "_existing_web_owner", None)
+                    owner = owner_getter() if callable(owner_getter) else None
+                    if not owner or owner == "web:local":
+                        return self._json(HTTPStatus.FORBIDDEN, {"error": "Для подтверждения действий требуется Web-сессия владельца"})
+                    result = controller.resolve(str(body.get("id") or ""), owner_id=owner, allow=bool(body.get("allow")))
                     return self._json(HTTPStatus.OK, result)
                 except (ValueError, PermissionError, RuntimeError) as exc:
                     return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
