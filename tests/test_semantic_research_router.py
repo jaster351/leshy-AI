@@ -82,8 +82,8 @@ class ConstitutionRoutingTests(unittest.TestCase):
             doc = root / "knowledge" / "constitution" / "CONSTITUTION_FEDERATION.md"
             doc.parent.mkdir(parents=True)
             doc.write_text(
-                "# Конституция Федерации Леших\\n\\n"
-                "### Статья 1. Защита человека\\nПрава людей защищены.\\n",
+                "# Конституция Федерации Леших\n\n"
+                "### Статья 1. Защита человека\nПрава людей защищены.\n",
                 encoding="utf-8",
             )
             store = Storage(root / "dialogues.sqlite3")
@@ -125,7 +125,7 @@ class ConstitutionRoutingTests(unittest.TestCase):
             doc = root / "knowledge" / "constitution" / "CONSTITUTION_FEDERATION.md"
             doc.parent.mkdir(parents=True)
             doc.write_text(
-                "# Конституция Федерации Леших\\n### Статья 1. Тест\\nДействующий текст.\\n",
+                "# Конституция Федерации Леших\n### Статья 1. Тест\nДействующий текст.\n",
                 encoding="utf-8",
             )
             store = Storage(root / "dialogues.sqlite3")
@@ -144,9 +144,9 @@ class ConstitutionRoutingTests(unittest.TestCase):
                     "INSERT INTO messages(session_id,role,content,created_at) "
                     "VALUES(?,?,?,?)",
                     (sid, "assistant",
-                     "Конституция Федерации Леших — общий документ проекта\\n"
-                     "Источник на этом узле: knowledge/constitution/CONSTITUTION_FEDERATION.md\\n"
-                     "SHA-256 фактических байтов локального файла: fake\\n",
+                     "Конституция Федерации Леших — общий документ проекта\n"
+                     "Источник на этом узле: knowledge/constitution/CONSTITUTION_FEDERATION.md\n"
+                     "SHA-256 фактических байтов локального файла: fake\n",
                      now),
                 )
             self.assertIsNone(constitution_acknowledgement(app, "молодец", owner, sid))
