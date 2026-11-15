@@ -5,6 +5,7 @@
   const RELOAD_KEY='leshy.identity.reload-owner';
   const originalFetch=window.fetch.bind(window);
   let pollTimer=null;
+  let currentProfile=null;
 
   const ownerId=()=>String(localStorage.getItem(OWNER_KEY)||'web:local').trim().slice(0,200)||'web:local';
   const esc=value=>String(value==null?'':value).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
@@ -71,6 +72,37 @@
     return card;
   }
 
+  function applySidebarProfile(data){
+    if(!data)return;
+    const profile=data.profile||{};
+    const isSigned=profile.provider&&profile.provider!=='local';
+    const display=isSigned?String(profile.name||data.display_name||'Пользователь').trim():'Гость';
+    const provider=isSigned?String(profile.provider||'').toUpperCase():'Гостевой профиль';
+    const avatarUrl=String(profile.avatar_url||'').trim();
+    const name=document.querySelector('#profileCopy b');
+    const subtitle=document.querySelector('#profileCopy span');
+    const avatar=document.getElementById('profileAvatar');
+    if(name&&name.textContent!==display)name.textContent=display;
+    if(subtitle&&subtitle.textContent!==provider)subtitle.textContent=provider;
+    if(avatar){
+      const old=avatar.dataset.profileAvatarUrl||'';
+      const initials=display.slice(0,1).toUpperCase()||'Г';
+      if(old!==avatarUrl || (!avatarUrl&&avatar.textContent!==initials)){
+        avatar.dataset.profileAvatarUrl=avatarUrl;
+        avatar.replaceChildren();
+        if(avatarUrl){
+          const img=document.createElement('img');
+          img.src=avatarUrl;img.alt=display;
+          img.referrerPolicy='no-referrer';
+          img.width=32;img.height=32;
+          img.style.cssText='width:32px;height:32px;object-fit:cover;border-radius:50%';
+          img.onerror=()=>{avatar.dataset.profileAvatarUrl='';avatar.replaceChildren();avatar.textContent=initials;};
+          avatar.appendChild(img);
+        }else avatar.textContent=initials;
+      }
+    }
+  }
+
   function render(data){
     ensureCard();
     const host=document.getElementById('ownerIdentityBody');if(!host)return;
@@ -78,11 +110,16 @@
     const linked=telegram[0]||null;
     const who=linked?(linked.label||('@'+(linked.username||''))||('Telegram '+linked.user_id)):'';
     const avatar=data.avatar||{};
+    const profile=data.profile||{};
+    const displayName=profile.name||data.display_name||'Гостевой профиль';
+    const displayAvatar=profile.avatar_url||avatar.url||'';
     const providers=Array.isArray(data.providers)?data.providers:[];
     const oauth=providers.filter(item=>item.type==='oauth');
     const providerDetails=oauth.map(item=>`<div class="item-meta" style="margin:4px 0"><b>${esc(item.title)}:</b> ${esc(item.reason||'Недоступно')}</div>`).join('');
     host.innerHTML=`
-      <div class="row"><span>Профиль</span><b>${esc(data.display_name||'Профиль Лешего')}</b></div>
+      <div class="row"><span>Профиль</span><b>${esc(profile.provider==='telegram'?displayName:'Гостевой профиль')}</b></div>
+      ${profile.provider==='telegram'?'<div class="item-meta good">✓ Подтверждён через Telegram</div>':'<div class="item-meta">Гостевой доступ: регистрация для общения не требуется.</div>'}
+      ${displayAvatar?`<img src="${esc(displayAvatar)}" alt="Фото профиля" referrerpolicy="no-referrer" width="54" height="54" style="border-radius:50%;object-fit:cover;margin:6px 0">`:''}
       <div class="row"><span>Owner ID</span><span class="mono" title="${esc(data.owner_id||'')}">${esc(shortId(data.owner_id))}</span></div>
       <div class="divider"></div>
       <div class="item-title">Аватар Gravatar</div>
@@ -107,7 +144,12 @@
       <div class="item-meta" style="margin:5px 0">Google, Apple и VK ID: вход не включён. Для Web OAuth необходима регистрация приложения и допустимый адрес возврата; обычный LAN-IP не является таким адресом. Вход по IP и привязка Telegram продолжают работать независимо.</div>
       ${providerDetails}
       <div class="divider"></div>
-      <div class="item-title">Telegram</div>
+      <div class="item-title">Войти через Telegram</div>
+      <div class="item-meta" style="margin:6px 0">Без внешнего домена. Откройте бота и подтвердите вход кнопкой после проверки кода на экране. Гостевые диалоги сохраняются.</div>
+      ${data.telegram_login_button_available?'<button class="button small" id="ownerIdentityTelegramLogin">Войти через Telegram</button>':'<div class="item-meta warn">Чтобы войти через Telegram, настройте бот и дождитесь подключения.</div>'}
+      <div id="ownerIdentityTelegramLoginBox" class="item-meta" style="margin:9px 0"></div>
+      <div class="divider"></div>
+      <div class="item-title">Привязка Telegram (резервный способ)</div>
       ${linked?`
         <div class="item-meta good" style="margin-top:6px">✓ Привязан: ${esc(who||('ID '+linked.user_id))}</div>
         <div class="item-meta">Telegram ID: ${esc(linked.user_id)}</div>
@@ -124,6 +166,7 @@
     document.getElementById('ownerIdentityBrowserPair')?.addEventListener('click',startBrowserPair);
     document.getElementById('ownerIdentityBrowserAccept')?.addEventListener('click',acceptBrowserPair);
     document.getElementById('ownerIdentityAvatar')?.addEventListener('error',e=>e.target.style.display='none');
+    document.getElementById('ownerIdentityTelegramLogin')?.addEventListener('click',startTelegramLogin);
     document.getElementById('ownerIdentityLink')?.addEventListener('click',startLink);
     document.getElementById('ownerIdentityUnlink')?.addEventListener('click',()=>unlink(linked.user_id));
   }
@@ -143,7 +186,10 @@
         }
       }
       if(canonical)sessionStorage.removeItem(RELOAD_KEY);
-      render(data);status(data.telegram_linked?'Web и Telegram используют единый профиль.':'Web-профиль готов. Telegram можно привязать одноразовым кодом.');
+      currentProfile=data;
+      render(data);
+      applySidebarProfile(data);
+      status(data.telegram_linked?'Web и Telegram используют единый профиль.':'Гостевой профиль сохранён. Можно общаться без авторизации.');
       return data;
     }catch(error){status('Ошибка профиля: '+error.message);return null;}
   }
@@ -193,6 +239,46 @@
     }catch(error){status('Не удалось войти по коду: '+error.message);}
   }
 
+  async function startTelegramLogin(){
+    status('Создаю запрос входа через Telegram…');
+    try{
+      const result=await api('/v1/identity/telegram/login/start',{
+        method:'POST',body:'{}'
+      });
+      const box=document.getElementById('ownerIdentityTelegramLoginBox');
+      if(!box)return;
+      const link=String(result.deep_link||'');
+      if(!/^https:\/\/t\.me\/[A-Za-z0-9_]+\?start=auth_[A-Za-z0-9_-]+$/.test(link)){
+        throw new Error('Некорректная ссылка Telegram');
+      }
+      box.innerHTML=`<div class="item"><div class="item-title">Код проверки: <span class="mono">${esc(result.short_code)}</span></div><div class="item-meta">Он должен совпадать с кодом, который пришлёт бот. Если Вы не открывали запрос — нажмите «Отменить».</div><a href="${esc(link)}" class="button small" style="display:inline-block;text-decoration:none;margin-top:7px" target="_blank" rel="noopener noreferrer">Открыть Telegram и подтвердить</a></div>`;
+      status('Откройте Telegram по кнопке и подтвердите вход в личном чате с ботом.');
+      clearInterval(pollTimer);
+      let tries=0;
+      pollTimer=setInterval(async()=>{
+        tries++;
+        try{
+          const state=await api('/v1/identity/telegram/login/status');
+          if(state.status==='confirmed'){
+            clearInterval(pollTimer);pollTimer=null;
+            if(state.owner_id)localStorage.setItem(OWNER_KEY,String(state.owner_id));
+            status('Telegram подтвердил вход. Загружаю Ваш профиль…');
+            location.reload();return;
+          }
+          if(state.status==='denied'||state.status==='expired'){
+            clearInterval(pollTimer);pollTimer=null;
+            status(state.status==='denied'?'Вход отклонён в Telegram.':'Срок ожидания истёк. Создайте новый запрос.');
+            return;
+          }
+        }catch(error){status('Ожидание Telegram: '+error.message);}
+        if(tries>=155){
+          clearInterval(pollTimer);pollTimer=null;
+          status('Срок ожидания истёк. Создайте новый запрос.');
+        }
+      },2000);
+    }catch(error){status('Не удалось начать вход: '+error.message);}
+  }
+
   async function startLink(){
     status('Создаю одноразовый код…');
     try{
@@ -223,7 +309,7 @@
 
   function boot(){
     ensureCard();ensureProfileMenuButton();loadIdentity();
-    new MutationObserver(()=>{ensureCard();ensureProfileMenuButton();}).observe(document.documentElement,{childList:true,subtree:true});
+    new MutationObserver(()=>{ensureCard();ensureProfileMenuButton();applySidebarProfile(currentProfile);}).observe(document.documentElement,{childList:true,subtree:true});
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
