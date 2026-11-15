@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
-from .research_policy import research_reason, is_casual_checkin, is_local_dialogue_request, external_freshness_requested
+from .research_policy import research_reason, is_casual_checkin, is_local_dialogue_request, external_freshness_requested, is_internal_knowledge_request
 
 SIX_MONTHS_SECONDS = 180 * 24 * 60 * 60
 
@@ -197,7 +197,7 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     basic = research_reason(current, trusted_count=len(trusted), candidate_count=len(candidates))
     if is_explicit_web_request(current):
         return "явный запрос интернет-поиска"
-    if is_casual_checkin(current) or is_local_dialogue_request(current):
+    if is_casual_checkin(current) or is_local_dialogue_request(current) or is_internal_knowledge_request(current):
         return None
     # Объяснение устойчивого термина можно сформулировать локально, если
     # не названы актуальный период, конкретная CVE/GHSA или внешний источник.
@@ -261,7 +261,7 @@ def requires_verified_live_sources(query: str, reason: str = "") -> bool:
     current = _current_user_text(query)
     if is_explicit_web_request(current):
         return True
-    if is_casual_checkin(current) or is_local_dialogue_request(current):
+    if is_casual_checkin(current) or is_local_dialogue_request(current) or is_internal_knowledge_request(current):
         return False
     if is_offline_creative_request(current):
         return False
