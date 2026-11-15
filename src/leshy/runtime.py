@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
+from .constitution_runtime import install_constitution_routing
 from .config import Settings
 from .freshness_cache_runtime import install_freshness_cache_runtime
 from .freshness_memory_runtime import install_freshness_memory_runtime
@@ -27,6 +28,7 @@ class Runtime(LeshyApp):
         # Idempotency ставится последним поверх специальных chat routing, чтобы
         # повтор одного request_id не создавал второй ответ ни в одном интерфейсе.
         install_global_chat_idempotency()
+        install_constitution_routing(LeshyApp)
         super().__init__(settings or Settings.from_env())
         install_freshness_memory_runtime(self)
         self.learning_control = self.learning
