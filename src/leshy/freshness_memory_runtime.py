@@ -9,7 +9,7 @@ from .knowledge import KnowledgeBase, fingerprint_claim, is_fresh
 from .llm import ChatMessage
 from .realtime_chat import RealtimeChatManager, StreamEvent
 from .research import PROMPT_INJECTION_MARKERS, ResearchEngine
-from .research_policy import research_reason
+from .research_policy import research_reason, is_casual_checkin, is_local_dialogue_request, is_internal_knowledge_request
 from .adaptive_internet_policy import is_offline_creative_request
 from .storage import utcnow
 from .temporal_grounding import temporal_grounding
@@ -37,7 +37,7 @@ _ORIGINAL_STREAM = None
 
 def is_dynamic_query(query: str) -> bool:
     value = " ".join(str(query or "").lower().replace("ё", "е").split())
-    if not value or is_offline_creative_request(query):
+    if not value or is_offline_creative_request(query) or is_casual_checkin(query) or is_local_dialogue_request(query) or is_internal_knowledge_request(query):
         return False
     if temporal_grounding(value) is not None:
         return True
