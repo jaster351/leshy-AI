@@ -18,7 +18,7 @@ from .capability_registry import is_self_capability_question
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply, work_reference_context
 from .conversation_mode import resolve_conversation_mode, mode_instruction, conversation_rows_for_mode
-from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request
+from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request, requires_verified_live_sources
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
 from .verified_clock import current_clock_context, grounded_countdown_answer
@@ -349,6 +349,15 @@ class RealtimeChatManager:
             except Exception as exc:
                 problem("chat_stream_search_failed", str(exc), query=message[:500])
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + str(exc)))
+
+        if search_attempted and not sources and not requires_verified_live_sources(search_query, str(plan.get("reason") or "")):
+            context.append(ChatMessage(
+                "system",
+                "Внешние источники не удалось проверить. Продолжи обычный"
+                " разговор, используй локальные знания и память. Не"
+                " выдумывай текущие новости, цены, версии или события."
+                " При нехватке сведений честно обозначь неопределённость.",
+            ))
 
         isolated_rows = conversation_rows_for_mode(rows, mode.kind)
         history = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
@@ -734,7 +743,10 @@ class RealtimeChatManager:
             # Если live-search не нашёл подтверждённых источников или упал,
             # НЕ передаём текущие данные LLM: иначе она выдумает дату/цену.
             # Такой отказ быстрый и прозрачный, обычные чаты не затронуты.
-            if search_attempted and not sources and not support_draft_context(message, rows, brain_dir=self.app.settings.brain_dir):
+            strict_live_sources = requires_verified_live_sources(
+                lookup_query, str(plan.get("reason") or "")
+            )
+            if search_attempted and not sources and strict_live_sources and not support_draft_context(message, rows, brain_dir=self.app.settings.brain_dir):
                 marker = "Текущий веб-поиск временно не выполнен:"
                 failure = next(
                     (
@@ -823,7 +835,7 @@ class RealtimeChatManager:
                     except Exception as exc:
                         problem("chat_stream_web_refusal_retry_failed", str(exc), request_id=rid)
                         answer = "Интернет-поиск выполнен, но достоверный ответ сформировать не удалось."
-                else:
+                elif strict_live_sources:
                     failure_marker = "Текущий веб-поиск временно не выполнен:"
                     failure = next(
                         (
