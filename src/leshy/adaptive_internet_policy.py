@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
-from .research_policy import research_reason, is_casual_checkin, is_local_dialogue_request, external_freshness_requested, is_internal_knowledge_request
+from .research_policy import research_reason, is_casual_checkin, is_local_dialogue_request, external_freshness_requested, is_internal_knowledge_request, is_explicit_offline_request
 
 SIX_MONTHS_SECONDS = 180 * 24 * 60 * 60
 
@@ -64,6 +64,8 @@ def _text(value: str) -> str:
 
 def is_explicit_web_request(query: str) -> bool:
     q = _current_user_text(query).strip()
+    if is_explicit_offline_request(q):
+        return False
     return q.lower().startswith("/search ") or (
         research_reason(q, trusted_count=1, candidate_count=1) == "явный запрос интернет-поиска"
     )
@@ -195,6 +197,8 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     if is_offline_creative_request(query):
         return None
     basic = research_reason(current, trusted_count=len(trusted), candidate_count=len(candidates))
+    if is_explicit_offline_request(current):
+        return None
     if is_explicit_web_request(current):
         return "явный запрос интернет-поиска"
     if is_casual_checkin(current) or is_local_dialogue_request(current) or is_internal_knowledge_request(current):
