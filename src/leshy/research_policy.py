@@ -66,6 +66,32 @@ def is_explicit_offline_request(query: str) -> bool:
     return bool(_OFFLINE_DIRECTIVE_RE.search(_current_user_text(query)))
 
 
+# Short insults, jokes, laughter and emotional reactions are conversation,
+# not external facts. Keep this whole-utterance-only: "ты лох, узнай погоду"
+# must still request a real weather lookup.
+_SOCIAL_REACTION_RE = re.compile(
+    r"^(?:(?:ты|леший|леша|вы)\s+)?"
+    r"(?:лох|лохушк\w*|дурак|дура|дурачок|тупой|тупица|идиот|"
+    r"глупый|глупыш|бестолоч\w*|зануда|клоун|"
+    r"молодец|красавчик|умница|супер|крутой|"
+    r"смешной|прикольный|забавный|"
+    r"достал|надоел|тормоз|отстой|отстань|замолчи|заткнись|"
+    r"обиделся|обидно|обидел|"
+    r"хаха+|ахаха+|ахах+|лол|lol|хех|хм+|мм+|"
+    r"шучу|шутка|это\s+шутка|"
+    r"пошутил|не\s+злись|не\s+обижайся)"
+    r"(?:\s+(?:ты|леший|леша))?"
+    r"\s*[!?.…\s)]*$",
+    re.IGNORECASE,
+)
+
+
+def is_social_utterance(query: str) -> bool:
+    text = normalize_query(_current_user_text(query))
+    text = re.sub(r"^(?:(?:слушай|леший|леша|эй)\s*[,!:]\s*)+", "", text)
+    return bool(_SOCIAL_REACTION_RE.fullmatch(text)) and len(text) <= 100
+
+
 _SMALL_TALK = frozenset((
     "привет", "здравствуй", "здравствуйте", "спасибо", "пока",
     "доброе утро", "добрый день", "добрый вечер", "доброй ночи",
@@ -122,7 +148,8 @@ def is_casual_checkin(query: str) -> bool:
     # Обращение или вводное слово не меняет смысл короткого вопроса.
     q = re.sub(r"^(?:(?:слушай|леший|леша|эй)\s*[,!:]\s*)+", "", q)
     return bool(
-        _TODAY_CONVERSATION_RE.fullmatch(q)
+        is_social_utterance(q)
+        or _TODAY_CONVERSATION_RE.fullmatch(q)
         or _CASUAL_CHECKIN_RE.fullmatch(q)
         or _ASSISTANT_SOCIAL_RE.fullmatch(q)
         or q.rstrip(" ?!.") in _SMALL_TALK
