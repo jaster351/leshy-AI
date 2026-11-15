@@ -89,7 +89,7 @@ class FactRecheckTests(unittest.TestCase):
             today=date(2026, 11, 15),
         )
         self.assertIn("19 ноября 2026", reply)
-        self.assertIn("4 дней", reply)
+        self.assertIn("4 дня", reply)
         self.assertNotIn("2025", reply)
 
     def test_explicit_conflicting_dates_not_overruled(self):
