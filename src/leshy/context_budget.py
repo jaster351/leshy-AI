@@ -167,6 +167,10 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
             return (0, -index)
         if any(mark in part for mark in ("FACTUAL_EVIDENCE", "достоверн", "недоверенн")):
             return (1, -index)
+        # Архивные диалоги — справочные данные ниже подтверждённых фактов
+        # и постоянных правил, но выше второстепенных системных материалов.
+        if "Семантически найденные записи" in part:
+            return (2, -index)
         return (3, -index)
 
     optional = sorted((i for i in range(len(parts)) if i not in essential),
