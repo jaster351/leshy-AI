@@ -24,7 +24,7 @@ def prepare_native_ssh_command(
 ) -> dict[str, Any]:
     """Create a short-lived, exact one-time owner approval; no network I/O."""
     user = _username(username)
-    result = prepare_ssh_command(policy, actor, node_id, user, command)
+    result = prepare_ssh_command(\n        policy, actor, node_id, user, command, approval_kind="native-openssh"\n    )
     result["username"] = user
     result["transport"] = "native-openssh"
     return result
