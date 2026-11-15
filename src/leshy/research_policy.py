@@ -49,6 +49,23 @@ _EXPLICIT_WEB_PATTERNS = (
     re.compile(r"\b(?:find|search|check|look\s+up)\b.{0,180}\b(?:online|on\s+the\s+web|on\s+the\s+internet)\b", re.IGNORECASE),
 )
 
+# A prohibition on internet access is not an explicit WEB request.
+# It must take priority over "проверь в интернете" quoted/negated in a prompt.
+_OFFLINE_DIRECTIVE_RE = re.compile(
+    r"(?:не\s+(?:используй|используйте|ищи|ищите|проверяй|проверяйте|"
+    r"обращайся|обращайтесь|заходи|заходите)\s+(?:(?:по|через|в)\s+)?"
+    r"(?:интернет\w*|сеть|веб\w*|поиск\w*)|"
+    r"(?:без|никакого)\s+(?:интернет\w*|веб[-\s]?поиск\w*|поиск\w*\s+в\s+сети)|"
+    r"интернет\s+не\s+используй|"
+    r"(?:поиск|интернет)\s+(?:не\s+нужен|не\s+использовать))",
+    re.IGNORECASE,
+)
+
+
+def is_explicit_offline_request(query: str) -> bool:
+    return bool(_OFFLINE_DIRECTIVE_RE.search(_current_user_text(query)))
+
+
 _SMALL_TALK = frozenset((
     "привет", "здравствуй", "здравствуйте", "спасибо", "пока",
     "доброе утро", "добрый день", "добрый вечер", "доброй ночи",
@@ -141,8 +158,9 @@ def is_local_dialogue_request(query: str) -> bool:
 
 
 _LESHY_CONSTITUTION_RE = re.compile(
-    r"\b(?:конституц\w*|закон\w*|правил\w*)\b.{0,130}\bлеш\w*\b|"
-    r"\bлеш\w*\b.{0,130}\b(?:конституц\w*|закон\w*|правил\w*)\b",
+    r"\b(?:конституц\w*|основн\w*\s+закон\w*)\b.{0,135}\bлеш\w*\b|"
+    r"\bлеш\w*\b.{0,135}\b(?:конституц\w*|основн\w*\s+закон\w*)\b|"
+    r"\bконституц\w*\s+федерац\w*\s+леш\w*\b",
     re.IGNORECASE,
 )
 _LOCAL_MEMORY_RE = re.compile(
@@ -156,7 +174,11 @@ _LOCAL_MEMORY_RE = re.compile(
 def is_internal_knowledge_request(query: str) -> bool:
     """User asks about Leshy's own saved documents, not public law or news."""
     current = normalize_query(_current_user_text(query))
-    return bool(_LESHY_CONSTITUTION_RE.search(current) or _LOCAL_MEMORY_RE.search(current))
+    return bool(
+        (not re.search(r"\b(?:российск\w*|росси\w*|рф)\b", current)
+         and _LESHY_CONSTITUTION_RE.search(current))
+        or _LOCAL_MEMORY_RE.search(current)
+    )
 
 
 def external_freshness_requested(query: str) -> bool:
@@ -182,6 +204,8 @@ def research_reason(
     current = _current_user_text(query)
     q = normalize_query(current)
     if not q:
+        return None
+    if is_explicit_offline_request(current):
         return None
     if q.startswith("/search ") or any(marker in q for marker in _EXPLICIT_WEB_MARKERS) or any(pattern.search(q) for pattern in _EXPLICIT_WEB_PATTERNS):
         return "явный запрос интернет-поиска"
