@@ -114,6 +114,23 @@ class FactRecheckTests(unittest.TestCase):
         self.assertIn("19 ноября 2026", answer)
         self.assertIn(url, answer)
 
+    def test_link_only_followup_uses_previous_release_question(self):
+        url = "https://www.rockstargames.com/VI"
+        note = (
+            f"Прочитана исходная веб-страница: {url}.\n"
+            "--- НАЧАЛО НЕДОВЕРЕННОГО ТЕКСТА СТРАНИЦЫ ---\n"
+            "ВЫХОДИТ 19 НОЯБРЯ 2026 ГОДА\n"
+            "--- КОНЕЦ ТЕКСТА СТРАНИЦЫ ---"
+        )
+        answer = grounded_release_from_context(
+            url, _history(),
+            [SimpleNamespace(content=note)],
+            [{"title": "официальная страница", "url": url}],
+        )
+        self.assertIsNotNone(answer)
+        self.assertIn("19 ноября 2026", answer)
+        self.assertIn(url, answer)
+
     def test_release_year_not_inferred_from_unmarked_publication_date(self):
         self.assertIsNone(release_date_from_page(
             "Новость от 10 ноября 2026. Предзагрузка GTA VI началась сегодня."
