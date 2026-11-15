@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from leshy.telegram import TelegramBridge
+from leshy.role_authority import register_local_creator
 
 
 class _App:
@@ -86,6 +88,25 @@ class TelegramAccessTests(unittest.TestCase):
             bridge.configure("", ["200"], owner_id="", infer_owner_from_allowed=False)
             self.assertEqual(bridge.status()["owner_id"], "")
             self.assertFalse(bridge._is_owner("200"))
+
+    def test_telegram_login_cannot_self_appoint_creator_on_fresh_node(self):
+        with tempfile.TemporaryDirectory() as temp:
+            _, bridge, _, _ = self.make_bridge(Path(temp))
+            with patch.dict("os.environ", {"LESHY_CREATOR_TELEGRAM_ID": ""}):
+                with self.assertRaisesRegex(PermissionError, "Создатель"):
+                    register_local_creator(bridge, "200")
+                self.assertFalse(bridge._is_owner("200"))
+
+    def test_provisioned_creator_id_cannot_be_replaced_by_another_user(self):
+        with tempfile.TemporaryDirectory() as temp:
+            _, bridge, _, _ = self.make_bridge(Path(temp))
+            with patch.dict("os.environ", {"LESHY_CREATOR_TELEGRAM_ID": "100"}):
+                with self.assertRaises(PermissionError):
+                    register_local_creator(bridge, "200")
+                result = register_local_creator(bridge, "100")
+                self.assertEqual(result["telegram_user_id"], "100")
+                self.assertTrue(bridge._is_owner("100"))
+                self.assertFalse(bridge._is_owner("200"))
 
     def test_plain_message_is_not_rewritten_without_reply(self):
         with tempfile.TemporaryDirectory() as temp:
