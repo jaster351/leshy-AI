@@ -169,7 +169,7 @@ def _remember_dynamic_results(engine: ResearchEngine, query: str, result: dict[s
             "knowledge.dynamic_live_search_remembered",
             {"query": query, "rows": changed, "checked_at": now, "ttl_seconds": ttl},
         )
-        event("dynamic_live_search_remembered", query=query[:500], rows=changed, ttl_seconds=ttl)
+        event("dynamic_live_search_remembered", query_chars=len(query), rows=changed, ttl_seconds=ttl)
     return int(changed)
 
 
