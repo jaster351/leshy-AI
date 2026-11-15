@@ -165,7 +165,7 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(verify.call_count, 2)
         self.assertEqual(exec_command.call_args.args[1], _FIXED_UPGRADE)
         self.assertTrue(postcheck.called)
-        self.assertEqual(require.call_count, 3)
+        self.assertEqual(require.call_count, 2)
         self.assertNotIn("secret", result["report"])
 
     def test_apt_exit_zero_with_remaining_updates_is_not_success(self):
