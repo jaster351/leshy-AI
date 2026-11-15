@@ -48,6 +48,7 @@ class TelegramBrowserLogin:
         self.identity = identity
         self.storage = identity.storage
         self._photo_refresh_lock = threading.Lock()
+        self._history_reconciliation_lock = threading.Lock()
         self._photo_refresh_last: dict[str, float] = {}
         with self.storage.connection() as conn:
             conn.executescript(_SCHEMA)
@@ -214,10 +215,10 @@ class TelegramBrowserLogin:
             if migrate_guest:
                 self.identity._migrate_owner_rows(original_owner, target_owner)
                 self.identity._migrate_lenta_profile(original_owner, target_owner)
-            if mode == "linked":
-                self.identity._migrate_owner_rows(f"telegram:{sender_id}", target_owner)
-                self.identity._migrate_lenta_profile(f"telegram:{sender_id}", target_owner)
-                self.identity._bind_alias(f"telegram:{sender_id}", target_owner)
+            # A returning Telegram user can have legacy sessions too (older
+            # Bot API/vision paths wrote under telegram:<id>). The old code
+            # imported them only for first-time linking, so Web missed chats.
+            self.reconcile_linked_telegram_history(target_owner)
         except Exception as exc:
             problem("telegram_browser_login_history_migration_failed",
                     type(exc).__name__, owner_id=target_owner)
@@ -257,6 +258,58 @@ class TelegramBrowserLogin:
             "mode": str(row["mode"] or ""),
             "owner_id": str(row["resolved_owner_id"] or "") if state == "confirmed" else "",
         }
+
+    def reconcile_linked_telegram_history(self, owner_id: str) -> dict[str, int | bool]:
+        """Bring previously stored Telegram conversations into a verified Web profile.
+
+        Only Telegram IDs already verified by the bot and linked to this
+        server-side owner UUID are eligible. Never use username, an arbitrary
+        owner_id query parameter, or incoming chat text as proof of identity.
+        This is an idempotent repair for legacy rows and vision/direct-write
+        paths that bypass the normal owner canonicalization.
+        """
+        owner = str(owner_id or "").strip()
+        if not owner:
+            return {"linked": False, "sessions_moved": 0}
+        with self.storage.connection() as conn:
+            links = conn.execute(
+                "SELECT provider_user_id FROM owner_identity_links "
+                "WHERE provider='telegram' AND owner_id=?",
+                (owner,),
+            ).fetchall()
+        if not links:
+            return {"linked": False, "sessions_moved": 0}
+        moved = 0
+        with self._history_reconciliation_lock:
+            for linked in links:
+                user_id = str(linked["provider_user_id"] or "")
+                if not user_id.isdecimal():
+                    continue
+                legacy = f"telegram:{user_id}"
+                if legacy == owner:
+                    continue
+                with self.storage.connection() as conn:
+                    session_count = int(conn.execute(
+                        "SELECT COUNT(*) FROM sessions WHERE owner_id=?",
+                        (legacy,),
+                    ).fetchone()[0])
+                    pending_memories = bool(conn.execute(
+                        "SELECT 1 FROM memories WHERE owner_id=? LIMIT 1",
+                        (legacy,),
+                    ).fetchone())
+                    pending_preferences = bool(conn.execute(
+                        "SELECT 1 FROM user_preferences WHERE owner_id=? LIMIT 1",
+                        (legacy,),
+                    ).fetchone())
+                if session_count or pending_memories or pending_preferences:
+                    self.identity._migrate_owner_rows(legacy, owner)
+                    self.identity._migrate_lenta_profile(legacy, owner)
+                    moved += session_count
+                self.identity._bind_alias(legacy, owner)
+        if moved:
+            event("telegram_web_history_reconciled", owner_id=owner,
+                  sessions_moved=moved)
+        return {"linked": True, "sessions_moved": moved}
 
     def sync_verified_sender(self, user_id: str, sender: dict[str, Any]) -> None:
         """Use only Telegram updates received from the Bot API, not Web fields."""
