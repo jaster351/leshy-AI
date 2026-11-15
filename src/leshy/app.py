@@ -724,6 +724,7 @@ class LeshyApp:
             "logs_dir": str(self.settings.brain_dir / "logs"),
             "learning_enabled": self.learning.is_enabled(),
             "learning_worker": self.self_learning.status(),
+            "semantic_recall": self.semantic_recall.status(),
             "telegram": self.telegram.status() if self.telegram is not None else {"configured": False, "running": False},
             "stats": stats,
             "hardware": hardware,
