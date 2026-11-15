@@ -141,9 +141,13 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
                 if not rule_indices:
                     break
                 index = max(rule_indices, key=lambda i: len(parts[i]))
-                clipped = _strict_clip(parts[index], max(80, len(parts[index]) * 2 // 3),
-                                       preserve_edges=True)
-                parts[index] = "[Часть постоянных правил не поместилась в контекст]\n" + clipped
+                # Предупреждение добавляется только один раз; иначе каждое
+                # повторное сокращение снова увеличивало бы системный блок.
+                warning = "[Часть постоянных правил не поместилась в контекст]\n"
+                plain = parts[index].removeprefix(warning)
+                parts[index] = warning + _strict_clip(
+                    plain, max(24, len(plain) // 2), preserve_edges=True,
+                )
         else:
             break
         truncated += 1
@@ -161,21 +165,37 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
             return (1, -index)
         return (3, -index)
 
-    for index in sorted((i for i in range(len(parts)) if i not in essential),
-                        key=system_priority):
+    optional = sorted((i for i in range(len(parts)) if i not in essential),
+                      key=system_priority)
+
+    def try_part(index: int) -> None:
         selected_parts.add(index)
         if estimator(render()) > budget:
             selected_parts.remove(index)
 
-    # Возвращаем столько реплик по хронологии, сколько помещается в реальное
-    # окно текущего backend. Больше никакого отдельного лимита 2600 символов.
-    for index in range(len(dialogue) - 1, -1, -1):
-        if index in selected_dialogue:
-            continue
+    # Сначала результаты текущей проверки, затем хотя бы несколько последних
+    # реплик и только после этого второстепенные системные материалы.
+    for index in optional:
+        if system_priority(index)[0] <= 1:
+            try_part(index)
+
+    def try_turn(index: int) -> None:
         selected_dialogue.add(index)
-        if estimator(render()) <= budget:
-            continue
-        selected_dialogue.remove(index)
+        if estimator(render()) > budget:
+            selected_dialogue.remove(index)
+
+    recent = [i for i in range(max(0, len(dialogue) - 7), len(dialogue))
+              if i not in selected_dialogue]
+    for index in reversed(recent):
+        try_turn(index)
+    for index in optional:
+        if system_priority(index)[0] > 1:
+            try_part(index)
+
+    # Оставшуюся вместимость используем для старой истории.
+    for index in range(max(0, len(dialogue) - 7) - 1, -1, -1):
+        if index not in selected_dialogue:
+            try_turn(index)
 
     kept = render()
     # Защитный запас для патологически маленьких окон и Unicode-оценщика.
