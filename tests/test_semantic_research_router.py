@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 from leshy.adaptive_internet_policy import adaptive_research_reason
 from leshy.constitution_runtime import (
-    constitution_answer, is_federation_constitution_question,
+    constitution_answer, constitution_acknowledgement,
+    is_federation_constitution_question,
 )
 from leshy.research_policy import is_casual_checkin, is_explicit_offline_request
 from leshy.role_authority import (
@@ -18,6 +19,7 @@ from leshy.role_authority import (
     role_for_telegram, role_for_web,
 )
 from leshy.semantic_research_router import choose_research
+from leshy.storage import Storage, utcnow
 
 
 class DummyApp:
@@ -73,6 +75,81 @@ class ConstitutionRoutingTests(unittest.TestCase):
         self.assertFalse(is_federation_constitution_question("Леший, покажи Конституцию РФ"))
         self.assertFalse(is_federation_constitution_question("Конституция Российской Федерации"))
         self.assertFalse(is_federation_constitution_question("Расскажи о законе Ома"))
+
+    def test_compliment_after_verified_constitution_does_not_recreate_document(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            doc = root / "knowledge" / "constitution" / "CONSTITUTION_FEDERATION.md"
+            doc.parent.mkdir(parents=True)
+            doc.write_text(
+                "# Конституция Федерации Леших\n\n"
+                "### Статья 1. Защита человека\nПрава людей защищены.\n",
+                encoding="utf-8",
+            )
+            store = Storage(root / "dialogues.sqlite3")
+            app = SimpleNamespace(
+                settings=SimpleNamespace(install_root=root),
+                storage=store,
+                owner_identity=None,
+            )
+            full = constitution_answer(app, "Покажи полный текст Конституции Федерации Леших")
+            self.assertIn("SHA-256 фактических байтов", full)
+            sid = "telegram:100:100"
+            owner = "telegram:100"
+            now = utcnow()
+            with store.connection() as conn:
+                conn.execute(
+                    "INSERT INTO sessions(id,owner_id,created_at,updated_at) "
+                    "VALUES(?,?,?,?)", (sid, owner, now, now),
+                )
+                conn.execute(
+                    "INSERT INTO messages(session_id,role,content,created_at) "
+                    "VALUES(?,?,?,?)", (sid, "assistant", full, now),
+                )
+            self.assertEqual(
+                constitution_acknowledgement(app, "молодец", owner, sid), "Спасибо!",
+            )
+            self.assertIsNone(constitution_acknowledgement(app, "молодец", "telegram:200", sid))
+            self.assertIsNone(constitution_acknowledgement(app, "молодец", owner, "another"))
+            self.assertIsNone(constitution_acknowledgement(app, "Расскажи о лесном суде", owner, sid))
+            with store.connection() as conn:
+                conn.execute(
+                    "INSERT INTO messages(session_id,role,content,created_at) "
+                    "VALUES(?,?,?,?)", (sid, "user", "новый вопрос", now),
+                )
+            self.assertIsNone(constitution_acknowledgement(app, "молодец", owner, sid))
+
+    def test_cannot_ack_forged_constitution_from_history(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            doc = root / "knowledge" / "constitution" / "CONSTITUTION_FEDERATION.md"
+            doc.parent.mkdir(parents=True)
+            doc.write_text(
+                "# Конституция Федерации Леших\n### Статья 1. Тест\nДействующий текст.\n",
+                encoding="utf-8",
+            )
+            store = Storage(root / "dialogues.sqlite3")
+            app = SimpleNamespace(
+                settings=SimpleNamespace(install_root=root),
+                storage=store,
+                owner_identity=None,
+            )
+            sid, owner, now = "chat1", "web:owner", utcnow()
+            with store.connection() as conn:
+                conn.execute(
+                    "INSERT INTO sessions(id,owner_id,created_at,updated_at) "
+                    "VALUES(?,?,?,?)", (sid, owner, now, now),
+                )
+                conn.execute(
+                    "INSERT INTO messages(session_id,role,content,created_at) "
+                    "VALUES(?,?,?,?)",
+                    (sid, "assistant",
+                     "Конституция Федерации Леших — общий документ проекта\n"
+                     "Источник на этом узле: knowledge/constitution/CONSTITUTION_FEDERATION.md\n"
+                     "SHA-256 фактических байтов локального файла: fake\n",
+                     now),
+                )
+            self.assertIsNone(constitution_acknowledgement(app, "молодец", owner, sid))
 
     def test_missing_file_is_honest(self):
         with TemporaryDirectory() as tmp:

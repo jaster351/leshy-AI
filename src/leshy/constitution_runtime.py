@@ -147,6 +147,54 @@ def constitution_answer(app, message: str) -> str | None:
     )
 
 
+
+_SHORT_ACKNOWLEDGEMENT = re.compile(
+    r"(?iu)^\s*(?:молодец|молодчина|умница|отлично|"
+    r"спасибо(?:\s+большое)?|благодарю|супер|класс|хорошо|"
+    r"понятно|ясно|ок(?:ей)?)[\s.!?👍👏🙏]*$"
+)
+
+
+def constitution_acknowledgement(
+    app, message: str, owner_id: str, session_id: str | None
+) -> str | None:
+    """A short compliment after the *verified* document needs no model call.
+
+    Verify the last assistant response in this owner's exact session and
+    its hash against the local Constitution. Never infer this from a user
+    quote, arbitrary memory, or a global previous conversation.
+    """
+    if not session_id or not _SHORT_ACKNOWLEDGEMENT.fullmatch(str(message or "")):
+        return None
+    from .owner_identity_runtime import canonical_owner
+    owner = canonical_owner(app, str(owner_id or "web:local").strip()[:200])
+    try:
+        with app.storage.connection() as conn:
+            row = conn.execute(
+                "SELECT m.role,m.content FROM messages m "
+                "JOIN sessions s ON s.id=m.session_id "
+                "WHERE m.session_id=? AND s.owner_id=? "
+                "ORDER BY m.id DESC LIMIT 1",
+                (session_id, owner),
+            ).fetchone()
+        if row is None or row["role"] != "assistant":
+            return None
+        last = str(row["content"] or "")
+        if not last.startswith(
+            "Конституция Федерации Леших — общий документ проекта"
+        ) or f"Источник на этом узле: {PUBLIC_PATH}\n" not in last:
+            return None
+        verified = _verified_document(app)
+        if verified is None:
+            return None
+        digest = verified[1]
+        if f"SHA-256 фактических байтов локального файла: {digest}\n" not in last:
+            return None
+        return "Спасибо!"
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 def install_constitution_routing(app_class) -> None:
     """Install after other runtime wrappers so no stale-cache/web guard runs first."""
     old_stream = RealtimeChatManager.stream
@@ -159,7 +207,10 @@ def install_constitution_routing(app_class) -> None:
             session_id: str | None = None,
             request_id: str | None = None,
         ) -> Iterator[StreamEvent]:
-            if not is_federation_constitution_question(message):
+            acknowledgement = constitution_acknowledgement(
+                self.app, message, owner_id, session_id,
+            )
+            if not is_federation_constitution_question(message) and acknowledgement is None:
                 yield from old_stream(
                     self, message, owner_id=owner_id,
                     session_id=session_id, request_id=request_id,
@@ -183,7 +234,7 @@ def install_constitution_routing(app_class) -> None:
                         "sources": [], "stopped": True,
                     })
                     return
-                answer = constitution_answer(self.app, message)
+                answer = acknowledgement if acknowledgement is not None else constitution_answer(self.app, message)
                 if answer is None:
                     raise RuntimeError("Constitution intent unexpectedly missing")
                 for chunk in self._chunk_fallback(answer, 160):
@@ -229,7 +280,10 @@ def install_constitution_routing(app_class) -> None:
             session_id: str | None = None,
             **kwargs: Any,
         ) -> dict[str, Any]:
-            if not is_federation_constitution_question(message):
+            acknowledgement = constitution_acknowledgement(
+                self, message, owner_id, session_id,
+            )
+            if not is_federation_constitution_question(message) and acknowledgement is None:
                 return old_chat(
                     self, message, owner_id=owner_id,
                     session_id=session_id, **kwargs,
@@ -253,7 +307,7 @@ def install_constitution_routing(app_class) -> None:
                         "UPDATE sessions SET title=?,title_source=?,updated_at=? WHERE id=?",
                         (" ".join(message.split())[:80], "auto", now, sid),
                     )
-            answer = constitution_answer(self, message)
+            answer = acknowledgement if acknowledgement is not None else constitution_answer(self, message)
             if answer is None:
                 raise RuntimeError("Constitution intent unexpectedly missing")
             return {
@@ -271,5 +325,6 @@ __all__ = [
     "PUBLIC_PATH",
     "is_federation_constitution_question",
     "constitution_answer",
+    "constitution_acknowledgement",
     "install_constitution_routing",
 ]
