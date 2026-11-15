@@ -42,11 +42,18 @@ _FIXED_UPGRADE = (
     "/usr/bin/apt-get -y -o Dpkg::Options::=--force-confdef "
     "-o Dpkg::Options::=--force-confold upgrade"
 )
+# Preserve the package manager's exit code before reducing output to a
+# number. A bare pipeline or "|| true" hides apt/dpkg failures and can
+# incorrectly report an unverified upgrade as successful.
 _FIXED_UPGRADABLE_COUNT = (
-    "LC_ALL=C /usr/bin/apt list --upgradable 2>/dev/null "
-    "| /usr/bin/grep -c 'upgradable from' || true"
+    "(set -e; updates=$(LC_ALL=C /usr/bin/apt list --upgradable 2>/dev/null); "
+    "printf '%s\\n' \"$updates\" | /usr/bin/grep -c 'upgradable from' "
+    "|| [ \"$?\" -eq 1 ])"
 )
-_FIXED_DPKG_AUDIT = "/usr/bin/dpkg --audit | /usr/bin/wc -c"
+_FIXED_DPKG_AUDIT = (
+    "(set -e; audit=$(/usr/bin/dpkg --audit); "
+    "printf '%s' \"$audit\" | /usr/bin/wc -c)"
+)
 _TIMEOUT_SECONDS = 1800
 
 
