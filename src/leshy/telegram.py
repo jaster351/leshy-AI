@@ -219,14 +219,20 @@ class TelegramBridge:
         allowed_users: Iterable[str | int],
         *,
         allow_all: bool = False,
-        owner_id: str | int = "",
+        owner_id: str | int | None = None,
+        infer_owner_from_allowed: bool = True,
     ) -> None:
         token = str(token or "").strip()
         if token:
             save_secret(self.token_path, token)
         allowed = sorted({str(value).strip() for value in allowed_users if str(value).strip()})
-        owner = str(owner_id or "").strip()
-        if not owner and len(allowed) == 1:
+        # When Web saves token/allow-list without specifying a new owner,
+        # preserve the already verified server owner across updates.
+        owner = (str(self._access().get("owner_id") or "").strip()
+                 if owner_id is None else str(owner_id or "").strip())
+        # Only legacy/local bootstrap callers may infer a first owner from
+        # a singleton allow-list. The public Web endpoint disables this.
+        if not owner and len(allowed) == 1 and infer_owner_from_allowed:
             owner = allowed[0]
         if allow_all and not owner:
             raise ValueError("Для режима «отвечать всем» укажите Telegram ID хозяина")

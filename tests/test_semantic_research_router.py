@@ -99,7 +99,10 @@ class RoleAuthorityTests(unittest.TestCase):
             self.assertEqual(role_for_telegram(tg, "123456"), "server_owner")
             self.assertEqual(role_for_telegram(tg, "222222"), "user")
             self.assertFalse(creator_telegram_id(tg))
-            self.assertEqual(register_local_creator(tg, "123456")["role"], "creator")
+            # Creator identity must be pre-provisioned; the Telegram login alone
+            # can no longer self-appoint the first visitor on a server.
+            with patch.dict("os.environ", {"LESHY_CREATOR_TELEGRAM_ID": "123456"}):
+                self.assertEqual(register_local_creator(tg, "123456")["role"], "creator")
             self.assertEqual(role_for_telegram(tg, "123456"), "creator")
             identity = SimpleNamespace(status=lambda _owner: {
                 "telegram": [{"user_id": "123456"}],
