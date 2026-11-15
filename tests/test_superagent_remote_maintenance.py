@@ -210,7 +210,7 @@ class MaintenanceTests(unittest.TestCase):
             return_value=0,
         ), mock.patch(
             "leshy.superagent_remote_maintenance._fixed_command",
-            return_value=(0, "8"),
+            side_effect=[(0, "8"), (0, "0")],
         ):
             result = _run_apt_update(
                 policy, actor, self.node, "mock.json", still_active=lambda: True,
