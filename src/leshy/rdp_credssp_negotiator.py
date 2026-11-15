@@ -10,6 +10,9 @@ from typing import Callable, Protocol
 
 from .rdp_credssp_binding import prepare_credssp_binding
 from .rdp_credssp_tsrequest import TSRequest, decode_tsrequest, encode_tsrequest
+from .rdp_credssp_credentials import (
+    RDPCredentials, password_credentials_der, sealed_authinfo_tsrequest,
+)
 
 
 class AuthenticationError(RuntimeError):
@@ -38,6 +41,8 @@ class CredSSPClient:
         # Certificate MUST be the actual TLS peer DER and pin pre-enrolled.
         self._binding = prepare_credssp_binding(tls_cert_der, pinned_tls_sha256)
         self._state, self._rounds, self._closed = "new", 0, False
+        self._delegation_attempted = False
+        self._credentials_sent = False
 
     @property
     def server_bound(self) -> bool:
@@ -45,7 +50,7 @@ class CredSSPClient:
 
     @property
     def credentials_delegated(self) -> bool:
-        return False
+        return self._credentials_sent and not self._closed
 
     def _abort(self):
         self.close()
@@ -115,6 +120,49 @@ class CredSSPClient:
         except BaseException:
             self.close()
             raise
+
+    def prepare_password_delegation(
+        self, credentials: RDPCredentials, *,
+        authorize_delegation: Callable[[], None],
+    ) -> bytes:
+        """Prepare encrypted authInfo once, only AFTER successful server binding.
+
+        A separately authenticated owner approval must be checked before and
+        after wrapping. The caller must deliver credentials only from a trusted
+        short-lived local secret provider, never from model or HTTP input.
+        Preparing does NOT mean the server received or accepted the password.
+        """
+        if (self._closed or self._state != "bound"
+                or self._delegation_attempted):
+            raise AuthenticationError("CredSSP delegation not permitted in current state")
+        if not callable(authorize_delegation):
+            raise PermissionError("Separate confirmed credential delegation required")
+        self._delegation_attempted = True
+        try:
+            self._authorize()
+            authorize_delegation()
+            cleartext = bytearray(password_credentials_der(credentials))
+            try:
+                # GSS Wrap enforces confidentiality for this authenticated
+                # mutual-authentication SPNEGO context.
+                sealed = self._mechanism.wrap(bytes(cleartext))
+            finally:
+                cleartext[:] = b"\x00" * len(cleartext)
+            if not isinstance(sealed, bytes) or not 0 < len(sealed) <= 128 * 1024:
+                raise AuthenticationError("Invalid sealed CredSSP authInfo")
+            self._authorize()
+            authorize_delegation()
+            return sealed_authinfo_tsrequest(sealed)
+        except BaseException:
+            self.close()
+            raise
+
+    def mark_password_sent(self) -> None:
+        """Mark transport send completion, NOT remote Windows login success."""
+        if (self._closed or self._state != "bound"
+                or not self._delegation_attempted or self._credentials_sent):
+            raise AuthenticationError("CredSSP delegation sequence invalid")
+        self._credentials_sent = True
 
     def close(self) -> None:
         if not self._closed:
