@@ -24,6 +24,7 @@ from .storage import utcnow
 from .verified_clock import current_clock_context, grounded_countdown_answer
 from .source_reading import read_supplied_source, supplied_public_url
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
+from .context_history import load_session_context
 
 
 def _local_learning_question(message: str) -> bool:
@@ -177,10 +178,9 @@ class RealtimeChatManager:
                     "UPDATE sessions SET title=?,title_source=?,updated_at=? WHERE id=?",
                     (" ".join(message.split())[:80], "auto", now, sid),
                 )
-            rows = conn.execute(
-                "SELECT role,content FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 24",
-                (sid,),
-            ).fetchall()
+            rows = load_session_context(
+                conn, sid, message, self.app.context_settings,
+            )
         return sid, rows
 
     def _search_plan(self, message: str) -> dict[str, Any]:
