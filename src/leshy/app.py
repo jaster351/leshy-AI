@@ -37,7 +37,7 @@ from .storage import Storage, utcnow
 from .version import VERSION
 from .verified_clock import current_clock_context
 from .source_reading import read_supplied_source
-from .fact_recheck import is_factual_challenge, recent_user_source, recheck_instruction, grounded_release_from_context
+from .fact_recheck import is_factual_challenge, recent_user_source, recheck_instruction, grounded_release_from_context, source_dispute_requires_review, source_dispute_instruction, source_dispute_fallback
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
 from .context_settings import ContextSettingsStore
 from .context_history import load_session_context
@@ -716,6 +716,21 @@ class LeshyApp:
         event("chat_generation_started", session_id=sid, owner_id=owner_id, context_messages=len(messages))
         try:
             answer = self.llm.chat(messages)
+            if source_dispute_requires_review(message, rows, sources, answer):
+                try:
+                    revised = self.llm.chat(
+                        messages + [ChatMessage(
+                            "system", source_dispute_instruction(sources),
+                        )]
+                    )
+                    answer = (
+                        revised if revised and not source_dispute_requires_review(
+                            message, rows, sources, revised,
+                        ) else source_dispute_fallback(sources)
+                    )
+                except Exception as exc:
+                    problem("source_dispute_recheck_failed", type(exc).__name__)
+                    answer = source_dispute_fallback(sources)
             if not creative and not (is_casual_checkin(message) or is_local_dialogue_request(message)) and self._answer_needs_research(answer):
                 if not search_attempted:
                     append_live_search("модель обнаружила пробел в знаниях")
