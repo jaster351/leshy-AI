@@ -768,7 +768,7 @@ class RealtimeChatManager:
             # Release dates from a page actually read this turn can be
             # grounded deterministically. Never let a model discard the
             # primary source and repeat its stale release-year claim.
-            grounded_fact = grounded_release_from_context(message, rows, messages, sources)
+            grounded_fact = grounded_release_from_context(message, rows, messages, sources, app=self.app)
             if grounded_fact and not cancel.is_set():
                 for part in self._chunk_fallback(grounded_fact, 160):
                     if cancel.is_set():
@@ -853,7 +853,7 @@ class RealtimeChatManager:
                 if grounded is not None:
                     answer = grounded
                     event("chat_countdown_grounded", request_id=rid, source_count=len(sources))
-            if not stopped and source_dispute_requires_review(message, rows, sources, answer):
+            if not stopped and source_dispute_requires_review(message, rows, sources, answer, app=self.app):
                 try:
                     instruction = ChatMessage(
                         "system", source_dispute_instruction(sources),
@@ -867,7 +867,7 @@ class RealtimeChatManager:
                         revised = "".join(revised_parts).strip()
                         answer = (
                             revised if revised and not source_dispute_requires_review(
-                                message, rows, sources, revised,
+                                message, rows, sources, revised, app=self.app,
                             ) else source_dispute_fallback(sources)
                         )
                 except Exception as exc:
