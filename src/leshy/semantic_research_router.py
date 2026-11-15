@@ -7,9 +7,12 @@ The classifier uses the local model and never sends private text to a provider.
 from __future__ import annotations
 
 from collections import OrderedDict
+import json
 import os
 import re
 import threading
+import time
+from urllib import request
 from typing import Any
 
 from .adaptive_internet_policy import (
@@ -19,7 +22,6 @@ from .adaptive_internet_policy import (
 )
 from .diagnostics import event
 from .cinema_research import cinema_query
-from .llm import ChatMessage
 from .research_policy import (
     _current_user_text,
     external_freshness_requested,
@@ -79,6 +81,72 @@ def _resident_model(app: Any) -> bool:
     return False
 
 
+def _short_local_inference(app: Any, query: str) -> str:
+    """A bounded, small-token judgement, never a full second chat reply."""
+    llm = getattr(app, "llm", None)
+    providers = [llm]
+    if hasattr(llm, "_states"):
+        providers = [getattr(state, "provider", None) for state in llm._states]
+    for provider in providers:
+        if provider is None:
+            continue
+        proc = getattr(provider, "_process", None)
+        if proc is not None and getattr(provider, "_port", None):
+            try:
+                if proc.poll() is not None:
+                    continue
+                guard = getattr(provider, "_chat_lock", None)
+                if guard is None or not guard.acquire(blocking=False):
+                    continue
+                try:
+                    from .accelerator_runtime import _open_local_llama, _visible_answer_options
+                    payload = {
+                        "messages": [
+                            {"role": "system", "content": _GUIDANCE},
+                            {"role": "user", "content": "Запрос: " + query[:600] + "\nРешение:"},
+                        ],
+                        "stream": False, "max_tokens": 24, "temperature": 0,
+                        **_visible_answer_options(str(getattr(provider, "model", ""))),
+                    }
+                    req = request.Request(
+                        f"http://127.0.0.1:{int(provider._port)}/v1/chat/completions",
+                        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with _open_local_llama(req, timeout=2.5) as response:
+                        body = json.loads(response.read().decode("utf-8"))
+                    return str(body["choices"][0]["message"].get("content") or "").strip()
+                finally:
+                    provider._idle_last_used = time.monotonic()
+                    guard.release()
+            except (OSError, TimeoutError, ValueError, TypeError, KeyError, IndexError):
+                continue
+        model = getattr(provider, "_model", None)
+        if model is None:
+            continue
+        guard = getattr(provider, "_lock", None)
+        if guard is None or not guard.acquire(blocking=False):
+            continue
+        try:
+            response = model.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": _GUIDANCE},
+                    {"role": "user", "content": "Запрос: " + query[:600] + "\nРешение:"},
+                ],
+                temperature=0,
+                max_tokens=24,
+                stop=["\n"],
+            )
+            return str(response["choices"][0]["message"].get("content") or "").strip()
+        except (AttributeError, KeyError, IndexError, OSError, ValueError, TypeError):
+            continue
+        finally:
+            provider._idle_last_used = time.monotonic()
+            guard.release()
+    return ""
+
+
 def _classify_locally(app: Any, query: str) -> str:
     """Return LOCAL if a busy/sleeping or slow model cannot decide promptly."""
     if os.getenv("LESHY_SEMANTIC_WEB_ROUTER", "on").strip().lower() in {"0", "off", "false"}:
@@ -97,14 +165,7 @@ def _classify_locally(app: Any, query: str) -> str:
 
     def worker() -> None:
         try:
-            llm = getattr(app, "llm", None)
-            if llm is None:
-                return
-            prompt = [
-                ChatMessage("system", _GUIDANCE),
-                ChatMessage("user", "Запрос: " + query[:600] + "\nОтвет:"),
-            ]
-            reply = str(llm.chat(prompt) or "").strip()
+            reply = _short_local_inference(app, query)
             match = _ANSWER_TOKEN.fullmatch(reply)
             if match:
                 result.append(match.group(1).upper())
