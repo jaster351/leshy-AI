@@ -251,7 +251,33 @@ def adaptive_research_reason(query: str, trusted: list[dict] | None = None, cand
     return basic
 
 
+def requires_verified_live_sources(query: str, reason: str = "") -> bool:
+    """Distinguish a mandatory live fact from a useful optional web lookup.
+
+    An incomplete local Knowledge entry may trigger research, but must not
+    prevent an ordinary timeless answer when all remote providers are down.
+    Never present current-world facts as verified without fresh evidence.
+    """
+    current = _current_user_text(query)
+    if is_explicit_web_request(current):
+        return True
+    if is_casual_checkin(current) or is_local_dialogue_request(current):
+        return False
+    if is_offline_creative_request(current):
+        return False
+    if _EXACT_IDENT.search(current) or external_freshness_requested(current):
+        return True
+    return str(reason or "").strip() in {
+        "требуются актуальные данные",
+        "свежие данные по безопасности",
+        "свежая проверка бюллетеня безопасности",
+        "события требуют актуального источника",
+        "проверка ссылки или предыдущего вопроса пользователя",
+    }
+
+
 __all__ = [
     "SIX_MONTHS_SECONDS", "ttl_for_context", "knowledge_is_current",
     "adaptive_research_reason", "is_explicit_web_request", "is_offline_creative_request",
+    "requires_verified_live_sources",
 ]
