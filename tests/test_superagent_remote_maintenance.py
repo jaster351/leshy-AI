@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
+import os
+import subprocess
 import unittest
 from unittest import mock
 
@@ -16,7 +18,7 @@ from leshy.storage import Storage, utcnow
 from leshy.superagent_remote_maintenance import (
     maintenance_intent, _actor_for_ticket, _choose_registered_node,
     _matching_credential, _run_apt_update, run_remote_maintenance,
-    _FIXED_UPGRADE,
+    _FIXED_UPGRADE, _FIXED_UPGRADABLE_COUNT, _FIXED_DPKG_AUDIT,
 )
 from leshy.superagent_remote_permissions import RemotePermissionPolicy
 
@@ -132,6 +134,37 @@ class MaintenanceTests(unittest.TestCase):
         name = _matching_credential(policy, actor, self.node)
         self.assertEqual(name, "mini-pc.json")
         self.assertNotIn("TOP_SECRET_PASSWORD", name)
+
+    @unittest.skipIf(os.name == "nt", "POSIX shell postcheck contract")
+    def test_postchecks_propagate_package_manager_errors(self):
+        # Replace only the external executables: retain the actual shell
+        # pipeline and exit semantics used in production.
+        apt_failure = _FIXED_UPGRADABLE_COUNT.replace(
+            "/usr/bin/apt list --upgradable", "/bin/false",
+        )
+        dpkg_failure = _FIXED_DPKG_AUDIT.replace(
+            "/usr/bin/dpkg --audit", "/bin/false",
+        )
+        for command in (apt_failure, dpkg_failure):
+            with self.subTest(command=command):
+                result = subprocess.run(
+                    ["/bin/sh", "-c", command], capture_output=True,
+                    text=True, timeout=5, check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+
+    @unittest.skipIf(os.name == "nt", "POSIX shell postcheck contract")
+    def test_no_available_updates_returns_valid_zero(self):
+        no_updates = _FIXED_UPGRADABLE_COUNT.replace(
+            "/usr/bin/apt list --upgradable",
+            "/bin/printf 'Listing...\\\\n'",
+        )
+        result = subprocess.run(
+            ["/bin/sh", "-c", no_updates], capture_output=True,
+            text=True, timeout=5, check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "0")
 
     def test_apt_requires_verified_operating_system(self):
         self._link_verified_telegram()
