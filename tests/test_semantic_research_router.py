@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import json
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from leshy.adaptive_internet_policy import adaptive_research_reason
 from leshy.constitution_runtime import (
@@ -76,7 +77,8 @@ class ConstitutionRoutingTests(unittest.TestCase):
     def test_missing_file_is_honest(self):
         with TemporaryDirectory() as tmp:
             app = SimpleNamespace(settings=SimpleNamespace(install_root=Path(tmp)))
-            answer = constitution_answer(app, "Покажи полный текст Конституции Федерации Леших")
+            with patch("leshy.constitution_runtime._candidate_paths", return_value=[Path(tmp) / "notfound"]):
+                answer = constitution_answer(app, "Покажи полный текст Конституции Федерации Леших")
             self.assertIn("не найден", answer.lower())
             self.assertIn("интернет", answer.lower())
 
