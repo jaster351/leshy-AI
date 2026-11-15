@@ -54,13 +54,6 @@ class TelegramBrowserLoginTests(unittest.TestCase):
         self.assertNotIn("token", str(self.identity.status(self.guest)))
 
     def test_existing_telegram_login_merges_new_browser_guest_chat(self):
-        self._start_button()
-        first_request = self.login.status(self.guest_session)
-        self.assertEqual(first_request["status"], "pending")
-        with self.identity.storage.connection() as conn:
-            callback_hash = conn.execute("SELECT callback_hash FROM telegram_browser_login").fetchone()[0]
-        # Use the actual callback issued for the first login.
-        self.login.begin(self.guest_session)
         begun = self.login.begin(self.guest_session)
         first_button = self.login.prepare_telegram_confirmation(begun["token"], "12345")
         self.login.finish(first_button["callback"], "12345", self.actor, True)
@@ -104,6 +97,38 @@ class TelegramBrowserLoginTests(unittest.TestCase):
             conn.execute("UPDATE telegram_browser_login SET expires_at=0 WHERE status='pending'")
         with self.assertRaises(ValueError):
             self.login.prepare_telegram_confirmation(replacement["token"], "12345")
+
+    def test_account_switch_does_not_merge_another_users_chats(self):
+        owner2, cookie2, session2 = self.identity.ensure_web_session("", "web:local")
+        self._add_guest_chat(self.guest, "account-a-dialogue")
+        self._add_guest_chat(owner2, "account-b-dialogue")
+        a = self.login.begin(self.guest_session)
+        ac = self.login.prepare_telegram_confirmation(a["token"], "12345")
+        self.login.finish(ac["callback"], "12345", self.actor, True)
+        b = self.login.begin(session2)
+        bc = self.login.prepare_telegram_confirmation(b["token"], "8888")
+        self.login.finish(bc["callback"], "8888", {
+            "id": 8888, "first_name": "Другой",
+        }, True)
+        # A shared browser signs in with the second Telegram account.
+        switch = self.login.begin(self.guest_session)
+        sc = self.login.prepare_telegram_confirmation(switch["token"], "8888")
+        result = self.login.finish(sc["callback"], "8888", {
+            "id": 8888, "first_name": "Другой",
+        }, True)
+        self.assertEqual(result["mode"], "login")
+        self.assertEqual(self.identity.owner_for_web_cookie(self.guest_cookie), owner2)
+        with self.identity.storage.connection() as conn:
+            first = conn.execute("SELECT owner_id FROM sessions WHERE id='account-a-dialogue'").fetchone()
+            second = conn.execute("SELECT owner_id FROM sessions WHERE id='account-b-dialogue'").fetchone()
+        self.assertEqual(first["owner_id"], self.guest)
+        self.assertEqual(second["owner_id"], owner2)
+
+    def test_telegram_callback_sender_identity_must_match(self):
+        _, confirmation = self._start_button()
+        with self.assertRaises(PermissionError):
+            self.login.finish(confirmation["callback"], "12345", {"id": 5555}, True)
+        self.assertEqual(self.login.status(self.guest_session)["status"], "pending")
 
     def test_profile_photo_has_no_external_url_or_token(self):
         started, prompt = self._start_button()
