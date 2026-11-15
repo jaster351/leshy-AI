@@ -628,7 +628,14 @@ class LeshyApp:
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
         reason = None if creative else adaptive_research_reason(lookup_query, trusted, candidates)
-        needed = False if creative else bool(force_search or cinema_plan is not None or reason or self._needs_live_search(lookup_query))
+        from .semantic_research_router import choose_research
+        needed, selected_reason = choose_research(
+            self, lookup_query, trusted, candidates,
+            initial_reason=reason, force_search=force_search,
+        )
+        if cinema_plan is not None and not creative:
+            needed, selected_reason = True, "внешний кино-каталог"
+        reason = selected_reason if needed else None
         self._last_internet_route = {
             "mode": "поиск" if needed else "локально",
             "reason": str(reason or ("явный запрос" if needed else "TTL/контекст позволяют ответ без сети"))[:100],
