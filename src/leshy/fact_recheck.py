@@ -194,6 +194,44 @@ def source_release_fact(
     return " ".join(result)
 
 
+def grounded_release_from_context(
+    message: str,
+    rows: list[Any],
+    messages: list[Any],
+    sources: list[dict[str, str]],
+) -> str | None:
+    """Prefer actual page heading to a contradictory LLM-generated release date.
+
+    Only the exact page read this turn is eligible, never another search result,
+    Knowledge candidate, old model text or an arbitrary date in the chat.
+    """
+    review = is_factual_challenge(message, rows)
+    original_question = prior_factual_question(rows) if review else message
+    if not (review or _RELEASE_REQUEST.search(original_question)):
+        return None
+    for msg in messages:
+        text = str(getattr(msg, "content", "") or "")
+        if "НАЧАЛО НЕДОВЕРЕННОГО ТЕКСТА СТРАНИЦЫ" not in text:
+            continue
+        # Extract the source page, not the metadata wrapper around it.
+        begin = text.partition("НАЧАЛО НЕДОВЕРЕННОГО ТЕКСТА СТРАНИЦЫ ---\n")[2]
+        page = begin.partition("\n--- КОНЕЦ ТЕКСТА СТРАНИЦЫ")[0]
+        url = ""
+        for item in sources:
+            candidate = str(item.get("url") or "")
+            if candidate and candidate in text:
+                url = candidate
+                break
+        if not url:
+            continue
+        result = source_release_fact(
+            original_question, page, url, correction=review,
+        )
+        if result:
+            return result
+    return None
+
+
 __all__ = [
     "is_factual_challenge",
     "prior_factual_question",
@@ -202,4 +240,5 @@ __all__ = [
     "recheck_instruction",
     "release_date_from_page",
     "source_release_fact",
+    "grounded_release_from_context",
 ]
