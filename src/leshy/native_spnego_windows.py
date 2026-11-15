@@ -198,6 +198,23 @@ class WindowsSSPIContext:
         return (header.raw[:buffers[0].cbBuffer] + data.raw[:buffers[1].cbBuffer]
                 + padding.raw[:buffers[2].cbBuffer])
 
+    @staticmethod
+    def _decrypted_data(buffer: SecBuffer, storage: C.Array, input_len: int) -> bytes:
+        """Only read decrypted bytes actually inside the caller-owned buffer.
+
+        SSPI is allowed to shift pvBuffer to an offset within input storage.
+        Reading storage.raw[:cbBuffer] would return the wrong bytes; blindly
+        dereferencing a provider-supplied pointer would be unsafe.
+        """
+        start = C.addressof(storage)
+        pointer = buffer.pvBuffer
+        length = buffer.cbBuffer
+        if (buffer.BufferType != _DATA or not isinstance(pointer, int)
+                or not 0 < length <= input_len
+                or pointer < start or pointer > start + input_len - length):
+            raise SPNEGOError("Invalid decrypted SSPI buffer")
+        return C.string_at(pointer, length)
+
     def unwrap(self, ciphertext: bytes) -> bytes:
         if not self.complete:
             raise SPNEGOError("SSPI authentication incomplete")
@@ -219,14 +236,19 @@ class WindowsSSPIContext:
         result = self.lib.DecryptMessage(
             C.byref(self._ctx), C.byref(descriptor), self._recv_seq, C.byref(qop)
         )
-        # SECQOP_WRAP_NO_ENCRYPT would allow unsigned plaintext: fail closed.
-        if (result != _OK or qop.value == 0x80000001 or
-                buffers[1].cbBuffer > len(ciphertext) - prefix):
+        # Accept only default confidentiality quality: any non-zero QOP
+        # (including SECQOP_WRAP_NO_ENCRYPT) is treated as untrusted.
+        if result != _OK or qop.value != 0:
             self.close()
             raise SPNEGOError("SSPI message integrity/confidentiality failed")
+        try:
+            plaintext = self._decrypted_data(buffers[1], data, len(ciphertext) - prefix)
+        except BaseException:
+            self.close()
+            raise
         self._recv_seq += 1
         self._reauthorize()
-        return data.raw[:buffers[1].cbBuffer]
+        return plaintext
 
     def close(self) -> None:
         if self._closed:
