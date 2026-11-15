@@ -42,13 +42,15 @@ def _fatal_npu_failure(name: str, exc: BaseException) -> bool:
 
 class AdaptiveLLM:
     def __init__(self, candidates: list[tuple[str, Any]], *, cooldown_seconds: float = 180.0,
-                 priority: tuple[str, ...] = ("gpu", "npu", "cpu", "other")):
+                 priority: tuple[str, ...] = ("gpu", "npu", "cpu", "other"), context_settings=None):
         if not candidates: raise ValueError("Нужен хотя бы один LLM backend")
         self._states = [_BackendState(name, provider) for name, provider in candidates]
         self.cooldown_seconds=max(5.0,float(cooldown_seconds)); self.priority=tuple(priority)
         self._priority_rank={kind:index for index,kind in enumerate(self.priority)}; self._preferred=self._states[0].name
         self._lock=threading.RLock(); self.model="adaptive:"+",".join(state.name for state in self._states)
         self._hardware_store=self._discover_hardware_store()
+        # Все маршруты (Web, Telegram, SuperAgent) используют один backend.
+        self.context_settings = context_settings
     def _discover_hardware_store(self):
         for state in self._states:
             manager=getattr(state.provider,"manager",None); brain_dir=getattr(manager,"brain_dir",None)
@@ -96,8 +98,10 @@ class AdaptiveLLM:
             event("adaptive_llm_warmup_ok",backend=state.name,latency_ms=latency_ms,switched=switched); return state.name
         return None
     @staticmethod
-    def _budget_for(state,messages):
+    def _budget_for(state,messages,context_settings=None):
         context_size=int(getattr(state.provider,"n_ctx",4096) or 4096); max_tokens=int(getattr(state.provider,"max_tokens",1024) or 1024)
+        if context_settings is not None:
+            context_size = context_settings.context_size(context_size)
         result=apply_context_budget(messages,context_size=context_size,reserve_tokens=max_tokens)
         if result.tokens_before>result.budget:
             event("llm_context_compacted",backend=state.name,context_size=context_size,reserve_tokens=max_tokens,tokens_before=result.tokens_before,tokens_after=result.tokens_after,budget=result.budget,dropped_messages=result.dropped_messages,truncated_messages=result.truncated_messages)
@@ -128,7 +132,7 @@ class AdaptiveLLM:
                 continue
             started = time.monotonic()
             try:
-                budgeted = self._budget_for(state, prepared_messages)
+                budgeted = self._budget_for(state, prepared_messages, self.context_settings)
             except LLMUnavailable as exc:
                 # Oversized user context is not an unhealthy GPU/CPU/NPU.
                 # Do not quarantine a working model due to an invalid input.
