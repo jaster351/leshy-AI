@@ -78,10 +78,11 @@
     const isSigned=profile.provider&&profile.provider!=='local';
     const display=isSigned?String(profile.name||data.display_name||'Пользователь').trim():'Гость';
     const provider=isSigned?String(profile.provider||'').toUpperCase():'Гостевой профиль';
-    const avatarUrl=String(profile.avatar_url||'').trim();
+    let avatarUrl=String(profile.avatar_url||'').trim();
     const name=document.querySelector('#profileCopy b');
     const subtitle=document.querySelector('#profileCopy span');
     const avatar=document.getElementById('profileAvatar');
+    if(avatar&&avatarUrl&&avatar.dataset.profileAvatarFailed===avatarUrl)avatarUrl='';
     if(name&&name.textContent!==display)name.textContent=display;
     if(subtitle&&subtitle.textContent!==provider)subtitle.textContent=provider;
     if(avatar){
@@ -96,7 +97,7 @@
           img.referrerPolicy='no-referrer';
           img.width=32;img.height=32;
           img.style.cssText='width:32px;height:32px;object-fit:cover;border-radius:50%';
-          img.onerror=()=>{avatar.dataset.profileAvatarUrl='';avatar.replaceChildren();avatar.textContent=initials;};
+          img.onerror=()=>{avatar.dataset.profileAvatarFailed=avatarUrl;avatar.dataset.profileAvatarUrl='';avatar.replaceChildren();avatar.textContent=initials;};
           avatar.appendChild(img);
         }else avatar.textContent=initials;
       }
@@ -121,6 +122,10 @@
       ${profile.provider==='telegram'?'<div class="item-meta good">✓ Подтверждён через Telegram</div>':'<div class="item-meta">Гостевой доступ: регистрация для общения не требуется.</div>'}
       ${displayAvatar?`<img src="${esc(displayAvatar)}" alt="Фото профиля" referrerpolicy="no-referrer" width="54" height="54" style="border-radius:50%;object-fit:cover;margin:6px 0">`:''}
       <div class="row"><span>Owner ID</span><span class="mono" title="${esc(data.owner_id||'')}">${esc(shortId(data.owner_id))}</span></div>
+      ${profile.provider==='telegram'?`
+        ${profile.username?`<div class="row"><span>Telegram</span><b>@${esc(profile.username)}</b></div>`:''}
+        ${profile.language_code?`<div class="row"><span>Язык профиля</span><b>${esc(profile.language_code)}</b></div>`:''}
+      `:''}
       <div class="divider"></div>
       <div class="item-title">Аватар Gravatar</div>
       <div class="item-meta" style="margin:5px 0">Не используется для входа. При включении браузер получает изображение с Gravatar по хешу email.</div>
