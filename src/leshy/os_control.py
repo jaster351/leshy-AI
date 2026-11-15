@@ -45,6 +45,21 @@ class OperatingSystemController:
         r"\b(?:открой\s+(?:файл|папку|программ)|запусти\s+(?:программ|приложени|процесс|скрипт)|выполни\s+(?:команду|скрипт|powershell)|создай\s+папк|прочитай\s+файл|покажи\s+(?:файлы|папки|процессы)|"
         r"останови\s+процесс|закрой\s+программ|скопируй\s+файл|перемести\s+файл|удали\s+файл)\b)"
     )
+    _OS_TARGET_RE = re.compile(
+        r"(?i)\\b(?:windows|виндовс|операционн\\w*\\s+систем\\w*|"
+        r"на\\s+(?:компьютер\\w*|пк)|shell|powershell|терминал|командн\\w*\\s+строк\\w*)\\b"
+    )
+    _OS_ACTION_RE = re.compile(
+        r"(?i)\\b(?:выполн\\w*|запуст\\w*|откро\\w*|покаж\\w*|удал\\w*|"
+        r"настро\\w*|измен\\w*|поменя\\w*|выключ\\w*|включ\\w*|"
+        r"перезагруз\\w*|останов\\w*|закро\\w*|созда\\w*|прочита\\w*|"
+        r"скопиру\\w*|перемест\\w*|проверь|провер\\w*|установ\\w*)\\b"
+    )
+    _OS_NEGATED_RE = re.compile(
+        r"(?i)\\b(?:не\\s+(?:меняй|изменяй|трогай|запускай|выполняй|"
+        r"удаляй|выключай|перезагружай|проверяй)|"
+        r"(?:никаких|без)\\s+(?:изменений|действий|команд)\\b)"
+    )
     _DANGEROUS_RE = re.compile(
         r"(?i)(?:format(?:-volume)?\b|clear-disk\b|remove-partition\b|diskpart\b|"
         r"bcdedit\b|bootrec\b|cipher\s+/w\b|remove-item\s+[^\r\n]*(?:windows|system32)[^\r\n]*-recurse|"
@@ -95,7 +110,21 @@ class OperatingSystemController:
                 )
 
     def is_request(self, message: str) -> bool:
-        return bool(self._INTENT_RE.search(str(message or "")))
+        """A mention of Windows or the OS is not a request to control it.
+
+        In particular, "не меняй Windows" and queries about Leshy's own
+        memory/constitution must remain safe normal chat for every user.
+        """
+        text = str(message or "").strip()
+        if re.match(r"(?i)^/os(?:\\s|$)", text):
+            return True
+        if self._OS_NEGATED_RE.search(text):
+            return False
+        explicit_action = bool(self._INTENT_RE.search(text))
+        has_targeted_action = bool(
+            self._OS_TARGET_RE.search(text) and self._OS_ACTION_RE.search(text)
+        )
+        return bool((explicit_action and self._OS_ACTION_RE.search(text)) or has_targeted_action)
 
     @staticmethod
     def _clip(value: str, limit: int = 12000) -> str:
