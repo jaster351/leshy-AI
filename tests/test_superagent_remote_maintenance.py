@@ -66,6 +66,25 @@ class MaintenanceTests(unittest.TestCase):
             "покажи картинки Ubuntu без подключения к серверу"
         ), "")
 
+    def test_guest_or_old_ticket_cannot_gain_remote_rights_later(self):
+        self._link_verified_telegram()
+        # The signed-in owner is not a substitute for authorization at the
+        # time the original user mandate was created.
+        ticket = {
+            "owner_id": self.owner,
+            "request_text": "зайди на сервер и обнови пакеты",
+            "mandate_json": '{"source":"chat","remote_authorized_at_creation":false}',
+        }
+        with mock.patch(
+            "leshy.superagent_remote_maintenance._run_apt_update"
+        ) as upgrade:
+            status, report = run_remote_maintenance(
+                self.app, ticket, still_active=lambda: True,
+            )
+        self.assertEqual(status, "blocked")
+        self.assertIn("момент создания", report)
+        upgrade.assert_not_called()
+
     def test_no_provider_login_cannot_create_background_ssh_actor(self):
         with self.assertRaises(PermissionError):
             _actor_for_ticket(self.app, self.owner)
