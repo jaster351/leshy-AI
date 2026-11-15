@@ -23,6 +23,7 @@ from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
 from .verified_clock import current_clock_context, grounded_countdown_answer
 from .source_reading import read_supplied_source, supplied_public_url
+from .fact_recheck import is_factual_challenge, recent_user_source, recheck_instruction, grounded_release_from_context
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
 from .context_history import load_session_context
 
@@ -268,6 +269,19 @@ class RealtimeChatManager:
         if _local_learning_question(message):
             context.append(ChatMessage("system", _today_learning_context(self.app)))
         source_context, source_links = read_supplied_source(self.app, message)
+        factual_challenge = is_factual_challenge(message, rows)
+        if factual_challenge and not source_links:
+            # Short objection after an official URL: re-read that exact page.
+            # No redundant third-party search can replace the user's evidence.
+            previous_url = recent_user_source(rows)
+            if previous_url:
+                source_context, source_links = read_supplied_source(self.app, previous_url)
+        if factual_challenge:
+            context.append(ChatMessage(
+                "system", recheck_instruction(
+                    message, rows, source_given=bool(source_links),
+                ),
+            ))
         if source_context:
             if source_links:
                 context.append(ChatMessage(
@@ -361,6 +375,17 @@ class RealtimeChatManager:
 
         isolated_rows = conversation_rows_for_mode(rows, mode.kind)
         history = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
+        if source_links:
+            context.append(ChatMessage(
+                "system",
+                "Прочитанный по ссылке пользователя первоисточник является "
+                "фактическим материалом для данного ответа. Используй его "
+                "содержание, не подменяй его датой из своей памяти или "
+                "прошлого ответа. Различай дату выхода, предзагрузки, "
+                "предзаказа и публикации новости. Если источник противоречит "
+                "предыдущему ответу, укажи исправление и приведи URL. "
+                "Если текста страницы не удалось получить, не выдумывай его.",
+            ))
         return context + history, sources, search_attempted
 
     def _stream_os_action(
@@ -740,6 +765,25 @@ class RealtimeChatManager:
             yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": sources})
             event("chat_stream_started", request_id=rid, session_id=sid, owner_id=owner_id)
 
+            # Release dates from a page actually read this turn can be
+            # grounded deterministically. Never let a model discard the
+            # primary source and repeat its stale release-year claim.
+            grounded_fact = grounded_release_from_context(message, rows, messages, sources)
+            if grounded_fact and not cancel.is_set():
+                for part in self._chunk_fallback(grounded_fact, 160):
+                    if cancel.is_set():
+                        break
+                    yield StreamEvent("delta", {"text": part})
+                answered_at = self.app._save_assistant(sid, grounded_fact) if not cancel.is_set() else utcnow()
+                yield StreamEvent("done", {
+                    "request_id": rid, "session_id": sid,
+                    "answer": grounded_fact if not cancel.is_set() else "",
+                    "created_at": answered_at, "sources": sources,
+                    "stopped": bool(cancel.is_set()), "source_grounded": True,
+                })
+                event("chat_primary_source_release_grounded", source_count=len(sources))
+                return
+
             # Если live-search не нашёл подтверждённых источников или упал,
             # НЕ передаём текущие данные LLM: иначе она выдумает дату/цену.
             # Такой отказ быстрый и прозрачный, обычные чаты не затронуты.
@@ -779,7 +823,10 @@ class RealtimeChatManager:
             # текста: локальная модель иногда ошибочно заявляет, что интернет
             # недоступен, даже когда поиск уже выполнен. Иначе неверный ответ
             # успевает появиться в Telegram до финального редактирования.
-            hold_search_answer = bool(search_attempted)
+            hold_search_answer = bool(
+                search_attempted or supplied_public_url(message)
+                or (is_factual_challenge(message, rows) and recent_user_source(rows))
+            )
             stream_formatter = LayoutStreamFormatter(message)
             for delta in self._llm_stream(messages, cancel, owner_id):
                 if cancel.is_set():
