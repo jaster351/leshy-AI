@@ -166,14 +166,23 @@ def install_advanced_modules(app_class, app=None) -> None:
         _ensure_components(self)
         query = self.intelligent_memory.latest_user_query(owner_id)
         blocks: list[str] = []
+        # Постоянные правила загружаются независимо от включения Mem0/GraphRAG.
+        # Штатный метод проверяет owner_id и включает все подтверждённые правила.
+        original = _ORIGINAL_MEMORY_CONTEXT(self, owner_id)
+        if original:
+            blocks.append(original)
         if module_enabled(self.storage, "intelligent-memory"):
             memory = self.intelligent_memory.context(owner_id, query, limit=8)
             if memory:
-                blocks.append(memory)
-        else:
-            original = _ORIGINAL_MEMORY_CONTEXT(self, owner_id)
-            if original:
-                blocks.append(original)
+                # Mem0 может повторно найти уже включённые правила. Убираем
+                # совпадающие строки, чтобы не тратить контекст на дубликаты.
+                seen = {line.strip() for line in original.splitlines()} if original else set()
+                extra = [
+                    line for line in memory.splitlines()
+                    if line.strip() and line.strip() not in seen
+                ]
+                if extra:
+                    blocks.append("Дополнительная интеллектуальная память:\n" + "\n".join(extra))
         if module_enabled(self.storage, "knowledge-graph") and query:
             graph = self.knowledge_graph.context(owner_id, query, limit=7)
             if graph:
