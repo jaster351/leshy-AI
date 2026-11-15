@@ -29,7 +29,7 @@ from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
-from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_explicit_web_request, is_offline_creative_request
+from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_explicit_web_request, is_offline_creative_request, requires_verified_live_sources
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .self_learning import SelfLearningWorker
 from .knowledge_repository_sync import KnowledgeRepositorySync
@@ -644,7 +644,19 @@ class LeshyApp:
             answer = cinema_no_data(cinema_plan)
             return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
 
-        if search_attempted and not sources and (not catalog_matches or force_search) and not support_rules:
+        strict_live_sources = requires_verified_live_sources(lookup_query, reason or "")
+        if search_attempted and not sources and not strict_live_sources:
+            # An outage is not a reason to silence the local model on timeless
+            # questions or user-specific knowledge. Preserve uncertainty.
+            context.append(ChatMessage(
+                "system",
+                "Внешние источники не удалось проверить. Ответь локально на"
+                " основании общих знаний и доступной памяти. Не выдавай"
+                " непроверенные новости, даты, цены или версии за актуальные."
+                " Если данных недостаточно, конкретно объясни ограничение,"
+                " но не отказывайся от обычного разговора.",
+            ))
+        if search_attempted and not sources and strict_live_sources and (not catalog_matches or force_search) and not support_rules:
             answer = (
                 "Не удалось проверить актуальные сведения: поисковые источники временно недоступны. Попробуйте позже."
                 if search_error else
@@ -676,9 +688,9 @@ class LeshyApp:
                         "Сформируй новый ответ по найденным веб-источникам. Не советуй пользователю искать самому.",
                     )]
                     answer = self.llm.chat(retry_context + history_messages)
-                elif search_attempted and search_error:
+                elif search_attempted and strict_live_sources and search_error:
                     answer = "Не удалось получить актуальные данные из интернета: поисковые источники временно недоступны."
-                elif search_attempted:
+                elif search_attempted and strict_live_sources:
                     answer = "Я выполнил интернет-поиск, но не нашёл достаточно данных для уверенного ответа. Уточните, пожалуйста, о ком или о чём именно идёт речь."
         except Exception as exc:
             problem("chat_generation_failed", str(exc), session_id=sid, owner_id=owner_id)
