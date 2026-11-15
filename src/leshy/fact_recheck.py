@@ -13,7 +13,7 @@ from collections import OrderedDict
 import re
 import threading
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from .source_reading import supplied_public_url
 
@@ -235,6 +235,20 @@ def release_date_from_page(page_text: str) -> date | None:
     return next(iter(dates)) if len(dates) == 1 else None
 
 
+def safe_source_reference(url: str) -> str:
+    """Never echo a token, personal query string, fragment or URL credentials."""
+    try:
+        split = urlsplit(str(url or ""))
+        if split.scheme not in ("http", "https") or not split.hostname:
+            return "неподтверждённый адрес"
+        host = split.hostname
+        if split.port is not None:
+            host = f"{host}:{split.port}"
+        return urlunsplit((split.scheme, host, split.path, "", ""))
+    except (ValueError, TypeError):
+        return "неподтверждённый адрес"
+
+
 def source_release_fact(
     question: str,
     page_text: str,
@@ -282,7 +296,7 @@ def source_release_fact(
             "Указанная дата уже прошла, но сам факт состоявшегося релиза "
             "не подтверждается одной только календарной датой."
         )
-    result.append("Источник: " + source_url)
+    result.append("Источник: " + safe_source_reference(source_url))
     return " ".join(result)
 
 
@@ -374,7 +388,7 @@ def source_dispute_requires_review(
 
 def source_dispute_instruction(sources: list[dict[str, str]]) -> str:
     urls = [
-        str(item.get("url") or "")[:300]
+        safe_source_reference(str(item.get("url") or ""))[:300]
         for item in sources[:3]
         if item.get("url")
     ]
@@ -394,7 +408,7 @@ def source_dispute_instruction(sources: list[dict[str, str]]) -> str:
 
 def source_dispute_fallback(sources: list[dict[str, str]]) -> str:
     urls = [
-        str(item.get("url") or "")
+        safe_source_reference(str(item.get("url") or ""))
         for item in sources[:2] if item.get("url")
     ]
     return (
@@ -420,4 +434,5 @@ __all__ = [
     "source_dispute_requires_review",
     "source_dispute_instruction",
     "source_dispute_fallback",
+    "safe_source_reference",
 ]
