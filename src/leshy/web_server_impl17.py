@@ -11,6 +11,8 @@ from .telegram_browser_login_runtime import install_telegram_browser_login_runti
 from .constitution_runtime import install_constitution_routing
 from .semantic_research_router import install_semantic_research_router
 from .research_tuning import store_for
+from .module_settings import module_enabled
+from .superagent_ssh_pty import InteractiveSSHBroker
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
 
 
@@ -29,6 +31,17 @@ def make_handler(app, telegram, settings, model_catalog):
     # local Constitution file without web search or an LLM-generated path.
     install_constitution_routing(type(app))
     install_semantic_research_router()
+
+    pty_broker = getattr(app, "_ssh_pty_broker", None)
+    if pty_broker is None:
+        pty_broker = InteractiveSSHBroker()
+        app._ssh_pty_broker = pty_broker
+        previous_stop = getattr(app, "stop_background", None)
+        if callable(previous_stop):
+            def stop_with_ssh_pty():
+                pty_broker.shutdown()
+                return previous_stop()
+            app.stop_background = stop_with_ssh_pty
 
     class Handler(Parent):
         def _identity_status_payload(self, owner_id: str) -> dict:
@@ -143,6 +156,87 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             route = urlsplit(self.path).path
+            if route in {
+                "/v1/superagent/ssh/pty/open",
+                "/v1/superagent/ssh/pty/read",
+                "/v1/superagent/ssh/pty/prepare",
+                "/v1/superagent/ssh/pty/write",
+                "/v1/superagent/ssh/pty/close",
+            }:
+                # The UI header only identifies this feature; authorization
+                # always comes from the HttpOnly Web session and provider link.
+                if not self._identity_write_allowed():
+                    return
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._identity_json(HTTPStatus.FORBIDDEN, {
+                        "error": "Требуется интерфейс SuperAgent",
+                    })
+                if (not module_enabled(app.storage, "superagent")
+                        or not module_enabled(app.storage, "remote-admin")):
+                    return self._identity_json(HTTPStatus.FORBIDDEN, {
+                        "error": "Удалённое управление отключено",
+                    })
+                context = self._remote_context()
+                if context is None:
+                    return
+                policy, actor = context
+                try:
+                    body = self._body()
+                    if not isinstance(body, dict):
+                        raise ValueError("Ожидается JSON-объект")
+                    if route.endswith("/open"):
+                        if (set(body) != {"node_id", "credential_file", "confirm"}
+                                or body.get("confirm") is not True):
+                            raise ValueError("Подтвердите открытие SSH-сеанса")
+                        result = pty_broker.open(
+                            policy, actor, body["node_id"], body["credential_file"],
+                        )
+                        return self._identity_json(HTTPStatus.OK, {"pty": result})
+                    if route.endswith("/read"):
+                        if set(body) != {"session_id"}:
+                            raise ValueError("Укажите SSH-сеанс")
+                        result = pty_broker.read(policy, actor, body["session_id"])
+                        return self._identity_json(HTTPStatus.OK, {"pty": result})
+                    if route.endswith("/prepare"):
+                        if set(body) != {"session_id", "line"}:
+                            raise ValueError("Нужна точная строка терминала")
+                        result = pty_broker.prepare(
+                            policy, actor, body["session_id"], body["line"],
+                        )
+                        return self._identity_json(HTTPStatus.OK, {"approval": result})
+                    if route.endswith("/write"):
+                        if (set(body) != {
+                            "session_id", "line", "approval_token", "confirm",
+                        } or body.get("confirm") is not True):
+                            raise ValueError("Подтвердите строку SSH-терминала")
+                        pty_broker.write(
+                            policy, actor, body["session_id"],
+                            body["line"], body["approval_token"],
+                        )
+                        return self._identity_json(HTTPStatus.OK, {
+                            "pty": {"accepted": True, "outcome": "unverified"},
+                        })
+                    if set(body) != {"session_id"}:
+                        raise ValueError("Укажите SSH-сеанс")
+                    pty_broker.close(policy, actor, body["session_id"])
+                    return self._identity_json(HTTPStatus.OK, {"pty": {"closed": True}})
+                except ValueError as exc:
+                    return self._identity_json(HTTPStatus.BAD_REQUEST, {
+                        "error": str(exc)[:250],
+                    })
+                except PermissionError as exc:
+                    return self._identity_json(HTTPStatus.FORBIDDEN, {
+                        "error": str(exc)[:250],
+                    })
+                except TimeoutError:
+                    return self._identity_json(HTTPStatus.GATEWAY_TIMEOUT, {
+                        "error": "SSH-сеанс превысил срок ожидания",
+                    })
+                except Exception as exc:
+                    problem("superagent_ssh_pty_failed", type(exc).__name__)
+                    return self._identity_json(HTTPStatus.BAD_GATEWAY, {
+                        "error": "SSH-соединение прервано или состояние удалённой команды неизвестно",
+                    })
             if route == "/v1/research/settings":
                 if not self._research_owner_allowed() or not self._identity_write_allowed():
                     return
