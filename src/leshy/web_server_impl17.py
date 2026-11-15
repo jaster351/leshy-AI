@@ -28,6 +28,12 @@ def make_handler(app, telegram, settings, model_catalog):
             payload["profile"] = login.profile(
                 owner_id, payload.get("avatar") or {},
             )
+            # The Telegram callback acknowledges login before Bot API photo
+            # retrieval finishes. Do not wait or force the user to log in again:
+            # retry the missing photo in a bounded background task.
+            if (payload["profile"].get("provider") == "telegram"
+                    and payload["profile"].get("photo_pending")):
+                login.ensure_photo_refresh(telegram, owner_id)
             payload["telegram_login_button_available"] = bool(
                 str(payload.get("telegram_bot_username") or "").strip()
             )
@@ -46,10 +52,10 @@ def make_handler(app, telegram, settings, model_catalog):
                     login.status(identity._hash_secret(cookie)),
                 )
             if route == "/v1/identity/telegram/avatar":
-                if not self._authorized():
-                    return self._identity_json(HTTPStatus.UNAUTHORIZED, {
-                        "error": "Требуется Web-сессия",
-                    })
+                # <img> sends the HttpOnly same-site cookie but not the
+                # Authorization: Bearer header used by JSON fetch requests.
+                # A valid, unexpired server-side Web session is sufficient and
+                # required; never accept owner_id from URL/JS for this image.
                 owner = self._existing_web_owner()
                 if not owner:
                     return self._identity_json(HTTPStatus.UNAUTHORIZED, {
@@ -64,7 +70,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", mime)
                 self.send_header("Content-Length", str(len(raw)))
-                self.send_header("Cache-Control", "private, max-age=300")
+                self.send_header("Cache-Control", "private, no-store")
                 self.send_header("Vary", "Cookie")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.end_headers()
