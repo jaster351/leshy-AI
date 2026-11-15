@@ -103,7 +103,7 @@ class InteractiveSSHBroker:
             self._sessions.clear()
 
     def _get(self, policy: RemotePermissionPolicy, actor: VerifiedActor,
-             session_id: str) -> _PTY:
+             session_id: str, *, touch: bool = True) -> _PTY:
         policy._check_actor(actor)
         self._prune()
         if not isinstance(session_id, str):
@@ -118,7 +118,8 @@ class InteractiveSSHBroker:
         # Recheck grant and SSH host-key registration for EVERY read/write.
         policy.require(actor, session.node, "execute",
                        observed_fingerprint=session.host_pin)
-        session.expires = self._clock() + self._ttl
+        if touch:
+            session.expires = self._clock() + self._ttl
         return session
 
     def open(self, policy: RemotePermissionPolicy, actor: VerifiedActor,
@@ -161,7 +162,8 @@ class InteractiveSSHBroker:
     def read(self, policy: RemotePermissionPolicy, actor: VerifiedActor,
              session_id: str) -> dict[str, Any]:
         with self._lock:
-            session = self._get(policy, actor, session_id)
+            # Automatic UI polling must not extend the session lifetime.
+            session = self._get(policy, actor, session_id, touch=False)
             chunks = bytearray()
             while len(chunks) < _MAX_OUTPUT and session.channel.recv_ready():
                 part = session.channel.recv(min(4096, _MAX_OUTPUT - len(chunks)))
