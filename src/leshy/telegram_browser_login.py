@@ -305,7 +305,13 @@ class TelegramBrowserLogin:
                     self.identity._migrate_owner_rows(legacy, owner)
                     self.identity._migrate_lenta_profile(legacy, owner)
                     moved += session_count
-                self.identity._bind_alias(legacy, owner)
+                with self.storage.connection() as conn:
+                    alias = conn.execute(
+                        "SELECT owner_id FROM owner_identity_aliases WHERE alias=?",
+                        (legacy,),
+                    ).fetchone()
+                if alias is None or str(alias["owner_id"]) != owner:
+                    self.identity._bind_alias(legacy, owner)
         if moved:
             event("telegram_web_history_reconciled", owner_id=owner,
                   sessions_moved=moved)
