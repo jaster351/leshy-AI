@@ -14,6 +14,7 @@ from .diagnostics import event, problem
 from .hf_settings import HuggingFaceSettings
 from .model_catalog import apply_saved_model_to_settings, configure_app_model_verifier
 from .os_control_approval import install_os_control
+from .role_authority import role_for_web
 from .runtime_compat import CompatibleRuntimeManager
 from .streaming_backends import install_streaming_backends
 from .telegram_fast import FastTelegramBridge
@@ -88,7 +89,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 # token alone does not establish the identity of an OS owner.
                 owner_getter = getattr(self, "_existing_web_owner", None)
                 owner = owner_getter() if callable(owner_getter) else None
-                if not owner or owner == "web:local":
+                if not owner or owner == "web:local" or role_for_web(telegram, getattr(app, "owner_identity", None), owner) not in {"creator", "server_owner"}:
                     return self._json(HTTPStatus.FORBIDDEN, {"error": "Для управления ОС требуется подтверждённая Web-сессия владельца"})
                 args = parse.parse_qs(parsed.query)
                 session_id = self._arg(args, "session_id", "")
@@ -168,7 +169,7 @@ def make_handler(app, telegram, settings, model_catalog):
                         raise RuntimeError("Модуль подтверждения системных действий недоступен")
                     owner_getter = getattr(self, "_existing_web_owner", None)
                     owner = owner_getter() if callable(owner_getter) else None
-                    if not owner or owner == "web:local":
+                    if not owner or owner == "web:local" or role_for_web(telegram, getattr(app, "owner_identity", None), owner) not in {"creator", "server_owner"}:
                         return self._json(HTTPStatus.FORBIDDEN, {"error": "Для подтверждения действий требуется Web-сессия владельца"})
                     result = controller.resolve(str(body.get("id") or ""), owner_id=owner, allow=bool(body.get("allow")))
                     return self._json(HTTPStatus.OK, result)
