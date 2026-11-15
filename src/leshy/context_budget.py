@@ -90,85 +90,125 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
     before = estimator(source)
     if before <= budget:
         return ContextBudgetResult(source, before, before, budget, 0, 0)
-    system = [m for m in source if m.role == "system"]
+    # Составные системные инструкции могут включать длинный persona и память.
+    # При сильном переполнении нельзя слепо резать их с конца: постоянные
+    # пользовательские правила как раз находятся в последних системных частях.
+    system_text = source[0].content if source and source[0].role == "system" else ""
+    paragraphs = [part.strip() for part in system_text.split("\n\n") if part.strip()]
     dialogue = [m for m in source if m.role != "system"]
-    tail = dialogue[-2:]
-    older = dialogue[:-2]
-    kept = system + tail
-    dropped = len(older)
-    while estimator(kept) > budget and len(system) > 1:
-        system.pop(1)
-        dropped += 1
-        kept = system + tail
+    latest_user = next((i for i in range(len(dialogue) - 1, -1, -1)
+                        if dialogue[i].role == "user"), None)
+    if latest_user is None and dialogue:
+        latest_user = len(dialogue) - 1
+
+    # Обязательные фрагменты: начало persona и все явно записанные правила.
+    essential = set([0] if paragraphs else [])
+    essential.update(i for i, part in enumerate(paragraphs)
+                     if "Постоянные правила общения" in part)
+    selected_parts = set(essential)
+    selected_dialogue = {latest_user} if latest_user is not None else set()
+    partial_dialogue: dict[int, ChatMessage] = {}
+    parts = list(paragraphs)
     truncated = 0
-    while estimator(kept) > budget and kept:
-        # Сначала ужимаем старый диалог и систему; актуальный запрос
-        # пользователя — последний кандидат на сокращение.
-        candidates = sorted(
-            range(len(kept)),
-            key=lambda i: (
-                kept[i].role == "user" and i == len(kept) - 1,
-                -len(kept[i].content),
-            ),
-        )
-        changed = False
-        for index in candidates:
-            current = kept[index]
-            current_tokens = max(1, (len(current.content) + 1) // 2)
-            if current_tokens <= 64:
-                continue
-            overflow = estimator(kept) - budget
-            target = max(64, current_tokens - overflow - 16)
-            is_current_user = current.role == "user" and index == len(kept) - 1
-            shortened = _truncate_content(
-                current.content, target, preserve_head=is_current_user or current.role == "system"
-            )
-            if shortened != current.content:
-                kept[index] = ChatMessage(current.role, shortened)
-                truncated += 1
-                changed = True
-                break
-        if not changed:
+
+    def render() -> list[ChatMessage]:
+        system_content = "\n\n".join(parts[i] for i in sorted(selected_parts))
+        answer = [ChatMessage("system", system_content)] if system_content else []
+        for index in sorted(selected_dialogue):
+            answer.append(partial_dialogue.get(index, dialogue[index]))
+        return answer
+
+    # Ужимаем только то, что уже нельзя разместить целиком: сперва persona,
+    # затем слишком длинный текущий вопрос. Постоянные правила обрезаются лишь
+    # как крайняя мера, когда одновременно сохранить всё физически невозможно.
+    for _ in range(120):
+        kept = render()
+        if estimator(kept) <= budget:
             break
+        if 0 in selected_parts and len(parts[0]) > 220:
+            target = max(220, (len(parts[0]) * 2) // 3)
+            parts[0] = _strict_clip(parts[0], target, preserve_edges=True)
+        elif latest_user is not None:
+            current = partial_dialogue.get(latest_user, dialogue[latest_user])
+            if len(current.content) > 96:
+                target = max(96, (len(current.content) * 2) // 3)
+                partial_dialogue[latest_user] = ChatMessage(
+                    current.role,
+                    _strict_clip(current.content, target, preserve_edges=True),
+                )
+            else:
+                rule_indices = [i for i in sorted(essential) if i != 0 and len(parts[i]) > 80]
+                if not rule_indices:
+                    break
+                index = max(rule_indices, key=lambda i: len(parts[i]))
+                clipped = _strict_clip(parts[index], max(80, len(parts[index]) * 2 // 3),
+                                       preserve_edges=True)
+                parts[index] = "[Часть постоянных правил не поместилась в контекст]\n" + clipped
+        else:
+            break
+        truncated += 1
+
+    # Свежие проверяемые факты важнее длинной старой истории.
+    def system_priority(index: int) -> tuple[int, int]:
+        part = parts[index]
+        if any(mark in part for mark in (
+            "Результаты текущего веб-поиска",
+            "Текущий веб-поиск временно не выполнен",
+            "Проверенные локальные знания",
+        )):
+            return (0, -index)
+        if any(mark in part for mark in ("FACTUAL_EVIDENCE", "достоверн", "недоверенн")):
+            return (1, -index)
+        return (3, -index)
+
+    for index in sorted((i for i in range(len(parts)) if i not in essential),
+                        key=system_priority):
+        selected_parts.add(index)
+        if estimator(render()) > budget:
+            selected_parts.remove(index)
+
+    # Возвращаем столько реплик по хронологии, сколько помещается в реальное
+    # окно текущего backend. Больше никакого отдельного лимита 2600 символов.
+    for index in range(len(dialogue) - 1, -1, -1):
+        if index in selected_dialogue:
+            continue
+        selected_dialogue.add(index)
+        if estimator(render()) <= budget:
+            continue
+        selected_dialogue.remove(index)
+
+    kept = render()
+    # Защитный запас для патологически маленьких окон и Unicode-оценщика.
+    # Длинный запрос сокращается с сохранением начала и конца, чтобы задача
+    # и последняя цитата не исчезали из prompt.
+    for _ in range(120):
+        if estimator(kept) <= budget:
+            break
+        if latest_user is not None:
+            current = partial_dialogue.get(latest_user, dialogue[latest_user])
+            if len(current.content) > 24:
+                partial_dialogue[latest_user] = ChatMessage(
+                    current.role,
+                    _strict_clip(current.content, max(24, len(current.content) * 2 // 3),
+                                 preserve_edges=True),
+                )
+                truncated += 1
+                kept = render()
+                continue
+        oversized = [i for i in sorted(selected_parts) if len(parts[i]) > 24]
+        if not oversized:
+            break
+        index = max(oversized, key=lambda i: len(parts[i]))
+        parts[index] = _strict_clip(parts[index], max(24, len(parts[index]) * 2 // 3),
+                                    preserve_edges=True)
+        truncated += 1
+        kept = render()
+
+    kept = render()
     after = estimator(kept)
-    if after > budget:
-        # The conservative Unicode estimator can assign >1 token per 2 chars.
-        # Drop nonessential turns first; always retain the system contract and
-        # most recent user request before falling back to strict character cuts.
-        latest_user = next(
-            (i for i in range(len(kept) - 1, -1, -1) if kept[i].role == "user"),
-            len(kept) - 1,
-        )
-        protected = {latest_user}
-        if kept and kept[0].role == "system":
-            protected.add(0)
-        for index in range(len(kept) - 1, -1, -1):
-            if estimator(kept) <= budget:
-                break
-            if index not in protected:
-                kept.pop(index)
-                dropped += 1
-
-        for _ in range(100):
-            if estimator(kept) <= budget:
-                break
-            # Keep reducing the longest protected block until the *actual*
-            # estimator fits, rather than trusting a fixed char/token ratio.
-            index = max(range(len(kept)), key=lambda i: len(kept[i].content))
-            current = kept[index]
-            if len(current.content) <= 1:
-                break
-            new_len = max(1, len(current.content) - max(16, len(current.content) // 3))
-            shorter = _strict_clip(
-                current.content, new_len,
-                preserve_edges=current.role in {"system", "user"},
-            )
-            if shorter == current.content:
-                break
-            kept[index] = ChatMessage(current.role, shorter)
-            truncated += 1
-        after = estimator(kept)
+    dropped = len(source) - len(kept)
+    # Число потерянных частей system в счётчике не отражаем как потерянные
+    # сообщения, иначе статистика ошибочно покажет удаление пользовательских реплик.
     return ContextBudgetResult(kept, before, after, budget, dropped, truncated)
-
 
 __all__ = ["ContextBudgetResult", "apply_context_budget", "estimate_tokens"]
