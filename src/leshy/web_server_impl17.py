@@ -8,6 +8,7 @@ from . import web_server_impl16 as previous
 from .diagnostics import problem
 from .telegram_browser_login import TelegramBrowserLogin
 from .telegram_browser_login_runtime import install_telegram_browser_login_runtime
+from .constitution_runtime import install_constitution_routing
 
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
@@ -21,6 +22,9 @@ def make_handler(app, telegram, settings, model_catalog):
         login = TelegramBrowserLogin(identity)
         app.telegram_browser_login = login
     install_telegram_browser_login_runtime()
+    # Apply after the other Web/Telegram runtime wrappers; use the verified
+    # local Constitution file without web search or an LLM-generated path.
+    install_constitution_routing(type(app))
 
     class Handler(Parent):
         def _identity_status_payload(self, owner_id: str) -> dict:
