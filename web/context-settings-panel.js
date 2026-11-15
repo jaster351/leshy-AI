@@ -17,10 +17,11 @@
   document.head.appendChild(style);
 
   async function request(path, options) {
+    const config = options || {};
     const response = await fetch(path, {
+      ...config,
       credentials: "same-origin",
-      headers: {"Content-Type": "application/json", ...((options && options.headers) || {})},
-      ...(options || {})
+      headers: {"Content-Type": "application/json", ...(config.headers || {})}
     });
     const data = await response.json().catch(() => ({error:"Некорректный ответ сервера"}));
     if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
