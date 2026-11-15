@@ -1,6 +1,7 @@
 """Owner-authenticated settings and pairing UI for Parser for Plex."""
 from __future__ import annotations
 
+import ipaddress
 from http import HTTPStatus
 from urllib import parse
 
@@ -16,6 +17,25 @@ def make_handler(app, telegram, settings, model_catalog):
     bridge = TorrentParserBridge(settings.brain_dir)
 
     class Handler(Parent):
+        def _context_settings_access(self) -> bool:
+            """Разрешить настройки доверенной Web-сессии или локальному владельцу."""
+            if not self._authorized():
+                self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API-авторизация"})
+                return False
+            getter = getattr(self, "_existing_web_owner", None)
+            owner = getter() if callable(getter) else ""
+            authenticated = bool(owner and owner != "web:local")
+            try:
+                local = ipaddress.ip_address(self.client_address[0]).is_loopback
+            except (ValueError, IndexError, TypeError, AttributeError):
+                local = False
+            if not authenticated and not local:
+                self._json(HTTPStatus.UNAUTHORIZED, {
+                    "error": "Настройка доступна владельцу после входа или локально",
+                })
+                return False
+            return True
+
         def do_GET(self):
             path = parse.urlsplit(self.path).path
             if path == "/context-settings-panel.js":
@@ -24,8 +44,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": "Панель контекста не найдена"})
             if path == "/v1/context/settings":
-                owner = self._settings_owner()
-                if owner is None:
+                if not self._context_settings_access():
                     return
                 return self._json(HTTPStatus.OK, app.context_settings.status(app.llm))
             if path == "/torrent-parser-panel.js":
@@ -43,8 +62,7 @@ def make_handler(app, telegram, settings, model_catalog):
         def do_POST(self):
             path = parse.urlsplit(self.path).path
             if path == "/v1/context/settings":
-                owner = self._settings_owner()
-                if owner is None:
+                if not self._context_settings_access():
                     return
                 if self.headers.get("X-Leshy-UI") != "context-settings":
                     return self._json(HTTPStatus.FORBIDDEN, {
