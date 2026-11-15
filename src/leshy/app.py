@@ -371,14 +371,14 @@ class LeshyApp:
         query = " ".join(str(query).replace("/search", "", 1).split()).strip()
         if not query:
             raise ValueError("Пустой поисковый запрос")
-        event("live_search_started", query=query[:500], reason=reason[:200])
+        event("live_search_started", query_chars=len(query), reason=reason[:100])
         result = self.research.live_query(query, reason=reason, limit=limit)
-        event("live_search_finished", query=query[:500], status=result.get("status"), results=len(result.get("results", [])))
+        event("live_search_finished", query_chars=len(query), status=result.get("status"), results=len(result.get("results", [])))
         return result
 
     def queue_research(self, query: str) -> int:
         task_id = self.self_learning.queue_topic(query)
-        event("research_queued_from_ui", task_id=task_id, query=str(query)[:500])
+        event("research_queued_from_ui", task_id=task_id, query_chars=len(str(query)))
         return task_id
 
     def _save_assistant(self, sid: str, answer: str) -> str:
@@ -643,7 +643,7 @@ class LeshyApp:
                     context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
             except Exception as exc:
                 search_error = str(exc)
-                problem("live_search_failed", search_error, query=message[:500])
+                problem("live_search_failed", type(search_error).__name__, query_chars=len(message))
                 context.append(ChatMessage("system", "Текущий веб-поиск временно не выполнен: " + search_error))
 
         reason = None if creative else adaptive_research_reason(lookup_query, trusted, candidates)
