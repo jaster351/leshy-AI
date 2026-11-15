@@ -21,7 +21,7 @@ from .superagent_ticket_pool import ParallelTicketPool
 from .superagent_worker_capacity import worker_ceiling, available_worker_slots
 from .superagent_plan_bridge import SuperAgentPlanBridge
 from .superagent_plan_runner import execute_ready_plan_reads
-from .superagent_remote_maintenance import maintenance_intent, run_remote_maintenance
+from .superagent_remote_maintenance import maintenance_intent, run_remote_maintenance, _actor_for_ticket
 from .cognitive_journal import CognitiveStepJournal
 from .cognitive_lease import SuperAgentProcessLease
 from .diagnostics import event, problem
@@ -318,6 +318,15 @@ class SuperAgentService:
             "created_at": now,
             "policy_version": 1,
         }
+        if maintenance_intent(request):
+            # Do not let an old anonymous ticket acquire SSH rights simply
+            # because the browser/Telegram identity is linked *later*.
+            # Check an active server-side provider login AT CREATION TIME.
+            try:
+                _actor_for_ticket(self.app, str(owner_id or ""))
+                mandate["remote_authorized_at_creation"] = True
+            except (PermissionError, ValueError, RuntimeError):
+                mandate["remote_authorized_at_creation"] = False
         with self.storage.connection() as conn:
             conn.execute(
                 "INSERT INTO superagent_tickets(id,owner_id,session_id,title,request_text,mandate_json,state,created_at,updated_at) "
