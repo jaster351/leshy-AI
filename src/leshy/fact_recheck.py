@@ -68,15 +68,60 @@ def _items(rows: list[Any], role: str) -> list[str]:
     return result
 
 
-def is_factual_challenge(message: str, rows: list[Any]) -> bool:
-    """Intent is broad, but must refer to a real previous factual claim."""
+_SEMANTIC_RECHECK_GUIDANCE = (
+    "Определи смысл ПОСЛЕДНЕЙ реплики пользователя на фоне предыдущего "
+    "фактического утверждения ассистента. Ответь ровно одним словом: "
+    "RECHECK или CHAT. "
+    "RECHECK: сомнение, возражение, просьба подтвердить истинность, "
+    "указание на ошибку или противоречие с доказательством, даже без "
+    "прямых слов «ошибка» и «проверь». "
+    "CHAT: обычное продолжение беседы, шутка, приветствие, согласие, "
+    "новая тема или уточнение, не ставящее под сомнение прежний факт. "
+    "Несогласие ещё не означает, что пользователь прав; требуется проверка."
+)
+
+
+def is_factual_challenge(
+    message: str, rows: list[Any], *, app: Any | None = None,
+) -> bool:
+    """Feedback about a previous FACT, not a universal web-search keyword."""
     if supplied_public_url(message):
         return False
     text = " ".join(str(message or "").split())
-    if len(text) > 600 or not _REVIEW.search(text):
+    if len(text) > 600:
         return False
     past = _items(rows, "assistant")
-    return bool(past and _FACTUAL.search(past[0]))
+    if not past or not _FACTUAL.search(past[0]):
+        return False
+    if _REVIEW.search(text):
+        return True
+    # Ambiguous natural-language doubt: give the already-loaded LOCAL model
+    # a tiny classification task; do not wake a sleeping model just for this.
+    if app is None or len(text) > 160:
+        return False
+    if not re.search(
+        r"(?i)(?:[?]|^\s*(?:но|а|зачем|неужели|сомневаюсь|"
+        r"друг\w*|иначе|не\s+похоже|странн\w*|серь[её]зно)\b|"
+        r"\b(?:доказ\w*|подтверд\w*|уверен\w*|не\s+верно|друг\w*|"
+        r"сомнев\w*|не\s+сход\w*|не\s+совпад\w*)\b)",
+        text,
+    ):
+        return False
+    try:
+        from .semantic_research_router import _resident_model, _short_local_inference
+        if not _resident_model(app):
+            return False
+        prompt = (
+            "Предыдущий ответ: " + past[0][:340] +
+            "\nНовая реплика: " + text[:160] +
+            "\nРешение:"
+        )
+        reply = _short_local_inference(
+            app, prompt, guidance=_SEMANTIC_RECHECK_GUIDANCE,
+        )
+        return bool(re.fullmatch(r"(?i)\s*RECHECK\s*[.!]?\s*", reply))
+    except Exception:
+        return False
 
 
 def prior_factual_question(rows: list[Any]) -> str:
