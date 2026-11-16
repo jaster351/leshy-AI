@@ -68,6 +68,22 @@ def search_provider_status() -> dict:
 
 
 
+# A salutation is not part of the subject of a longer question.
+# Without this, "Добрый день" makes unrelated juice-brand hits appear relevant.
+_GREETING_PREFIX = re.compile(
+    r"^\s*(?:(?:добрый\s+(?:день|вечер)|доброе\s+утро|"
+    r"доброй\s+ночи|здравствуйте|здравствуй|привет(?:ствую)?|"
+    r"hello|hi)\s*[,!:.—–-]*\s*)+",
+    re.IGNORECASE,
+)
+
+
+def _search_intent_query(query: str) -> str:
+    original = " ".join(str(query or "").split()).strip()
+    focused = _GREETING_PREFIX.sub("", original).strip()
+    return focused or original
+
+
 # A search endpoint can return valid URLs for an entirely different topic.
 # Check the subject before declaring a provider successful (or learning from it).
 _SEARCH_FILLER = frozenset("""
@@ -78,6 +94,8 @@ _SEARCH_FILLER = frozenset("""
 будет выйдет выходит выпустят выпустит дата даты выход выхода релиз релиза
 последние последний последняя новые новая новый новое сейчас сегодня завтра
 информация информации узнать нужно хочу можно про нас мне тебя это этот этой
+добрый доброе доброй день вечер утро ночи здравствуйте здравствуй привет
+если около постоянно размер данных
 эти о об от для по с со на в во из к ко у за и или что ли не
 tell show explain find please when how many days left remaining
 release released date dates latest news new now today tomorrow
@@ -378,7 +396,7 @@ class RacingSearch(FallbackSearch):
         self.hedge_delay_seconds = max(0.0, min(float(hedge_delay_seconds), 3.0))
 
     def search(self, query: str, limit: int = 5) -> list[SearchResult]:
-        cleaned = " ".join(str(query or "").split()).strip()
+        cleaned = _search_intent_query(query)
         if not cleaned:
             return []
         limit = max(1, min(int(limit), 10))
