@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .action_intent_guard import local_document_study
+
 
 _URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _DIRECT_RE = re.compile(
@@ -32,7 +34,7 @@ def explicit_learning_target(message: str) -> str | None:
     способной к обучению.
     """
     text = " ".join(str(message or "").split()).strip()
-    if not text:
+    if not text or local_document_study(text):
         return None
     match = _DIRECT_RE.search(text) or _EN_RE.search(text)
     if match:
