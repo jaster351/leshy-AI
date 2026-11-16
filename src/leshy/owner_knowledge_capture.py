@@ -41,12 +41,21 @@ def is_owner_document_save_request(message: str) -> bool:
     ):
         return False
     prefix = value[:1100]
+    # Only a present-tense instruction from the user is authorization to
+    # persist data. Imperatives quoted inside a document are not.
+    directed = bool(re.match(
+        r"^(?:леший[,!:]?\s+)?(?:пожалуйста[,!:]?\s+)?"
+        r"(?:сохрани|сохранить|запомни|запиши|записать|внеси|добавь)\b",
+        value,
+    ))
+    assigned = bool(
+        re.search(r"(?:твоя текущая задача|текущее задание|текущая задача).{0,140}"
+                  r"(?:сохрани|сохранить|запомни|запиши|записать)", value[:360])
+    )
+    if not (directed or assigned):
+        return False
     if _NEGATIVE_RE.search(prefix):
         return False
-    # The user's full instruction can itself be a Markdown document.
-    if len(original) >= 1000 and ("cloud4box" in value or "техподдерж" in value):
-        if _HEADING_RE.search(original) and re.search(r"\bсохрани\b", value[-1800:]):
-            return True
     if not any(word in prefix for word in _KEYWORDS):
         return False
     if not _ACTION_RE.search(prefix):
