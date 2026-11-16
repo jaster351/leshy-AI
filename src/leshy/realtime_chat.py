@@ -19,6 +19,7 @@ from .capability_registry import is_self_capability_question
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply, work_reference_context
 from .conversation_mode import resolve_conversation_mode, mode_instruction, conversation_rows_for_mode
+from .response_integrity import is_correction_request, protect_corrected_answer
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_offline_creative_request, requires_verified_live_sources
 from .research_policy import is_casual_checkin, is_local_dialogue_request
 from .storage import utcnow
@@ -500,6 +501,9 @@ class RealtimeChatManager:
                         "sources": [], "stopped": True,
                     })
                     return
+                answer, rejected_reason = protect_corrected_answer(message, rows, answer)
+                if rejected_reason:
+                    event("support_answer_integrity_blocked", request_id=rid, reason=rejected_reason)
                 created_at = self.app._save_assistant(sid, answer)
                 event("support_stream_draft_prepared", request_id=rid, session_id=sid,
                       answer_chars=len(answer))
@@ -829,7 +833,7 @@ class RealtimeChatManager:
             # недоступен, даже когда поиск уже выполнен. Иначе неверный ответ
             # успевает появиться в Telegram до финального редактирования.
             hold_search_answer = bool(
-                search_attempted or supplied_public_url(message)
+                is_correction_request(message) or search_attempted or supplied_public_url(message)
                 or (is_factual_challenge(message, rows, app=self.app) and recent_user_source(rows))
             )
             stream_formatter = LayoutStreamFormatter(message)
@@ -926,6 +930,9 @@ class RealtimeChatManager:
                 event("chat_stream_web_refusal_handled", request_id=rid, source_count=len(sources))
             if not cancel.is_set():
                 answer = layout_answer(message, answer)
+                answer, rejected_reason = protect_corrected_answer(message, rows, answer)
+                if rejected_reason:
+                    event("chat_stream_integrity_blocked", request_id=rid, reason=rejected_reason)
             if hold_search_answer and not cancel.is_set():
                 for part in self._chunk_fallback(answer, 160):
                     yield StreamEvent("delta", {"text": part})
