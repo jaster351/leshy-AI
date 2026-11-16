@@ -13,6 +13,7 @@ from .semantic_research_router import install_semantic_research_router
 from .research_tuning import store_for
 from .module_settings import module_enabled
 from .superagent_ssh_pty import InteractiveSSHBroker
+from .model_update_service import ModelUpdateService
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
 
 
@@ -32,6 +33,19 @@ def make_handler(app, telegram, settings, model_catalog):
     install_constitution_routing(type(app))
     install_semantic_research_router()
 
+    updates = getattr(app, "_model_update_service", None)
+    if not isinstance(updates, ModelUpdateService):
+        updates = ModelUpdateService(settings.brain_dir, settings.native_models_dir, model_catalog)
+        app._model_update_service = updates
+        previous_stop = getattr(app, "stop_background", None)
+
+        def stop_with_model_updates():
+            updates.stop()
+            if callable(previous_stop):
+                return previous_stop()
+        app.stop_background = stop_with_model_updates
+        updates.start()
+
     pty_broker = getattr(app, "_ssh_pty_broker", None)
     if pty_broker is None:
         pty_broker = InteractiveSSHBroker()
@@ -44,6 +58,21 @@ def make_handler(app, telegram, settings, model_catalog):
             app.stop_background = stop_with_ssh_pty
 
     class Handler(Parent):
+        def _model_update_owner_allowed(self, *, write: bool = False) -> bool:
+            if not self._authorized() or not self._existing_web_owner():
+                self._identity_json(HTTPStatus.UNAUTHORIZED, {
+                    "error": "Требуется подтверждённая Web-сессия хозяина",
+                })
+                return False
+            if role_for_web(telegram, identity, self._existing_web_owner()) not in {"creator", "server_owner"}:
+                self._identity_json(HTTPStatus.FORBIDDEN, {
+                    "error": "Управление моделями доступно только хозяину этого сервера",
+                })
+                return False
+            if write and not self._identity_write_allowed():
+                return False
+            return True
+
         def _identity_status_payload(self, owner_id: str) -> dict:
             # The verified owner is read from the server-side Web cookie. Repair
             # earlier Telegram conversations before telling the UI to reload.
@@ -98,6 +127,12 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_GET(self):
             route = urlsplit(self.path).path
+            if route == "/model-update-panel.js":
+                return self._send_asset("model-update-panel.js", "application/javascript; charset=utf-8")
+            if route == "/v1/model-updates":
+                if not self._model_update_owner_allowed():
+                    return
+                return self._identity_json(HTTPStatus.OK, updates.status())
             if route == "/research-settings-panel.js":
                 try:
                     return self._send_asset(
@@ -156,6 +191,22 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             route = urlsplit(self.path).path
+            if route in {"/v1/model-updates/check", "/v1/model-updates/config"}:
+                if not self._model_update_owner_allowed(write=True):
+                    return
+                try:
+                    body = self._body()
+                    if route.endswith("/config"):
+                        if set(body) != {"mode"}:
+                            raise ValueError("Нужен только параметр mode")
+                        result = updates.configure(str(body["mode"]))
+                    else:
+                        if set(body) - {"download"}:
+                            raise ValueError("Допустим только параметр download")
+                        result = updates.request_check(download=body.get("download") is True)
+                    return self._identity_json(HTTPStatus.OK, result)
+                except (ValueError, TypeError) as exc:
+                    return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             if route in {
                 "/v1/superagent/ssh/pty/open",
                 "/v1/superagent/ssh/pty/read",
