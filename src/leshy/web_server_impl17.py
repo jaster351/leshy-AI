@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 from . import web_server_impl16 as previous
 from .diagnostics import problem
@@ -14,6 +14,7 @@ from .research_tuning import store_for
 from .module_settings import module_enabled
 from .superagent_ssh_pty import InteractiveSSHBroker
 from .model_update_service import ModelUpdateService
+from .model_repository_search import search_hub_models
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
 
 
@@ -133,6 +134,28 @@ def make_handler(app, telegram, settings, model_catalog):
                 if not self._model_update_owner_allowed():
                     return
                 return self._identity_json(HTTPStatus.OK, updates.status())
+            if route == "/v1/model-repositories":
+                if not self._model_update_owner_allowed():
+                    return
+                params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                value = lambda key, default="": str((params.get(key) or [default])[0])
+                try:
+                    result = search_hub_models(
+                        name=value("name"), author=value("author"),
+                        specialty=value("specialty", "all"),
+                        date_from=value("from"), date_to=value("to"),
+                        limit=value("limit", "30"),
+                    )
+                    return self._identity_json(HTTPStatus.OK, result)
+                except (ValueError, TypeError) as exc:
+                    return self._identity_json(HTTPStatus.BAD_REQUEST, {
+                        "error": str(exc)[:250],
+                    })
+                except Exception as exc:
+                    problem("model_repository_search_failed", type(exc).__name__)
+                    return self._identity_json(HTTPStatus.BAD_GATEWAY, {
+                        "error": "Не удалось получить реальные результаты из Hugging Face Hub",
+                    })
             if route == "/research-settings-panel.js":
                 try:
                     return self._send_asset(
