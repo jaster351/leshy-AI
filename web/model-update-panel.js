@@ -48,14 +48,104 @@
       'Загружаю состояние обновлений…</div>',
       '<div class="hint" style="margin-top:8px">Автозагрузка не означает автоматическое переключение. ',
       'Пока отсутствует независимая оценка русского языка, фактической точности и работы инструментов, ',
-      'новая GGUF остаётся кандидатом. Существующая модель не удаляется.</div>'
+      'новая GGUF остаётся кандидатом. Существующая модель не удаляется.</div>',
+      '<section style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">',
+      '<h3>Поиск моделей в репозиториях разработчиков</h3>',
+      '<p class="muted">Поиск по реальному каталогу Hugging Face Hub, а не по заранее записанному списку. ',
+      'Специализация определяется только по доступным названиям и тегам.</p>',
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px">',
+      '<label>Название модели<input class="field" id="modelRepoName" type="search" maxlength="120" ',
+      'placeholder="Например, Qwen3.5 или Coder" autocomplete="off" style="width:100%"></label>',
+      '<label>Автор / организация<input class="field" id="modelRepoAuthor" maxlength="80" ',
+      'placeholder="Например, Qwen или google" autocomplete="off" style="width:100%"></label>',
+      '<label>Специализация<select class="field" id="modelRepoSpecialty" style="width:100%">',
+      '<option value="all">Все направления</option>',
+      '<option value="programming">Программирование</option>',
+      '<option value="legal">Юриспруденция</option>',
+      '<option value="medicine">Медицина</option>',
+      '<option value="finance">Финансы</option>',
+      '<option value="science">Наука</option>',
+      '<option value="education">Образование</option>',
+      '</select></label>',
+      '<label>Дата публикации от<input class="field" id="modelRepoFrom" type="date" style="width:100%"></label>',
+      '<label>Дата публикации до<input class="field" id="modelRepoTo" type="date" style="width:100%"></label>',
+      '</div>',
+      '<button class="button secondary" id="modelRepoSearch" type="button" style="margin-top:12px">',
+      'Найти модели</button>',
+      '<div id="modelRepoResults" aria-live="polite" style="margin-top:12px"></div>',
+      '</section>'
     ].join('');
     const reference = find('modelLibraryCard') || find('localModelCard');
     if (reference && reference.parentNode) reference.insertAdjacentElement('afterend', card);
     else pane.appendChild(card);
     find('modelUpdateMode').onchange = save;
     find('modelUpdateCheck').onclick = check;
+    find('modelRepoSearch').onclick = searchRepositories;
+    find('modelRepoName').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); searchRepositories(); }
+    });
     return true;
+  }
+
+  async function searchRepositories() {
+    const button = find('modelRepoSearch');
+    const container = find('modelRepoResults');
+    if (!button || !container) return;
+    const params = new URLSearchParams({
+      name: find('modelRepoName').value.trim(),
+      author: find('modelRepoAuthor').value.trim(),
+      specialty: find('modelRepoSpecialty').value,
+      from: find('modelRepoFrom').value,
+      to: find('modelRepoTo').value,
+      limit: '30'
+    });
+    button.disabled = true;
+    container.textContent = 'Получаю модели из каталога Hugging Face…';
+    try {
+      const data = await api('/v1/model-repositories?' + params.toString());
+      container.replaceChildren();
+      const info = document.createElement('p');
+      info.className = 'muted';
+      info.textContent = 'Найдено: ' + data.count + ' · просмотрено записей: ' + data.scanned
+        + '. Данные: ' + data.source + '.';
+      container.appendChild(info);
+      if (!data.items || !data.items.length) {
+        const empty = document.createElement('p');
+        empty.textContent = 'Под заданные условия модели не найдены в просмотренной части каталога.';
+        container.appendChild(empty);
+      }
+      for (const item of data.items || []) {
+        const entry = document.createElement('article');
+        entry.style.cssText = 'padding:10px 0;border-bottom:1px solid var(--line)';
+        const link = document.createElement('a');
+        // Only verified canonical Hub repository URL shapes may leave the UI.
+        if (!/^https:\/\/huggingface\.co\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(item.url)) {
+          continue;
+        }
+        link.href = item.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = item.id;
+        const details = document.createElement('div');
+        details.className = 'muted';
+        details.style.fontSize = '12px';
+        details.textContent = 'Опубликована: ' + (item.created_at || 'нет даты')
+          + ' · Изменена: ' + (item.last_modified || 'неизвестно')
+          + ' · Скачиваний: ' + item.downloads
+          + ' · ' + (item.gguf_tag ? 'GGUF по тегам' : 'GGUF не подтверждён');
+        entry.append(link, details);
+        container.appendChild(entry);
+      }
+      const foot = document.createElement('p');
+      foot.className = 'hint';
+      foot.textContent = data.note || '';
+      if (data.scan_limited) foot.textContent += ' Поиск охватывает ограниченную выдачу; более старые записи могут не попасть в неё.';
+      container.appendChild(foot);
+    } catch (error) {
+      container.textContent = 'Не удалось выполнить поиск: ' + (error.message || String(error));
+    } finally {
+      button.disabled = false;
+    }
   }
 
   let busy = false;
