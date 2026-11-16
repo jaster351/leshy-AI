@@ -57,81 +57,110 @@ def is_owner_document_save_request(message: str) -> bool:
     return True
 
 
-def _source_document(storage, owner_id: str, session_id: str, request: str) -> str | None:
-    """Use only the current owner's own messages in the current session."""
-    if (len(request) >= 900 and "cloud4box" in request.casefold()
-            and len(_HEADING_RE.findall(request)) >= 3):
-        return request
+def _source_document(storage, owner_id: str, session_id: str, request: str) -> tuple[str, str, int] | None:
+    """Read the user's OR assistant's complete document from this owner's session."""
+    if (900 <= len(request) <= _MAX_DOCUMENT and len(_HEADING_RE.findall(request)) >= 3
+            and ("cloud4box" in request.casefold() or "техподдерж" in request.casefold())):
+        return request, "user", 0
     with storage.connection() as conn:
-        session = conn.execute(
-            "SELECT id FROM sessions WHERE id=? AND owner_id=?",
-            (session_id, owner_id),
-        ).fetchone()
-        if session is None:
+        if conn.execute("SELECT 1 FROM sessions WHERE id=? AND owner_id=?",
+                        (session_id, owner_id)).fetchone() is None:
             return None
         rows = conn.execute(
-            "SELECT content FROM messages WHERE session_id=? AND role='user' "
-            "ORDER BY id DESC LIMIT 100", (session_id,),
+            "SELECT id,role,content FROM messages WHERE session_id=? "
+            "AND role IN ('user','assistant') ORDER BY id DESC LIMIT 160",
+            (session_id,),
         ).fetchall()
+    q = request.casefold().replace("ё", "е")
+    wanted = ("assistant" if any(k in q for k in
+              ("твой ответ", "твою инструкцию", "которую ты написал", "ответ лешего"))
+              else "user" if any(k in q for k in ("мой текст", "мое сообщение")) else "")
+    title = re.search(r"[«\"]([^»\"]{12,140})[»\"]", request)
     for row in rows:
-        content = str(row["content"] or "")
-        if content == request or len(content) < 900 or len(content) > _MAX_DOCUMENT:
+        document = str(row["content"] or "")
+        role = str(row["role"] or "")
+        if (document == request or not 600 <= len(document) <= _MAX_DOCUMENT
+                or wanted and role != wanted):
             continue
-        lower = content.casefold()
-        if ("cloud4box" in lower and ("инструкц" in lower or "техподдерж" in lower)
-                and (len(_HEADING_RE.findall(content)) >= 3 or content.count("\n") >= 12)):
-            return content
+        low = document.casefold()
+        if "cloud4box" in q and "cloud4box" not in low:
+            continue
+        if (len(_HEADING_RE.findall(document)) < 3
+                or not any(k in low for k in ("инструкц", "техподдерж", "cloud4box"))):
+            continue
+        if title and title.group(1).casefold() not in low[:750]:
+            continue
+        return document, role, int(row["id"])
     return None
 
 
+def _owner_doc_fp(owner: str) -> str:
+    """One mutable canonical record per owner, instead of duplicate revisions."""
+    return sha256((owner + "\0" + _KIND + "\0canonical").encode("utf-8")).hexdigest()
+
+
+def _current_document(conn, owner: str):
+    return conn.execute(
+        "SELECT id,content,created_at,source FROM memories WHERE owner_id=? AND kind=? "
+        "ORDER BY CASE WHEN fingerprint=? THEN 0 ELSE 1 END,id DESC LIMIT 1",
+        (owner, _KIND, _owner_doc_fp(owner)),
+    ).fetchone()
+
+
 def save_owner_document(app: Any, owner_id: str, session_id: str, request: str) -> str:
-    """Persist a complete source document with deterministic evidence."""
     owner = str(owner_id or "").strip()[:200]
     if not owner or owner.casefold() in {"web:local", "shared", "standalone"}:
-        return ("Инструкция не сохранена: нужен индивидуальный профиль владельца, "
-                "а не общий или анонимный профиль.")
-    document = _source_document(app.storage, owner, session_id, request)
-    if not document:
+        return "Инструкция не сохранена: нужен индивидуальный профиль владельца."
+    selected = _source_document(app.storage, owner, session_id, request)
+    if not selected:
         return ("Инструкция Cloud4box не сохранена: полный исходный текст не найден "
-                "среди Ваших сообщений в текущем диалоге. Пришлите инструкцию "
-                "целиком с командой «Сохрани в Knowledge».")
-    if len(document) > _MAX_DOCUMENT:
-        return f"Инструкция не сохранена: размер превышает {_MAX_DOCUMENT} символов."
+                "в истории текущего диалога. Пришлите документ целиком "
+                "или укажите его точный заголовок.")
+    document, source_role, source_message_id = selected
+    from .text_integrity import validate_knowledge_text
+    try:
+        validate_knowledge_text(document, field="owner_knowledge_document")
+    except ValueError:
+        return "Инструкция не сохранена: текст имеет повреждённую кодировку."
     if re.search(r"(?i)\b(?:password|api[_ -]?key|token|пароль|токен)\s*[:=]\s*\S+", document):
         return "Инструкция не сохранена: обнаружено возможное значение секрета."
     digest = sha256(document.encode("utf-8")).hexdigest()
-    fingerprint = sha256((owner + "\0" + _KIND + "\0" + digest).encode("utf-8")).hexdigest()
+    provenance = f"explicit-local-knowledge|{source_role}|{source_message_id}|sha256={digest}"
     with app.storage.connection() as conn:
-        row = conn.execute(
-            "SELECT id,content FROM memories WHERE owner_id=? AND kind=? AND fingerprint=?",
-            (owner, _KIND, fingerprint),
-        ).fetchone()
+        row = _current_document(conn, owner)
         if row is None:
             cur = conn.execute(
                 "INSERT INTO memories(owner_id,kind,content,importance,source,created_at,expires_at,fingerprint) "
                 "VALUES(?,?,?,?,?,?,?,?)",
-                (owner, _KIND, document, 1.0, "explicit-local-knowledge", utcnow(), None, fingerprint),
+                (owner, _KIND, document, 1.0, provenance, utcnow(), None, _owner_doc_fp(owner)),
             )
-            document_id = int(cur.lastrowid)
+            doc_id = int(cur.lastrowid)
         else:
-            document_id = int(row["id"])
+            doc_id = int(row["id"])
+            conn.execute(
+                "UPDATE memories SET content=?,source=?,created_at=?,fingerprint=?,importance=1.0 "
+                "WHERE id=? AND owner_id=? AND kind=?",
+                (document, provenance, utcnow(), _owner_doc_fp(owner), doc_id, owner, _KIND),
+            )
+    # Read after commit in a fresh SQLite transaction.
+    with app.storage.connection() as conn:
         verified = conn.execute(
-            "SELECT content FROM memories WHERE id=? AND owner_id=? AND kind=?",
-            (document_id, owner, _KIND),
+            "SELECT content,source FROM memories WHERE id=? AND owner_id=? AND kind=?",
+            (doc_id, owner, _KIND),
         ).fetchone()
-        if verified is None or sha256(str(verified["content"]).encode("utf-8")).hexdigest() != digest:
-            raise RuntimeError("Контрольная сумма сохранённой инструкции не совпадает с оригиналом")
+    if (verified is None or verified["content"] != document
+            or f"sha256={digest}" not in str(verified["source"])):
+        raise RuntimeError("Ошибка проверки записи Knowledge после фиксации транзакции")
     app.storage.audit("owner_knowledge.saved", {
-        "id": document_id, "owner_id": owner, "sha256": digest, "characters": len(document),
+        "id": doc_id, "owner_id": owner, "sha256": digest,
+        "source_role": source_role, "source_message_id": source_message_id,
     })
-    event("owner_knowledge_saved", owner_id=owner, document_id=document_id, length=len(document))
-    return (f"Инструкция Cloud4box сохранена в локальной базе знаний профиля LeshyBrain. "
-            f"ID {document_id}, {len(document)} символов, SHA-256: {digest}. "
-            "Чтение и контрольная сумма проверены. Работа после перезапуска "
-            "и синхронизация с другими узлами отдельно не проверялись. "
-            "В общий Knowledge других пользователей документ не передавался.")
-
-
+    event("owner_knowledge_saved", owner_id=owner, document_id=doc_id, length=len(document))
+    return (f"Инструкция Cloud4box сохранена в LeshyBrain: ID {doc_id}, "
+            f"{len(document)} символов, SHA-256 {digest}. "
+            f"Источник: {source_role}, сообщение {source_message_id or 'текущий запрос'}. "
+            "Чтение после записи и контрольная сумма проверены. "
+            "Перезапуск и синхронизация с другими узлами не проверены.")
 
 def is_owner_document_status_request(message: str) -> bool:
     """A question about whether the Cloud4box document was saved."""
@@ -151,23 +180,21 @@ def is_owner_document_status_request(message: str) -> bool:
 def owner_document_status(storage, owner_id: str) -> str:
     owner = str(owner_id or "").strip()[:200]
     if not owner:
-        return "Нельзя проверить Knowledge: не определён профиль."
+        return "Нельзя проверить Knowledge: профиль не определён."
     with storage.connection() as conn:
-        row = conn.execute(
-            "SELECT id,content,created_at FROM memories "
-            "WHERE owner_id=? AND kind=? ORDER BY id DESC LIMIT 1",
-            (owner, _KIND),
-        ).fetchone()
+        row = _current_document(conn, owner)
     if row is None:
-        return ("В локальной памяти текущего профиля не найдено сохранённой "
-                "инструкции Cloud4box. Фактическая запись не подтверждена.")
-    content = str(row["content"] or "")
-    checksum = sha256(content.encode("utf-8")).hexdigest()
-    return (f"Инструкция Cloud4box найдена в LeshyBrain: ID {int(row['id'])}, "
-            f"{len(content)} символов, SHA-256 {checksum}, "
-            f"время записи {row['created_at']}. Чтение выполнено. "
-            "Работа после перезапуска и синхронизация с узлами не проверялись.")
-
+        return "Инструкция Cloud4box не найдена в локальной памяти этого профиля."
+    digest = sha256(str(row["content"]).encode("utf-8")).hexdigest()
+    source = str(row["source"] or "")
+    if "sha256=" in source and source.rsplit("sha256=", 1)[-1] != digest:
+        return "Ошибка целостности: контрольная сумма инструкции Cloud4box не совпадает."
+    integrity = ("Контрольная сумма совпадает." if "sha256=" in source
+                 else "Старая запись без исходной контрольной суммы.")
+    return (f"Инструкция Cloud4box прочитана из LeshyBrain: ID {int(row['id'])}, "
+            f"{len(str(row['content']))} символов, SHA-256 {digest}; "
+            f"дата {row['created_at']}. {integrity} "
+            "Перезапуск и синхронизация не проверялись.")
 
 def owner_document_context(storage, owner_id: str, query: str, *, support: bool = False) -> str:
     """Bounded retrieval for the same owner's support work; not global Knowledge."""
@@ -176,10 +203,7 @@ def owner_document_context(storage, owner_id: str, query: str, *, support: bool 
     if not support and not any(t in q for t in ("cloud4box", "техподдерж", "клиент", "тикет")):
         return ""
     with storage.connection() as conn:
-        row = conn.execute(
-            "SELECT content FROM memories WHERE owner_id=? AND kind=? ORDER BY id DESC LIMIT 1",
-            (owner, _KIND),
-        ).fetchone()
+        row = _current_document(conn, owner)
     if row is None:
         return ""
     source = str(row["content"] or "")
