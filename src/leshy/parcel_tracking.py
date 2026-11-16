@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from hashlib import sha256
 import re
 import threading
+
+from .action_intent_guard import local_memory_intent
 import time
 from typing import Any, Callable
 
@@ -98,6 +100,8 @@ def extract_tracking_numbers(text: str) -> list[str]:
 
 def parse_parcel_intent(text: str) -> ParcelIntent | None:
     raw = " ".join(str(text or "").split()).strip()
+    if local_memory_intent(raw):
+        return None
     lower = raw.lower().replace("ё", "е")
     tracks = extract_tracking_numbers(raw)
 
