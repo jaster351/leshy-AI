@@ -15,6 +15,7 @@ from .context_budget import _normalize_system_messages, apply_context_budget, es
 from .llm import ChatMessage, LLMUnavailable
 from .adaptive_backend import _hardware_kind
 from .persona import with_leshy_identity
+from .stream_loop_guard import StreamLoopGuard
 
 _CONTEXT_ERROR_RE = re.compile(r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)", re.IGNORECASE)
 _MAX_AUTO_CONTINUATIONS = 1
@@ -152,12 +153,14 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
         active_messages = list(base_messages)
         generated_text = ""
         continuation_count = 0
+        loop_guard = StreamLoopGuard()
 
         while True:
             round_started = time.monotonic()
             context_retry = False
             finish_reason: str | None = None
             round_chunks: list[str] = []
+            repetition_stopped = False
             while True:
                 try:
                     base = self._ensure_server()
@@ -165,6 +168,9 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                         "messages": [{"role": m.role, "content": m.content} for m in active_messages],
                         "temperature": 0.25,
                         "top_p": 0.92,
+                        "repeat_penalty": 1.13,
+                        "repeat_last_n": 256,
+                        "frequency_penalty": 0.12,
                         "max_tokens": self.max_tokens,
                         "stream": True,
                         **_visible_answer_options(getattr(self, "model", "")),
@@ -218,10 +224,14 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                                 if delta or change.get("reasoning_content") or change.get("reasoning"):
                                     last_progress[0] = time.monotonic()
                                 if delta:
-                                    chunk = str(delta)
-                                    round_chunks.append(chunk)
-                                    if continuation_count == 0:
-                                        yield chunk
+                                    chunk = loop_guard.push(str(delta))
+                                    if chunk:
+                                        round_chunks.append(chunk)
+                                        if continuation_count == 0:
+                                            yield chunk
+                                    if loop_guard.triggered:
+                                        repetition_stopped = True
+                                        break
                                 reason = choice.get("finish_reason")
                                 if reason is not None:
                                     finish_reason = str(reason)
@@ -238,6 +248,12 @@ def _llama_stream(self, messages, *, cancel_event: threading.Event | None = None
                                 raise
                         finally:
                             watchdog_stop.set()
+                        if repetition_stopped:
+                            event("accelerator_stream_repetition_stopped", backend=self.backend,
+                                  output_chars=sum(map(len, round_chunks)),
+                                  continuation=continuation_count)
+                            yield "\n\n[Генерация остановлена: модель начала повторять один и тот же текст.]"
+                            return
                         if watchdog_timeout.is_set():
                             event("accelerator_stream_deadline_exceeded", backend=self.backend,
                                   elapsed_ms=int((time.monotonic() - round_started) * 1000),
@@ -344,9 +360,12 @@ def _ollama_stream(self, messages, *, cancel_event: threading.Event | None = Non
     cancel_event = cancel_event or threading.Event()
     prepared = with_leshy_identity(messages)
     payload = json.dumps({"model": self.model, "messages": [{"role": m.role, "content": m.content} for m in prepared],
-                          "stream": True, "options": {"temperature": 0.25}}).encode("utf-8")
+                          "stream": True, "options": {"temperature": 0.25,
+                                                       "repeat_penalty": 1.13,
+                                                       "repeat_last_n": 256}}).encode("utf-8")
     req = request.Request(f"{self.base_url}/api/chat", data=payload,
                           headers={"Content-Type": "application/json"}, method="POST")
+    loop_guard = StreamLoopGuard()
     try:
         with request.urlopen(req, timeout=self.timeout) as response:
             for raw_line in response:
@@ -359,7 +378,13 @@ def _ollama_stream(self, messages, *, cancel_event: threading.Event | None = Non
                 message = body.get("message") or {}
                 delta = message.get("content")
                 if delta:
-                    yield str(delta)
+                    chunk = loop_guard.push(str(delta))
+                    if chunk:
+                        yield chunk
+                    if loop_guard.triggered:
+                        event("ollama_stream_repetition_stopped", output_chars=len(loop_guard._tail))
+                        yield "\n\n[Генерация остановлена: модель начала повторять один и тот же текст.]"
+                        break
                 if body.get("done"):
                     break
     except (error.URLError, TimeoutError) as exc:
