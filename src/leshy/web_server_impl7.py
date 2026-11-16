@@ -22,6 +22,7 @@ from .lenta_runtime import install_lenta_routing
 from .module_settings import list_module_states, module_enabled, set_module_enabled
 from .cluster_orchestrator import cluster_public_summary
 from .network_blocking_runtime import install_network_blocking_routing
+from .owner_knowledge_capture import install_owner_document_routing
 from .parcel_tracking_runtime import install_parcel_tracking_routing, sync_parcel_runtime_state
 from .reliable_web_runtime import install_reliable_web_runtime
 from .runtime_latency_fix import install_runtime_latency_fixes
@@ -70,6 +71,9 @@ def _install_runtime_contracts(app=None) -> None:
     # Последний смысловой предохранитель до idempotency: пустой ответ никогда не
     # должен превращаться в бесконечное ожидание или молчание пользователя.
     install_honest_uncertainty(LeshyApp)
+    # Memory commands run before all side-effecting modules but *inside* the
+    # outer request-idempotency ledger installed at the end of this function.
+    install_owner_document_routing(LeshyApp)
     _restore_reference_chat_timing()
     install_telegram_exact_once_finalization()
     install_global_chat_idempotency()
