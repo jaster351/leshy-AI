@@ -98,8 +98,10 @@ def find_catalog_matches(directory: Path | str, query: str, *, limit: int = 4) -
                 continue
             if not is_fresh(record, now=now):
                 continue
-            haystack = (record["topic"] + " " + record["claim"]).lower()
-            overlap = sum(1 for word in terms if word in haystack)
+            # Match complete tokens: substring matches can select unrelated facts.
+            # In particular, short query terms must not match inside other words.
+            document_terms = set(_WORDS.findall((record["topic"] + " " + record["claim"]).lower()))
+            overlap = len(terms & document_terms)
             if overlap == 0:
                 continue
             score = overlap / len(terms) + min(0.25, overlap * 0.05)
