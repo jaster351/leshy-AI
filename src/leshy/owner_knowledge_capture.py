@@ -124,6 +124,43 @@ def save_owner_document(app: Any, owner_id: str, session_id: str, request: str) 
             "В общий Knowledge других пользователей документ не передавался.")
 
 
+
+def is_owner_document_status_request(message: str) -> bool:
+    """A question about whether the Cloud4box document was saved."""
+    text = " ".join(str(message or "").casefold().replace("ё", "е").split())
+    if is_owner_document_save_request(message):
+        return False
+    if not any(term in text for term in ("cloud4box", "инструкц", "knowledge", "техподдерж")):
+        return False
+    return bool(
+        any(term in text for term in ("сохранил", "сохранена", "сохранилось",
+                                      "сохранилась", "записана", "записал", "провер",
+                                      "где хранится", "где лежит"))
+        and any(term in text for term in ("памят", "knowledge", "инструкц", "правил", "запис"))
+    )
+
+
+def owner_document_status(storage, owner_id: str) -> str:
+    owner = str(owner_id or "").strip()[:200]
+    if not owner:
+        return "Нельзя проверить Knowledge: не определён профиль."
+    with storage.connection() as conn:
+        row = conn.execute(
+            "SELECT id,content,created_at FROM memories "
+            "WHERE owner_id=? AND kind=? ORDER BY id DESC LIMIT 1",
+            (owner, _KIND),
+        ).fetchone()
+    if row is None:
+        return ("В локальной памяти текущего профиля не найдено сохранённой "
+                "инструкции Cloud4box. Фактическая запись не подтверждена.")
+    content = str(row["content"] or "")
+    checksum = sha256(content.encode("utf-8")).hexdigest()
+    return (f"Инструкция Cloud4box найдена в LeshyBrain: ID {int(row['id'])}, "
+            f"{len(content)} символов, SHA-256 {checksum}, "
+            f"время записи {row['created_at']}. Чтение выполнено. "
+            "Работа после перезапуска и синхронизация с узлами не проверялись.")
+
+
 def owner_document_context(storage, owner_id: str, query: str, *, support: bool = False) -> str:
     """Bounded retrieval for the same owner's support work; not global Knowledge."""
     owner = str(owner_id or "").strip()[:200]
@@ -184,7 +221,9 @@ def install_owner_document_routing(app_class) -> None:
     def chat(self, message: str, *, owner_id: str = "web:local",
              session_id: str | None = None, **kwargs):
         value = str(message or "").strip()
-        if not is_owner_document_save_request(value):
+        saving = is_owner_document_save_request(value)
+        checking = is_owner_document_status_request(value)
+        if not saving and not checking:
             return _ORIGINAL_CHAT(self, message, owner_id=owner_id,
                                   session_id=session_id, **kwargs)
         owner = str(owner_id or "web:local").strip()[:200]
@@ -196,14 +235,17 @@ def install_owner_document_routing(app_class) -> None:
                 (sid, "user", value, now),
             )
             conn.execute("UPDATE sessions SET updated_at=? WHERE id=?", (now, sid))
-        answer = save_owner_document(self, owner, sid, value)
+        answer = (save_owner_document(self, owner, sid, value) if saving
+                  else owner_document_status(self.storage, owner))
         return {"session_id": sid, "answer": answer,
                 "created_at": self._save_assistant(sid, answer), "sources": []}
 
     def stream(self, message: str, *, owner_id: str = "web:local",
                session_id: str | None = None, request_id: str | None = None) -> Iterator[StreamEvent]:
         value = str(message or "").strip()
-        if not is_owner_document_save_request(value):
+        saving = is_owner_document_save_request(value)
+        checking = is_owner_document_status_request(value)
+        if not saving and not checking:
             yield from _ORIGINAL_STREAM(self, message, owner_id=owner_id,
                                         session_id=session_id, request_id=request_id)
             return
@@ -218,7 +260,8 @@ def install_owner_document_routing(app_class) -> None:
                 yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "",
                                            "stopped": True, "local_knowledge": True})
                 return
-            answer = save_owner_document(self.app, owner, sid, value)
+            answer = (save_owner_document(self.app, owner, sid, value) if saving
+                      else owner_document_status(self.app.storage, owner))
             created = self.app._save_assistant(sid, answer)
             yield StreamEvent("delta", {"text": answer})
             yield StreamEvent("done", {
@@ -238,5 +281,6 @@ def install_owner_document_routing(app_class) -> None:
     RealtimeChatManager.stream = stream
 
 
-__all__ = ["is_owner_document_save_request", "save_owner_document",
-           "owner_document_context", "install_owner_document_routing"]
+__all__ = ["is_owner_document_save_request", "is_owner_document_status_request",
+           "save_owner_document", "owner_document_status", "owner_document_context",
+           "install_owner_document_routing"]
