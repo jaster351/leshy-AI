@@ -34,6 +34,7 @@ from .research_policy import (
     normalize_query,
 )
 from .realtime_chat import RealtimeChatManager
+from .action_intent_guard import local_memory_intent, local_document_study
 from .research_tuning import manual_research_score, store_for
 
 _BUSY = threading.BoundedSemaphore(1)
@@ -227,7 +228,8 @@ def choose_research(
     candidates = list(candidates or [])
     if not current:
         return finish(False, "", "auto_local")
-    if (is_explicit_offline_request(current)
+    if (local_memory_intent(current) or local_document_study(current)
+            or is_explicit_offline_request(current)
             or is_casual_checkin(current)
             or is_local_dialogue_request(current)
             or is_internal_knowledge_request(current)
