@@ -253,6 +253,14 @@ class RealtimeChatManager:
                 "устаревшие шаблоны базы как на причину отказа: сразу напиши "
                 "готовый естественный текст, используя требования пользователя.",
             )
+            if re.search(r"(?i)стендап|монолог|мини-концерт|шутк", message):
+                context.append(ChatMessage(
+                    "system",
+                    "Для длинного стендапа используй несколько самостоятельных номеров: "
+                    "каждый с новой ситуацией, развитием и финальной шуткой. "
+                    "Не заполняй требуемую длительность повторением реплик или сцен. "
+                    "Не обещай точную длительность, если текст короче.",
+                ))
         context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
         mode = resolve_conversation_mode(message, rows)
         interaction_instruction = mode_instruction(mode.kind)
