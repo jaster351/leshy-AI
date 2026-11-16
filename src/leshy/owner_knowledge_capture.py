@@ -159,7 +159,7 @@ def save_owner_document(app: Any, owner_id: str, session_id: str, request: str) 
     return (f"Инструкция Cloud4box сохранена в LeshyBrain: ID {doc_id}, "
             f"{len(document)} символов, SHA-256 {digest}. "
             f"Источник: {source_role}, сообщение {source_message_id or 'текущий запрос'}. "
-            "Чтение после записи и контрольная сумма проверены. "
+            "Чтение и контрольная сумма проверены после записи. "
             "Перезапуск и синхронизация с другими узлами не проверены.")
 
 def is_owner_document_status_request(message: str) -> bool:
