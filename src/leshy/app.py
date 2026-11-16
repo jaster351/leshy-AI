@@ -16,6 +16,7 @@ from .github_facts import GitHubRepositoryEvidence
 from .evidence_policy import FACTUAL_EVIDENCE_POLICY
 from .provider_support import support_draft_context, is_support_draft_request, draft_support_reply, work_reference_context
 from .conversation_mode import resolve_conversation_mode, mode_instruction, conversation_rows_for_mode
+from .response_integrity import protect_corrected_answer
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .dialogue_rules import is_direct_rule_request, save_direct_rule, persistent_rule_context, is_rule_inspection_request, verified_rule_report
@@ -443,6 +444,9 @@ class LeshyApp:
                 self.llm.chat, message, rows, brain_dir=self.settings.brain_dir,
                 owner_knowledge=owner_document_context(self.storage, owner_id, message, support=True),
             )
+            answer, rejected_reason = protect_corrected_answer(message, rows, answer)
+            if rejected_reason:
+                event("support_draft_integrity_blocked", reason=rejected_reason, session_id=sid)
             event("support_draft_prepared", session_id=sid, owner_id=owner_id,
                   answer_chars=len(answer))
             return {
@@ -754,6 +758,9 @@ class LeshyApp:
             problem("chat_generation_failed", str(exc), session_id=sid, owner_id=owner_id)
             raise
         answer = layout_answer(message, answer)
+        answer, rejected_reason = protect_corrected_answer(message, rows, answer)
+        if rejected_reason:
+            event("chat_answer_integrity_blocked", reason=rejected_reason, session_id=sid)
         answered_at = self._save_assistant(sid, answer)
         event(
             "chat_generation_finished",
