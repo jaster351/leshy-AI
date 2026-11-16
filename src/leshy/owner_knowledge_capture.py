@@ -12,7 +12,6 @@ import time
 from typing import Any, Iterator
 
 from .diagnostics import event, problem
-from .realtime_chat import RealtimeChatManager, StreamEvent
 from .storage import utcnow
 
 _KIND = "owner_knowledge_document"
@@ -174,6 +173,7 @@ def owner_document_context(storage, owner_id: str, query: str, *, support: bool 
 
 def install_owner_document_routing(app_class) -> None:
     """Outermost Web/Telegram route, ahead of browser, parcel and search tools."""
+    from .realtime_chat import RealtimeChatManager, StreamEvent
     global _INSTALLED, _ORIGINAL_CHAT, _ORIGINAL_STREAM
     if _INSTALLED:
         return
