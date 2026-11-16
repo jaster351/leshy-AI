@@ -71,10 +71,12 @@ def parse_browser_conversation_intent(text: str) -> BrowserConversationIntent | 
     original = str(text or "")
     value = " ".join(original.split()).strip()
     low = value.lower().replace("ё", "е")
-    if not value or local_memory_intent(value):
+    if not value:
         return None
     if low.startswith("/browser "):
         return BrowserConversationIntent("research", value[len("/browser "):].strip())
+    if local_memory_intent(value):
+        return None
     # Quoted multi-section documents are data, not authorization to buy, pay
     # or use an interactive browser even when they mention those verbs.
     if len(original) >= 1000 and re.search(r"(?m)^\s*#{1,4}\s+", original):
