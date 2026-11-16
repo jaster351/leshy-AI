@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from . import web_server_impl16 as previous
 from .diagnostics import problem
@@ -11,6 +11,7 @@ from .telegram_browser_login_runtime import install_telegram_browser_login_runti
 from .constitution_runtime import install_constitution_routing
 from .semantic_research_router import install_semantic_research_router
 from .research_tuning import store_for
+from .model_repository_search import search_hub_models
 from .module_settings import module_enabled
 from .superagent_ssh_pty import InteractiveSSHBroker
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
@@ -98,6 +99,29 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_GET(self):
             route = urlsplit(self.path).path
+            if route == "/v1/model-repositories":
+                if not self._research_owner_allowed():
+                    return
+                values = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                def param(name, default=""):
+                    return str((values.get(name) or [default])[0])
+                try:
+                    results = search_hub_models(
+                        name=param("name"), author=param("author"),
+                        specialty=param("specialty", "all"),
+                        date_from=param("from"), date_to=param("to"),
+                        limit=param("limit", "30"),
+                    )
+                    return self._identity_json(HTTPStatus.OK, results)
+                except (ValueError, TypeError) as exc:
+                    return self._identity_json(HTTPStatus.BAD_REQUEST, {
+                        "error": str(exc)[:250],
+                    })
+                except Exception as exc:
+                    problem("model_repository_search_failed", type(exc).__name__)
+                    return self._identity_json(HTTPStatus.BAD_GATEWAY, {
+                        "error": "Не удалось получить каталог моделей Hugging Face",
+                    })
             if route == "/research-settings-panel.js":
                 try:
                     return self._send_asset(
