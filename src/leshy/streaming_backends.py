@@ -366,6 +366,7 @@ def _ollama_stream(self, messages, *, cancel_event: threading.Event | None = Non
     req = request.Request(f"{self.base_url}/api/chat", data=payload,
                           headers={"Content-Type": "application/json"}, method="POST")
     loop_guard = StreamLoopGuard()
+    output_chars = 0
     try:
         with request.urlopen(req, timeout=self.timeout) as response:
             for raw_line in response:
@@ -380,9 +381,10 @@ def _ollama_stream(self, messages, *, cancel_event: threading.Event | None = Non
                 if delta:
                     chunk = loop_guard.push(str(delta))
                     if chunk:
+                        output_chars += len(chunk)
                         yield chunk
                     if loop_guard.triggered:
-                        event("ollama_stream_repetition_stopped", output_chars=len(loop_guard._tail))
+                        event("ollama_stream_repetition_stopped", output_chars=output_chars)
                         yield "\n\n[Генерация остановлена: модель начала повторять один и тот же текст.]"
                         break
                 if body.get("done"):
