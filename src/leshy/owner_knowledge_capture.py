@@ -130,7 +130,7 @@ def is_owner_document_status_request(message: str) -> bool:
     text = " ".join(str(message or "").casefold().replace("ё", "е").split())
     if is_owner_document_save_request(message):
         return False
-    if not any(term in text for term in ("cloud4box", "инструкц", "knowledge", "техподдерж")):
+    if not any(term in text for term in ("cloud4box", "инструкц", "техподдерж")):
         return False
     return bool(
         any(term in text for term in ("сохранил", "сохранена", "сохранилось",

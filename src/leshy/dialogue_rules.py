@@ -134,8 +134,9 @@ def is_rule_inspection_request(message: str) -> bool:
     text = " ".join(str(message or "").casefold().replace("ё", "е").split())
     # A directive to save a document is not a question about older rules.
     # In particular, "проверь, что инструкция сохранена" must not list rule #6.
-    from .owner_knowledge_capture import is_owner_document_save_request
-    if is_owner_document_save_request(message):
+    from .owner_knowledge_capture import (is_owner_document_save_request,
+                                         is_owner_document_status_request)
+    if is_owner_document_save_request(message) or is_owner_document_status_request(message):
         return False
     return bool(
         (("правила" in text or "правило" in text) and

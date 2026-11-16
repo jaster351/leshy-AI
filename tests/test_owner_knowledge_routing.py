@@ -5,7 +5,8 @@ from pathlib import Path
 import unittest
 
 from leshy.owner_knowledge_capture import (
-    is_owner_document_save_request, save_owner_document, owner_document_context,
+    is_owner_document_save_request, is_owner_document_status_request,
+    save_owner_document, owner_document_status, owner_document_context,
 )
 from leshy.parcel_tracking import parse_parcel_intent, extract_tracking_numbers
 from leshy.dialogue_rules import is_rule_inspection_request
@@ -32,6 +33,9 @@ class OwnerKnowledgeRoutingTests(unittest.TestCase):
         self.assertFalse(is_rule_inspection_request(command))
         self.assertFalse(is_owner_document_save_request("Какие правила ты сохранил?"))
         self.assertFalse(is_owner_document_save_request("Не сохраняй инструкцию Cloud4box"))
+        status = "Проверь, сохранились ли постоянные правила Cloud4box в Knowledge?"
+        self.assertTrue(is_owner_document_status_request(status))
+        self.assertFalse(is_rule_inspection_request(status))
 
     def test_full_document_read_back_and_owner_isolation(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -54,6 +58,7 @@ class OwnerKnowledgeRoutingTests(unittest.TestCase):
             command = "Леший, сохрани ранее переданную инструкцию Cloud4box в Knowledge."
             answer = save_owner_document(app, "telegram:101", "one", command)
             self.assertIn("Чтение и контрольная сумма проверены", answer)
+            self.assertIn("Чтение выполнено", owner_document_status(app.storage, "telegram:101"))
             self.assertIn("Не здоровайся", owner_document_context(
                 app.storage, "telegram:101", "Напиши ответ клиенту", support=True))
             self.assertEqual(owner_document_context(
