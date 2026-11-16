@@ -194,7 +194,7 @@ def owner_document_status(storage, owner_id: str) -> str:
     return (f"Инструкция Cloud4box прочитана из LeshyBrain: ID {int(row['id'])}, "
             f"{len(str(row['content']))} символов, SHA-256 {digest}; "
             f"дата {row['created_at']}. {integrity} "
-            "Перезапуск и синхронизация не проверялись.")
+            "Чтение выполнено. Перезапуск и синхронизация не проверялись.")
 
 def owner_document_context(storage, owner_id: str, query: str, *, support: bool = False) -> str:
     """Bounded retrieval for the same owner's support work; not global Knowledge."""
