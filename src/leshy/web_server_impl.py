@@ -54,7 +54,6 @@ def _inject_runtime_ui(html: str) -> str:
         '<script src="/context-settings-panel.js"></script>',
         '<script src="/research-settings-panel.js"></script>',
         '<script src="/model-library-panel.js"></script>',
-        '<script src="/model-update-panel.js"></script>',
         '<script src="/nas-panel.js"></script>',
         '<script src="/variant3.js"></script>',
         '<script src="/chat-extras.js"></script>',
