@@ -43,6 +43,7 @@
       '<option value="auto">Автоматически скачивать кандидат</option>',
       '</select>',
       '<button class="button secondary" id="modelUpdateCheck" type="button">Проверить сейчас</button>',
+      '<button class="button secondary" id="modelUpdateDownload" type="button">Загрузить кандидат</button>',
       '</div>',
       '<div id="modelUpdateStatus" class="model-meta" style="white-space:pre-wrap;margin-top:10px;font-size:12px">',
       'Загружаю состояние обновлений…</div>',
@@ -80,6 +81,7 @@
     else pane.appendChild(card);
     find('modelUpdateMode').onchange = save;
     find('modelUpdateCheck').onclick = check;
+    find('modelUpdateDownload').onclick = downloadCandidate;
     find('modelRepoSearch').onclick = searchRepositories;
     find('modelRepoName').addEventListener('keydown', (event) => {
       if (event.key === 'Enter') { event.preventDefault(); searchRepositories(); }
@@ -153,6 +155,7 @@
     if (!attach()) return;
     find('modelUpdateMode').value = data.mode || 'notify';
     find('modelUpdateCheck').disabled = Boolean(data.busy);
+    find('modelUpdateDownload').disabled = Boolean(data.busy);
     const rows = [
       'Состояние: ' + (labels[data.state] || data.state || '—'),
       'Рабочая модель: ' + (data.active_model || '—'),
@@ -199,12 +202,28 @@
     busy = true;
     find('modelUpdateCheck').disabled = true;
     try {
-      render(await api('/v1/model-updates/check', {download: true}));
+      render(await api('/v1/model-updates/check', {download: false}));
     } catch (error) {
       find('modelUpdateStatus').textContent = 'Проверка не запущена: ' + error.message;
     } finally {
       busy = false;
       find('modelUpdateCheck').disabled = false;
+    }
+  }
+
+  async function downloadCandidate() {
+    if (busy) return;
+    if (!window.confirm('Скачать полную GGUF-модель? Потребуется несколько гигабайт диска и трафика. Рабочая модель не изменится.')) return;
+    busy = true;
+    const button = find('modelUpdateDownload');
+    button.disabled = true;
+    try {
+      render(await api('/v1/model-updates/check', {download: true}));
+    } catch (error) {
+      find('modelUpdateStatus').textContent = 'Загрузка не запущена: ' + error.message;
+    } finally {
+      busy = false;
+      button.disabled = false;
     }
   }
 
