@@ -211,6 +211,11 @@ class RDPSessionController:
                     or not isinstance(frame_digest, str)
                     or not hmac.compare_digest(session.frame_digest, frame_digest)):
                 raise PermissionError("RDP frame stale or already used; observe again")
+            # Opaque transport bytes cannot prove what the owner actually saw.
+            # An actionable receipt requires a decoded, validated framebuffer.
+            if session.pixel_format not in {"RGB", "RGBA"}:
+                session.used = True
+                raise PermissionError("RDP frame must be decoded before remote input")
             if type(x) is not int or type(y) is not int or not (0 <= x < session.width and 0 <= y < session.height):
                 raise ValueError("Click outside observed framebuffer")
             # Consume first, so failures cannot cause implicit retries.
@@ -233,6 +238,9 @@ class RDPSessionController:
                     or not isinstance(frame_digest, str)
                     or not hmac.compare_digest(session.frame_digest, frame_digest)):
                 raise PermissionError("RDP frame stale or already used; observe again")
+            if session.pixel_format not in {"RGB", "RGBA"}:
+                session.used = True
+                raise PermissionError("RDP frame must be decoded before remote input")
             send = getattr(self.backend, "type_text", None)
             if not callable(send):
                 raise RuntimeError("RDP backend does not implement text input")
