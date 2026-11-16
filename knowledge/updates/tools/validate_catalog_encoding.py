@@ -28,6 +28,14 @@ def inspect_file(path: Path) -> tuple[int, list[str]]:
     except (UnicodeError, OSError) as exc:
         return 0, [f"{path}: not valid UTF-8: {exc}"]
 
+    # Reject invisible C0 controls except normal tab, CR and LF; they can alter
+    # retrieved facts without being apparent in a code review.
+    for offset, char in enumerate(data):
+        if ord(char) < 32 and char not in "\\t\\r\\n":
+            errors.append(f"{path}: forbidden control U+{ord(char):04X} at offset {offset}")
+            if len(errors) >= MAX_ERRORS:
+                break
+
     reason = corruption_reason(data)
     if reason:
         errors.append(f"{path}: damaged text: {reason}")
