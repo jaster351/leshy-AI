@@ -36,6 +36,8 @@ class TerminalReceipt:
 
     @property
     def outcome(self) -> Outcome:
+        if self.transport_lost or self.cancelled:
+            return Outcome.UNKNOWN
         if not self.started:
             return Outcome.NOT_STARTED
         if self.exit_code is not None:
