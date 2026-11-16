@@ -10,6 +10,7 @@ from .telegram_browser_login import TelegramBrowserLogin
 from .telegram_browser_login_runtime import install_telegram_browser_login_runtime
 from .constitution_runtime import install_constitution_routing
 from .semantic_research_router import install_semantic_research_router
+from .owner_knowledge_capture import install_owner_document_routing
 from .research_tuning import store_for
 from .model_repository_search import search_hub_models
 from .module_settings import module_enabled
@@ -32,6 +33,8 @@ def make_handler(app, telegram, settings, model_catalog):
     # local Constitution file without web search or an LLM-generated path.
     install_constitution_routing(type(app))
     install_semantic_research_router()
+    # Last route: local Knowledge saves must never become browser/parcel/IP jobs.
+    install_owner_document_routing(type(app))
 
     pty_broker = getattr(app, "_ssh_pty_broker", None)
     if pty_broker is None:

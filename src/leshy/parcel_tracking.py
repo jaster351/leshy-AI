@@ -85,7 +85,11 @@ def extract_tracking_numbers(text: str) -> list[str]:
     for match in _TRACK_RE.finditer(str(text or "")):
         candidate = _normalize_track(match.group(1))
         digits = sum(ch.isdigit() for ch in candidate)
-        if len(candidate) < 8 or digits < 5:
+        # Hardware identifiers can look like parcel IDs (I7-9700K has five digits).
+        # Bare identifiers without delivery context need a credible tracking shape.
+        if re.fullmatch(r"(?i)i[3579]-[0-9]{4,5}[a-z]{0,3}", candidate):
+            continue
+        if len(candidate) < 8 or digits < 7:
             continue
         if candidate not in values:
             values.append(candidate)

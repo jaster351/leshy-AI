@@ -19,6 +19,7 @@ from .conversation_mode import resolve_conversation_mode, mode_instruction, conv
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .diagnostics import configure_diagnostics, event, problem
 from .dialogue_rules import is_direct_rule_request, save_direct_rule, persistent_rule_context, is_rule_inspection_request, verified_rule_report
+from .owner_knowledge_capture import owner_document_context
 from .hardware import detect_hardware
 from .image_generation import ImageGenerationManager
 from .knowledge import KnowledgeBase
@@ -273,9 +274,9 @@ class LeshyApp:
         rules = persistent_rule_context(self.storage, owner_id)
         with self.storage.connection() as conn:
             items = conn.execute(
-                "SELECT content FROM memories WHERE owner_id=? AND kind!=? "
+                "SELECT content FROM memories WHERE owner_id=? AND kind NOT IN (?,?) "
                 "ORDER BY importance DESC,id DESC LIMIT 8",
-                (owner_id, "dialogue_rule"),
+                (owner_id, "dialogue_rule", "owner_knowledge_document"),
             ).fetchall()
         other = "\n".join(f"- {item['content']}" for item in items)
         return "\n\n".join(part for part in (rules, other) if part)
@@ -440,6 +441,7 @@ class LeshyApp:
         if mode.kind == "support_draft":
             answer = draft_support_reply(
                 self.llm.chat, message, rows, brain_dir=self.settings.brain_dir,
+                owner_knowledge=owner_document_context(self.storage, owner_id, message, support=True),
             )
             event("support_draft_prepared", session_id=sid, owner_id=owner_id,
                   answer_chars=len(answer))
@@ -578,6 +580,9 @@ class LeshyApp:
                 ))
             else:
                 context.append(ChatMessage("system", source_context))
+        owner_knowledge = owner_document_context(self.storage, owner_id, message)
+        if owner_knowledge:
+            context.append(ChatMessage("system", owner_knowledge))
         memory_context = self._memory_context(owner_id)
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))

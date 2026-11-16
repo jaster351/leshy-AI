@@ -10,6 +10,7 @@ from typing import Any, Iterator
 
 from .diagnostics import event, problem
 from .dialogue_rules import is_direct_rule_request, is_rule_inspection_request
+from .owner_knowledge_capture import owner_document_context
 from .cinema_research import cinema_query, cinema_instruction, cinema_search, cinema_no_data
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
@@ -292,6 +293,9 @@ class RealtimeChatManager:
                 context.append(ChatMessage("user", source_context))
             else:
                 context.append(ChatMessage("system", source_context))
+        owner_knowledge = owner_document_context(self.app.storage, owner_id, message)
+        if owner_knowledge:
+            context.append(ChatMessage("system", owner_knowledge))
         memory_context = self.app._memory_context(owner_id)
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
@@ -488,6 +492,7 @@ class RealtimeChatManager:
                     return "".join(self._llm_stream(prepared, cancel, owner_id))
                 answer = draft_support_reply(
                     infer, message, rows, brain_dir=self.app.settings.brain_dir,
+                    owner_knowledge=owner_document_context(self.app.storage, owner_id, message, support=True),
                 )
                 if cancel.is_set():
                     yield StreamEvent("done", {

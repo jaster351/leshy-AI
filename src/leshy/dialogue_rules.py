@@ -132,6 +132,11 @@ def persistent_rule_context(storage, owner_id: str) -> str:
 def is_rule_inspection_request(message: str) -> bool:
     """Answer a question about stored rules from SQLite, not model guesses."""
     text = " ".join(str(message or "").casefold().replace("ё", "е").split())
+    # A directive to save a document is not a question about older rules.
+    # In particular, "проверь, что инструкция сохранена" must not list rule #6.
+    from .owner_knowledge_capture import is_owner_document_save_request
+    if is_owner_document_save_request(message):
+        return False
     return bool(
         (("правила" in text or "правило" in text) and
          ("общения" in text or "постоянн" in text or "сохраненн" in text) and
