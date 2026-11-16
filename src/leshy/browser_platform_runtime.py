@@ -14,6 +14,7 @@ from .fact_recheck import prior_factual_question, source_release_fact
 from .browser_use_adapter import BrowserUseAdapter
 from .browser_use_llm import LeshyBrowserUseLLM
 from .diagnostics import event, problem
+from .action_intent_guard import local_memory_intent
 from .document_intelligence import DocumentIntelligence
 from .extension_marketplace import ExtensionMarketplace
 from .module_settings import module_enabled
@@ -69,7 +70,11 @@ class BrowserConversationIntent:
 def parse_browser_conversation_intent(text: str) -> BrowserConversationIntent | None:
     value = " ".join(str(text or "").split()).strip()
     low = value.lower().replace("ё", "е")
-    if not value:
+    if not value or local_memory_intent(value):
+        return None
+    # Quoted multi-section documents are data, not authorization to buy, pay
+    # or use an interactive browser even when they mention those verbs.
+    if len(value) >= 1000 and re.search(r"(?m)^#{1,4}\s+", value):
         return None
     if low.startswith("/browser "):
         return BrowserConversationIntent("research", value[len("/browser "):].strip())
