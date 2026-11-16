@@ -32,6 +32,14 @@ def is_owner_document_save_request(message: str) -> bool:
     if not original:
         return False
     value = " ".join(original.casefold().replace("ё", "е").split())
+    # Short personal style rules already have their own verified rule store.
+    # Do not mistake "Запомни правило: ..." for a full-document import.
+    if len(original) < 900 and re.match(
+        r"^(?:леший[,!:]?\s+)?(?:запомни правило|сохрани правило|"
+        r"установи постоянное правило|запомни следующие правила|сохрани следующие правила)\b",
+        value,
+    ):
+        return False
     prefix = value[:1100]
     if _NEGATIVE_RE.search(prefix):
         return False
