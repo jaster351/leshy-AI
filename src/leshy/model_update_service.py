@@ -58,7 +58,7 @@ class ModelUpdateService:
             temp.unlink(missing_ok=True)
 
     def mode(self) -> str:
-        mode = str(self._read().get("mode") or "auto")
+        mode = str(self._read().get("mode") or "notify")
         return mode if mode in MODES else "notify"
 
     def configure(self, mode: str) -> dict[str, Any]:
@@ -112,7 +112,8 @@ class ModelUpdateService:
         if (not filename or filename != Path(filename).name
                 or filename in {".", ".."} or "\\" in filename or "/" in filename
                 or not filename.lower().endswith(".gguf")
-                or filename.lower().startswith("mmproj")):
+                or filename.lower().startswith("mmproj") or filename == ".gguf"
+                or any(ord(ch) < 32 for ch in filename)):
             raise ValueError("Недопустимое имя GGUF-модели")
         return filename
 
@@ -150,6 +151,8 @@ class ModelUpdateService:
                     if response.geturl().lower().startswith("http://"):
                         raise ValueError("Незащищённая переадресация GGUF")
                     for block in iter(lambda: response.read(8 * 1024 * 1024), b""):
+                        if self._stop.is_set():
+                            raise RuntimeError("Загрузка модели остановлена")
                         received += len(block)
                         if received > expected_size or received > MAX_MODEL_BYTES:
                             raise ValueError("GGUF превышает ожидаемый размер")
@@ -196,7 +199,8 @@ class ModelUpdateService:
             if manifest["filename"] == self.catalog.selected_name():
                 self._set(state="current")
                 return
-            if download and self.mode() == "auto":
+            if download:
+                # Explicit owner request or periodic automatic policy check.
                 self._stage(manifest)
             else:
                 self._set(state="available")
