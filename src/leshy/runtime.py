@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
+from .owner_knowledge_capture import install_owner_document_routing
 from .constitution_runtime import install_constitution_routing
 from .semantic_research_router import install_semantic_research_router
 from .config import Settings
@@ -26,6 +27,7 @@ class Runtime(LeshyApp):
         install_freshness_cache_runtime()
         install_runtime_latency_fixes()
         install_creator_identity_routing(LeshyApp)
+        install_owner_document_routing(LeshyApp)
         # Idempotency ставится последним поверх специальных chat routing, чтобы
         # повтор одного request_id не создавал второй ответ ни в одном интерфейсе.
         install_global_chat_idempotency()
