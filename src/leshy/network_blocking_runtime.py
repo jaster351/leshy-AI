@@ -5,6 +5,7 @@ import time
 from typing import Any, Iterator
 
 from .diagnostics import event, problem
+from .action_intent_guard import explicit_network_probe, local_memory_intent
 from .module_settings import module_enabled
 from .modules import ModuleRequest
 from .network_blocking_module import NetworkBlockingModule
@@ -35,7 +36,7 @@ def _enabled(app) -> bool:
 
 
 def _matches(app, text: str) -> bool:
-    if not _enabled(app):
+    if not _enabled(app) or local_memory_intent(text):
         return False
     # Ticket drafting is not an instruction to scan every IP in the client's quote.
     # Explicit /support and "answer the client" take precedence over IP diagnostics.
@@ -50,7 +51,9 @@ def _matches(app, text: str) -> bool:
     ):
         return False
     try:
-        return _module(app).checker.looks_like_request(text)
+        checker = _module(app).checker
+        target = checker.extract_target(text)
+        return bool(explicit_network_probe(text, target) and checker.looks_like_request(text))
     except Exception:
         return False
 
