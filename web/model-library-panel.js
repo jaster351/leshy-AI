@@ -36,6 +36,12 @@
       .model-library-vision{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--muted);width:100%}
       #modelLibraryProgress{margin-top:10px;border:1px solid var(--line);border-radius:9px;padding:9px 10px;font-size:11px;color:var(--muted);white-space:pre-wrap}
       #modelLibraryProgress.active{color:#dce8f3;border-color:#31516f;background:rgba(74,155,232,.06)}
+      #modelRepositorySearch{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+      #modelRepoFields{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:9px;margin:10px 0}
+      #modelRepoFields label{font-size:11px;color:var(--muted)}
+      #modelRepoFields input,#modelRepoFields select{width:100%;margin-top:4px}
+      #modelRepoResults{white-space:normal;font-size:12px;margin-top:12px}
+      #modelRepoResults .repo-item{border-bottom:1px solid var(--line);padding:9px 0;word-break:break-word}
       @media(max-width:950px){#modelLibraryGrid{grid-template-columns:1fr}}
       @media(max-width:720px){#modelLibraryRuntime{grid-template-columns:1fr}}
     `;
@@ -63,11 +69,30 @@
       </div>
       <div id="modelLibraryGrid"></div>
       <div id="modelLibraryProgress">Каталог загружается…</div>
+      <section id="modelRepositorySearch">
+        <h3>Найти модель в репозиториях</h3>
+        <div class="muted">Актуальный поиск по Hugging Face. Результаты не устанавливаются автоматически и не заменяют рекомендованный каталог.</div>
+        <div id="modelRepoFields">
+          <label>Название модели<input id="modelRepoName" class="field" type="search" maxlength="120" placeholder="Qwen, Gemma, Coder"></label>
+          <label>Организация<input id="modelRepoAuthor" class="field" type="text" maxlength="80" placeholder="Qwen, google"></label>
+          <label>Специализация<select id="modelRepoSpecialty" class="field">
+            <option value="all">Любая</option><option value="programming">Программирование</option>
+            <option value="legal">Юриспруденция</option><option value="medicine">Медицина</option>
+            <option value="finance">Финансы</option><option value="science">Наука</option>
+            <option value="education">Образование</option></select></label>
+          <label>Дата публикации от<input id="modelRepoFrom" type="date" class="field"></label>
+          <label>Дата публикации до<input id="modelRepoTo" type="date" class="field"></label>
+        </div>
+        <button id="modelRepoSearchButton" class="button secondary small" type="button">Найти модели</button>
+        <div id="modelRepoResults" aria-live="polite"></div>
+      </section>
     `;
     const local=$('localModelCard');
     if(local && local.parentNode) local.parentNode.insertBefore(card,local.nextSibling);
     else pane.appendChild(card);
     $('runtimeMode').onchange=saveRuntimeMode;
+    $('modelRepoSearchButton').onclick=searchRepositories;
+    $('modelRepoName').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();searchRepositories();}};
     return card;
   }
 
@@ -98,6 +123,56 @@
       $('runtimeModeNote').textContent=runtimeText(data)+'\nНастройка сохранена.';
     }catch(error){alert('Не удалось сохранить режим runtime: '+error.message);}
     finally{select.disabled=false;}
+  }
+
+  async function searchRepositories(){
+    const button=$('modelRepoSearchButton'),box=$('modelRepoResults');
+    if(!button||!box||button.disabled)return;
+    const from=$('modelRepoFrom').value,to=$('modelRepoTo').value;
+    if(from&&to&&from>to){box.textContent='Начальная дата не должна быть позже конечной.';return;}
+    const params=new URLSearchParams({
+      name:$('modelRepoName').value.trim(),
+      author:$('modelRepoAuthor').value.trim(),
+      specialty:$('modelRepoSpecialty').value,
+      from,to,limit:'30'
+    });
+    button.disabled=true;
+    box.textContent='Получаю реальные модели из Hugging Face Hub…';
+    try{
+      const results=await api('/v1/model-repositories?'+params.toString());
+      box.replaceChildren();
+      const summary=document.createElement('div');
+      summary.className='model-library-note';
+      summary.textContent='Найдено: '+results.count+'; просмотрено записей: '+results.scanned+'. Источник: '+results.source+'.';
+      box.appendChild(summary);
+      const models=Array.isArray(results.items)?results.items:[];
+      if(!models.length){
+        const note=document.createElement('div');
+        note.textContent='В просмотренной части каталога совпадений нет.';
+        box.appendChild(note);
+      }
+      for(const model of models){
+        if(typeof model.url!=='string'||!/^https:\/\/huggingface\.co\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(model.url))continue;
+        const row=document.createElement('div');
+        row.className='repo-item';
+        const link=document.createElement('a');
+        link.href=model.url;link.target='_blank';link.rel='noopener noreferrer';
+        link.textContent=model.id;
+        const detail=document.createElement('div');
+        detail.className='model-library-note';
+        detail.textContent='Опубликована: '+(model.created_at||'нет данных')
+          +' · Обновлена: '+(model.last_modified||'нет данных')
+          +' · '+(model.gguf_tag?'Тег GGUF присутствует':'GGUF не подтверждён')
+          +' · Скачиваний: '+String(model.downloads??0);
+        row.append(link,detail);box.appendChild(row);
+      }
+      const foot=document.createElement('p');
+      foot.className='model-library-note';
+      foot.textContent=results.note||'Выбор специализации основан только на тегах, а не на тестах профессиональных знаний.';
+      box.appendChild(foot);
+    }catch(err){
+      box.textContent='Каталог недоступен: '+err.message;
+    }finally{button.disabled=false;}
   }
 
   function cardFor(model){
