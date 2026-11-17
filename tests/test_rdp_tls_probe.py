@@ -165,3 +165,10 @@ def test_slow_drip_exceeds_total_handshake_deadline():
             _negotiate(fake, deadline=1.0)
     assert fake.sent is not None
     assert len(fake.payload) == len(response(2)) - 2
+
+
+@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), float("-inf"), -1.0, 0.0, 15.01])
+def test_nonfinite_and_out_of_range_timeout_never_opens_socket(timeout, monkeypatch):
+    monkeypatch.setattr(socket, "create_connection", lambda *a, **kw: pytest.fail("unexpected network"))
+    with pytest.raises(ValueError, match="timeout"):
+        probe_rdp_tls("127.0.0.1", "a" * 64, timeout=timeout)
