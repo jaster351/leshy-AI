@@ -15,6 +15,7 @@ from leshy.native_spnego import SPNEGOError
 
 def fake_context(status, *, completion_status=0, invalid_pointer=False, bad_type=False):
     context = win.WindowsSSPIContext.__new__(win.WindowsSSPIContext)
+    context.host = "server.example.com"
     context._cred, context._ctx, context._expiry = (
         win.SecHandle(), win.SecHandle(), win.TimeStamp()
     )
