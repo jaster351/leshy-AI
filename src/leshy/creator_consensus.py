@@ -128,7 +128,8 @@ class CreatorConsensusService:
 
     def report(self) -> dict[str, Any]:
         digest = creator_identity_digest()
-        peers = self.discovery.creator_peer_votes()
+        reader = getattr(self.discovery, "creator_peer_votes", None)
+        peers = reader() if callable(reader) else {}
         summary = summarize_creator_votes(digest, peers)
         summary["informational_cache"] = self._cache_state
         return summary
@@ -137,10 +138,11 @@ class CreatorConsensusService:
         """Работает в существующем фоновом цикле, без новых демонов."""
         now = time.monotonic()
         with self._lock:
-            if now - self._checked_at < _MIN_INTERVAL and self._checked_at:
-                return
-            self._checked_at = now
-            self.reconcile_informational_cache()
+            # Кэш перепроверяется раз в 5 минут, но расхождения узлов
+            # оцениваются при каждом обновлении существующего LAN-цикла.
+            if not self._checked_at or now - self._checked_at >= _MIN_INTERVAL:
+                self._checked_at = now
+                self.reconcile_informational_cache()
             report = self.report()
             # Уменьшаем шум: сохраняем только изменение набора расхождений.
             signature = json.dumps(
