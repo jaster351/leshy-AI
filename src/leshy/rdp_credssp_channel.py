@@ -28,6 +28,9 @@ from .rdp_credssp_credentials import (
     RDPCredentials, validate_sealed_authinfo_tsrequest,
 )
 from .native_spnego import _check_target, new_native_spnego
+from .rdp_client_info import (
+    RDPClientInfoReceipt, build_client_info_pdu,
+)
 from .rdp_mcs_channels import (
     MCSChannelError, MCSJoinedChannels, erect_domain_request,
     attach_user_request, parse_attach_user_confirm, channel_join_request,
@@ -113,6 +116,8 @@ class PinnedRDPCredSSPChannel:
         self._mcs_settings: ServerMCSSettings | None = None
         self._mcs_join_attempted = False
         self._mcs_joined: MCSJoinedChannels | None = None
+        self._client_info_attempted = False
+        self._client_info_receipt: RDPClientInfoReceipt | None = None
 
     def _check(self) -> None:
         if self._closed:
@@ -323,6 +328,40 @@ class PinnedRDPCredSSPChannel:
             self._mcs_joined = result
             return result
         except BaseException:
+            self.close()
+            raise
+
+    def send_client_info(self, *, client_address: str) -> RDPClientInfoReceipt:
+        """Send minimal non-autologon Client Info on the joined I/O channel.
+
+        This is a one-shot internal protocol operation. It cannot introduce a
+        password or claim the server logged in. The caller must provide the
+        literal client-side socket address from trusted local runtime state.
+        """
+        if (self._closed or self._client_info_attempted or self._mcs_joined is None
+                or self._credssp is None or not self._credssp.credentials_delegated):
+            raise RDPChannelError("Client Info requires joined owner-approved MCS channels")
+        self._client_info_attempted = True
+        try:
+            self._check()
+            packet = build_client_info_pdu(
+                self._mcs_joined.user_channel_id,
+                self._mcs_joined.io_channel_id,
+                client_address=client_address,
+            )
+            self._check()
+            self._tls.settimeout(_time_left(self._deadline))
+            self._tls.sendall(packet)
+            self._check()
+            receipt = RDPClientInfoReceipt(
+                self._mcs_joined.user_channel_id,
+                self._mcs_joined.io_channel_id,
+            )
+            self._client_info_receipt = receipt
+            return receipt
+        except BaseException:
+            # Failure after any part of a packet may have reached the server.
+            # Do not retry automatically or reuse the compromised channel.
             self.close()
             raise
 
