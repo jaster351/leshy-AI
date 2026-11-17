@@ -20,6 +20,26 @@ TEXT_EXTENSIONS = {".json", ".jsonl", ".md", ".py", ".csv"}
 MAX_ERRORS = 100
 
 
+def nested_text_errors(value: object, location: str) -> list[str]:
+    """Inspect decoded JSON strings, including Unicode escapes hidden in source text."""
+    if isinstance(value, str):
+        reason = corruption_reason(value)
+        return [f"{location}: damaged decoded text: {reason}"] if reason else []
+    if isinstance(value, list):
+        return [
+            error
+            for index, item in enumerate(value)
+            for error in nested_text_errors(item, f"{location}[{index}]")
+        ]
+    if isinstance(value, dict):
+        errors: list[str] = []
+        for key, item in value.items():
+            errors.extend(nested_text_errors(key, f"{location}.<key>"))
+            errors.extend(nested_text_errors(item, f"{location}.{key}"))
+        return errors
+    return []
+
+
 def inspect_file(path: Path) -> tuple[int, list[str]]:
     errors: list[str] = []
     rows = 0
@@ -34,7 +54,8 @@ def inspect_file(path: Path) -> tuple[int, list[str]]:
 
     if path.suffix == ".json":
         try:
-            json.loads(data)
+            record = json.loads(data)
+            errors.extend(nested_text_errors(record, str(path)))
             rows += 1
         except (ValueError, TypeError) as exc:
             errors.append(f"{path}: invalid JSON: {exc}")
@@ -50,6 +71,7 @@ def inspect_file(path: Path) -> tuple[int, list[str]]:
                     break
                 continue
             rows += 1
+            errors.extend(nested_text_errors(record, f"{path}:{line_number}"))
             if not isinstance(record, dict):
                 errors.append(f"{path}:{line_number}: expected JSON object")
     return rows, errors
