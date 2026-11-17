@@ -32,6 +32,7 @@ jobs:
           python -m pytest -q -ra `
             tests/test_native_spnego.py `
             tests/test_native_spnego_windows_buffers.py `
+            tests/test_native_spnego_windows_steps.py `
             tests/test_rdp_credssp_tsrequest.py `
             tests/test_rdp_credssp_binding.py `
             tests/test_rdp_credssp_binding_x509.py `

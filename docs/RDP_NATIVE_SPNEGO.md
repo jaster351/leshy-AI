@@ -91,3 +91,31 @@ RDP host. Python RDP pytest tests are now explicitly included in the existing
 Windows runner when manually dispatched. GitHub Actions remain
 **manual-only until the repository's existing 2026-12-01 limit date**:
 no automatic pull-request or push triggers were enabled.
+
+## Windows Negotiate CompleteAuthToken handling (2026-11-17)
+
+The Windows SSPI `InitializeSecurityContextW` adapter now treats the two
+documented `SEC_I_COMPLETE_*` statuses correctly:
+
+- `SEC_I_COMPLETE_NEEDED (0x00090313)` -> call `CompleteAuthToken`,
+  validate its result and then finish the security context after checking
+  the required mutual-authentication, integrity and confidentiality flags.
+- `SEC_I_COMPLETE_AND_CONTINUE (0x00090314)` -> call
+  `CompleteAuthToken`, send the completed token and continue negotiation.
+
+The updated output reader validates the returned `SecBuffer` type,
+length, and pointer against the caller-owned allocation, including
+after `CompleteAuthToken` may have updated the token.
+
+Regression scenarios in `tests/test_native_spnego_windows_steps.py`
+exercise all four normal SSPI statuses, completion failure, pointer
+bounds, incorrect buffer type, and fatal status. The manually dispatched
+Linux and Windows RDP test workflows include this new test file.
+
+An isolated copy of the updated `step` method passed 8 tests locally.
+This does **not** constitute a real SSPI handshake, CredSSP/NLA login
+or Windows RDP desktop end-to-end verification.
+
+Microsoft references:
+- https://learn.microsoft.com/en-us/windows/win32/secauthn/initializesecuritycontext--negotiate
+- https://learn.microsoft.com/en-us/windows/win32/api/sspi/nf-sspi-completeauthtoken
