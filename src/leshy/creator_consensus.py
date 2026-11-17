@@ -48,7 +48,7 @@ def summarize_creator_votes(local_digest: str, peer_votes: Mapping[str, str]) ->
     total = sum(counts.values())
     highest = max(counts.values())
     leaders = sorted(key for key, count in counts.items() if count == highest)
-    leader = leaders[0] if len(leaders) == 1 and highest > total / 2 else None
+    leader = leaders[0] if valid and len(leaders) == 1 and highest > total / 2 else None
     differing = sorted(node for node, vote in valid.items() if vote != local_digest)
     if not valid:
         status = "no_peer_votes"
