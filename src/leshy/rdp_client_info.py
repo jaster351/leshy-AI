@@ -81,10 +81,15 @@ def build_client_info_pdu(
     io = _channel_id(io_channel_id)
     if user == io:
         raise RDPClientInfoError("User and I/O MCS channels must be distinct")
+    if (not isinstance(client_address, str) or
+            not client_address or "%" in client_address):
+        raise RDPClientInfoError("Client address must be a literal IP")
     try:
         address = ipaddress.ip_address(client_address)
     except (ValueError, TypeError) as exc:
         raise RDPClientInfoError("Client address must be a literal IP") from exc
+    if address.is_unspecified or address.is_multicast:
+        raise RDPClientInfoError("Unusable client IP address")
     if address.version == 4:
         family = 2
     else:
