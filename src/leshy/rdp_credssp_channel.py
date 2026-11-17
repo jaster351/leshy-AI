@@ -28,6 +28,10 @@ from .rdp_credssp_credentials import (
     RDPCredentials, validate_sealed_authinfo_tsrequest,
 )
 from .native_spnego import _check_target, new_native_spnego
+from .rdp_mcs_basic import (
+    MCSError, MAX_PACKET as MAX_MCS_PACKET, ServerMCSSettings,
+    build_mcs_connect_initial, parse_mcs_connect_response,
+)
 
 _CERT_SHA256 = re.compile(r"[a-fA-F0-9]{64}\Z")
 _MAX_ROUND_TRIPS = 18
@@ -100,6 +104,7 @@ class PinnedRDPCredSSPChannel:
         self._deadline = deadline
         self._credssp: CredSSPClient | None = None
         self._closed = False
+        self._mcs_attempted = False
 
     def _check(self) -> None:
         if self._closed:
@@ -216,6 +221,53 @@ class PinnedRDPCredSSPChannel:
         except BaseException:
             # Even on send failure the peer might have received authInfo.
             # Never retry automatically and never re-use this GSS channel.
+            self.close()
+            raise
+
+
+    def exchange_mcs_basic_settings(
+        self, width: int = 1280, height: int = 720,
+    ) -> ServerMCSSettings:
+        """Perform only RDP MCS Basic Settings Exchange on existing TLS.
+
+        No packet is sent until the separately approved CredSSP credentials
+        were transferred on this SAME verified owner-scoped connection.
+        Server MCS response confirms settings only, NOT Windows desktop login.
+        """
+        if (self._closed or self._mcs_attempted or self._credssp is None
+                or not self._credssp.credentials_delegated):
+            raise RDPChannelError("MCS requires approved CredSSP credential transfer")
+        self._mcs_attempted = True  # single attempt, including failures
+        try:
+            self._check()
+            # Hybrid-EX uses a four-byte early authorization result after the
+            # CredSSP exchange. Never treat access-denied as a basic setting.
+            if self._selected == "CredSSP-EX":
+                result = _read_exact(self._tls, 4, self._deadline)
+                self._check()
+                if result != b"\x00\x00\x00\x00":
+                    raise PermissionError("RDP early user authorization was not granted")
+            protocol = {"CredSSP": 2, "CredSSP-EX": 8}.get(self._selected)
+            if protocol is None:
+                raise RDPChannelError("Invalid MCS security protocol")
+            request = build_mcs_connect_initial(
+                width, height, selected_protocol=protocol
+            )
+            self._check()
+            self._tls.settimeout(_time_left(self._deadline))
+            self._tls.sendall(request)
+            self._check()
+            header = _read_exact(self._tls, 4, self._deadline)
+            if header[:2] != b"\x03\x00":
+                raise MCSError("Invalid MCS TPKT response")
+            size = int.from_bytes(header[2:4], "big")
+            if not 18 <= size <= MAX_MCS_PACKET:
+                raise MCSError("MCS TPKT length outside configured limit")
+            response = header + _read_exact(self._tls, size - 4, self._deadline)
+            settings = parse_mcs_connect_response(response)
+            self._check()
+            return settings
+        except BaseException:
             self.close()
             raise
 

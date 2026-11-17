@@ -61,7 +61,9 @@ jobs:
             tests/test_native_spnego_windows_steps.py \
             tests/test_rdp_credssp_negotiator.py \
             tests/test_rdp_credssp_channel.py \
-            tests/test_rdp_credssp_channel_loopback.py
+            tests/test_rdp_credssp_channel_loopback.py \
+            tests/test_rdp_mcs_basic.py \
+            tests/test_rdp_mcs_channel.py
       - name: Проверить реальный Browser E2E
         run: |
           BROWSER="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
