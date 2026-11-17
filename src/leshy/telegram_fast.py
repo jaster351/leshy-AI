@@ -539,12 +539,13 @@ class FastTelegramBridge(RichTelegramBridge):
         try:
             self._wait_for_foreground_slot()
             dialogue_text = _dialogue_text_with_reply(message, text)
-            from .identity_runtime import stream_with_verified_identity
+            from .identity_runtime import is_owner_identity_question, stream_with_verified_identity
             for item in stream_with_verified_identity(
                 lambda: self._realtime.stream(
                     dialogue_text, owner_id=owner_key, session_id=session_key,
                 ),
-                role=verified_role, server_owner=owner,
+                role=verified_role if is_owner_identity_question(text) else None,
+                server_owner=owner,
             ):
                 if item.type == "delta":
                     answer += str(item.data.get("text") or "")
