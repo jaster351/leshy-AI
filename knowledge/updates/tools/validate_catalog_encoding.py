@@ -27,7 +27,7 @@ def inspect_file(path: Path) -> tuple[int, list[str]]:
         raw = path.read_bytes()
         # A BOM is not corruption itself, but a strict no-BOM catalogue
         # prevents silent differences between editors and importers.
-        if raw.startswith(b"\\xef\\xbb\\xbf"):
+        if raw.startswith(b"\xef\xbb\xbf"):
             errors.append(f"{path}: UTF-8 BOM is not allowed in knowledge files")
         data = raw.decode("utf-8", errors="strict")
     except (UnicodeError, OSError) as exc:
