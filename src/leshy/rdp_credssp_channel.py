@@ -245,7 +245,7 @@ class PinnedRDPCredSSPChannel:
             if self._selected == "CredSSP-EX":
                 result = _read_exact(self._tls, 4, self._deadline)
                 self._check()
-                if result != b"\\x00\\x00\\x00\\x00":
+                if result != b"\x00\x00\x00\x00":
                     raise PermissionError("RDP early user authorization was not granted")
             protocol = {"CredSSP": 2, "CredSSP-EX": 8}.get(self._selected)
             if protocol is None:
@@ -258,7 +258,7 @@ class PinnedRDPCredSSPChannel:
             self._tls.sendall(request)
             self._check()
             header = _read_exact(self._tls, 4, self._deadline)
-            if header[:2] != b"\\x03\\x00":
+            if header[:2] != b"\x03\x00":
                 raise MCSError("Invalid MCS TPKT response")
             size = int.from_bytes(header[2:4], "big")
             if not 18 <= size <= MAX_MCS_PACKET:
