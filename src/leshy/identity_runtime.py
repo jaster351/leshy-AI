@@ -58,9 +58,12 @@ def verified_speaker_instruction() -> str:
 
 
 def stream_with_verified_identity(
-    factory: Callable[[], Iterator[_T]], *, role: str, server_owner: bool,
+    factory: Callable[[], Iterator[_T]], *, role: str | None, server_owner: bool,
 ) -> Iterator[_T]:
-    """Сохранить доверенную роль на весь поток генерации, затем отозвать контекст."""
+    """Передавать роль только для вопроса о личности; не нагружать остальные запросы."""
+    if role is None:
+        yield from factory()
+        return
     with verified_telegram_identity_context(role, server_owner=server_owner):
         yield from factory()
 
