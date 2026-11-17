@@ -73,7 +73,7 @@ def creator_identity_answer(message: str) -> None:
 def is_owner_identity_question(message: str) -> bool:
     """Распознавание темы вопроса; не является подтверждением личности."""
     value = " ".join(str(message or "").lower().replace("ё", "е").split())
-    value = re.sub(r"[^а-яa-z0-9\\s]", " ", value)
+    value = re.sub(r"[^а-яa-z0-9\s]", " ", value)
     value = " ".join(value.split())
     return any(phrase in value for phrase in (
         "а я по твоему кто",
