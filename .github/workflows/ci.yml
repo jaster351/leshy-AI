@@ -65,7 +65,9 @@ jobs:
             tests/test_rdp_mcs_basic.py \
             tests/test_rdp_mcs_channel.py \
             tests/test_rdp_mcs_channels.py \
-            tests/test_rdp_mcs_channel_join.py
+            tests/test_rdp_mcs_channel_join.py \
+            tests/test_rdp_client_info.py \
+            tests/test_rdp_client_info_channel.py
       - name: Проверить реальный Browser E2E
         run: |
           BROWSER="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
