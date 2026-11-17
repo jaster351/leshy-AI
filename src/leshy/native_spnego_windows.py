@@ -41,6 +41,7 @@ class SecPkgSizes(C.Structure):
 _ISC_REQ = 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00000800 | 0x00010000
 _REQUIRED = 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00010000
 _OK, _CONTINUE = 0, 0x00090312
+_COMPLETE, _COMPLETE_AND_CONTINUE = 0x00090313, 0x00090314
 _TOKEN, _DATA, _PADDING = 2, 1, 9
 
 
@@ -86,6 +87,8 @@ class WindowsSSPIContext:
             h, h, C.c_wchar_p, UINT, UINT, UINT, d, UINT, h, d, u, C.POINTER(TimeStamp),
         ]
         self.lib.InitializeSecurityContextW.restype = C.c_int32
+        self.lib.CompleteAuthToken.argtypes = [h, d]
+        self.lib.CompleteAuthToken.restype = C.c_int32
         self.lib.QueryContextAttributesW.argtypes = [h, UINT, PTR]
         self.lib.QueryContextAttributesW.restype = C.c_int32
         self.lib.EncryptMessage.argtypes = [h, UINT, d, UINT]
@@ -144,14 +147,31 @@ class WindowsSSPIContext:
         self._rounds += 1
         if self._ctx.dwLower or self._ctx.dwUpper:
             self._have_ctx = True
-        if status not in (_OK, _CONTINUE):
+        if status not in (_OK, _CONTINUE, _COMPLETE, _COMPLETE_AND_CONTINUE):
             self.close()
             raise SPNEGOError("SSPI target authentication failed")
-        if output_arr[0].cbBuffer > MAX_TOKEN:
+        # SSPI may require a final checksum or token adjustment. Sending an
+        # incomplete token would make real Windows Negotiate handshakes fail.
+        if status in (_COMPLETE, _COMPLETE_AND_CONTINUE):
+            completed = self.lib.CompleteAuthToken(
+                C.byref(self._ctx), C.byref(output_desc)
+            )
+            if completed != _OK:
+                self.close()
+                raise SPNEGOError("SSPI token completion failed")
+        # SSPI output is native memory. Never trust a buffer length/pointer
+        # changed by the security provider without checking the owned range.
+        output = output_arr[0]
+        start = C.addressof(output_store)
+        address = output.pvBuffer
+        length = output.cbBuffer
+        if (output.BufferType != _TOKEN or not isinstance(address, int)
+                or length > MAX_TOKEN or address < start
+                or address > start + MAX_TOKEN - length):
             self.close()
-            raise SPNEGOError("SSPI output token exceeded limit")
-        token = output_store.raw[:output_arr[0].cbBuffer]
-        if status == _OK:
+            raise SPNEGOError("SSPI output token buffer invalid")
+        token = C.string_at(address, length) if length else b""
+        if status in (_OK, _COMPLETE):
             if (actual.value & _REQUIRED) != _REQUIRED:
                 self.close()
                 raise SPNEGOError("SSPI lacks mutual authentication or confidentiality")
