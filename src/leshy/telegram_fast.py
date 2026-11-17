@@ -479,18 +479,9 @@ class FastTelegramBridge(RichTelegramBridge):
         owner = self._is_owner(user_id)
         from .role_authority import role_for_telegram, ROLE_DISPLAY
         verified_role = role_for_telegram(self, user_id)
-        # Распознаём владельца по проверенному Telegram ID, не по имени,
-        # аватарке, пересланному сообщению или тексту «я хозяин».
-        from .identity_runtime import CREATOR_FULL_NAME, is_owner_identity_question
-        if is_owner_identity_question(text):
-            if verified_role == "creator":
-                self._send(chat_id, "Ваш Telegram ID подтверждён как Создатель Федерации Леших." +
-                           (" Вы также хозяин этого сервера." if owner else " Это не даёт доступа к чужим серверам без разрешения их владельца."))
-            elif owner:
-                self._send(chat_id, f"Вы подтверждены как хозяин этого сервера. Создатель проекта — {CREATOR_FULL_NAME}.")
-            else:
-                self._send(chat_id, "Вы сейчас пользователь этого сервера. Имя, сообщение или Web-гость сами по себе не предоставляют административных прав. Проверьте привязку Telegram в профиле Web.")
-            return
+        # Вопросы «кто я» проходят через нейросеть. Роль подтверждает
+        # Telegram-сервер, а не текст или имя собеседника; команды /whoami
+        # и проверка полномочий остаются самостоятельными серверными операциями.
         command = text.split(maxsplit=1)[0].lower()
         if command in _ADMIN_COMMANDS and not owner:
             self._send(chat_id, "Эта команда доступна только хозяину Лешего.")
@@ -548,7 +539,14 @@ class FastTelegramBridge(RichTelegramBridge):
         try:
             self._wait_for_foreground_slot()
             dialogue_text = _dialogue_text_with_reply(message, text)
-            for item in self._realtime.stream(dialogue_text, owner_id=owner_key, session_id=session_key):
+            from .identity_runtime import is_owner_identity_question, stream_with_verified_identity
+            for item in stream_with_verified_identity(
+                lambda: self._realtime.stream(
+                    dialogue_text, owner_id=owner_key, session_id=session_key,
+                ),
+                role=verified_role if is_owner_identity_question(text) else None,
+                server_owner=owner,
+            ):
                 if item.type == "delta":
                     answer += str(item.data.get("text") or "")
                     visible = _partial_text(answer)

@@ -104,7 +104,8 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
     # Обязательные фрагменты: начало persona и все явно записанные правила.
     essential = set([0] if paragraphs else [])
     essential.update(i for i, part in enumerate(paragraphs)
-                     if "Постоянные правила общения" in part)
+                     if ("Постоянные правила общения" in part or "ПРОИСХОЖДЕНИЕ ЛЕШЕГО" in part
+                         or "ПОДТВЕРЖДЁННАЯ СЕРВЕРОМ РОЛЬ" in part))
     selected_parts = set(essential)
     selected_dialogue = {latest_user} if latest_user is not None else set()
     partial_dialogue: dict[int, ChatMessage] = {}
