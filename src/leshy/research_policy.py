@@ -157,6 +157,16 @@ def is_casual_checkin(query: str) -> bool:
     )
 
 
+# Узкие вопросы о происхождении Лешего относятся к локальной идентичности,
+# закреплённой в коде. Это только решение о маршруте, НЕ шаблон ответа.
+_CREATOR_LOCAL_RE = re.compile(
+    r"^(?:кто\\s+(?:твой\\s+)?(?:создатель|автор|разработчик)|"
+    r"кто\\s+(?:тебя|лешего)\\s+(?:создал|сделал)|"
+    r"назови\\s+(?:своего|твоего)\\s+(?:создателя|автора)|"
+    r"кто\\s+создал\\s+лешего)"
+    r"\\s*[?!.]*$", re.IGNORECASE,
+)
+
 _LOCAL_DIALOGUE_RE = re.compile(
     r"^(?:"
     r"вы\s+(?:же\s+)?друг\s+друга\s+видите\s+в\s+чате(?:\s*,?\s*да)?|"
@@ -181,7 +191,7 @@ def is_local_dialogue_request(query: str) -> bool:
     внешних фактов по схожим словам внутри других вопросов.
     """
     q = normalize_query(_current_user_text(query))
-    return bool(_LOCAL_DIALOGUE_RE.fullmatch(q))
+    return bool(_LOCAL_DIALOGUE_RE.fullmatch(q) or _CREATOR_LOCAL_RE.fullmatch(q))
 
 
 _LESHY_CONSTITUTION_RE = re.compile(
