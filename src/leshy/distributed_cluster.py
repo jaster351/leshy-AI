@@ -15,6 +15,7 @@ from urllib import parse, request
 
 from .cluster_orchestrator import ClusterNode, ClusterOrchestrator, ClusterResult, ClusterTask
 from .cluster_controls import autodiscovery_enabled
+from .creator_consensus import creator_identity_digest, CreatorConsensusService
 from .version import VERSION
 from .diagnostics import event, problem
 from .inference_scheduler import get_inference_scheduler
@@ -113,6 +114,7 @@ class LanPeerDiscovery:
         self._peers: dict[str, ClusterNode] = {}
         self._telegram_local: dict[str, Any] = {}
         self._telegram_remote: dict[str, dict[str, Any]] = {}
+        self._creator_remote: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -153,6 +155,17 @@ class LanPeerDiscovery:
                 and node_id in self._peers
             }
 
+    def creator_peer_votes(self, *, max_age_seconds: float = 25.0) -> dict[str, str]:
+        """Отпечатки из недавних HMAC-подтверждённых UDP-объявлений."""
+        cutoff = time.time() - max_age_seconds
+        with self._lock:
+            return {
+                node_id: str(info["digest"])
+                for node_id, info in self._creator_remote.items()
+                if node_id in self._peers and float(info.get("seen") or 0) >= cutoff
+                and time.time() - self._peers[node_id].last_seen <= 60.0
+            }
+
     def diagnostics(self) -> dict[str, Any]:
         with self._lock:
             return {
@@ -178,6 +191,7 @@ class LanPeerDiscovery:
             thread.join(timeout=1.5)
         with self._lock:
             self._peers.clear()
+            self._creator_remote.clear()
 
     def announce(self, node: ClusterNode) -> None:
         self._last_node = node
@@ -185,6 +199,8 @@ class LanPeerDiscovery:
             "magic": _DISCOVERY_MAGIC,
             "cluster_id": self.identity.cluster_id,
             "node": asdict(node),
+            # Лишь SHA-256: в UDP не отправляем имя, личную память или роли.
+            "creator_digest": creator_identity_digest(),
         }
         with self._lock:
             if self._telegram_local:
@@ -210,6 +226,7 @@ class LanPeerDiscovery:
             for key in stale:
                 self._peers.pop(key, None)
                 self._telegram_remote.pop(key, None)
+                self._creator_remote.pop(key, None)
             return list(self._peers.values())
 
     def _accept_packet(self, raw: bytes, source_ip: str = "") -> None:
@@ -255,8 +272,21 @@ class LanPeerDiscovery:
             if not peer.endpoint.startswith(("http://", "https://")):
                 return
             role = data.get("telegram")
+            # Голос — часть уже проверенного HMAC-пакета; недоверенные
+            # форматы игнорируются, чтобы старые версии оставались совместимы.
+            candidate_digest = data.get("creator_digest")
+            valid_creator = (
+                isinstance(candidate_digest, str) and len(candidate_digest) == 64
+                and all(ch in "0123456789abcdef" for ch in candidate_digest)
+            )
             with self._lock:
                 self._peers[peer.node_id] = peer
+                if valid_creator:
+                    self._creator_remote[peer.node_id] = {
+                        "digest": candidate_digest, "seen": time.time(),
+                    }
+                else:
+                    self._creator_remote.pop(peer.node_id, None)
                 if isinstance(role, dict):
                     bot = str(role.get("bot") or "")
                     vote = str(role.get("vote") or "")
@@ -372,6 +402,7 @@ class DistributedClusterRuntime:
         self.app = app
         self.identity = ClusterIdentity(app.settings.brain_dir)
         self.discovery = LanPeerDiscovery(self.identity)
+        self.creator_consensus = CreatorConsensusService(app.storage, self.discovery)
         self.transport = HttpClusterTransport(self.identity)
         self.local_node = self._build_local_node()
         self.orchestrator = ClusterOrchestrator(
@@ -582,6 +613,10 @@ class DistributedClusterRuntime:
                 self.refresh_local_node()
                 self.orchestrator.announce_and_refresh()
                 self._console_diagnostics()
+                try:
+                    self.creator_consensus.tick()
+                except Exception as exc:
+                    problem("creator_federation_audit_failed", type(exc).__name__)
             except Exception as exc:
                 problem("distributed_cluster_refresh_failed", str(exc))
 
@@ -658,6 +693,7 @@ class DistributedClusterRuntime:
             "udp": discovery,
             "tcp_port": int(os.getenv("LESHY_PORT", "8765")),
             "hints": hints,
+            "creator_consensus": self.creator_consensus.report(),
         }
 
     def _execute_local(self, task: ClusterTask) -> ClusterResult:
@@ -846,6 +882,7 @@ class DistributedClusterRuntime:
             "proof_of_work": False,
             "purpose": "полезные вычисления Лешего",
             "telegram_election": self.telegram_election_status(),
+            "creator_consensus": self.creator_consensus.report(),
         })
         return value
 

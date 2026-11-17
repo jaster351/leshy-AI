@@ -70,6 +70,11 @@ def _advanced_kind(app, message: str) -> tuple[str, str] | None:
     low = value.lower()
     if low in {"/cluster", "/cluster status", "/кластер", "/кластер статус"}:
         return "cluster", ""
+    if low in {
+        "/creator_consensus", "/creator-consensus", "/проверка_создателя",
+        "проверь создателя у федерации", "проверь кто создатель у леших",
+    }:
+        return "creator_consensus", ""
     for prefix in ("/memory ", "/память "):
         if low.startswith(prefix):
             return "memory", value[len(prefix):].strip()
@@ -111,9 +116,48 @@ def _cluster_answer(app) -> tuple[str, dict[str, Any]]:
     return "\n".join(lines), status
 
 
+def _creator_consensus_answer(app) -> tuple[str, dict[str, Any]]:
+    """Показать коллективные свидетельства; не подменять голосованием истину."""
+    if not module_enabled(app.storage, "distributed-cluster"):
+        return "Для коллективной проверки включите модуль LAN-кластера Лешего.", {}
+    cluster = app.distributed_cluster
+    try:
+        cluster.refresh()
+    except Exception as exc:
+        problem("creator_consensus_refresh_failed", type(exc).__name__)
+    cache_state = cluster.creator_consensus.reconcile_informational_cache()
+    report = cluster.creator_consensus.report()
+    agreeing = int(report["matching_local"])
+    total = int(report["total_observed_nodes"])
+    peers = int(report["reported_peers"])
+    lines = [
+        "Коллективная сверка создателя Федерации Леших:",
+        f"Ответов от других узлов: {peers}. Совпадений с локальным кодом: {agreeing} из {total} (включая этот узел).",
+    ]
+    if not peers:
+        lines.append("Другие узлы ещё не передали свежие сведения. Общее мнение отсутствует.")
+    elif report["status"] == "consistent":
+        lines.append("Полученные отпечатки одинаковы; расхождений среди ответивших нет.")
+    else:
+        lines.append("Обнаружены расхождения! Нужна проверка узлов и их сборок.")
+        if report["differing_peer_ids"]:
+            lines.append("Узлы с иным отпечатком: " +
+                         ", ".join(report["differing_peer_ids"][:16]))
+        if report["status"] == "local_outlier":
+            lines.append("В этом узле встроенный отпечаток отличается от большинства; исходный код не изменён.")
+    lines.append(f"Служебная копия сведений о создателе: {cache_state}.")
+    lines.append(
+        "Большинство и общий секрет кластера не доказывают авторство; "
+        "роли, личная память и встроенный код голосованием не изменяются."
+    )
+    return "\n".join(lines), report
+
+
 def _handle_advanced(app, kind: str, payload: str, *, owner_id: str, session_id: str, request_id: str) -> tuple[str, dict[str, Any]]:
     if kind == "cluster":
         return _cluster_answer(app)
+    if kind == "creator_consensus":
+        return _creator_consensus_answer(app)
     if kind == "memory":
         if not module_enabled(app.storage, "intelligent-memory"):
             return "Модуль «Интеллектуальная память» выключен в настройках.", {}
@@ -242,6 +286,7 @@ def install_advanced_modules(app_class, app=None) -> None:
             activity_text = {
                 "agents": "Запускаю команду подагентов…",
                 "cluster": "Проверяю узлы кластера…",
+                "creator_consensus": "Сверяю сведения о создателе у узлов Федерации…",
                 "memory": "Ищу в долговременной памяти…",
                 "graph": "Ищу связи в GraphRAG…",
             }.get(route[0], "Выполняю модуль…")
