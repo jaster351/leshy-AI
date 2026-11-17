@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 
+from leshy.advanced_modules_runtime import _advanced_kind
 from leshy.cluster_orchestrator import ClusterNode
 from leshy.creator_consensus import (
     CreatorConsensusService, creator_identity_digest, summarize_creator_votes,
@@ -28,6 +29,13 @@ class _Discovery:
 
 
 class CreatorConsensusTests(unittest.TestCase):
+    def test_collective_command_is_explicit_and_origin_answer_remains_model_driven(self):
+        self.assertEqual(_advanced_kind(None, "/creator_consensus"),
+                         ("creator_consensus", ""))
+        self.assertEqual(_advanced_kind(None, "проверь создателя у федерации"),
+                         ("creator_consensus", ""))
+        self.assertIsNone(_advanced_kind(None, "Кто твой создатель?"))
+
     def test_consistent_nodes_count_without_promoting_role(self):
         digest = creator_identity_digest()
         result = summarize_creator_votes(digest, {"peer-1": digest, "peer-2": digest})
