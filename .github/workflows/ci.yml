@@ -58,6 +58,7 @@ jobs:
             tests/test_rdp_credssp_binding_x509.py \
             tests/test_native_spnego.py \
             tests/test_native_spnego_windows_buffers.py \
+            tests/test_native_spnego_windows_steps.py \
             tests/test_rdp_credssp_negotiator.py \
             tests/test_rdp_credssp_channel.py \
             tests/test_rdp_credssp_channel_loopback.py
