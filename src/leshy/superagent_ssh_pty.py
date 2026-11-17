@@ -129,37 +129,68 @@ class InteractiveSSHBroker:
         node = check_terminal_permission(policy, actor, node_id)
         filename = _file(credential_file)
         pin = _registered_pin(policy, actor, node, "execute")
+        # Network handshakes may take seconds. Never hold the broker lock
+        # while connecting: established PTYs must remain readable/closable.
         with self._lock:
             self._prune()
+            if self._stopped.is_set():
+                raise RuntimeError("SSH-брокер остановлен")
             if len(self._sessions) >= self._max:
                 raise PermissionError("Достигнут предел активных SSH-сеансов")
-            context = verified_connection(node, filename, pin, policy, actor,
-                                          "execute", 8.0)
-            transport = None
-            channel = None
-            try:
-                transport, observed = context.__enter__()
-                channel = transport.open_session(timeout=8.0)
-                channel.settimeout(8.0)
-                channel.get_pty(term="xterm", width=100, height=30)
-                channel.invoke_shell()
+
+        context = verified_connection(node, filename, pin, policy, actor,
+                                      "execute", 8.0)
+        channel = None
+        entered = False
+        registered = False
+        sid = ""
+        try:
+            transport, observed = context.__enter__()
+            entered = True
+            channel = transport.open_session(timeout=8.0)
+            channel.settimeout(8.0)
+            channel.get_pty(term="xterm", width=100, height=30)
+            channel.invoke_shell()
+            policy.require(actor, node, "execute",
+                           observed_fingerprint=observed)
+            sid = secrets.token_urlsafe(24)
+            with self._lock:
+                # Another concurrent opener or shutdown can win the race
+                # while our SSH handshake is in progress.
+                self._prune()
+                if self._stopped.is_set():
+                    raise RuntimeError("SSH-брокер остановлен")
+                if len(self._sessions) >= self._max:
+                    raise PermissionError("Достигнут предел активных SSH-сеансов")
+                # Authorization may also have been revoked during connect.
                 policy.require(actor, node, "execute",
                                observed_fingerprint=observed)
-                sid = secrets.token_urlsafe(24)
                 self._sessions[sid] = _PTY(
                     actor.owner_id, actor.session_fingerprint, node, filename,
                     observed, context, channel, self._clock() + self._ttl,
                 )
+                registered = True
+            try:
                 policy.storage.audit("superagent.ssh.pty.open", {
                     "node_id": node, "interactive": True,
                 })
-                return {"session_id": sid, "node_id": node,
-                        "expires_seconds": int(self._ttl)}
             except BaseException:
+                # A failed audit must not leave an unaudited open session.
+                with self._lock:
+                    self._sessions.pop(sid, None)
+                registered = False
+                raise
+            return {"session_id": sid, "node_id": node,
+                    "expires_seconds": int(self._ttl)}
+        except BaseException:
+            if not registered:
                 if channel is not None:
                     channel.close()
-                context.__exit__(None, None, None)
-                raise
+                # __enter__ may fail before yielding; in that case the
+                # generator context manager already performed its cleanup.
+                if entered:
+                    context.__exit__(None, None, None)
+            raise
 
     def read(self, policy: RemotePermissionPolicy, actor: VerifiedActor,
              session_id: str) -> dict[str, Any]:
