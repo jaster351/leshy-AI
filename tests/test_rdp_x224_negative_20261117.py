@@ -8,24 +8,24 @@ from leshy.rdp_tls_probe import _negotiate, probe_rdp_tls
 
 class X224PreflightNegativeTests(unittest.TestCase):
     def _socket(self, body):
-        packet = b"\\x03\\x00" + struct.pack(">H", len(body) + 4) + body
+        packet = b"\x03\x00" + struct.pack(">H", len(body) + 4) + body
         sock = Mock()
         pieces = [packet[:4], packet[4:]]
         sock.recv.side_effect = lambda n: pieces.pop(0)
         return sock
 
     def test_reject_legacy_security_downgrade(self):
-        body = b"\\x0e\\xd0\\x00\\x00\\x00\\x00\\x00" + struct.pack("<BBHI", 2, 0, 8, 0)
+        body = b"\x0e\xd0\x00\x00\x00\x00\x00" + struct.pack("<BBHI", 2, 0, 8, 0)
         with self.assertRaises(ConnectionError):
             _negotiate(self._socket(body))
 
     def test_reject_unexpected_security_selection(self):
-        body = b"\\x0e\\xd0\\x00\\x00\\x00\\x00\\x00" + struct.pack("<BBHI", 2, 0, 8, 4)
+        body = b"\x0e\xd0\x00\x00\x00\x00\x00" + struct.pack("<BBHI", 2, 0, 8, 4)
         with self.assertRaises(ConnectionError):
             _negotiate(self._socket(body))
 
     def test_reject_malformed_negotiation_length(self):
-        body = b"\\x0e\\xd0\\x00\\x00\\x00\\x00\\x00" + struct.pack("<BBHI", 2, 0, 7, 2)
+        body = b"\x0e\xd0\x00\x00\x00\x00\x00" + struct.pack("<BBHI", 2, 0, 7, 2)
         with self.assertRaises(ConnectionError):
             _negotiate(self._socket(body))
 
