@@ -36,6 +36,12 @@ class CreatorConsensusTests(unittest.TestCase):
                          ("creator_consensus", ""))
         self.assertIsNone(_advanced_kind(None, "Кто твой создатель?"))
 
+    def test_no_network_majority_from_only_this_node(self):
+        report = summarize_creator_votes(creator_identity_digest(), {})
+        self.assertEqual(report["status"], "no_peer_votes")
+        self.assertIsNone(report["majority_digest"])
+        self.assertEqual(report["total_observed_nodes"], 1)
+
     def test_consistent_nodes_count_without_promoting_role(self):
         digest = creator_identity_digest()
         result = summarize_creator_votes(digest, {"peer-1": digest, "peer-2": digest})
