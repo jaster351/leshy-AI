@@ -28,6 +28,11 @@ from .rdp_credssp_credentials import (
     RDPCredentials, validate_sealed_authinfo_tsrequest,
 )
 from .native_spnego import _check_target, new_native_spnego
+from .rdp_mcs_channels import (
+    MCSChannelError, MCSJoinedChannels, erect_domain_request,
+    attach_user_request, parse_attach_user_confirm, channel_join_request,
+    parse_channel_join_confirm, required_channel_ids,
+)
 from .rdp_mcs_basic import (
     MCSError, MAX_PACKET as MAX_MCS_PACKET, ServerMCSSettings,
     build_mcs_connect_initial, parse_mcs_connect_response,
@@ -105,6 +110,9 @@ class PinnedRDPCredSSPChannel:
         self._credssp: CredSSPClient | None = None
         self._closed = False
         self._mcs_attempted = False
+        self._mcs_settings: ServerMCSSettings | None = None
+        self._mcs_join_attempted = False
+        self._mcs_joined: MCSJoinedChannels | None = None
 
     def _check(self) -> None:
         if self._closed:
@@ -266,7 +274,54 @@ class PinnedRDPCredSSPChannel:
             response = header + _read_exact(self._tls, size - 4, self._deadline)
             settings = parse_mcs_connect_response(response)
             self._check()
+            self._mcs_settings = settings
             return settings
+        except BaseException:
+            self.close()
+            raise
+
+    def _read_mcs_confirm(self, size: int) -> bytes:
+        """Read a single bounded TPKT; never consume another MCS packet."""
+        self._check()
+        header = _read_exact(self._tls, 4, self._deadline)
+        if header[:2] != b"\x03\x00" or int.from_bytes(header[2:4], "big") != size:
+            raise MCSChannelError("Unexpected MCS confirmation frame length")
+        packet = header + _read_exact(self._tls, size - 4, self._deadline)
+        self._check()
+        return packet
+
+    def join_mcs_channels(self) -> MCSJoinedChannels:
+        """Join ONLY user and I/O channels after successful Basic Settings.
+
+        MCS Channel Join is sequential, with a checked server response for
+        each channel. Does NOT mean screen or input is available.
+        """
+        if (self._closed or self._mcs_join_attempted or self._mcs_settings is None
+                or self._credssp is None or not self._credssp.credentials_delegated):
+            raise RDPChannelError("MCS channels require completed owner-approved basic settings")
+        self._mcs_join_attempted = True  # no retries after partial sends
+        try:
+            self._check()
+            self._tls.settimeout(_time_left(self._deadline))
+            self._tls.sendall(erect_domain_request())
+            self._check()
+            self._tls.settimeout(_time_left(self._deadline))
+            self._tls.sendall(attach_user_request())
+            user_id = parse_attach_user_confirm(self._read_mcs_confirm(11))
+            channels = required_channel_ids(user_id, self._mcs_settings.io_channel_id)
+            for target in channels:
+                self._check()
+                self._tls.settimeout(_time_left(self._deadline))
+                self._tls.sendall(channel_join_request(user_id, target))
+                self._check()
+                parse_channel_join_confirm(
+                    self._read_mcs_confirm(15),
+                    user_id=user_id, requested_channel=target,
+                )
+            self._check()
+            result = MCSJoinedChannels(user_id, channels[1], channels)
+            self._mcs_joined = result
+            return result
         except BaseException:
             self.close()
             raise
