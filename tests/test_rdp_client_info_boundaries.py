@@ -51,7 +51,7 @@ def test_ipv6_client_info_has_no_password_and_uses_literal_address():
     packet = build_client_info_pdu(1007, 1003, client_address="2001:0db8:0:0::1")
     # Fixed TS_INFO_PACKET offsets: all five credential/shell lengths are zero.
     body = packet[14:] if packet[13] < 128 else packet[15:]
-    assert body[:4] == b"\\x40\\x00\\x00\\x00"
+    assert body[:4] == bytes((0x40, 0, 0, 0))
     assert struct.unpack_from("<5H", body, 12) == (0, 0, 0, 0, 0)
-    assert body[22:32] == b"\\x00" * 10
+    assert body[22:32] == bytes(10)
     assert "2001:db8::1".encode("utf-16-le") in body
