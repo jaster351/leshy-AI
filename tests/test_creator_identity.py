@@ -51,6 +51,7 @@ class CreatorIdentityTests(unittest.TestCase):
         self.assertIn(CREATOR_FULL_NAME, LESHY_IDENTITY_PROMPT)
         self.assertIn("ПРОИСХОЖДЕНИЕ ЛЕШЕГО", LESHY_IDENTITY_PROMPT)
         for question in ("Кто твой создатель?", "Кто создал Лешего?",
+                         "Кто автор Лешего?", "Кто создатель Лешего?",
                          "Назови своего автора"):
             with self.subTest(question=question):
                 self.assertIsNone(creator_identity_answer(question))
