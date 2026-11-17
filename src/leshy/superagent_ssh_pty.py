@@ -170,26 +170,28 @@ class InteractiveSSHBroker:
                     observed, context, channel, self._clock() + self._ttl,
                 )
                 registered = True
-            try:
-                policy.storage.audit("superagent.ssh.pty.open", {
-                    "node_id": node, "interactive": True,
-                })
-            except BaseException:
-                # A failed audit must not leave an unaudited open session.
-                with self._lock:
+                try:
+                    # Do not expose the session to a concurrent reader before
+                    # the mandatory audit record was successfully persisted.
+                    policy.storage.audit("superagent.ssh.pty.open", {
+                        "node_id": node, "interactive": True,
+                    })
+                except BaseException:
                     self._sessions.pop(sid, None)
-                registered = False
-                raise
+                    registered = False
+                    raise
             return {"session_id": sid, "node_id": node,
                     "expires_seconds": int(self._ttl)}
         except BaseException:
             if not registered:
-                if channel is not None:
-                    channel.close()
-                # __enter__ may fail before yielding; in that case the
-                # generator context manager already performed its cleanup.
-                if entered:
-                    context.__exit__(None, None, None)
+                try:
+                    if channel is not None:
+                        channel.close()
+                finally:
+                    # __enter__ may fail before yielding; in that case the
+                    # generator context manager already performed cleanup.
+                    if entered:
+                        context.__exit__(None, None, None)
             raise
 
     def read(self, policy: RemotePermissionPolicy, actor: VerifiedActor,
