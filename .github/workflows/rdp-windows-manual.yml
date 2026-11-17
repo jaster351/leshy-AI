@@ -41,6 +41,8 @@ jobs:
             tests/test_rdp_credssp_channel_loopback.py `
             tests/test_rdp_mcs_basic.py `
             tests/test_rdp_mcs_channel.py `
+            tests/test_rdp_mcs_channels.py `
+            tests/test_rdp_mcs_channel_join.py `
             tests/test_rdp_tls_probe.py `
             tests/test_rdp_frame_codec.py `
             tests/test_superagent_rdp_session.py
