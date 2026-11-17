@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from types import SimpleNamespace
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -162,6 +163,43 @@ class SSHPTYTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.broker.prepare(self.policy, self.actor, sid, line)
         self.assertEqual(self.channel.command_bytes, [])
+
+
+    def test_new_connection_does_not_hold_the_broker_lock(self):
+        seen = []
+
+        @contextmanager
+        def connection(*_args, **_kwargs):
+            def inspect_from_another_thread():
+                acquired = self.broker._lock.acquire(blocking=False)
+                seen.append(acquired)
+                if acquired:
+                    self.broker._lock.release()
+
+            thread = threading.Thread(target=inspect_from_another_thread)
+            thread.start()
+            thread.join(timeout=1)
+            self.assertFalse(thread.is_alive(), "probe must finish without blocking")
+            yield FakeTransport(self.channel), "a" * 64
+
+        with patch("leshy.superagent_ssh_pty.check_terminal_permission",
+                   return_value="192.0.2.10"), patch(
+            "leshy.superagent_ssh_pty._registered_pin", return_value="a" * 64,
+        ), patch("leshy.superagent_ssh_pty.verified_connection",
+                 side_effect=connection):
+            self.broker.open(self.policy, self.actor, "192.0.2.10", "access.json")
+        self.assertEqual(seen, [True])
+
+    def test_failed_open_audit_closes_channel_without_leaking_session(self):
+        def unavailable_audit(*_args, **_kwargs):
+            raise RuntimeError("audit storage unavailable")
+
+        self.policy.audit = unavailable_audit
+        with self.assertRaisesRegex(RuntimeError, "audit storage unavailable"):
+            self._open()
+        self.assertFalse(self.broker._sessions)
+        self.assertTrue(self.channel.closed)
+        self.assertTrue(self.closed_connection)
 
     def test_permission_denial_causes_no_network_connection(self):
         with patch("leshy.superagent_ssh_pty.check_terminal_permission",
