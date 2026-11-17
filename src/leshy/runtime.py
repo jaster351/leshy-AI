@@ -8,7 +8,6 @@ from .semantic_research_router import install_semantic_research_router
 from .config import Settings
 from .freshness_cache_runtime import install_freshness_cache_runtime
 from .freshness_memory_runtime import install_freshness_memory_runtime
-from .identity_runtime import install_creator_identity_routing
 from .runtime_latency_fix import install_runtime_latency_fixes
 
 
@@ -26,7 +25,6 @@ class Runtime(LeshyApp):
         install_freshness_memory_runtime()
         install_freshness_cache_runtime()
         install_runtime_latency_fixes()
-        install_creator_identity_routing(LeshyApp)
         install_owner_document_routing(LeshyApp)
         # Idempotency ставится последним поверх специальных chat routing, чтобы
         # повтор одного request_id не создавал второй ответ ни в одном интерфейсе.
