@@ -34,6 +34,26 @@ function Write-DiskSpace {
         return $free
     } catch { Write-Warning 'Disk space information unavailable.'; return [double]::MaxValue }
 }
+# Expand-Archive from Windows PowerShell 5.1 may fail cleaning nested SDK
+# cmdline-tools entries. Use native Windows tar, then .NET ZIP extraction.
+# Archives must be authenticated via SHA-256 before calling this function.
+function Expand-VerifiedAndroidArchive {
+    param([string]$Archive,[string]$Destination)
+    if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) { throw 'Verified Android archive missing.' }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+    if ($tar) {
+        & $tar.Source -xf $Archive -C $Destination
+        if ($LASTEXITCODE -eq 0) { return }
+        # Clean a partial extraction before the second implementation attempts it.
+        Get-ChildItem -LiteralPath $Destination -Force -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction Stop
+        Write-Warning 'Windows tar could not extract the verified ZIP. Trying .NET ZipFile.'
+    }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($Archive,$Destination)
+}
+
 if (-not $cacheHit) {
     if ((Write-DiskSpace) -lt 3GB) { throw 'Android compilation requires at least 3 GiB free.' }
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -52,14 +72,14 @@ if (-not $cacheHit) {
         }
         $cmd = Get-Command javac.exe -ErrorAction SilentlyContinue
         if ($cmd) { $candidates += (Split-Path -Parent (Split-Path -Parent $cmd.Source)) }
-        foreach ($home in $candidates) {
-            if (-not $home) { continue }
-            $java = Join-Path $home 'bin\java.exe'
-            $javac = Join-Path $home 'bin\javac.exe'
+        foreach ($jdkCandidateHome in $candidates) {
+            if (-not $jdkCandidateHome) { continue }
+            $java = Join-Path $jdkCandidateHome 'bin\java.exe'
+            $javac = Join-Path $jdkCandidateHome 'bin\javac.exe'
             if (-not (Test-Path -LiteralPath $java -PathType Leaf) -or -not (Test-Path -LiteralPath $javac -PathType Leaf)) { continue }
             $ver = ([string](@(& $javac -version 2>$null | Select-Object -First 1))).Trim()
             if ($ver -match '^javac\s+(\d+)' -and [int]$Matches[1] -ge 17 -and [int]$Matches[1] -le 23) {
-                return (Resolve-Path -LiteralPath $home).Path
+                return (Resolve-Path -LiteralPath $jdkCandidateHome).Path
             }
         }
         return $null
@@ -101,8 +121,9 @@ if (-not $cacheHit) {
             $zip = Join-Path $stage $package
             Invoke-WebRequest -Uri ('https://dl.google.com/android/repository/' + $package) -UseBasicParsing -OutFile $zip
             if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ine $expected) { throw 'Official Android SDK tools checksum mismatch.' }
-            Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
-            $src = Join-Path $stage 'cmdline-tools'
+            $unpacked = Join-Path $stage 'unpacked'
+            Expand-VerifiedAndroidArchive -Archive $zip -Destination $unpacked
+            $src = Join-Path $unpacked 'cmdline-tools'
             if (-not (Test-Path -LiteralPath (Join-Path $src 'bin\sdkmanager.bat') -PathType Leaf)) { throw 'Malformed Google SDK tools archive.' }
             $parent = Join-Path $sdk 'cmdline-tools'
             New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -139,8 +160,9 @@ if (-not $cacheHit) {
             if ($hash -notmatch '^[0-9a-fA-F]{64}$' -or (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ine $hash) {
                 throw 'Official Gradle distribution checksum mismatch.'
             }
-            Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
-            Move-Item -LiteralPath (Join-Path $stage ('gradle-' + $gradleVersion)) -Destination $gradleRoot -ErrorAction Stop
+            $unpacked = Join-Path $stage 'unpacked'
+            Expand-VerifiedAndroidArchive -Archive $zip -Destination $unpacked
+            Move-Item -LiteralPath (Join-Path $unpacked ('gradle-' + $gradleVersion)) -Destination $gradleRoot -ErrorAction Stop
         } finally {
             Remove-Item -LiteralPath $stage -Force -Recurse -ErrorAction SilentlyContinue
         }
