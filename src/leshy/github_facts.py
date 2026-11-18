@@ -56,7 +56,11 @@ class _NoRedirect(request.HTTPRedirectHandler):
 
 def is_leshy_repository_audit_request(message: str, history: Any = ()) -> bool:
     """Узкое правило, не перехватывающее обычные беседы о GitHub и коде."""
-    text = " ".join(str(message or "").strip().split())[:1200]
+    raw = str(message or "").strip()
+    # A multi-section instruction is never a GitHub author audit.
+    if not raw or len(raw) > 320 or "\n" in raw or "\r" in raw:
+        return False
+    text = " ".join(raw.split())
     if not text or not _AUDIT_WORDS.search(text):
         return False
     # Если пользователь назвал чужой репозиторий, не подменять его Лешим.
