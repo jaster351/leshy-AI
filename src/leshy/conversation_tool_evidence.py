@@ -41,9 +41,25 @@ def conversation_tool_evidence(
         )
         from .github_facts import is_leshy_repository_audit_request
 
+        # Explicit memory commands perform their DB operation before the LLM
+        # formulates the user-facing confirmation.
+        if compact.startswith("/remember "):
+            name = "memory_write"
+            memory_text = original[len("/remember "):].strip()
+            if memory_text:
+                memory_id = app.remember(owner_id, memory_text)
+                output = f"Запись памяти подтверждена, ID {memory_id}."
+            else:
+                output = "Текст для запоминания не указан."
+        elif compact == "/memories":
+            name = "memory_read"
+            memories = app.memories(owner_id)
+            output = ("Память пуста." if not memories else
+                      "Подтверждённые записи:\n" +
+                      "\n".join(str(item.get("content") or "") for item in memories))
         # The legacy owner-document store contains a Cloud4box-specific record.
         # Generic Knowledge instructions must never act on that record.
-        if "cloud4box" in compact and is_owner_document_save_request(original):
+        elif "cloud4box" in compact and is_owner_document_save_request(original):
             name = "owner_document_write"
             output = save_owner_document(app, owner_id, session_id, original)
         elif is_owner_document_status_request(original):
