@@ -16,6 +16,7 @@ from .model_repository_search import search_hub_models
 from .module_settings import module_enabled
 from .superagent_ssh_pty import InteractiveSSHBroker
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
+from .android_voice_access import authorized_owner as _android_voice_owner, conversational_answer as _android_voice_answer
 
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
@@ -102,6 +103,11 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_GET(self):
             route = urlsplit(self.path).path
+            if route == "/v1/android/voice/status":
+                owner = _android_voice_owner(settings.brain_dir, self.headers.get("Authorization", ""))
+                if not owner:
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Android voice key missing or invalid"})
+                return self._json(HTTPStatus.OK, {"ready": True, "mode": "conversation_only"})
             if route == "/v1/model-repositories":
                 if not self._research_owner_allowed():
                     return
@@ -183,6 +189,17 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             route = urlsplit(self.path).path
+            if route == "/v1/android/voice/chat":
+                owner = _android_voice_owner(settings.brain_dir, self.headers.get("Authorization", ""))
+                if not owner:
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Android voice key missing or invalid"})
+                try:
+                    return self._json(HTTPStatus.OK, _android_voice_answer(app, owner, self._body()))
+                except (ValueError, PermissionError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)[:250]})
+                except Exception as exc:
+                    problem("android_voice_chat_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "Voice model temporarily unavailable"})
             if route in {
                 "/v1/superagent/ssh/pty/open",
                 "/v1/superagent/ssh/pty/read",
