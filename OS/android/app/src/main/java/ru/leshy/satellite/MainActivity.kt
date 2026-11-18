@@ -2,9 +2,15 @@ package ru.leshy.satellite
 
 import android.Manifest
 import android.app.AlertDialog
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.speech.RecognizerIntent
+import android.speech.tts.TextToSpeech
+import android.text.InputType
 import android.provider.Settings
 import android.view.View
 import android.widget.Button
@@ -24,6 +30,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.util.concurrent.Executors
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private lateinit var micButton: Button
@@ -31,6 +38,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var micStatus: TextView
     private lateinit var faceStatus: TextView
     private lateinit var cameraPreview: PreviewView
+    private lateinit var voiceStatus: TextView
+    private lateinit var voiceQuestion: EditText
+    private lateinit var voiceSecret: EditText
+    private var voiceSession: String? = null
+    private var speaker: TextToSpeech? = null
+    private var speakerReady = false
     private lateinit var serverAddress: EditText
     private lateinit var serverStatus: TextView
     private lateinit var deviceStatus: TextView
@@ -39,6 +52,18 @@ class MainActivity : ComponentActivity() {
     private val serverExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val speechInput = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val words = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val question = words?.firstOrNull()?.trim().orEmpty()
+            if (question.isNotEmpty()) submitVoiceQuestion(question)
+            else if (::voiceStatus.isInitialized) voiceStatus.text = "Речь не распознана"
+        } else if (::voiceStatus.isInitialized) {
+            voiceStatus.text = "Распознавание отменено. Можно ввести вопрос текстом."
+        }
+    }
     private val detector = FaceDetection.getClient(
         FaceDetectorOptions.Builder()
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -95,6 +120,62 @@ class MainActivity : ComponentActivity() {
         root.addView(Button(this).apply {
             text = "Сохранить адрес и проверить"
             setOnClickListener { checkServer() }
+        })
+
+        root.addView(TextView(this).apply {
+            text = "Разговор с Лешим (по нажатию). Используется нейросеть и Knowledge сервера."
+            textSize = 16f
+        })
+        voiceStatus = TextView(this).apply {
+            text = "Для первого подключения нужен ограниченный Android-ключ, созданный на сервере."
+        }
+        root.addView(voiceStatus)
+        voiceSecret = EditText(this).apply {
+            hint = "Android voice key (не административный API-токен)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        root.addView(voiceSecret)
+        root.addView(Button(this).apply {
+            text = "Сохранить ключ разговора"
+            setOnClickListener {
+                val value = voiceSecret.text.toString().trim()
+                try {
+                    AndroidVoiceCredentials.save(this@MainActivity, value)
+                    voiceSecret.setText("")
+                    voiceSession = null
+                    getSharedPreferences("android_voice_session", MODE_PRIVATE).edit().clear().apply()
+                    voiceStatus.text = "Ключ сохранён в Android Keystore. Проверьте соединение."
+                } catch (_: Exception) {
+                    voiceStatus.text = "Ключ не сохранён. Введите выданный сервером Android-ключ."
+                }
+            }
+        })
+        root.addView(Button(this).apply {
+            text = "Проверить доступ к разговору"
+            setOnClickListener { checkVoiceConnection() }
+        })
+        root.addView(Button(this).apply {
+            text = "Говорить с Лешим"
+            setOnClickListener { startVoiceRecognition() }
+        })
+        voiceQuestion = EditText(this).apply {
+            hint = "Или введите вопрос текстом"
+            setSingleLine(false)
+            minLines = 2
+        }
+        root.addView(voiceQuestion)
+        root.addView(Button(this).apply {
+            text = "Отправить вопрос Лешему"
+            setOnClickListener { submitVoiceQuestion(voiceQuestion.text.toString()) }
+        })
+        root.addView(Button(this).apply {
+            text = "Новый разговор"
+            setOnClickListener {
+                voiceSession = null
+                getSharedPreferences("android_voice_session", MODE_PRIVATE).edit().clear().apply()
+                voiceStatus.text = "Новый разговор. Можете задать вопрос."
+            }
         })
         root.addView(TextView(this).apply {
             text = "Привязка телефона: подготовка ключа устройства (без авторизации на сервере)"
@@ -163,12 +244,24 @@ class MainActivity : ComponentActivity() {
         }
         root.addView(cameraPreview, LinearLayout.LayoutParams(-1, 600))
         root.addView(TextView(this).apply {
-            text = "Диалог с сервером пока не подключён; передаётся только запрос состояния /v1/status. " +
-                "Голос и изображения не отправляются. Bluetooth-динамик необязателен."
+            text = "Кнопка разговора использует системное распознавание Android; " +
+                "служба распознавания может отправлять аудио своему поставщику. " +
+                "Серверу Лешего передаётся только распознанный текст по HTTPS. " +
+                "Ответ произносится через системный TTS, Bluetooth-динамик необязателен."
         })
         setContentView(ScrollView(this).apply { addView(root) })
         refreshMicStatus()
         refreshDeviceIdentity()
+        voiceSession = getSharedPreferences("android_voice_session", MODE_PRIVATE)
+            .getString("session_id", null)
+        speaker = TextToSpeech(this) { status ->
+            runOnUiThread {
+                speakerReady = status == TextToSpeech.SUCCESS
+                if (speakerReady) {
+                    speaker?.language = Locale("ru", "RU")
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -192,6 +285,93 @@ class MainActivity : ComponentActivity() {
             val result = ServerReachability.probe(normalized)
             runOnUiThread {
                 if (!isDestroyed) serverStatus.text = result.message
+            }
+        }
+    }
+
+    private fun startVoiceRecognition() {
+        if (AndroidVoiceCredentials.read(this).isNullOrBlank()) {
+            voiceStatus.text = "Сначала сохраните выданный сервером ключ разговора."
+            return
+        }
+        if (ServerReachability.address(this).isBlank()) {
+            voiceStatus.text = "Сначала укажите HTTPS-адрес сервера и сохраните его."
+            return
+        }
+        try {
+            val request = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите с Лешим")
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            }
+            voiceStatus.text = "Слушаю вопрос..."
+            speechInput.launch(request)
+        } catch (_: ActivityNotFoundException) {
+            voiceStatus.text = "Служба распознавания речи не установлена. Можно ввести вопрос текстом."
+        } catch (_: Exception) {
+            voiceStatus.text = "Не удалось запустить распознавание речи."
+        }
+    }
+
+    private fun checkVoiceConnection() {
+        val token = AndroidVoiceCredentials.read(this)
+        val address = ServerReachability.address(this)
+        if (token.isNullOrBlank() || address.isBlank()) {
+            voiceStatus.text = "Сохраните адрес HTTPS и ключ Android-разговора."
+            return
+        }
+        voiceStatus.text = "Проверяю авторизацию Android..."
+        serverExecutor.execute {
+            val state = try {
+                if (AndroidVoiceApi.status(address, token)) {
+                    "Android авторизован. Можно разговаривать с Лешим."
+                } else "Сервер не подтвердил доступ к разговору."
+            } catch (e: Exception) {
+                "Ошибка подключения: " + (e.message ?: e.javaClass.simpleName)
+            }
+            runOnUiThread { if (!isDestroyed) voiceStatus.text = state }
+        }
+    }
+
+    private fun submitVoiceQuestion(raw: String) {
+        val question = raw.trim()
+        if (question.isEmpty() || question.length > 2500) {
+            voiceStatus.text = "Введите вопрос длиной до 2500 символов."
+            return
+        }
+        val token = AndroidVoiceCredentials.read(this)
+        val address = ServerReachability.address(this)
+        if (token.isNullOrBlank() || address.isBlank()) {
+            voiceStatus.text = "Нужны сохранённые HTTPS-адрес и отдельный Android-ключ."
+            return
+        }
+        voiceStatus.text = "Вы: " + question + "\nОжидаю ответ Лешего..."
+        val activeSession = voiceSession
+        serverExecutor.execute {
+            try {
+                val result = AndroidVoiceApi.ask(address, token, question, activeSession)
+                runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
+                    voiceSession = result.sessionId
+                    getSharedPreferences("android_voice_session", MODE_PRIVATE).edit()
+                        .putString("session_id", result.sessionId).apply()
+                    voiceStatus.text = "Вы: " + question + "\nЛеший: " + result.text
+                    voiceQuestion.setText("")
+                    if (speakerReady) {
+                        speaker?.speak(
+                            result.text.take(3900),
+                            TextToSpeech.QUEUE_FLUSH, null, "leshy-android-answer"
+                        )
+                    } else {
+                        voiceStatus.append("\nСистемный TTS недоступен; ответ показан текстом.")
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isDestroyed) voiceStatus.text =
+                        "Не удалось получить ответ: " + (e.message ?: e.javaClass.simpleName)
+                }
             }
         }
     }
@@ -361,6 +541,9 @@ class MainActivity : ComponentActivity() {
         cameraExecutor.shutdown()
         serverExecutor.shutdownNow()
         deviceExecutor.shutdownNow()
+        speaker?.stop()
+        speaker?.shutdown()
+        speaker = null
         super.onDestroy()
     }
 }
