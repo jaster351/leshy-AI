@@ -1,17 +1,32 @@
 """Два HTTP/HTTPS listener используют один обработчик и один экземпляр Лешего."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from http.server import ThreadingHTTPServer
 import os
 from pathlib import Path
 import socket
 import ssl
 import threading
-from typing import Any
+from typing import Any, Callable
 
 from .diagnostics import problem
 from .web_certificates import WebCertificateStore, covers_hostname
 from .web_transport_settings import WebTransportSettings, validate_settings
+
+
+_listener_callback: ContextVar[Callable[[str], None] | None] = ContextVar("leshy_listener_callback", default=None)
+
+
+@contextmanager
+def listener_ready(callback: Callable[[str], None] | None):
+    """Передать launcher-уведомление через существующую цепочку serve без глобальной гонки."""
+    token = _listener_callback.set(callback)
+    try:
+        yield
+    finally:
+        _listener_callback.reset(token)
 
 
 class _WebServer(ThreadingHTTPServer):
@@ -58,6 +73,7 @@ class WebTransportRuntime:
         self._http_override = explicit_http_port is not None or "LESHY_PORT" in os.environ
         self._https_override = "LESHY_HTTPS_PORT" in os.environ
         self.host = host
+        self._on_listening = _listener_callback.get()
         self.lock = threading.RLock()
         self.certificates = WebCertificateStore(brain_dir, lambda: self.settings.load()["hostname"])
         self._servers: dict[str, _WebServer] = {}
@@ -72,7 +88,30 @@ class WebTransportRuntime:
         self._running = False
         self._stopping = threading.Event()
         from .web_acme import WebAcmeService
-        self.acme = WebAcmeService(brain_dir, self.install_certificate)
+        self.acme = WebAcmeService(brain_dir, self.install_certificate, self._http01_available)
+
+    def _http01_available(self) -> bool:
+        with self.lock:
+            return bool(self.settings.load()["http_enabled"] and self._states["http"]["listening"])
+
+    def listening_url(self) -> str | None:
+        """Только реально запущенный listener; не открывать чужой сервис на занятом порте."""
+        with self.lock:
+            http = self._states["http"]
+            if http["listening"] and self._threads["http"].is_alive():
+                host = "127.0.0.1" if self.host in {"", "0.0.0.0"} else "::1" if self.host == "::" else self.host
+                if ":" in host:
+                    host = "[" + host + "]"
+                return f"http://{host}:{http['port']}/"
+            https = self._states["https"]
+            host = self.configuration["hostname"]
+            if (https["listening"] and self._threads["https"].is_alive() and host
+                    and self.certificates.context() is not None
+                    and covers_hostname(self.certificates.status(), host)):
+                if ":" in host:
+                    host = "[" + host + "]"
+                return f"https://{host}:{https['port']}/"
+            return None
 
     def _bind(self, protocol: str) -> None:
         if protocol in self._servers or not self.configuration[protocol + "_enabled"]:
@@ -139,6 +178,14 @@ class WebTransportRuntime:
             for name in list(self._servers):
                 self._start_server(name)
         self.acme.start()
+        if self._on_listening:
+            callback, self._on_listening = self._on_listening, None
+            url = self.listening_url()
+            if url:
+                try:
+                    callback(url)
+                except Exception as exc:
+                    problem("web_browser_open_failed", type(exc).__name__)
         while not self._stopping.wait(0.5):
             with self.lock:
                 if not any(thread.is_alive() for thread in self._threads.values()):
@@ -176,9 +223,25 @@ class WebTransportRuntime:
             return value
 
     def save_settings(self, body: dict) -> dict:
+        # Единый порядок ACME → core не допускает гонку HTTP-off с configure/renewal.
+        with self.acme.configuration_guard() as acme:
+            return self._save_settings(body, acme)
+
+    def _save_settings(self, body: dict, acme: dict) -> dict:
         with self.lock:
             prospective = validate_settings({**self.settings.load(), **body})
+            effective = dict(prospective)
+            if self._http_override:
+                effective["http_port"] = self.configuration["http_port"]
+            if self._https_override:
+                effective["https_port"] = self.configuration["https_port"]
+            try:
+                validate_settings(effective)
+            except ValueError as exc:
+                raise ValueError("С учётом портов, заданных при запуске: " + str(exc)) from exc
             if not prospective["http_enabled"]:
+                if acme["in_progress"] or (acme["enabled"] and acme["auto_renew"]):
+                    raise ValueError("Перед выключением HTTP завершите выпуск и отключите автопродление HTTP-01")
                 if (self.certificates.context() is None
                         or not covers_hostname(self.certificates.status(), prospective["hostname"])):
                     raise ValueError("Перед выключением HTTP загрузите действующий сертификат для указанного имени сервера")

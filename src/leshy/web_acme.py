@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
@@ -277,13 +278,15 @@ class _AcmeWire:
 class WebAcmeService:
     """Выпуск и ограниченный цикл продления только согласованной области."""
 
-    def __init__(self, brain_dir: Path | str, install_certificate: Callable[[str, str], dict]):
+    def __init__(self, brain_dir: Path | str, install_certificate: Callable[[str, str], dict],
+                 http01_available: Callable[[], bool] | None = None):
         self.root = security_root(brain_dir) / "acme"
         reject_link(self.root)
         self.root.mkdir(mode=0o700, exist_ok=True)
         private_path(self.root)
         self.path = self.root / "state.json"
         self.install_certificate = install_certificate
+        self._http01_available = http01_available
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._generation = 0
@@ -387,6 +390,8 @@ class WebAcmeService:
                 return self.status()
             candidate["enabled"] = body.get("enabled", True)
             self._validate(candidate)
+            if candidate["enabled"] and candidate["auto_renew"]:
+                self._require_http01()
             # Изменение отзывается до сетевого чтения условий, а не после него.
             self._generation += 1
             generation = self._generation
@@ -412,6 +417,14 @@ class WebAcmeService:
             self.config["terms_url"] = terms
             if (requested_enable and body.get("terms_agreed") is True
                     and body.get("contact_consent") is True and body.get("terms_url") == terms):
+                # Пока читались Terms без lock, транспорт мог быть изменён.
+                if self.config["auto_renew"]:
+                    try:
+                        self._require_http01()
+                    except _AcmeFailure as exc:
+                        self.config.update(state="needs_consent", last_error=str(exc))
+                        self._save()
+                        raise
                 scope = _scope(self.config)
                 same_scope = bool(previous_scope and previous_scope == scope)
                 self.config.update(enabled=True, consent_scope=scope,
@@ -428,6 +441,16 @@ class WebAcmeService:
         with self._lock:
             if generation != self._generation or self._stop.is_set():
                 raise _Cancelled("Настройки ACME изменены либо служба остановлена")
+
+    @contextmanager
+    def configuration_guard(self):
+        """Изменение транспорта проверяется атомарно относительно configure/job."""
+        with self._lock:
+            yield self.status()
+
+    def _require_http01(self) -> None:
+        if self._http01_available is not None and not self._http01_available():
+            raise _AcmeFailure("Для HTTP-01 нужен включённый и работающий HTTP-порт Лешего с внешним доступом на порт 80")
 
     def replace_certificate_manually(self, install: Callable[[], dict]) -> dict:
         """Отозвать старый job и откатить настройки, если запись сертификата не удалась."""
@@ -474,6 +497,7 @@ class WebAcmeService:
             raise ValueError("Выпуск ACME уже выполняется")
         generation, scope = self._generation, self.config["consent_scope"]
         self._guard_job(generation, scope)
+        self._require_http01()
         snapshot = dict(self.config)
         self.config.update(state="issuing", last_error="", attention_required=False, outcome_unknown=False)
         try:

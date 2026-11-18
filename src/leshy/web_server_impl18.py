@@ -8,10 +8,12 @@ import json
 import os
 import re
 import ssl
+from typing import Callable
 from urllib.parse import urlsplit
 
 from . import web_server_impl17 as previous
 from .diagnostics import problem
+from .web_transport_runtime import listener_ready
 
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
@@ -216,11 +218,13 @@ def make_handler(app, telegram, settings, model_catalog):
     return Handler
 
 
-def serve(host: str | None = None, port: int | None = None) -> None:
+def serve(host: str | None = None, port: int | None = None,
+          on_listening: Callable[[str], None] | None = None) -> None:
     original = previous.make_handler
     previous.make_handler = make_handler
     try:
-        previous.serve(host=host, port=port)
+        with listener_ready(on_listening):
+            previous.serve(host=host, port=port)
     finally:
         previous.make_handler = original
 

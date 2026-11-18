@@ -59,7 +59,7 @@
         <p id="networkImportHelp" class="hint"></p><button class="button secondary" id="networkImport" type="button">Проверить и установить сертификат</button>
       </details>
       <details><summary>Бесплатный сертификат и автопродление</summary>
-        <p class="hint">Леший подтвердит владение доменом через HTTP-01. Центр сертификации обращается к внешнему порту 80; перенаправление на HTTP-порт Лешего нужно настроить на Вашем роутере или сервере. Порты приложения можно выбирать отдельно.</p>
+        <p class="hint">Леший подтвердит владение доменом через HTTP-01. Центр сертификации обращается к внешнему порту 80; перенаправление на работающий HTTP-порт Лешего нужно настроить на Вашем роутере или сервере. Порты приложения можно выбирать отдельно. Перед выключением HTTP завершите выпуск и отключите автопродление HTTP-01.</p>
         <div class="network-fields">
           <label>Домены через запятую<input id="networkAcmeDomains" class="field" maxlength="1500" placeholder="leshy.example.org"></label>
           <label>Электронная почта для центра сертификации<input id="networkAcmeEmail" class="field" type="email" maxlength="254" autocomplete="email"></label>
@@ -98,7 +98,13 @@
       $('networkHttpEnabled').checked=settings.http_enabled===true;$('networkHttpsEnabled').checked=settings.https_enabled===true;
       $('networkHttpPort').value=String(settings.http_port??'');$('networkHttpsPort').value=String(settings.https_port??'');$('networkHostname').value=settings.hostname||'';portsDirty=false;
     }
-    $('networkRuntimeStatus').textContent=[listenerText('HTTP',runtime.http,settings.http_enabled,settings.http_port),listenerText('HTTPS',runtime.https,settings.https_enabled,settings.https_port),runtime.restart_required?'Сохранённые настройки отличаются от применённых. Нужен перезапуск Лешего.':''].filter(Boolean).join('\n');
+    $('networkRuntimeStatus').textContent=[
+      listenerText('HTTP',runtime.http,settings.http_enabled,settings.http_port),
+      listenerText('HTTPS',runtime.https,settings.https_enabled,settings.https_port),
+      runtime.http_port_override?'Порт HTTP задан при запуске. Чтобы применить сохранённый порт, сначала уберите это переопределение.':'',
+      runtime.https_port_override?'Порт HTTPS задан при запуске. Чтобы применить сохранённый порт, сначала уберите это переопределение.':'',
+      runtime.restart_required?'Сохранённые настройки отличаются от применённых. Нужен перезапуск Лешего.':'',
+    ].filter(Boolean).join('\n');
     const certNode=$('networkCertificateStatus');certNode.classList.toggle('bad',cert.configured===true&&cert.valid!==true);
     certNode.textContent=!cert.configured?'Сертификат пока не установлен. HTTPS без подходящего сертификата не запускается.':[
       cert.valid===true?'Сертификат прошёл локальную проверку.':'Сохранённый сертификат нельзя использовать: '+(cert.error||'срок или содержимое не прошли проверку'),

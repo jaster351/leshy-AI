@@ -214,15 +214,15 @@ def main() -> None:
 
     from leshy.diagnostic_publisher import DiagnosticPublisher
     from leshy.web_server import serve
-    from leshy.web_transport_settings import browser_url
 
     publisher = DiagnosticPublisher(brain_root)
     publisher.start()
     try:
-        if not args.no_browser:
-            target_url = browser_url(brain_root, args.port)
-            threading.Timer(1.2, lambda: webbrowser.open(target_url)).start()
-        serve(args.host, args.port)
+        def open_browser(target_url: str) -> None:
+            timer = threading.Timer(0.1, lambda: webbrowser.open(target_url))
+            timer.daemon = True
+            timer.start()
+        serve(args.host, args.port, on_listening=None if args.no_browser else open_browser)
     finally:
         publisher.stop()
 
