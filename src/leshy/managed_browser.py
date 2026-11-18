@@ -394,6 +394,49 @@ def _browser_executable() -> Path | None:
     return None
 
 
+def _old_owner_is_running(pid: int) -> bool:
+    """Не удалять профиль, если запустивший его Leshy.exe ещё работает."""
+    kernel = _kernel32()
+    handle = kernel.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # ERROR_INVALID_PARAMETER означает отсутствие PID. При отказе в
+        # доступе действуем осторожно и считаем процесс живым.
+        return ctypes.get_last_error() != 87
+    try:
+        code = wintypes.DWORD()
+        if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == _STILL_ACTIVE
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def _cleanup_orphan_profiles() -> None:
+    """Очищаем только устаревшие профили, созданные самим Лешим."""
+    if os.name != "nt":
+        return
+    try:
+        profiles = Path(tempfile.gettempdir())
+        removed = 0
+        for directory in profiles.glob("leshy-ui-*"):
+            if removed >= 5:
+                break  # Ограничиваем время задержки открытия окна.
+            marker = directory / ".leshy-ui-owner"
+            if not directory.is_dir() or not marker.is_file():
+                continue
+            if time.time() - marker.stat().st_mtime < 7 * 24 * 3600:
+                continue
+            owner = marker.read_text(encoding="ascii").strip()
+            if not owner.isdecimal():
+                continue
+            if _old_owner_is_running(int(owner)):
+                continue
+            shutil.rmtree(directory, ignore_errors=True)
+            removed += 1
+    except (OSError, ValueError) as exc:
+        _LOG.warning("Не удалось очистить старые временные профили браузера: %s", exc)
+
+
 class ManagedBrowser:
     """Один браузер для Leshy.exe: никаких общих пользовательских вкладок."""
 
@@ -432,8 +475,10 @@ class ManagedBrowser:
             job = None
             process = None
             try:
+                _cleanup_orphan_profiles()
                 job = _BrowserJob()
                 profile = Path(tempfile.mkdtemp(prefix="leshy-ui-"))
+                (profile / ".leshy-ui-owner").write_text(str(os.getpid()), encoding="ascii")
                 args = [
                     str(executable),
                     "--user-data-dir=" + str(profile),
