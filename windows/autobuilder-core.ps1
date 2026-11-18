@@ -251,8 +251,8 @@ function Stop-Leshy {
 }
 
 function Start-Leshy {
-    if (@(Assert-LeshyProcessVisibility).Count -gt 0) {
-        Write-CoreLog 'Leshy is already running.'
+    if (@(Get-Process -Name Leshy -ErrorAction SilentlyContinue).Count -gt 0) {
+        Write-CoreLog 'A Leshy.exe process is already running; startup skipped.'
         return
     }
     if (-not (Test-Path -LiteralPath $LiveExe)) { throw ('Live executable was not found: ' + $LiveExe) }
@@ -364,7 +364,7 @@ function Invoke-FullUpdate {
         Write-UiStatus -State 'ready' -Message 'No new Git changes; build skipped' -Sha $sha
         return
     }
-    $wasRunning = (@(Get-LeshyProcesses).Count -gt 0)
+    $wasRunning = (@(Assert-LeshyProcessVisibility).Count -gt 0)
     try {
         $version = Invoke-Build -Sha $sha
         if ($wasRunning) { Wait-LeshyConversationsIdle -BrainRoot $BrainRoot }
