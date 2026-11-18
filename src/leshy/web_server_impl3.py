@@ -402,6 +402,10 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
     server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
 
+    # Expose the live HTTP server to the Windows tray for graceful shutdown.
+    from .desktop_tray import register_server, unregister_server
+    register_server(server)
+
     threading.Thread(
         target=_warmup_soft,
         args=(app, warmup_ready, shutdown),
@@ -437,6 +441,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
         shutdown.set()
         telegram.stop()
         app.stop_background()
+        unregister_server(server)
         server.server_close()
 
 
