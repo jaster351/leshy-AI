@@ -28,7 +28,7 @@ if (-not $Force -and (Test-Path -LiteralPath $apk -PathType Leaf) -and (Test-Pat
 }
 function Write-DiskSpace {
     try {
-        $drive = New-Object IO.DriveInfo([IO.Path]::GetPathRoot($root))
+        $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($root))
         $free = [double]$drive.AvailableFreeSpace
         Write-Host ('ANDROID_FREE_GIB: ' + [Math]::Round($free / 1GB,2))
         return $free
