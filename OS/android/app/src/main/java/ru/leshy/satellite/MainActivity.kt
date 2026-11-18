@@ -339,6 +339,14 @@ class MainActivity : ComponentActivity() {
             voiceStatus.text = "Дождитесь текущего ответа, затем включите разговор."
             return
         }
+        if (AndroidVoiceCredentials.read(this).isNullOrBlank()) {
+            voiceStatus.text = "Сначала сохраните ограниченный Android-ключ разговора."
+            return
+        }
+        if (ServerReachability.address(this).isBlank()) {
+            voiceStatus.text = "Сначала сохраните HTTPS-адрес сервера Лешего."
+            return
+        }
         val consent = getSharedPreferences("android_voice_privacy", MODE_PRIVATE)
         if (!consent.getBoolean("system_asr_agreed", false)) {
             AlertDialog.Builder(this)
@@ -357,14 +365,6 @@ class MainActivity : ComponentActivity() {
                     startContinuousConversation()
                 }
                 .show()
-            return
-        }
-        if (AndroidVoiceCredentials.read(this).isNullOrBlank()) {
-            voiceStatus.text = "Сначала сохраните ограниченный Android-ключ разговора."
-            return
-        }
-        if (ServerReachability.address(this).isBlank()) {
-            voiceStatus.text = "Сначала сохраните HTTPS-адрес сервера Лешего."
             return
         }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
