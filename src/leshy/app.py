@@ -441,19 +441,7 @@ class LeshyApp:
             }
 
         image_prompt = self._image_prompt(message)
-        if image_prompt is not None:
-            job = self.image_generation.enqueue(image_prompt)
-            answer = (
-                "Начал локальную генерацию изображения. При первом запуске Леший сам скачает и проверит модель "
-                "изображений; прогресс появится прямо в чате."
-            )
-            return {
-                "session_id": sid,
-                "answer": answer,
-                "created_at": self._save_assistant(sid, answer),
-                "sources": [],
-                "image_job": job,
-            }
+        image_job = self.image_generation.enqueue(image_prompt) if image_prompt is not None else None
 
         lookup_query, force_search = contextual_search_query(message, rows, app=self)
         context: list[ChatMessage] = [
@@ -483,6 +471,14 @@ class LeshyApp:
         )
         if tool_evidence:
             context.append(ChatMessage("system", tool_evidence))
+        if image_job is not None:
+            context.append(ChatMessage(
+                "system",
+                "Подтверждённое действие: задача генерации изображения уже отправлена "
+                "в очередь приложения. Сообщи об этом кратко, не заявляй, "
+                "что изображение уже создано. Данные задания: "
+                + str(image_job)[:500],
+            ))
         interaction_instruction = mode_instruction(mode.kind)
         if interaction_instruction:
             context.append(ChatMessage("system", interaction_instruction))
@@ -716,7 +712,10 @@ class LeshyApp:
             web_search=search_attempted,
             web_sources=len(sources),
         )
-        return {"session_id": sid, "answer": answer, "created_at": answered_at, "sources": sources}
+        result = {"session_id": sid, "answer": answer, "created_at": answered_at, "sources": sources}
+        if image_job is not None:
+            result["image_job"] = image_job
+        return result
 
     def set_learning(self, enabled: bool) -> bool:
         value = self.learning.set_enabled(bool(enabled), reason="Web/Telegram")
