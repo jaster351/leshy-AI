@@ -40,8 +40,21 @@ def unregister_server(server: Any) -> None:
 
 
 def _request_shutdown(server: Any) -> None:
-    # BaseServer.shutdown() MUST run in a different thread from serve_forever().
-    threading.Thread(target=server.shutdown, name="leshy-tray-shutdown", daemon=True).start()
+    # BaseServer.shutdown() MUST run in another thread AND only after the server
+    # has entered serve_forever(). The tray may be clicked during startup.
+    def run():
+        started = getattr(server, "_BaseServer__is_shut_down", None)
+        if started is not None:
+            import time
+            while started.is_set():
+                time.sleep(0.05)
+        server.shutdown()
+
+    threading.Thread(target=run, name="leshy-tray-shutdown", daemon=True).start()
+
+
+def is_shutdown_requested() -> bool:
+    return _STOP_REQUESTED.is_set()
 
 
 def request_shutdown() -> None:
