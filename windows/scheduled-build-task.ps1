@@ -76,15 +76,59 @@ try {
     & $gitExe rev-parse --short HEAD
     if ($LASTEXITCODE -ne 0) { throw 'Could not read Git HEAD.' }
 
-    # build.ps1 has its own commit/version cache and skips an unchanged build.
-    Write-Host '> .\windows\build.ps1'
-    $env:LESHY_SCHEDULED_BUILD = '1'
-    $global:LASTEXITCODE = 0
-    & (Join-Path $RepoRoot 'windows\build.ps1')
-    if ($LASTEXITCODE -ne 0) {
-        throw ('build.ps1 failed with exit code ' + $LASTEXITCODE)
+    # The monitor compares source SHA+VERSION against the deployed build
+    # before launching any compiler, installer, or Android toolchain.
+    . (Join-Path $RepoRoot 'windows\build-update-guard.ps1')
+    $liveRoot = Join-Path $RepoRoot 'dist\Leshy'
+    $liveExe = Join-Path $liveRoot 'Leshy.exe'
+    $autoRoot = Join-Path $RepoRoot '.autobuild'
+    $version = (Get-Content -LiteralPath (Join-Path $RepoRoot 'VERSION') -Raw -Encoding UTF8).Trim()
+    $headResult = @(& $gitExe -C $RepoRoot rev-parse HEAD 2>&1)
+    if ($LASTEXITCODE -ne 0 -or $headResult.Count -lt 1) { throw 'Cannot determine local Git HEAD.' }
+    $head = ([string]$headResult[0]).Trim()
+    if ($head -notmatch '^[0-9a-fA-F]{40}
+} catch {
+    $exitCode = 1
+    Write-Host ('SCHEDULED BUILD FAILED: ' + $_.Exception.Message)
+} finally {
+    Remove-Item Env:LESHY_SCHEDULED_BUILD -ErrorAction SilentlyContinue
+    if ($hasTranscript) { try { Stop-Transcript | Out-Null } catch { } }
+    if ($hasMutex) { try { $mutex.ReleaseMutex() | Out-Null } catch { } }
+    $mutex.Dispose()
+}
+exit $exitCode
+) { throw ('Invalid source Git commit: ' + $head) }
+    $installer = Join-Path $RepoRoot ('dist\LeshySetup-' + $version + '.exe')
+    $current = Test-LeshyAlreadyBuilt -Commit $head -Version $version -AutoRoot $autoRoot -LiveExe $liveExe -Installer $installer
+    $installedVersion = Join-Path $liveRoot '_internal\VERSION'
+    if ($current -and (Test-Path -LiteralPath $installedVersion -PathType Leaf)) {
+        $versionInExe = (Get-Content -LiteralPath $installedVersion -Raw -Encoding UTF8).Trim()
+        if ($versionInExe -ne $version) {
+            Write-Host ('DEPLOYED_VERSION_MISMATCH: ' + $versionInExe + ' != ' + $version)
+            $current = $false
+        }
     }
-    Write-Host ('SCHEDULED BUILD OK: ' + (Get-Date -Format o))
+
+    $env:LESHY_SCHEDULED_BUILD = '1'
+    if (-not $current) {
+        Write-Host ('UPDATE_REQUIRED: source_sha=' + $head + ' source_version=' + $version)
+        $global:LASTEXITCODE = 0
+        & (Join-Path $RepoRoot 'windows\build.ps1')
+        if (-not $?) { throw 'build.ps1 failed (PowerShell error).' }
+        if ($LASTEXITCODE -ne 0) {
+            throw ('build.ps1 failed with exit code ' + $LASTEXITCODE)
+        }
+        if (-not (Test-LeshyAlreadyBuilt -Commit $head -Version $version -AutoRoot $autoRoot -LiveExe $liveExe -Installer $installer)) {
+            throw 'Build returned without a matching deployed source SHA and version.'
+        }
+        Write-Host ('DEPLOYED: ' + $version + ' / ' + $head.Substring(0,10))
+    } else {
+        Write-Host ('UP_TO_DATE: ' + $version + ' / ' + $head.Substring(0,10))
+        # Process can be restarted after a crash without recompilation.
+        # A deliberate "Exit" in the tray is respected by Start-LeshyElevated.
+        Start-LeshyElevated -LiveExe $liveExe -LiveRoot $liveRoot
+    }
+    Write-Host ('SCHEDULED CHECK OK: ' + (Get-Date -Format o))
 } catch {
     $exitCode = 1
     Write-Host ('SCHEDULED BUILD FAILED: ' + $_.Exception.Message)
