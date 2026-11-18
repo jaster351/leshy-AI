@@ -1,3 +1,11 @@
+## 19.11.2026 — Windows PowerShell 5.1 parser compatibility (1.10.183)
+
+- Fix Windows PowerShell 5.1 parse failure in windows/build-update-guard.ps1 caused by non-ASCII strings saved as UTF-8 without BOM.
+- Keep the new Windows build/deployment scripts ASCII-only so that Windows PowerShell 5.1 and PowerShell 7 parse the same source regardless of the machine's legacy code page.
+- Preserve exact `/v1/status` API identity check for Leshy through Unicode code points, without a Cyrillic source literal.
+- Changed `windows/build.ps1`, `windows/build-update-guard.ps1`, and `windows/autobuilder-core.ps1` only for encoding-safe strings/comments; no change to deployment logic.
+- User-reported build error is diagnosed from the supplied Windows log. Windows execution and E2E remain unverified pending local rerun.
+
 ## 19.11.2026 — Сборка по Git SHA и ожидание простоя перед обновлением (1.10.182, черновик)
 
 - Прямой windows/build.ps1 сравнивает чистый Git HEAD и VERSION с последним успешно развёрнутым выпуском: при совпадении и наличии EXE/installer компиляция пропускается без остановки Лешего.

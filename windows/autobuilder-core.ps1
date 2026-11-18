@@ -29,7 +29,7 @@ $LiveStatePath = Join-Path $RuntimeRoot 'live-state.json'
 $UiStatusPath = Join-Path $RuntimeRoot 'ui-status.json'
 $CoreLog = Join-Path $LogsRoot 'autobuilder-gui.log'
 $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-# Совместные API-правила простоя и SHA-cache с windows/build.ps1.
+# Shared idle-state API guard and SHA caching for Windows build.
 . (Join-Path $RepoRoot 'windows\build-update-guard.ps1')
 
 New-Item -ItemType Directory -Force -Path $RuntimeRoot, $LogsRoot | Out-Null
@@ -228,7 +228,7 @@ function Get-LeshyProcesses {
     return @($result)
 }
 
-# Тот же интерфейс локальной API-проверки, что в прямом build.ps1.
+# Same local API guard is used for direct and AutoBuilder builds.
 function Get-LiveProcesses { return @(Get-LeshyProcesses) }
 
 function Stop-Leshy {
