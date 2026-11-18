@@ -232,7 +232,7 @@ function Get-LeshyProcesses {
 function Get-LiveProcesses { return @(Get-LeshyProcesses) }
 
 function Stop-Leshy {
-    $processes = @(Get-LeshyProcesses)
+    $processes = @(Assert-LeshyProcessVisibility)
     if ($processes.Count -eq 0) {
         Write-CoreLog 'Leshy is already stopped.'
         return
@@ -251,12 +251,12 @@ function Stop-Leshy {
 }
 
 function Start-Leshy {
-    if (@(Get-LeshyProcesses).Count -gt 0) {
+    if (@(Assert-LeshyProcessVisibility).Count -gt 0) {
         Write-CoreLog 'Leshy is already running.'
         return
     }
     if (-not (Test-Path -LiteralPath $LiveExe)) { throw ('Live executable was not found: ' + $LiveExe) }
-    Start-Process -FilePath $LiveExe -WorkingDirectory $LiveRoot | Out-Null
+    Start-LeshyElevated -LiveExe $LiveExe -LiveRoot $LiveRoot | Out-Null
     Write-CoreLog ('Leshy started: ' + $LiveExe)
 }
 
