@@ -105,6 +105,56 @@ function Save-LeshyBuiltState {
   }
 }
 
+function Start-LeshyElevated {
+  param([string]$LiveExe,[string]$LiveRoot)
+  # Always launch the executable from this repository's dist/Leshy directory.
+  $exe = [IO.Path]::GetFullPath($LiveExe)
+  $dir = [IO.Path]::GetFullPath($LiveRoot)
+  $expected = [IO.Path]::GetFullPath((Join-Path $dir 'Leshy.exe'))
+  if (-not [string]::Equals($exe,$expected,[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Unexpected Leshy executable path; refusing elevated launch.'
+  }
+  if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+    throw ('Leshy.exe was not found at: ' + $exe)
+  }
+
+  # Do not create a second instance. If an elevated process hides its path,
+  # fail closed instead of assuming that no Leshy process is running.
+  $unknown = @()
+  $processes = @(Get-CimInstance Win32_Process -Filter "Name='Leshy.exe'" -ErrorAction Stop)
+  foreach ($running in $processes) {
+    $path = [string]$running.ExecutablePath
+    if (-not $path) { $unknown += [int]$running.ProcessId; continue }
+    try { $path = [IO.Path]::GetFullPath($path) } catch { $unknown += [int]$running.ProcessId; continue }
+    if ([string]::Equals($path,$exe,[StringComparison]::OrdinalIgnoreCase)) {
+      Write-Host ('Leshy.exe already running at the requested path (PID ' + $running.ProcessId + ').')
+      return
+    }
+  }
+  if ($unknown.Count -gt 0) {
+    throw ('Cannot determine the path of Leshy.exe PID(s): ' + ($unknown -join ', ') +
+      '. Run PowerShell as administrator and retry; no duplicate process launched.')
+  }
+
+  try {
+    # Windows displays its regular UAC confirmation. Never bypass UAC or edit ACLs.
+    $process = Start-Process -FilePath $exe -WorkingDirectory $dir -Verb RunAs -PassThru -ErrorAction Stop
+  } catch {
+    throw ('Administrator UAC approval is required to launch: ' + $exe + '. ' + $_.Exception.Message)
+  }
+  if ($null -eq $process) { throw 'Elevated start did not return a process handle.' }
+  try {
+    Start-Sleep -Seconds 3
+    $process.Refresh()
+    if ($process.HasExited) {
+      throw ('Elevated Leshy.exe exited shortly after launch. Exit code: ' + $process.ExitCode)
+    }
+    Write-Host ('Started as administrator: ' + $exe + ' (PID ' + $process.Id + ')')
+  } finally {
+    $process.Dispose()
+  }
+}
+
 function Publish-LeshyProgramSafely {
   param([string]$PackageRoot,[string]$LiveRoot,[string]$LiveExe,
         [string]$BrainRoot,[string]$AutoRoot)
@@ -138,14 +188,9 @@ function Publish-LeshyProgramSafely {
       Copy-Item -LiteralPath $entry.FullName -Destination $LiveRoot -Recurse -Force -ErrorAction Stop
     }
     if (-not (Test-Path -LiteralPath $LiveExe -PathType Leaf)) { throw 'New Leshy.exe missing after deployment.' }
-    if ($wasRunning) {
-      Start-Process -FilePath $LiveExe -WorkingDirectory $LiveRoot -ErrorAction Stop | Out-Null
-      Start-Sleep -Seconds 3
-      if (@(Get-LiveProcesses).Count -eq 0) { throw 'The new Leshy process exited immediately.' }
-      Write-Host 'Leshy restarted. On-device chat verification is still required.'
-    } else {
-      Write-Host 'Update installed; Leshy was not running before the update, so no automatic start was performed.'
-    }
+    # Launch after *every* successful direct build, even on a fresh installation.
+    Start-LeshyElevated -LiveExe $LiveExe -LiveRoot $LiveRoot
+    Write-Host 'Deployment completed; elevated Leshy.exe is running.'
     Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
   } catch {
     $reason = $_.Exception.Message
@@ -160,7 +205,7 @@ function Publish-LeshyProgramSafely {
           }
         }
         if ($wasRunning -and (Test-Path -LiteralPath $LiveExe -PathType Leaf)) {
-          Start-Process -FilePath $LiveExe -WorkingDirectory $LiveRoot | Out-Null
+          Start-LeshyElevated -LiveExe $LiveExe -LiveRoot $LiveRoot
         }
         Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
       } catch {
