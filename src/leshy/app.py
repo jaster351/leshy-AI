@@ -420,23 +420,6 @@ class LeshyApp:
             )
         self.semantic_recall.schedule(owner_id)
 
-        # A direct preference request is a deterministic database operation,
-        # never merely an LLM promise. The normal chat UI receives a receipt.
-        if is_direct_rule_request(message):
-            rule_id, answer = save_direct_rule(self.storage, owner_id, message)
-            event("dialogue_rule_write_checked", owner_id=owner_id, saved=rule_id is not None)
-            return {
-                "session_id": sid, "answer": answer,
-                "created_at": self._save_assistant(sid, answer), "sources": [],
-            }
-
-        if is_rule_inspection_request(message):
-            answer = verified_rule_report(self.storage, owner_id)
-            return {
-                "session_id": sid, "answer": answer,
-                "created_at": self._save_assistant(sid, answer), "sources": [],
-            }
-
         # Detect intent within this owner's current session, not by clock or
         # assistant personality. Technical work is not automatically a letter
         # to a customer; only support drafts use the guarded reply pipeline.
@@ -456,54 +439,6 @@ class LeshyApp:
                 "session_id": sid, "answer": answer,
                 "created_at": self._save_assistant(sid, answer), "sources": [],
             }
-
-        # Вопросы о числе авторов/комментариев канонического GitHub-репозитория
-        # получают только полные данные REST API. Никогда не угадываем авторов LLM.
-        github = self.github_facts.answer(message, rows)
-        if github is not None:
-            event("chat_github_facts", verified=bool(github["verified"]),
-                  receipt_id=github["receipt_id"], session_id=sid)
-            answer = str(github["answer"])
-            return {
-                "session_id": sid, "answer": answer,
-                "created_at": self._save_assistant(sid, answer),
-                "sources": github["sources"],
-            }
-
-        # Дата/время и погода — проверяемые инструменты, а не прогноз LLM.
-        # Ничего не меняем в обычном диалоге и его скорости.
-        from .verified_clock import checked_clock_answer
-        from .weather_runtime import weather_answer
-        layout_suggestion = suggest_keyboard_layout(message)
-        factual_query = layout_suggestion.corrected if layout_suggestion else message
-        factual, sources = checked_clock_answer(factual_query, self.live_search)
-        if factual is None:
-            factual = weather_answer(factual_query)
-            sources = (
-                [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
-                if factual is not None and "Источник: Open-Meteo" in factual else (
-                    [{"title": "wttr.in", "url": "https://wttr.in/"}]
-                    if factual is not None and "Источник: wttr.in" in factual else []
-                )
-            )
-        if factual is not None:
-            factual = layout_answer(message, factual)
-            event("chat_factual_tool_answered", kind="weather" if sources else "clock_or_unavailable_weather",
-                  session_id=sid, source_count=len(sources))
-            return {
-                "session_id": sid, "answer": factual,
-                "created_at": self._save_assistant(sid, factual), "sources": sources,
-            }
-
-        if message.lower().startswith("/remember "):
-            content = message[len("/remember "):].strip()
-            memory_id = self.remember(owner_id, content)
-            answer = f"Запомнил. Запись памяти #{memory_id}."
-            return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
-        if message.lower() == "/memories":
-            items = self.memories(owner_id)
-            answer = "Сохранённая память пуста." if not items else "Сохранённая память:\n" + "\n".join(f"• {item['content']}" for item in items)
-            return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
 
         image_prompt = self._image_prompt(message)
         if image_prompt is not None:
@@ -540,6 +475,14 @@ class LeshyApp:
                 "или об устаревших шаблонах. Напиши готовый текст локально.",
             )
         context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
+        # Every ordinary message reaches the LLM. Data from legacy factual/
+        # memory tools is added as evidence, never returned as a canned answer.
+        from .conversation_tool_evidence import conversation_tool_evidence
+        tool_evidence, tool_sources = conversation_tool_evidence(
+            self, message, owner_id, sid, rows,
+        )
+        if tool_evidence:
+            context.append(ChatMessage("system", tool_evidence))
         interaction_instruction = mode_instruction(mode.kind)
         if interaction_instruction:
             context.append(ChatMessage("system", interaction_instruction))
@@ -622,7 +565,7 @@ class LeshyApp:
         cinema_plan = None if creative else cinema_query(message, rows)
         if cinema_plan is not None:
             context.append(ChatMessage("system", cinema_instruction(cinema_plan)))
-        sources: list[dict[str, str]] = list(source_links)
+        sources: list[dict[str, str]] = list(source_links) + tool_sources
         search_attempted = False
         search_error = ""
 
