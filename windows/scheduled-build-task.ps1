@@ -101,11 +101,16 @@ exit $exitCode
     $installer = Join-Path $RepoRoot ('dist\LeshySetup-' + $version + '.exe')
     $current = Test-LeshyAlreadyBuilt -Commit $head -Version $version -AutoRoot $autoRoot -LiveExe $liveExe -Installer $installer
     $installedVersion = Join-Path $liveRoot '_internal\VERSION'
-    if ($current -and (Test-Path -LiteralPath $installedVersion -PathType Leaf)) {
-        $versionInExe = (Get-Content -LiteralPath $installedVersion -Raw -Encoding UTF8).Trim()
-        if ($versionInExe -ne $version) {
-            Write-Host ('DEPLOYED_VERSION_MISMATCH: ' + $versionInExe + ' != ' + $version)
+    if ($current) {
+        if (-not (Test-Path -LiteralPath $installedVersion -PathType Leaf)) {
+            Write-Host 'DEPLOYED_VERSION_MISSING: compilation required.'
             $current = $false
+        } else {
+            $versionInExe = (Get-Content -LiteralPath $installedVersion -Raw -Encoding UTF8).Trim()
+            if ($versionInExe -ne $version) {
+                Write-Host ('DEPLOYED_VERSION_MISMATCH: ' + $versionInExe + ' != ' + $version)
+                $current = $false
+            }
         }
     }
 
