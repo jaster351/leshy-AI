@@ -27,7 +27,7 @@ $desktopCopy = Join-Path $desktop $name
 $latestDesktop = Join-Path $desktop 'Leshy-Android-current.apk'
 $sha = (Get-FileHash -LiteralPath $ApkPath -Algorithm SHA256).Hash
 try {
-    $desktopDrive = New-Object IO.DriveInfo([IO.Path]::GetPathRoot($desktop))
+    $desktopDrive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($desktop))
     Write-Host ('ANDROID_DESKTOP_FREE_GIB: ' + [Math]::Round([double]$desktopDrive.AvailableFreeSpace / 1GB, 2))
     $apkBytes = (Get-Item -LiteralPath $ApkPath).Length
     if ($desktopDrive.AvailableFreeSpace -lt 2 * $apkBytes) {
