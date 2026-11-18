@@ -57,8 +57,8 @@ if (-not $cacheHit) {
             $java = Join-Path $home 'bin\java.exe'
             $javac = Join-Path $home 'bin\javac.exe'
             if (-not (Test-Path -LiteralPath $java -PathType Leaf) -or -not (Test-Path -LiteralPath $javac -PathType Leaf)) { continue }
-            $ver = (@(& $java -version 2>&1) -join ' ')
-            if ($ver -match 'version "(\d+)(\.|")' -and [int]$Matches[1] -ge 17 -and [int]$Matches[1] -le 23) {
+            $ver = ([string](@(& $javac -version 2>$null | Select-Object -First 1))).Trim()
+            if ($ver -match '^javac\s+(\d+)' -and [int]$Matches[1] -ge 17 -and [int]$Matches[1] -le 23) {
                 return (Resolve-Path -LiteralPath $home).Path
             }
         }
