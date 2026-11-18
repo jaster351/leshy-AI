@@ -133,8 +133,8 @@ class MainActivity : ComponentActivity() {
         }
         root.addView(cameraPreview, LinearLayout.LayoutParams(-1, 600))
         root.addView(TextView(this).apply {
-            text = "Сервер «Лешего»: не подключён. Ничего не отправляется. " +
-                "Bluetooth-динамик необязателен; звук позже пойдёт через системный аудиовыход."
+            text = "Диалог с сервером пока не подключён; передаётся только запрос состояния /v1/status. " +
+                "Голос и изображения не отправляются. Bluetooth-динамик необязателен."
         })
         setContentView(ScrollView(this).apply { addView(root) })
         refreshMicStatus()
@@ -143,6 +143,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::micStatus.isInitialized) refreshMicStatus()
+        if (::serverAddress.isInitialized &&
+            ServerReachability.address(this).isNotBlank()) {
+            checkServer()
+        }
     }
 
     private fun checkServer() {
