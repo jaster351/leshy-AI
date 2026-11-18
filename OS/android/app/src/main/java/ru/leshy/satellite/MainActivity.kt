@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
     private var voiceSession: String? = null
     private var speaker: TextToSpeech? = null
     private var speakerReady = false
+    private var voiceBusy = false
     private lateinit var serverAddress: EditText
     private lateinit var serverStatus: TextView
     private lateinit var deviceStatus: TextView
@@ -101,7 +102,7 @@ class MainActivity : ComponentActivity() {
             textSize = 23f
         })
         root.addView(TextView(this).apply {
-            text = "Прототип: микрофон работает локально. Серверный разговор и узнавание личности ещё не подключены."
+            text = "Разговор с моделью Лешего доступен по кнопке. Узнавание людей и активация по слову ещё не подключены."
             textSize = 14f
         })
         root.addView(TextView(this).apply {
@@ -335,6 +336,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun submitVoiceQuestion(raw: String) {
+        if (voiceBusy) {
+            voiceStatus.text = "Дождитесь текущего ответа Лешего."
+            return
+        }
         val question = raw.trim()
         if (question.isEmpty() || question.length > 2500) {
             voiceStatus.text = "Введите вопрос длиной до 2500 символов."
@@ -346,6 +351,7 @@ class MainActivity : ComponentActivity() {
             voiceStatus.text = "Нужны сохранённые HTTPS-адрес и отдельный Android-ключ."
             return
         }
+        voiceBusy = true
         voiceStatus.text = "Вы: " + question + "\nОжидаю ответ Лешего..."
         val activeSession = voiceSession
         serverExecutor.execute {
@@ -372,6 +378,8 @@ class MainActivity : ComponentActivity() {
                     if (!isDestroyed) voiceStatus.text =
                         "Не удалось получить ответ: " + (e.message ?: e.javaClass.simpleName)
                 }
+            } finally {
+                runOnUiThread { voiceBusy = false }
             }
         }
     }
