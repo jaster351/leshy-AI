@@ -330,7 +330,7 @@ function Deploy-Package {
         Clear-ProgramTree -Root $LiveRoot
         Copy-ProgramTree -Source $PackageRoot -Destination $LiveRoot
         if (-not (Test-Path -LiteralPath $LiveExe)) { throw 'Live deployment did not produce Leshy.exe.' }
-        Save-LiveState -Sha $Sha -Version $Version
+        # Commit deployment state only after Start-Leshy succeeds.
         Remove-Item -LiteralPath $BackupRoot -Recurse -Force -ErrorAction SilentlyContinue
         Write-CoreLog ('Live deployment completed. LeshyBrain preserved at ' + $BrainRoot)
     } catch {
@@ -371,6 +371,7 @@ function Invoke-FullUpdate {
         Stop-Leshy
         Deploy-Package -Sha $sha -Version $version
         Start-Leshy
+        Save-LiveState -Sha $sha -Version $version
         Write-UiStatus -State 'ready' -Message 'Live update completed' -Sha $sha -Version $version
         Write-CoreLog ('Full live update completed: ' + $version + ' ' + $sha.Substring(0,8))
     } catch {
@@ -404,6 +405,7 @@ function Invoke-Startup {
         Write-CoreLog ('Startup: no new Git changes since ' + $sha.Substring(0,8))
     }
     Start-Leshy
+    if ($needsBuild) { Save-LiveState -Sha $sha -Version $version }
     $state = Read-LiveState
     $versionText = if ($state) { [string]$state.version } else { '' }
     Write-UiStatus -State 'ready' -Message 'Startup update check completed; Leshy started' -Sha $sha -Version $versionText
