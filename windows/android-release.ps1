@@ -26,6 +26,19 @@ $localCopy = Join-Path $apkRoot $name
 $desktopCopy = Join-Path $desktop $name
 $latestDesktop = Join-Path $desktop 'Leshy-Android-current.apk'
 $sha = (Get-FileHash -LiteralPath $ApkPath -Algorithm SHA256).Hash
+try {
+    $desktopDrive = New-Object IO.DriveInfo([IO.Path]::GetPathRoot($desktop))
+    Write-Host ('ANDROID_DESKTOP_FREE_GIB: ' + [Math]::Round([double]$desktopDrive.AvailableFreeSpace / 1GB, 2))
+    $apkBytes = (Get-Item -LiteralPath $ApkPath).Length
+    if ($desktopDrive.AvailableFreeSpace -lt 2 * $apkBytes) {
+        throw 'Insufficient free space on Desktop volume for Android APK copies.'
+    }
+} catch [System.IO.IOException] {
+    throw
+} catch {
+    Write-Warning ('Cannot read Desktop volume capacity: ' + $_.Exception.Message)
+}
+
 foreach ($target in @($localCopy,$desktopCopy,$latestDesktop)) {
     if ([IO.Path]::GetFullPath($target) -ine [IO.Path]::GetFullPath($ApkPath)) {
         Copy-Item -LiteralPath $ApkPath -Destination $target -Force
@@ -121,7 +134,7 @@ try {
     }
     Write-Host ('ANDROID_GITHUB_RELEASE: https://github.com/' + $releaseRepo + '/releases/tag/' + $tag)
     # Prune only automatic releases with the fixed Android tag pattern.
-    $raw = & $gh.Source release list --repo $releaseRepo --limit 100 --json tagName,createdAt,isPrerelease
+    $raw = & $gh.Source release list --repo $releaseRepo --limit 500 --json tagName,createdAt,isPrerelease
     if ($LASTEXITCODE -ne 0) { throw 'Could not list old Android releases. No remote cleanup performed.' }
     $allReleases = @($raw | ConvertFrom-Json | Where-Object {
         $_.tagName -match '^android-v\d+\.\d+\.\d+-[0-9a-fA-F]{10}
