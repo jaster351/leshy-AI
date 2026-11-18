@@ -14,7 +14,7 @@ import sys
 import threading
 import webbrowser
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 _LOG = logging.getLogger(__name__)
 _LOCK = threading.Lock()
@@ -79,8 +79,14 @@ def _icon_path() -> Path:
     return root / "assets" / "leshy-icon.jpg"
 
 
-def start_tray(brain_root: Path, *, host: str = "127.0.0.1", port: int = 8765):
-    """Start an optional Windows tray. Does not depend on a console window."""
+def start_tray(
+    brain_root: Path,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    open_web: Callable[[], bool] | None = None,
+):
+    """Запускает трей Windows и использует одно управляемое Web-окно."""
     if os.name != "nt":
         return None
 
@@ -92,8 +98,14 @@ def start_tray(brain_root: Path, *, host: str = "127.0.0.1", port: int = 8765):
     image = Image.open(image_file).convert("RGBA")
     holder = {}
 
-    def open_web(icon=None, item=None):
-        webbrowser.open(url)
+    def open_web_item(icon=None, item=None):
+        if open_web is not None:
+            # Открыть или переиспользовать только окно этого экземпляра.
+            if not open_web():
+                _LOG.warning("Не удалось открыть управляемое окно Лешего")
+        else:
+            # Сохранено для вызовов start_tray вне штатного Windows launcher.
+            webbrowser.open(url)
 
     def check_updates(icon=None, item=None):
         # Task Scheduler enforces no overlapping builds.
@@ -121,7 +133,7 @@ def start_tray(brain_root: Path, *, host: str = "127.0.0.1", port: int = 8765):
         request_shutdown()
 
     menu = pystray.Menu(
-        pystray.MenuItem("Открыть Лешего", open_web, default=True),
+        pystray.MenuItem("Открыть Лешего", open_web_item, default=True),
         pystray.MenuItem("Проверить обновления", check_updates),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Выйти из Лешего", exit_leshy),
