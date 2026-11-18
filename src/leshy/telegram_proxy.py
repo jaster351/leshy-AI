@@ -215,36 +215,49 @@ class TelegramProxyTransport:
         )
 
     def open(self, req, *, timeout: float):
-        with self._lock:
-            cfg = self._read()
-        if not cfg["enabled"]:
-            # Backwards compatible: use existing OS/environment proxy policy.
-            # Сохраняем политику системных прокси, добавляя только явно
-            # выбранный доверенный CA. Никаких CERT_NONE или check_hostname=False.
-            if os.getenv("LESHY_TELEGRAM_CA_BUNDLE", "").strip():
-                return request.build_opener(
-                    request.HTTPSHandler(context=_telegram_tls_context()), _NoRedirects(),
-                ).open(req, timeout=timeout)
-            return request.urlopen(req, timeout=timeout)
         url = req.full_url if isinstance(req, request.Request) else str(req)
         target = parse.urlsplit(url)
-        if target.scheme != "https" or target.hostname != "api.telegram.org" or target.port is not None:
-            raise ValueError("Прокси Telegram разрешён только для HTTPS Telegram Bot API")
+        # Never allow arbitrary endpoints, redirects or URL credentials to
+        # receive the Telegram bot token, regardless of proxy configuration.
+        if (target.scheme != "https" or target.hostname != "api.telegram.org"
+                or target.port is not None or target.username is not None
+                or target.password is not None or target.fragment):
+            raise ValueError("Telegram transport accepts only HTTPS Telegram Bot API")
+
+        with self._lock:
+            cfg = self._read()
         try:
-            return self._opener(cfg).open(req, timeout=timeout)
-        except error.HTTPError:
-            raise
+            if cfg["enabled"]:
+                opener = self._opener(cfg)
+            else:
+                # An explicit opener retains environment/system proxy settings
+                # while disabling urllib's automatic HTTP redirects.
+                opener = request.build_opener(
+                    request.HTTPSHandler(context=_telegram_tls_context()),
+                    _NoRedirects(),
+                )
+            return opener.open(req, timeout=timeout)
+        except error.HTTPError as exc:
+            # HTTPError.geturl() and str(exc) otherwise expose the bot token.
+            # Preserve status, headers (notably Retry-After), and response body.
+            raise error.HTTPError(
+                "https://api.telegram.org/",
+                exc.code,
+                exc.msg,
+                exc.hdrs,
+                exc.fp,
+            ) from None
         except Exception as exc:
-            # SSL-ошибка может приходить внутри URLError.reason. Не маскируем
-            # её как "прокси недоступен"; сертификаты проверяем обязательно.
             reason = exc.reason if isinstance(exc, error.URLError) else exc
             if isinstance(reason, ssl.SSLCertVerificationError):
                 raise ConnectionError(
                     "Telegram TLS: сертификат не доверен (CERTIFICATE_VERIFY_FAILED); "
                     "проверьте корневой CA прокси/антивируса"
                 ) from None
-            # Никогда не печатаем URL (он может содержать bot token) и пароль.
-            raise ConnectionError(f"Прокси Telegram недоступен ({type(exc).__name__})") from None
+            # Never expose the request URL or proxy credentials in diagnostics.
+            raise ConnectionError(
+                f"Telegram transport unavailable ({type(exc).__name__})"
+            ) from None
 
 
 __all__ = ["TelegramProxyTransport"]
