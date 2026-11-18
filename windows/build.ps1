@@ -27,6 +27,32 @@ $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 
 . (Join-Path $PSScriptRoot 'build-update-guard.ps1')
 
+function Invoke-AndroidClientBuild {
+  param([string]$RepositoryPath)
+  $androidBuilder = Join-Path $PSScriptRoot 'build-android.ps1'
+  if (-not (Test-Path -LiteralPath $androidBuilder -PathType Leaf)) { throw 'Android builder is missing.' }
+  & $androidBuilder -RepositoryPath $RepositoryPath
+  if (-not $?) { throw 'Android APK build or publication stage failed.' }
+}
+
+function Remove-OldWindowsInstallers {
+  param([string]$RepositoryPath,[string]$CurrentVersion,[int]$Keep=3)
+  $dist = Join-Path $RepositoryPath 'dist'
+  if (-not (Test-Path -LiteralPath $dist -PathType Container)) { return }
+  $currentName = 'LeshySetup-' + $CurrentVersion + '.exe'
+  $old = @(Get-ChildItem -LiteralPath $dist -File -Filter 'LeshySetup-*.exe' |
+      Where-Object { $_.Name -match '^LeshySetup-\d+\.\d+\.\d+\.exe$' } |
+      Sort-Object LastWriteTimeUtc -Descending)
+  $keepPaths = @($old | Select-Object -First $Keep | ForEach-Object { $_.FullName })
+  foreach ($entry in $old) {
+    if ($entry.Name -eq $currentName -or $entry.FullName -in $keepPaths) { continue }
+    try {
+      Remove-Item -LiteralPath $entry.FullName -Force -ErrorAction Stop
+      Write-Host ('OLD_WINDOWS_INSTALLER_REMOVED: ' + $entry.Name)
+    } catch { Write-Warning ('Old installer cleanup failed: ' + $entry.Name + '. ' + $_.Exception.Message) }
+  }
+}
+
 # AutoBuilder explicitly invokes this script with -StageOnly.
 $script:GitCommit = ''
 if (-not $StageOnly) {
@@ -35,6 +61,7 @@ if (-not $StageOnly) {
   if (Test-LeshyAlreadyBuilt -Commit $script:GitCommit -Version $version -AutoRoot $autoRoot -LiveExe $liveExe -Installer $targetInstaller) {
     Write-Host ("NO CHANGES: " + $version + " / " + $script:GitCommit.Substring(0,10) + ". Compilation skipped.")
     Start-LeshyElevated -LiveExe $liveExe -LiveRoot $liveRoot
+    Invoke-AndroidClientBuild -RepositoryPath $repoRoot
     return
   }
 }
@@ -442,6 +469,7 @@ Build-Stage 'publish-or-stage'
 if (-not $StageOnly) {
   Publish-LiveProgram
   Save-LeshyBuiltState -AutoRoot $autoRoot -Commit $script:GitCommit -Version $version -LiveRoot $liveRoot
+  Remove-OldWindowsInstallers -RepositoryPath $repoRoot -CurrentVersion $version
 } else {
   Write-Host 'STAGE ONLY: AutoBuilder will publish the package to dist\Leshy after creating its rollback backup.'
 }
@@ -478,4 +506,10 @@ $script:buildOK = $true
       } catch { Write-Warning "Could not publish full build profile into LeshyBrain logs: $($_.Exception.Message)" }
     }
   } catch { }
+}
+
+# Windows build/deployment and profile output have completed.
+# StageOnly remains controlled by the existing AutoBuilder.
+if (-not $StageOnly -and $script:buildOK) {
+  Invoke-AndroidClientBuild -RepositoryPath $repoRoot
 }

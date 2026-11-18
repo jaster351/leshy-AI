@@ -16,3 +16,10 @@ Leshy-Support-Key.key
 Local-Support-Profile*.zip
 support_profile.key
 support.key.dpapi
+
+# Android build caches and generated project state
+OS/android/.gradle/
+OS/android/.kotlin/
+OS/android/.idea/
+OS/android/local.properties
+OS/android/**/build/
