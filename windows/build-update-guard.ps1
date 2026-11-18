@@ -137,10 +137,21 @@ function Start-LeshyElevated {
   }
 
   try {
-    # Windows displays its regular UAC confirmation. Never bypass UAC or edit ACLs.
-    $process = Start-Process -FilePath $exe -WorkingDirectory $dir -Verb RunAs -PassThru -ErrorAction Stop
+    if ($env:LESHY_SCHEDULED_BUILD -eq '1') {
+      # The Windows scheduled task is registered for this user with RunLevel Highest.
+      # Verify the already-elevated token and launch silently, without a second UAC prompt.
+      $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+      $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+      if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'The scheduled build is not running with elevated administrator rights.'
+      }
+      $process = Start-Process -FilePath $exe -WorkingDirectory $dir -ArgumentList '--no-browser' -WindowStyle Hidden -PassThru -ErrorAction Stop
+    } else {
+      # An interactive build still asks Windows for explicit UAC approval.
+      $process = Start-Process -FilePath $exe -WorkingDirectory $dir -Verb RunAs -PassThru -ErrorAction Stop
+    }
   } catch {
-    throw ('Administrator UAC approval is required to launch: ' + $exe + '. ' + $_.Exception.Message)
+    throw ('Could not launch Leshy.exe with administrator rights: ' + $exe + '. ' + $_.Exception.Message)
   }
   if ($null -eq $process) { throw 'Elevated start did not return a process handle.' }
   try {
