@@ -187,6 +187,8 @@ def main() -> None:
             sys.stdout = open(log_dir / "launcher.stdout.log", "a", encoding="utf-8", buffering=1)
         if sys.stderr is None:
             sys.stderr = open(log_dir / "launcher.stderr.log", "a", encoding="utf-8", buffering=1)
+        if sys.stdin is None:
+            sys.stdin = open(os.devnull, "r", encoding="utf-8")
 
     if os.name == "nt" and not args.scheduled_start:
         from leshy.desktop_tray import resume_manually
