@@ -5,7 +5,6 @@ import os
 import threading
 import time
 from http import HTTPStatus
-from http.server import ThreadingHTTPServer
 from urllib import parse
 
 from . import web_server_impl2 as previous
@@ -22,6 +21,7 @@ from .os_control_approval import install_os_control
 from .runtime_compat import CompatibleRuntimeManager
 from .streaming_backends import install_streaming_backends
 from .telegram_fast import FastTelegramBridge
+from .web_transport_runtime import WebTransportRuntime
 
 
 _SOFT_WARMUP_DELAY_SECONDS = 2.0
@@ -399,8 +399,18 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     shutdown = threading.Event()
 
     bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0")
-    bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
-    server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
+    server = WebTransportRuntime(settings.brain_dir, bind_host, port)
+    app.web_security = server
+    # Метаданные локального узла получают фактически выбранный HTTP-порт.
+    os.environ["LESHY_PORT"] = str(server.configuration["http_port"])
+    try:
+        handler = make_handler(app, telegram, settings, model_catalog)
+        server.bind(handler)
+    except BaseException:
+        server.close()
+        telegram.stop()
+        app.stop_background()
+        raise
 
     threading.Thread(
         target=_warmup_soft,
@@ -428,16 +438,18 @@ def serve(host: str | None = None, port: int | None = None) -> None:
         auto_title_quiet_seconds=_AUTO_TITLE_QUIET_SECONDS,
         telegram_minimum_delay_seconds=_TELEGRAM_MINIMUM_DELAY_SECONDS,
     )
-    print(f"Леший {app.status()['version']} запущен: http://{bind_host}:{bind_port}")
+    for protocol, state in server.status()["runtime"].items():
+        if protocol in {"http", "https"} and state.get("status") == "bound":
+            print(f"Леший {app.status()['version']}: {protocol}://{bind_host}:{state['port']}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         shutdown.set()
+        server.close()
         telegram.stop()
         app.stop_background()
-        server.server_close()
 
 
 def main() -> None:

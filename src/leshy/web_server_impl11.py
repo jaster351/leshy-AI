@@ -4,6 +4,7 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 import json
 import os
+import ssl
 from urllib import parse
 
 from . import web_server_impl10 as previous
@@ -104,7 +105,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 f"{identity.cookie_name}={new_cookie}; Path=/; Max-Age={180 * 24 * 60 * 60}; "
                 "HttpOnly; SameSite=Strict"
             )
-            if str(self.headers.get("X-Forwarded-Proto") or "").lower() == "https":
+            if isinstance(self.connection, ssl.SSLSocket):
                 value += "; Secure"
             return value
 

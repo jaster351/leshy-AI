@@ -154,7 +154,8 @@ def _start_llama_watchdog(brain_root: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="Leshy")
     parser.add_argument("--host", default=os.getenv("LESHY_HOST", "0.0.0.0"))
-    parser.add_argument("--port", type=int, default=int(os.getenv("LESHY_PORT", "8765")))
+    parser.add_argument("--port", type=int, default=None,
+                        help="HTTP-порт: явный параметр, LESHY_PORT, сохранённое значение, затем 8765")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument(
         "--check-native-runtime",
@@ -190,7 +191,8 @@ def main() -> None:
         os.environ.pop("LESHY_LEGACY_BRAIN_DIR", None)
 
     os.environ["LESHY_HOST"] = args.host
-    os.environ["LESHY_PORT"] = str(args.port)
+    if args.port is not None:
+        os.environ["LESHY_PORT"] = str(args.port)
 
     # Owner's previously downloaded encrypted bundle is picked up automatically.
     # The private key never ships in Git/EXE and is stored using Windows DPAPI.
@@ -212,12 +214,14 @@ def main() -> None:
 
     from leshy.diagnostic_publisher import DiagnosticPublisher
     from leshy.web_server import serve
+    from leshy.web_transport_settings import browser_url
 
     publisher = DiagnosticPublisher(brain_root)
     publisher.start()
     try:
         if not args.no_browser:
-            threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/")).start()
+            target_url = browser_url(brain_root, args.port)
+            threading.Timer(1.2, lambda: webbrowser.open(target_url)).start()
         serve(args.host, args.port)
     finally:
         publisher.stop()

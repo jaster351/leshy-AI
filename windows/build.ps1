@@ -172,6 +172,7 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --collect-all markitdown `
   --collect-all mcp `
   --collect-all paramiko `
+  --collect-all cryptography `
   --collect-all mss `
   --collect-all pyautogui `
   --collect-all pypdf `
