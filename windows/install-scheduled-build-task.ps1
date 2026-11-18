@@ -36,7 +36,7 @@ $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
 $action = New-ScheduledTaskAction -Execute $wscript -Argument ('//B //Nologo "' + $RunnerVbs + '"') -WorkingDirectory $RepoRoot
 
 # Quarter-hourly runs every day, plus an immediate check at user logon.
-$daily = New-ScheduledTaskTrigger -Daily -At (Get-Date).Date
+$daily = New-ScheduledTaskTrigger -Daily -At (Get-Date).AddMinutes(1)
 $daily.Repetition.Interval = 'PT15M'
 $daily.Repetition.Duration = 'P1D'
 $daily.Repetition.StopAtDurationEnd = $false
