@@ -24,19 +24,43 @@ _NUMBER_REQUEST = re.compile(r"(?i)\b(?:стать[ьяиюе]|ст\.)\s*(?:№\
 
 
 def is_federation_constitution_question(message: str) -> bool:
-    """Do not intercept questions about the Constitution of the Russian Federation."""
-    current = " ".join(str(message or "").lower().replace("ё", "е").split())
-    law = "конституц" in current or "основной закон" in current
-    leshy = bool(re.search(r"\bлеш\w*\b", current))
-    federation = bool(re.search(r"\bфедерац\w*\b", current))
-    local_possession = bool(re.search(
-        r"\b(?:моя|наша|твоя|твою|твоей|ваша|вашу)\b.{0,50}\bконституц\w*|"
-        r"\bконституц\w*\b.{0,50}\b(?:тебя|вас|лешего|леших)\b",
+    """Only an explicit, standalone request to read the local document is routed here.
+
+    Merely mentioning the Constitution, Federation, Leshy, a creator or an
+    article inside an instruction MUST NOT override the user's actual task.
+    """
+    raw = str(message or "").strip()
+    if not raw or len(raw) > 260 or "\n" in raw or "\r" in raw:
+        return False
+    current = " ".join(raw.casefold().replace("ё", "е").split())
+    current = re.sub(r"^леший[,!:.\s]+", "", current).strip()
+    if re.search(r"\b(?:рф|росси\w*|российск\w*)\b", current):
+        return False
+    if not re.search(r"\bконституц\w*\b", current):
+        return False
+    if not re.search(r"\b(?:леш\w*|федерац\w*|наша|нашу|твоя|твою|моя|мою)\b", current):
+        return False
+
+    # An explicit request for this document, not a generic imperative that
+    # happens to mention its name later in a list of instructions.
+    direct_read = re.match(
+        r"^(?:покажи|прочитай|открой|выведи|процитируй|приведи)"
+        r"(?:[,!]\s*|\s+)"
+        r"(?:(?:мне|пожалуйста|полный|весь|всю|текст|содержание|"
+        r"статью|статьи|главу|раздел|все|№?\d+)\s+){0,8}"
+        r"конституц\w*\b",
         current,
-    ))
-    russian = bool(re.search(r"\b(?:рф|росси\w*|российск\w*)\b", current))
-    # "Леший, покажи Конституцию РФ" is NOT the federation document.
-    return law and (leshy or federation or local_possession) and not russian
+    )
+    direct_article = re.match(
+        r"^что\s+(?:сказано|написано|говорится)\s+в\s+"
+        r"(?:(?:статье|главе|разделе)\s+\d+\s+)?конституц\w*\b",
+        current,
+    )
+    article_count = re.match(
+        r"^сколько\s+статей\s+в\s+конституц\w*\b",
+        current,
+    )
+    return bool(direct_read or direct_article or article_count)
 
 
 def _candidate_paths(app) -> list[Path]:
@@ -148,51 +172,11 @@ def constitution_answer(app, message: str) -> str | None:
 
 
 
-_SHORT_ACKNOWLEDGEMENT = re.compile(
-    r"(?iu)^\s*(?:молодец|молодчина|умница|отлично|"
-    r"спасибо(?:\s+большое)?|благодарю|супер|класс|хорошо|"
-    r"понятно|ясно|ок(?:ей)?)[\s.!?👍👏🙏]*$"
-)
-
-
 def constitution_acknowledgement(
     app, message: str, owner_id: str, session_id: str | None
 ) -> str | None:
-    """A short compliment after the *verified* document needs no model call.
-
-    Verify the last assistant response in this owner's exact session and
-    its hash against the local Constitution. Never infer this from a user
-    quote, arbitrary memory, or a global previous conversation.
-    """
-    if not session_id or not _SHORT_ACKNOWLEDGEMENT.fullmatch(str(message or "")):
-        return None
-    from .owner_identity_runtime import canonical_owner
-    owner = canonical_owner(app, str(owner_id or "web:local").strip()[:200])
-    try:
-        with app.storage.connection() as conn:
-            row = conn.execute(
-                "SELECT m.role,m.content FROM messages m "
-                "JOIN sessions s ON s.id=m.session_id "
-                "WHERE m.session_id=? AND s.owner_id=? "
-                "ORDER BY m.id DESC LIMIT 1",
-                (session_id, owner),
-            ).fetchone()
-        if row is None or row["role"] != "assistant":
-            return None
-        last = str(row["content"] or "")
-        if not last.startswith(
-            "Конституция Федерации Леших — общий документ проекта"
-        ) or f"Источник на этом узле: {PUBLIC_PATH}\n" not in last:
-            return None
-        verified = _verified_document(app)
-        if verified is None:
-            return None
-        digest = verified[1]
-        if f"SHA-256 фактических байтов локального файла: {digest}\n" not in last:
-            return None
-        return "Спасибо!"
-    except (OSError, ValueError, TypeError, KeyError):
-        return None
+    """No scripted conversational response after quoting the document."""
+    return None
 
 
 def install_constitution_routing(app_class) -> None:
@@ -207,10 +191,7 @@ def install_constitution_routing(app_class) -> None:
             session_id: str | None = None,
             request_id: str | None = None,
         ) -> Iterator[StreamEvent]:
-            acknowledgement = constitution_acknowledgement(
-                self.app, message, owner_id, session_id,
-            )
-            if not is_federation_constitution_question(message) and acknowledgement is None:
+            if not is_federation_constitution_question(message):
                 yield from old_stream(
                     self, message, owner_id=owner_id,
                     session_id=session_id, request_id=request_id,
@@ -234,7 +215,7 @@ def install_constitution_routing(app_class) -> None:
                         "sources": [], "stopped": True,
                     })
                     return
-                answer = acknowledgement if acknowledgement is not None else constitution_answer(self.app, message)
+                answer = constitution_answer(self.app, message)
                 if answer is None:
                     raise RuntimeError("Constitution intent unexpectedly missing")
                 for chunk in self._chunk_fallback(answer, 160):
@@ -280,10 +261,7 @@ def install_constitution_routing(app_class) -> None:
             session_id: str | None = None,
             **kwargs: Any,
         ) -> dict[str, Any]:
-            acknowledgement = constitution_acknowledgement(
-                self, message, owner_id, session_id,
-            )
-            if not is_federation_constitution_question(message) and acknowledgement is None:
+            if not is_federation_constitution_question(message):
                 return old_chat(
                     self, message, owner_id=owner_id,
                     session_id=session_id, **kwargs,
@@ -307,7 +285,7 @@ def install_constitution_routing(app_class) -> None:
                         "UPDATE sessions SET title=?,title_source=?,updated_at=? WHERE id=?",
                         (" ".join(message.split())[:80], "auto", now, sid),
                     )
-            answer = acknowledgement if acknowledgement is not None else constitution_answer(self, message)
+            answer = constitution_answer(self, message)
             if answer is None:
                 raise RuntimeError("Constitution intent unexpectedly missing")
             return {
