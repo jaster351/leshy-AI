@@ -140,6 +140,11 @@ class OperatingSystemController:
         text = str(message or "").strip()
         if re.match(r"(?i)^/os(?:\s|$)", text):
             return True
+        # Natural-language OS commands must be short and standalone.
+        # Long work plans, quoted instructions and multi-step prompts belong
+        # to the LLM even when they mention editing files or running scripts.
+        if len(text) > 360 or "\n" in text or "\r" in text:
+            return False
         if self._OS_NEGATED_RE.search(text):
             return False
         explicit_action = bool(self._INTENT_RE.search(text))
