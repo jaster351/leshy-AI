@@ -92,6 +92,10 @@ internal class ConnectivityNotifier(
         engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "leshy-network")
     }
 
+    fun announce(text: String) {
+        handler.post { if (!closed) speak(text) }
+    }
+
     fun close() {
         if (closed) return
         closed = true

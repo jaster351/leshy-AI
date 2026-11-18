@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -29,6 +30,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var micStatus: TextView
     private lateinit var faceStatus: TextView
     private lateinit var cameraPreview: PreviewView
+    private lateinit var serverAddress: EditText
+    private lateinit var serverStatus: TextView
+    private val serverExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val detector = FaceDetection.getClient(
@@ -70,6 +74,23 @@ class MainActivity : ComponentActivity() {
         root.addView(TextView(this).apply {
             text = "Прототип: микрофон работает локально. Серверный разговор и узнавание личности ещё не подключены."
             textSize = 14f
+        })
+        root.addView(TextView(this).apply {
+            text = "Адрес сервера (HTTPS). Проверка связи не даёт прав владельца."
+        })
+        serverAddress = EditText(this).apply {
+            hint = "https://server.example:443"
+            setSingleLine(true)
+            setText(ServerReachability.address(this@MainActivity))
+        }
+        root.addView(serverAddress)
+        serverStatus = TextView(this).apply {
+            text = "Связь с сервером ещё не проверялась"
+        }
+        root.addView(serverStatus)
+        root.addView(Button(this).apply {
+            text = "Сохранить адрес и проверить"
+            setOnClickListener { checkServer() }
         })
         micStatus = TextView(this)
         root.addView(micStatus)
@@ -122,6 +143,22 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::micStatus.isInitialized) refreshMicStatus()
+    }
+
+    private fun checkServer() {
+        val normalized = ServerReachability.normalize(serverAddress.text.toString())
+        if (normalized == null) {
+            serverStatus.text = "Укажите HTTPS-адрес без пути, логина и параметров"
+            return
+        }
+        ServerReachability.saveAddress(this, normalized)
+        serverStatus.text = "Проверяем связь с сервером..."
+        serverExecutor.execute {
+            val result = ServerReachability.probe(normalized)
+            runOnUiThread {
+                if (!isDestroyed) serverStatus.text = result.message
+            }
+        }
     }
 
     private fun refreshMicStatus() {
@@ -229,6 +266,7 @@ class MainActivity : ComponentActivity() {
         stopCamera()
         detector.close()
         cameraExecutor.shutdown()
+        serverExecutor.shutdownNow()
         super.onDestroy()
     }
 }

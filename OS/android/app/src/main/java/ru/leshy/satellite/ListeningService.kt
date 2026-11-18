@@ -13,6 +13,8 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import java.util.concurrent.atomic.AtomicBoolean
@@ -38,6 +40,9 @@ class ListeningService : Service() {
     private var captureThread: Thread? = null
     private var cpuLock: PowerManager.WakeLock? = null
     private var connectivityNotifier: ConnectivityNotifier? = null
+    private var serverMonitor: ServerStatusMonitor? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var serverState: ServerReachability.State? = null
     @Volatile private var internetConnected: Boolean? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -82,6 +87,28 @@ class ListeningService : Service() {
                         .notify(NOTIFICATION_ID, listeningNotification())
                 }
             }
+            if (serverMonitor == null && capture.get()) {
+                serverMonitor = ServerStatusMonitor(this) { result, previous ->
+                    mainHandler.post {
+                        if (!capture.get()) return@post
+                        serverState = result.state
+                        val connectedBefore = previous == ServerReachability.State.REACHABLE_UNVERIFIED ||
+                            previous == ServerReachability.State.AUTH_REQUIRED
+                        val connectedNow = result.state == ServerReachability.State.REACHABLE_UNVERIFIED ||
+                            result.state == ServerReachability.State.AUTH_REQUIRED
+                        val failedNow = result.state == ServerReachability.State.UNREACHABLE ||
+                            result.state == ServerReachability.State.SERVER_ERROR ||
+                            result.state == ServerReachability.State.TLS_FAILURE
+                        if (connectedBefore && failedNow && internetConnected == true) {
+                            connectivityNotifier?.announce("Нет связи с сервером Лешего.")
+                        } else if (connectedNow && previous != null && !connectedBefore) {
+                            connectivityNotifier?.announce("Связь с сервером Лешего восстановлена.")
+                        }
+                        getSystemService(NotificationManager::class.java)
+                            .notify(NOTIFICATION_ID, listeningNotification())
+                    }
+                }
+            }
         } catch (_: SecurityException) {
             // Restart from background can be forbidden by Android 14+.
             stopSelf()
@@ -108,7 +135,15 @@ class ListeningService : Service() {
             .setContentText(
                 when (internetConnected) {
                     false -> "Нет подключения к интернету"
-                    true -> "Микрофон активен. Серверное соединение пока не подключено."
+                    true -> when (serverState) {
+                        ServerReachability.State.NOT_CONFIGURED -> "Сервер не настроен"
+                        ServerReachability.State.REACHABLE_UNVERIFIED -> "Сервер отвечает; клиент не авторизован"
+                        ServerReachability.State.AUTH_REQUIRED -> "Сервер отвечает; нужна авторизация"
+                        ServerReachability.State.UNREACHABLE -> "Нет связи с сервером Лешего"
+                        ServerReachability.State.TLS_FAILURE -> "Ошибка HTTPS-сертификата"
+                        ServerReachability.State.SERVER_ERROR -> "Некорректный ответ сервера"
+                        null -> "Проверяем связь с сервером..."
+                    }
                     null -> "Микрофон активен. Проверка сети..."
                 }
             )
@@ -170,6 +205,8 @@ class ListeningService : Service() {
     }
 
     override fun onDestroy() {
+        serverMonitor?.close()
+        serverMonitor = null
         connectivityNotifier?.close()
         connectivityNotifier = null
         capture.set(false)
