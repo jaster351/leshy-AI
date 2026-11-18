@@ -151,11 +151,10 @@ _ORIGINAL_PENDING_SESSIONS = None
 
 
 def _configure_app_search(app) -> None:
-    """Prefer real isolated Chromium, hedge against its temporary failure.
+    """Use independent network search providers without launching a browser.
 
-    The search provider's normal user agent and cookies belong to the real
-    Chromium session. After a short delay, independent HTTP providers become
-    available, even when Chromium meets a CAPTCHA or cannot start.
+    Search is handled by direct HTTP clients. A legacy ChromiumSearch provider
+    is removed from the normal chain even when it was previously configured.
     """
     provider = getattr(getattr(app, "research", None), "search_provider", None)
     if provider is not None and not bool(getattr(provider, "_leshy_reliable_web", False)):
@@ -163,7 +162,10 @@ def _configure_app_search(app) -> None:
             list(provider.providers) if isinstance(provider, FallbackSearch)
             else [provider]
         )
-        fast = [item for item in original if not isinstance(item, DdgsSearch)]
+        fast = [
+            item for item in original
+            if not isinstance(item, (DdgsSearch, ChromiumSearch))
+        ]
         for item in fast:
             # SearXNG can be configured with a 20-second request timeout.
             # Never let a single local service hold a worker for 20 seconds.
@@ -180,21 +182,11 @@ def _configure_app_search(app) -> None:
             DdgsSearch(timeout=3, backends=("google", "mojeek", "yandex"))
             for item in original if isinstance(item, DdgsSearch)
         ]
-        chromium_enabled = str(os.getenv("LESHY_CHROMIUM_SEARCH_ENABLED", "1")).strip().lower() not in {
-            "0", "false", "off", "no",
-        }
-        if chromium_enabled:
-            try:
-                fast.insert(0, ChromiumSearch(
-                    brain_dir=getattr(getattr(app, "settings", None), "brain_dir", None)
-                ))
-            except ValueError as exc:
-                problem("chromium_search_config_invalid", type(exc).__name__)
         # Optional authenticated LAN peer joins the independent source race.
         # Without an enabled cluster it returns immediately with no network I/O.
         combined = RacingSearch(
             *fast, *slow, ClusterPeerSearch(app), deadline_seconds=8.0,
-            hedge_delay_seconds=1.4 if chromium_enabled and isinstance(fast[0], ChromiumSearch) else 0.0,
+            hedge_delay_seconds=0.0,
         )
         setattr(combined, "_leshy_reliable_web", True)
         app.research.search_provider = combined
@@ -202,7 +194,7 @@ def _configure_app_search(app) -> None:
             "reliable_web_search_ready",
             providers=" || ".join(type(item).__name__ for item in combined.providers),
             parallel=True,
-            preferred="ChromiumSearch" if chromium_enabled else "HTTP-only",
+            preferred="HTTP-only",
             hedge_delay_seconds=combined.hedge_delay_seconds,
             deadline_seconds=8.0,
         )
