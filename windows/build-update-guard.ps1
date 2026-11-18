@@ -20,7 +20,12 @@ function Start-LeshyElevated {
 function Assert-LeshyProcessVisibility {
   # Refuse to overwrite an elevated process if its path is hidden from this user.
   $known = @(Get-LiveProcesses)
-  $all = @(Get-CimInstance Win32_Process -Filter "Name='Leshy.exe'" -ErrorAction SilentlyContinue)
+  try {
+    $all = @(Get-CimInstance Win32_Process -Filter "Name='Leshy.exe'" -ErrorAction Stop)
+  } catch { throw 'Cannot inspect running Leshy processes. Run PowerShell as Administrator.' }
+  if ($all.Count -gt 0 -and $known.Count -eq 0) {
+    throw 'Leshy.exe is running but its executable location could not be verified. Use an elevated PowerShell.'
+  }
   foreach ($proc in $all) {
     if (-not $proc.ExecutablePath) {
       throw 'Leshy.exe is running with an unreadable path. Run PowerShell as Administrator before updating.'
@@ -188,9 +193,10 @@ function Publish-LeshyProgramSafely {
       # The elevated process path can be inaccessible to a non-admin builder.
       Write-Host 'Leshy restarted. On-device chat verification is still required.'
     } else {
-      Write-Host 'Update installed; Leshy was not running before the update, so no automatic start was performed.'
+      Write-Host 'Update installed; direct build will now start Leshy.exe elevated.'
     }
     Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+    return $wasRunning
   } catch {
     $reason = $_.Exception.Message
     if ($stopped) {
