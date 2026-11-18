@@ -256,8 +256,8 @@ function Start-Leshy {
         return
     }
     if (-not (Test-Path -LiteralPath $LiveExe)) { throw ('Live executable was not found: ' + $LiveExe) }
-    Start-Process -FilePath $LiveExe -WorkingDirectory $LiveRoot | Out-Null
-    Write-CoreLog ('Leshy started: ' + $LiveExe)
+    Start-LeshyElevated -LiveExe $LiveExe -LiveRoot $LiveRoot
+    Write-CoreLog ('Leshy elevated launch completed: ' + $LiveExe)
 }
 
 function Read-LiveState {
