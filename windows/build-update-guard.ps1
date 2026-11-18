@@ -117,6 +117,13 @@ function Start-LeshyElevated {
   if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
     throw ('Leshy.exe was not found at: ' + $exe)
   }
+  # A user who clicked "Exit" in the tray has explicitly stopped the app.
+  # Keep watching/baking new commits, but do not resurrect Leshy in the background.
+  $manualStop = Join-Path $dir 'LeshyBrain\manual-stop.flag'
+  if ($env:LESHY_SCHEDULED_BUILD -eq '1' -and (Test-Path -LiteralPath $manualStop -PathType Leaf)) {
+    Write-Host 'MANUAL_STOP: scheduled restart suppressed until Leshy.exe is launched manually.'
+    return
+  }
 
   # Do not create a second instance. If an elevated process hides its path,
   # fail closed instead of assuming that no Leshy process is running.
@@ -145,7 +152,7 @@ function Start-LeshyElevated {
       if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw 'The scheduled build is not running with elevated administrator rights.'
       }
-      $process = Start-Process -FilePath $exe -WorkingDirectory $dir -ArgumentList '--no-browser' -WindowStyle Hidden -PassThru -ErrorAction Stop
+      $process = Start-Process -FilePath $exe -WorkingDirectory $dir -ArgumentList '--no-browser --scheduled-start' -WindowStyle Hidden -PassThru -ErrorAction Stop
     } else {
       # An interactive build still asks Windows for explicit UAC approval.
       $process = Start-Process -FilePath $exe -WorkingDirectory $dir -Verb RunAs -PassThru -ErrorAction Stop
@@ -201,7 +208,11 @@ function Publish-LeshyProgramSafely {
     if (-not (Test-Path -LiteralPath $LiveExe -PathType Leaf)) { throw 'New Leshy.exe missing after deployment.' }
     # Launch after *every* successful direct build, even on a fresh installation.
     Start-LeshyElevated -LiveExe $LiveExe -LiveRoot $LiveRoot
-    Write-Host 'Deployment completed; elevated Leshy.exe is running.'
+    if ($env:LESHY_SCHEDULED_BUILD -eq '1' -and (Test-Path -LiteralPath (Join-Path $BrainRoot 'manual-stop.flag'))) {
+      Write-Host 'Deployment completed; user requested that Leshy remain stopped.'
+    } else {
+      Write-Host 'Deployment completed; elevated Leshy.exe is running.'
+    }
     Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
   } catch {
     $reason = $_.Exception.Message
