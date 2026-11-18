@@ -54,7 +54,7 @@
       .leshy-session-mark{display:inline-flex;align-items:center;color:#969696;flex:0 0 auto}.leshy-session-mark svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
       .leshy-session-more{width:30px;height:30px;display:grid;place-items:center;flex:0 0 30px!important;margin-left:auto!important;position:relative;right:0;border:0;background:transparent;color:#a8a8a8;border-radius:7px;cursor:pointer;opacity:1!important}
       .leshy-session-more:hover,.leshy-session-more:focus,.leshy-session-item.menu-open .leshy-session-more{background:#3a3a3a;color:#fff;opacity:1!important}.leshy-session-more svg{width:17px;height:17px;fill:currentColor;stroke:none}
-      #leshySessionMenu{position:fixed;display:none;z-index:2400;width:236px;max-width:calc(100vw - 18px);padding:6px;background:#2b2b2b;border:1px solid #444;border-radius:13px;box-shadow:0 18px 55px rgba(0,0,0,.55)}#leshySessionMenu.open{display:block}
+      #leshySessionMenu{position:fixed;display:none;z-index:2400;width:236px;max-width:calc(100vw - 18px);max-height:calc(100vh - 18px);max-height:calc(100dvh - 18px);box-sizing:border-box;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;padding:6px;background:#2b2b2b;border:1px solid #444;border-radius:13px;box-shadow:0 18px 55px rgba(0,0,0,.55)}#leshySessionMenu.open{display:block}
       #leshySessionMenu button{width:100%;height:39px;border:0;background:transparent;color:#eee;border-radius:8px;padding:0 9px;display:flex;align-items:center;gap:10px;cursor:pointer;text-align:left;font-size:14px}#leshySessionMenu button:hover,#leshySessionMenu button:focus{background:#3a3a3a;outline:none}#leshySessionMenu button.danger{color:#ff8f8f}#leshySessionMenu svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:0 0 17px}.leshy-menu-sep{height:1px;background:#444;margin:5px 4px}
       .leshy-session-rename{width:100%;height:28px;background:#202020;border:1px solid #666;border-radius:6px;color:#fff;padding:0 6px;outline:none;font:inherit}
       #leshyProjectOverlay{position:fixed;inset:0;display:none;z-index:2500;background:rgba(0,0,0,.48);align-items:center;justify-content:center;padding:18px}#leshyProjectOverlay.open{display:flex}
@@ -119,8 +119,24 @@
   function separator(menu){const d=document.createElement('div');d.className='leshy-menu-sep';menu.appendChild(d)}
 
   function positionMenu(menu,button){
-    menu.classList.add('open');const rect=button.getBoundingClientRect();const width=Math.min(236,window.innerWidth-18);menu.style.width=width+'px';
-    requestAnimationFrame(()=>{const h=menu.offsetHeight;let left=rect.right-width;left=Math.max(9,Math.min(window.innerWidth-width-9,left));let top=rect.bottom+5;if(top+h>window.innerHeight-9)top=Math.max(9,rect.top-h-5);menu.style.left=left+'px';menu.style.top=top+'px'});
+    menu.classList.add('open');menu.scrollTop=0;
+    requestAnimationFrame(()=>{
+      if(!menu.classList.contains('open'))return;
+      const viewport=window.visualViewport;
+      const useVisual=viewport&&Math.abs(viewport.scale-1)<.01&&Number.isFinite(viewport.height)&&viewport.height>0&&window.matchMedia('(max-width:1024px) and (pointer:coarse)').matches;
+      const viewportTop=useVisual?Math.max(0,viewport.offsetTop):0;
+      const viewportHeight=useVisual?viewport.height:window.innerHeight;
+      const rect=button.getBoundingClientRect();
+      menu.style.width=Math.min(236,window.innerWidth-18)+'px';
+      // Экранная клавиатура может уменьшить visualViewport без смены innerHeight.
+      menu.style.maxHeight=Math.max(0,viewportHeight-18)+'px';
+      const width=menu.offsetWidth,height=menu.offsetHeight;
+      const left=Math.max(9,Math.min(window.innerWidth-width-9,rect.right-width));
+      let top=rect.bottom+5;
+      if(top+height>viewportTop+viewportHeight-9)top=rect.top-height-5;
+      top=Math.max(viewportTop+9,Math.min(viewportTop+viewportHeight-height-9,top));
+      menu.style.left=left+'px';menu.style.top=top+'px';
+    });
   }
 
   function inlineRename(item,row){
@@ -179,6 +195,9 @@
     document.addEventListener('click',e=>{const menu=$('leshySessionMenu');if(menu&&menu.classList.contains('open')&&!menu.contains(e.target)&&!e.target.closest?.('.leshy-session-more'))closeMenu()});
     document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMenu();$('leshyProjectOverlay')?.classList.remove('open')}});
     window.addEventListener('resize',closeMenu);
+    if(window.visualViewport){window.visualViewport.addEventListener('resize',closeMenu);window.visualViewport.addEventListener('scroll',closeMenu)}
+    // Прокрутка самого меню сохраняет его открытым, внешняя — закрывает.
+    document.addEventListener('scroll',e=>{const menu=$('leshySessionMenu');if(menu&&menu.classList.contains('open')&&!menu.contains(e.target))closeMenu()},true);
     window.addEventListener('leshy:session-changed',()=>setTimeout(renderSessions,40));
   }
 
