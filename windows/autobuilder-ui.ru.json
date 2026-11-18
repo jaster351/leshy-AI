@@ -46,5 +46,11 @@
   "tray_exit": "Выход",
   "close_hint": "При закрытии окно сворачивается в трей. AutoBuilder продолжает работу.",
   "data_safe": "LeshyBrain не удаляется и не заменяется при сборке.",
-  "startup_note": "При запуске AutoBuilder сначала обновляет выбранный репозиторий, при необходимости собирает новую версию, затем запускает Лешего."
+  "startup_note": "При запуске AutoBuilder сначала обновляет выбранный репозиторий, при необходимости собирает новую версию, затем запускает Лешего.",
+  "android_build": "Собрать Android APK",
+  "android_build_started": "начата сборка Android APK",
+  "android_open_apk": "Открыть папку APK",
+  "android_build_note": "Android-клиент: ручная сборка debug APK через Gradle. Требуется Android Studio / SDK 35 и интернет при первом запуске. Сервер «Лешего» не останавливается.",
+  "android_apk_path": "Результат: .autobuild\\android-apk\\Leshy-Android-debug.apk",
+  "android_no_apk": "APK ещё не собран. Сначала нажмите «Собрать Android APK»."
 }
