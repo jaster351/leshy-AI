@@ -14,6 +14,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.text.InputType
 import android.provider.Settings
 import android.view.View
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -374,6 +375,8 @@ class MainActivity : ComponentActivity() {
         // Старый фоновый PCM-сервис не должен одновременно занимать микрофон.
         if (ListeningService.isListening) stopListening()
         continuousActive = true
+        // Предотвращаем автоматическое засыпание экрана во время открытого разговора.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val epoch = ++continuousEpoch
         dialogueButton.text = "Завершить разговор"
         val recognizer = ContinuousSpeechRecognizer(
@@ -399,6 +402,7 @@ class MainActivity : ComponentActivity() {
     private fun stopContinuousConversation(message: String) {
         if (!continuousActive && continuousRecognizer == null) return
         continuousActive = false
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         continuousEpoch++
         ++voiceRequestEpoch
         activeVoiceRequest?.cancel()
