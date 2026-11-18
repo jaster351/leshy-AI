@@ -35,11 +35,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot '.git'))) {
 $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
 $action = New-ScheduledTaskAction -Execute $wscript -Argument ('//B //Nologo "' + $RunnerVbs + '"') -WorkingDirectory $RepoRoot
 
-# Quarter-hourly runs every day, plus an immediate check at user logon.
-$daily = New-ScheduledTaskTrigger -Daily -At (Get-Date).AddMinutes(1)
-$daily.Repetition.Interval = 'PT15M'
-$daily.Repetition.Duration = 'P1D'
-$daily.Repetition.StopAtDurationEnd = $false
+# ScheduledTasks exposes repetition arguments only for -Once triggers.
+# With no RepetitionDuration, Task Scheduler repeats every 15 minutes indefinitely.
+# Also start on user logon. Register-ScheduledTask replaces any earlier task.
+$every15Minutes = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15)
 $onLogon = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
 
 # Use the local admin account without saving its password in this task.
@@ -47,7 +46,7 @@ $runAs = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactiv
 
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
-Register-ScheduledTask -TaskName $TaskName -Description 'Check origin/main and run windows/build.ps1 every 15 minutes, elevated and without visible console windows.' -Action $action -Trigger @($daily, $onLogon) -Principal $runAs -Settings $settings -Force -ErrorAction Stop | Out-Null
+Register-ScheduledTask -TaskName $TaskName -Description 'Check origin/main and run windows/build.ps1 every 15 minutes, elevated and without visible console windows.' -Action $action -Trigger @($every15Minutes, $onLogon) -Principal $runAs -Settings $settings -Force -ErrorAction Stop | Out-Null
 
 Write-Host ("Scheduled task installed: " + $TaskName)
 Write-Host ("Run as: " + $identity.Name + ' (highest privileges)')
