@@ -33,7 +33,12 @@ if (-not $StageOnly) {
   $script:GitCommit = Get-LocalGitCommit -RepositoryPath $repoRoot
   $targetInstaller = Join-Path $repoRoot ("dist\LeshySetup-$version.exe")
   if (Test-LeshyAlreadyBuilt -Commit $script:GitCommit -Version $version -AutoRoot $autoRoot -LiveExe $liveExe -Installer $targetInstaller) {
-    Write-Host ("NO CHANGES: " + $version + " / " + $script:GitCommit.Substring(0,10) + ". Compilation and Leshy restart skipped.")
+    Write-Host ("NO CHANGES: " + $version + " / " + $script:GitCommit.Substring(0,10) + ". Windows compilation skipped.")
+    # Even when Windows is cached, Android sources might still need an APK.
+    Invoke-AndroidBuild -RepositoryPath $repoRoot
+    if (@(Assert-LeshyProcessVisibility).Count -eq 0) {
+      Start-LeshyElevated -LiveExe $liveExe -LiveRoot $liveRoot | Out-Null
+    }
     return
   }
 }
@@ -440,7 +445,11 @@ if (-not (Test-Path -LiteralPath $installer)) { throw "Installer was not created
 Build-Stage 'publish-or-stage'
 if (-not $StageOnly) {
   Publish-LiveProgram
+  if (@(Assert-LeshyProcessVisibility).Count -eq 0) {
+    Start-LeshyElevated -LiveExe $liveExe -LiveRoot $liveRoot | Out-Null
+  }
   Save-LeshyBuiltState -AutoRoot $autoRoot -Commit $script:GitCommit -Version $version -LiveRoot $liveRoot
+  Remove-OldLeshyInstallers -RepositoryPath $repoRoot -CurrentVersion $version
 } else {
   Write-Host 'STAGE ONLY: AutoBuilder will publish the package to dist\Leshy after creating its rollback backup.'
 }
@@ -477,4 +486,9 @@ $script:buildOK = $true
       } catch { Write-Warning "Could not publish full build profile into LeshyBrain logs: $($_.Exception.Message)" }
     }
   } catch { }
+}
+
+# Build Android client using the same main command once the Windows stage succeeded.
+if (-not $StageOnly -and $script:buildOK) {
+  Invoke-AndroidBuild -RepositoryPath $repoRoot
 }
