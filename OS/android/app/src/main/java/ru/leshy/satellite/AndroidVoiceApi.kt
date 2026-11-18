@@ -86,9 +86,9 @@ internal object AndroidVoiceApi {
     data class Answer(val text: String, val sessionId: String)
 
     /**
-     * Stop the local HTTP request immediately when the user ends a conversation.
-     * The server may already be generating a response; a future backend change
-     * can add a cancellable task ID for server-side abort.
+     * Завершение разговора сразу разрывает клиентский HTTPS-запрос.
+     * На сервере генерация могла уже начаться; для её завершения в будущем
+     * понадобится поддержка отмены задания на серверной стороне.
      */
     class RequestHandle {
         private val lock = Any()
@@ -99,7 +99,7 @@ internal object AndroidVoiceApi {
             synchronized(lock) {
                 if (cancelled) {
                     value.disconnect()
-                    throw java.util.concurrent.CancellationException("Conversation stopped")
+                    throw java.util.concurrent.CancellationException("Разговор остановлен")
                 }
                 connection = value
             }
@@ -119,7 +119,7 @@ internal object AndroidVoiceApi {
 
         fun checkActive() {
             synchronized(lock) {
-                if (cancelled) throw java.util.concurrent.CancellationException("Conversation stopped")
+                if (cancelled) throw java.util.concurrent.CancellationException("Разговор остановлен")
             }
         }
     }
