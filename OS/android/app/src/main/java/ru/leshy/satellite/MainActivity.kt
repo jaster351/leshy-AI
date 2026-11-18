@@ -371,7 +371,7 @@ class MainActivity : ComponentActivity() {
             continuousMicPermission.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-        // Do not let the legacy PCM foreground service compete for the microphone.
+        // Старый фоновый PCM-сервис не должен одновременно занимать микрофон.
         if (ListeningService.isListening) stopListening()
         continuousActive = true
         val epoch = ++continuousEpoch
@@ -669,7 +669,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        // Android SpeechRecognizer is not guaranteed in background; fail closed.
+        // При сворачивании приложения Android не гарантирует работу распознавателя.
         if (continuousActive) {
             stopContinuousConversation("Разговор остановлен: приложение свернуто или экран заблокирован.")
         }
