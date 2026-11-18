@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var deviceCreateButton: Button
     private val deviceExecutor = Executors.newSingleThreadExecutor()
     private val serverExecutor = Executors.newSingleThreadExecutor()
+    private val voiceExecutor = Executors.newCachedThreadPool()
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val continuousMicPermission = registerForActivityResult(
@@ -429,7 +430,7 @@ class MainActivity : ComponentActivity() {
         voiceBusy = true
         voiceStatus.text = "Вы: " + question + "\nЛеший думает..."
         val sid = voiceSession
-        serverExecutor.execute {
+        voiceExecutor.execute {
             try {
                 val result = AndroidVoiceApi.ask(address, token, question, sid, handle)
                 runOnUiThread {
@@ -652,6 +653,7 @@ class MainActivity : ComponentActivity() {
         detector.close()
         cameraExecutor.shutdown()
         serverExecutor.shutdownNow()
+        voiceExecutor.shutdownNow()
         deviceExecutor.shutdownNow()
         speaker?.stop()
         speaker?.shutdown()
