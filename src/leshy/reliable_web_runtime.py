@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 import html
-import os
 from html.parser import HTMLParser
-import re
-import time
-from types import MethodType
 from urllib import parse, request
 
 from .diagnostics import event, problem
@@ -13,7 +9,6 @@ from .llm import ChatMessage
 from .research import DdgsSearch, FallbackSearch, SearchResult, SearxngSearch
 from .search_parallel import BingRssSearch, ClusterPeerSearch, RacingSearch
 from .search_chromium import ChromiumSearch
-from .research_policy import research_reason
 from .realtime_chat import RealtimeChatManager
 from .storage import utcnow
 from .text_integrity import corruption_reason
@@ -157,14 +152,19 @@ def _configure_app_search(app) -> None:
     is removed from the normal chain even when it was previously configured.
     """
     provider = getattr(getattr(app, "research", None), "search_provider", None)
-    if provider is not None and not bool(getattr(provider, "_leshy_reliable_web", False)):
-        original = (
-            list(provider.providers) if isinstance(provider, FallbackSearch)
-            else [provider]
-        )
+    original = (
+        list(provider.providers) if isinstance(provider, FallbackSearch)
+        else [provider] if provider is not None else []
+    )
+    # An already-configured search chain may survive an in-process update.
+    # Rebuild only when it still contains the former browser provider.
+    has_browser = any(isinstance(item, ChromiumSearch) for item in original)
+    if provider is not None and (
+        not bool(getattr(provider, "_leshy_reliable_web", False)) or has_browser
+    ):
         fast = [
             item for item in original
-            if not isinstance(item, (DdgsSearch, ChromiumSearch))
+            if not isinstance(item, (DdgsSearch, ChromiumSearch, ClusterPeerSearch))
         ]
         for item in fast:
             # SearXNG can be configured with a 20-second request timeout.
