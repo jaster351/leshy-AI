@@ -31,6 +31,7 @@ internal class ContinuousSpeechRecognizer(
     private var listening = false
     private var waitingForAnswer = false
     private var consecutiveErrors = 0
+    private var onDeviceSelected = false
     var isActive: Boolean = false
         private set
 
@@ -48,7 +49,8 @@ internal class ContinuousSpeechRecognizer(
         waitingForAnswer = false
         consecutiveErrors = 0
         try {
-            val instance = if (SpeechRecognizer.isOnDeviceRecognitionAvailable(activity)) {
+            onDeviceSelected = SpeechRecognizer.isOnDeviceRecognitionAvailable(activity)
+            val instance = if (onDeviceSelected) {
                 SpeechRecognizer.createOnDeviceSpeechRecognizer(activity)
             } else {
                 SpeechRecognizer.createSpeechRecognizer(activity)
@@ -69,6 +71,29 @@ internal class ContinuousSpeechRecognizer(
                 override fun onError(error: Int) {
                     if (!current(id) || waitingForAnswer) return
                     listening = false
+                    // Локальный движок может существовать, но не иметь пакета русского языка.
+                    // В этом случае разрешённый пользователем системный ASR — запасной канал.
+                    if (onDeviceSelected &&
+                        (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ||
+                            error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED)) {
+                        val old = recognizer
+                        recognizer = null
+                        try { old?.destroy() } catch (_: Exception) { }
+                        try {
+                            val fallback = SpeechRecognizer.createSpeechRecognizer(activity)
+                            fallback.setRecognitionListener(this)
+                            recognizer = fallback
+                            onDeviceSelected = false
+                            consecutiveErrors = 0
+                            onState("Офлайн-язык недоступен. Переключаю на системное распознавание.")
+                            queueRecognition(id, 850L)
+                            return
+                        } catch (_: Exception) {
+                            onState("Служба распознавания не поддерживает выбранный язык.")
+                            stop()
+                            return
+                        }
+                    }
                     if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                         onState("Нет разрешения на микрофон: разговор остановлен.")
                         stop()
