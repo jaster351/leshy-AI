@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib import request
 
-from leshy.telegram_proxy import TelegramProxyTransport, _ForceHTTPProxy
+from leshy.telegram_proxy import TelegramProxyTransport, _ForceHTTPProxy, _NoRedirects
 
 
 class TelegramProxyTests(unittest.TestCase):
@@ -20,9 +20,10 @@ class TelegramProxyTests(unittest.TestCase):
     def test_disabled_by_default_keeps_existing_network_path(self):
         self.assertFalse(self.proxy.status()["enabled"])
         fake=Mock()
-        with patch("leshy.telegram_proxy.request.urlopen", return_value=fake) as urlopen:
+        with patch("leshy.telegram_proxy.request.build_opener") as factory:
+            factory.return_value.open.return_value = fake
             self.assertIs(self.proxy.open(self.request, timeout=3), fake)
-        urlopen.assert_called_once()
+        self.assertTrue(any(isinstance(h, _NoRedirects) for h in factory.call_args.args))
 
     def test_http_without_credentials_and_status_mask(self):
         status=self.proxy.configure({"enabled":True,"scheme":"http","host":"proxy.local","port":3128,"auth":False})
@@ -143,6 +144,46 @@ class TelegramProxyTests(unittest.TestCase):
         with patch.object(self.proxy,"_opener",return_value=opener):
             self.assertIs(self.proxy.open(self.request,timeout=4),fake)
         self.proxy.configure({"enabled":False,"scheme":"http","host":"","port":0})
-        with patch("leshy.telegram_proxy.request.urlopen",return_value=fake) as direct:
+        with patch("leshy.telegram_proxy.request.build_opener") as factory:
+            factory.return_value.open.return_value=fake
             self.assertIs(self.proxy.open(self.request,timeout=4),fake)
-        direct.assert_called_once()
+        self.assertTrue(any(isinstance(h,_NoRedirects) for h in factory.call_args.args))
+
+    def test_redirect_rejected_without_leaking_bot_token(self):
+        token = "SECRET-BOT-TOKEN"
+        req = request.Request(f"https://api.telegram.org/bot{token}/getMe")
+        with self.assertRaises(ConnectionError) as caught:
+            _NoRedirects().redirect_request(req, None, 302, "Found", {"Location": "https://example.com/"}, "https://example.com/")
+        self.assertNotIn(token, str(caught.exception))
+
+    def test_system_proxy_policy_preserved_with_redirect_guard(self):
+        with patch("leshy.telegram_proxy.request.build_opener") as factory:
+            factory.return_value.open.return_value = Mock()
+            self.proxy.open(self.request, timeout=2)
+        handlers = factory.call_args.args
+        self.assertTrue(any(isinstance(h, request.HTTPSHandler) for h in handlers))
+        self.assertTrue(any(isinstance(h, _NoRedirects) for h in handlers))
+        self.assertFalse(any(isinstance(h, request.ProxyHandler) for h in handlers))
+
+    def test_http_302_is_blocked_by_real_opener_pipeline(self):
+        """HTTPErrorProcessor должен передать 302 запретителю перенаправлений."""
+        import io
+        from email.message import Message
+        from urllib.response import addinfourl
+
+        token = "SECRET-BOT-TOKEN"
+        target = request.Request(f"https://api.telegram.org/bot{token}/getMe")
+
+        class FakeHTTPS(request.HTTPSHandler):
+            def https_open(self, req):
+                headers = Message()
+                headers["Location"] = "https://example.com/collect"
+                response = addinfourl(io.BytesIO(b""), headers, req.full_url, 302)
+                response.code = 302
+                response.msg = "Found"
+                return response
+
+        opener = request.build_opener(request.ProxyHandler({}), FakeHTTPS(), _NoRedirects())
+        with self.assertRaises(ConnectionError) as caught:
+            opener.open(target, timeout=2)
+        self.assertNotIn(token, str(caught.exception))
