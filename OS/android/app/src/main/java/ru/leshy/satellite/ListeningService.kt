@@ -37,6 +37,8 @@ class ListeningService : Service() {
     @Volatile private var recorder: AudioRecord? = null
     private var captureThread: Thread? = null
     private var cpuLock: PowerManager.WakeLock? = null
+    private var connectivityNotifier: ConnectivityNotifier? = null
+    @Volatile private var internetConnected: Boolean? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -73,6 +75,13 @@ class ListeningService : Service() {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
             if (!capture.get()) beginCapture()
+            if (connectivityNotifier == null && capture.get()) {
+                connectivityNotifier = ConnectivityNotifier(this) { online ->
+                    internetConnected = online
+                    getSystemService(NotificationManager::class.java)
+                        .notify(NOTIFICATION_ID, listeningNotification())
+                }
+            }
         } catch (_: SecurityException) {
             // Restart from background can be forbidden by Android 14+.
             stopSelf()
@@ -96,7 +105,13 @@ class ListeningService : Service() {
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Леший: микрофон активен")
-            .setContentText("Данные не сохраняются. Распознавание слова пока не подключено.")
+            .setContentText(
+                when (internetConnected) {
+                    false -> "Нет подключения к интернету"
+                    true -> "Микрофон активен. Серверное соединение пока не подключено."
+                    null -> "Микрофон активен. Проверка сети..."
+                }
+            )
             .setContentIntent(open)
             .setOngoing(true)
             .addAction(Notification.Action.Builder(null, "Остановить", stop).build())
@@ -155,6 +170,8 @@ class ListeningService : Service() {
     }
 
     override fun onDestroy() {
+        connectivityNotifier?.close()
+        connectivityNotifier = null
         capture.set(false)
         isListening = false
         try { recorder?.stop() } catch (_: IllegalStateException) { }
