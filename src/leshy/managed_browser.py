@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from typing import Callable
 
 
@@ -153,6 +154,61 @@ class _BrowserJob:
     def attach(self, handle: int) -> None:
         if not self._dll.AssignProcessToJobObject(self._handle, handle):
             raise OSError(ctypes.get_last_error(), "Браузер нельзя привязать к процессу Лешего")
+
+    def focus_existing_window(self) -> bool:
+        """Возвращает уже открытое окно Лешего из трея вместо новой вкладки."""
+        if not self._handle:
+            return False
+        dll = self._dll
+        dll.IsProcessInJob.argtypes = (
+            wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)
+        )
+        dll.IsProcessInJob.restype = wintypes.BOOL
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        user.IsWindowVisible.argtypes = (wintypes.HWND,)
+        user.IsWindowVisible.restype = wintypes.BOOL
+        user.GetWindowThreadProcessId.argtypes = (
+            wintypes.HWND, ctypes.POINTER(wintypes.DWORD)
+        )
+        user.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+        user.ShowWindow.restype = wintypes.BOOL
+        user.SetForegroundWindow.argtypes = (wintypes.HWND,)
+        user.SetForegroundWindow.restype = wintypes.BOOL
+        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        user.EnumWindows.argtypes = (callback_type, wintypes.LPARAM)
+        user.EnumWindows.restype = wintypes.BOOL
+        located = [False]
+
+        @callback_type
+        def visit(hwnd, extra):
+            try:
+                if not user.IsWindowVisible(hwnd):
+                    return True
+                pid = wintypes.DWORD()
+                user.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if not pid.value:
+                    return True
+                process = dll.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+                if not process:
+                    return True
+                try:
+                    member = wintypes.BOOL()
+                    if not dll.IsProcessInJob(process, self._handle, ctypes.byref(member)):
+                        return True
+                    if not member.value:
+                        return True
+                finally:
+                    dll.CloseHandle(process)
+                located[0] = True
+                user.ShowWindow(hwnd, 9)  # SW_RESTORE
+                user.SetForegroundWindow(hwnd)
+                return False
+            except Exception:
+                return True
+
+        user.EnumWindows(visit, 0)
+        return located[0]
 
     def close(self) -> None:
         if self._handle:
@@ -354,13 +410,19 @@ class ManagedBrowser:
         self._process: _WindowsBrowserProcess | None = None
         self._job: _BrowserJob | None = None
         self._profile: Path | None = None
+        self._started_at = 0.0
 
     def open(self) -> bool:
         with self._lock:
             if self._closed:
                 return False
             if self._process is not None and self._process.poll() is None:
-                return True  # Уже есть окно: не открываем десятки вкладок.
+                if self._job is not None and self._job.focus_existing_window():
+                    return True
+                if time.monotonic() - self._started_at < 4:
+                    return True  # Окно ещё открывается: не создаём дубликат.
+                # Пользователь закрыл окно, а фоновые процессы Chromium остались.
+                # Удаляем только принадлежащую этому экземпляру браузерную группу.
             self._stop_locked()
             executable = self._find_executable()
             if executable is None:
@@ -384,6 +446,7 @@ class ManagedBrowser:
                 self._job = job
                 self._process = process
                 self._profile = profile
+                self._started_at = time.monotonic()
                 return True
             except Exception:
                 _LOG.exception("Управляемое окно браузера не открылось; чужие вкладки не затронуты")
@@ -401,6 +464,7 @@ class ManagedBrowser:
         self._job = None
         self._process = None
         self._profile = None
+        self._started_at = 0.0
         if job is not None:
             job.close()
         if proc is not None:
