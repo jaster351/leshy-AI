@@ -70,7 +70,9 @@ internal class ContinuousSpeechRecognizer(
                         stop()
                         return
                     }
-                    consecutiveErrors++
+                    val silence = error == SpeechRecognizer.ERROR_NO_MATCH ||
+                        error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                    if (!silence) consecutiveErrors++
                     if (consecutiveErrors >= 8) {
                         onState("Распознавание неоднократно завершилось ошибкой ($error). Разговор остановлен.")
                         stop()
@@ -115,6 +117,17 @@ internal class ContinuousSpeechRecognizer(
             stop()
             return false
         }
+    }
+
+    /** Used when a text question is submitted during an active conversation. */
+    fun pauseForAnswer() {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        if (!isActive || waitingForAnswer) return
+        waitingForAnswer = true
+        pending?.let { handler.removeCallbacks(it) }
+        pending = null
+        listening = false
+        try { recognizer?.cancel() } catch (_: Exception) { }
     }
 
     /** Call when TTS finishes (or a text-only answer/error is shown). */
