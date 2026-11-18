@@ -110,7 +110,7 @@ internal class ContinuousSpeechRecognizer(
                 }
                 override fun onEvent(eventType: Int, params: Bundle?) { }
             })
-            queueRecognition(id, 150L)
+            queueRecognition(id, 800L)
             return true
         } catch (_: Exception) {
             onState("Не удалось начать непрерывное распознавание речи.")
