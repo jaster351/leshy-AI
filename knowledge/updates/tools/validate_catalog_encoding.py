@@ -16,6 +16,16 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPOSITORY_ROOT / "src"))
 from leshy.text_integrity import corruption_reason  # noqa: E402
 
+def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    """Reject ambiguous JSON objects rather than silently keeping the last value."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key!r}")
+        result[key] = value
+    return result
+
+
 TEXT_EXTENSIONS = {".json", ".jsonl", ".md", ".py", ".csv"}
 MAX_ERRORS = 100
 
@@ -39,7 +49,7 @@ def inspect_file(path: Path) -> tuple[int, list[str]]:
 
     if path.suffix == ".json":
         try:
-            json.loads(data)
+            json.loads(data, object_pairs_hook=reject_duplicate_keys)
             rows += 1
         except (ValueError, TypeError) as exc:
             errors.append(f"{path}: invalid JSON: {exc}")
@@ -48,7 +58,7 @@ def inspect_file(path: Path) -> tuple[int, list[str]]:
             if not line.strip():
                 continue
             try:
-                record = json.loads(line)
+                record = json.loads(line, object_pairs_hook=reject_duplicate_keys)
             except (ValueError, TypeError) as exc:
                 errors.append(f"{path}:{line_number}: invalid JSONL: {exc}")
                 if len(errors) >= MAX_ERRORS:
