@@ -27,13 +27,13 @@ $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 
 . (Join-Path $PSScriptRoot 'build-update-guard.ps1')
 
-# AutoBuilder вызывает этот скрипт явно с -StageOnly.
+# AutoBuilder explicitly invokes this script with -StageOnly.
 $script:GitCommit = ''
 if (-not $StageOnly) {
   $script:GitCommit = Get-LocalGitCommit -RepositoryPath $repoRoot
   $targetInstaller = Join-Path $repoRoot ("dist\LeshySetup-$version.exe")
   if (Test-LeshyAlreadyBuilt -Commit $script:GitCommit -Version $version -AutoRoot $autoRoot -LiveExe $liveExe -Installer $targetInstaller) {
-    Write-Host ("НЕТ ИЗМЕНЕНИЙ: " + $version + " / " + $script:GitCommit.Substring(0,10) + ". Повторная компиляция и остановка Лешего не нужны.")
+    Write-Host ("NO CHANGES: " + $version + " / " + $script:GitCommit.Substring(0,10) + ". Compilation and Leshy restart skipped.")
     return
   }
 }
@@ -111,7 +111,7 @@ $script:buildOK = $false
 try {
 Build-Stage 'preflight'
 
-# -StageOnly задаётся AutoBuilder при запуске, а не определяется по процессам.
+# AutoBuilder explicitly sets -StageOnly; no process-name inference.
 
 # Validate syntax and imports before expensive pip upgrades or PyInstaller.
 Build-Stage 'local-module-preflight'
