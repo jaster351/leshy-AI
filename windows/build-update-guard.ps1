@@ -25,7 +25,12 @@ function Test-LeshyAlreadyBuilt {
   if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { return $false }
   try {
     $state = Get-Content -LiteralPath $statePath -Encoding UTF8 -Raw | ConvertFrom-Json
-    return ([string]$state.sha -eq $Commit -and [string]$state.version -eq $Version)
+    if ([string]$state.sha -ne $Commit -or [string]$state.version -ne $Version) { return $false }
+    # Detect on-disk executable tampering/corruption when a recorded hash exists.
+    if ([string]$state.exe_sha256) {
+      return ((Get-FileHash -LiteralPath $LiveExe -Algorithm SHA256).Hash -ieq [string]$state.exe_sha256)
+    }
+    return $true
   } catch { return $false }
 }
 
@@ -98,6 +103,7 @@ function Save-LeshyBuiltState {
       deployed_at=(Get-Date).ToString('o')
       live_root=$LiveRoot
       source='windows/build.ps1'
+      exe_sha256=(Get-FileHash -LiteralPath (Join-Path $LiveRoot 'Leshy.exe') -Algorithm SHA256).Hash
     } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $temp -Encoding UTF8
     Move-Item -LiteralPath $temp -Destination $target -Force
   } finally {
