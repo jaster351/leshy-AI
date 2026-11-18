@@ -30,6 +30,8 @@
       #chatHistorySearch{width:100%;height:36px;padding:0 10px 0 34px!important;border-radius:8px!important;background:#202020!important;border:1px solid transparent!important;color:#eee!important}
       #sidebarHistory{flex:1;min-height:0;overflow:auto;padding:3px 8px 8px}#sidebarHistoryTitle{padding:9px 8px 6px;color:#8f8f8f;font-size:11px;font-weight:600}
       #sidebarHistory #sessionList{display:grid;gap:2px}#sidebarHistory #sessionList .item,#sidebarHistory #sessionList .leshy-session-item{border:0!important;background:transparent!important;border-radius:8px!important;min-height:36px!important;padding:2px 3px!important;color:#e8e8e8!important}
+      body.full #sidebarHistory #sessionList .leshy-session-search-hidden{display:none!important}
+      #sidebarHistory .leshy-session-search-empty[hidden]{display:none!important}
       #sidebarHistory #sessionList .item:hover,#sidebarHistory #sessionList .leshy-session-item:hover,#sidebarNewChat:hover,#chatSidebarNew:hover,#profileMenuButton:hover,#leshyTopActions button:hover{background:var(--cg-hover)!important}
       body.full .sidebar-foot{margin-top:0!important;padding:7px 8px 9px!important;background:var(--cg-side)!important;border-top:1px solid #282828!important}body.full .sidebar-foot>.hint,body.full #minimalMode,body.full #showSessions,body.full #newChat{display:none!important}
       #profileMenuButton{width:100%;height:48px;display:flex;align-items:center;gap:10px;border:0;background:transparent;color:#eee;border-radius:9px;padding:5px 7px;cursor:pointer;text-align:left}
@@ -60,30 +62,35 @@
 
   function bindSessionSearch(list,search){
     if(!search)return;
-    const show=(node,visible)=>{
-      if(visible)node.style.removeProperty('display');
-      else node.style.setProperty('display','none','important');
-    };
+    const empty=document.createElement('div');
+    empty.className='empty leshy-session-search-empty';empty.textContent='Совпадений не найдено';empty.hidden=true;empty.setAttribute('role','status');
+    list.insertAdjacentElement('afterend',empty);
+    // Маркер поиска не изменяет inline-стили, принадлежащие другим модулям.
+    const show=(node,visible)=>node.classList.toggle('leshy-session-search-hidden',!visible);
     const apply=()=>{
       const query=search.value.trim().toLowerCase();
-      let groupVisible=false,sectionVisible=false;
+      let groupVisible=false,sectionVisible=false,matches=0;
       // Идём от строк к их заголовкам, чтобы пустые группы не занимали место.
       for(const node of [...list.children].reverse()){
         if(node.matches('.item,.leshy-session-item')){
           const title=node.querySelector('.leshy-session-title')||node;
           // Открытый редактор названия остаётся видимым до завершения правки.
           const visible=!!node.querySelector('.leshy-session-rename')||!query||title.textContent.toLowerCase().includes(query);
+          if(visible)matches+=1;
           show(node,visible);groupVisible=groupVisible||visible;sectionVisible=sectionVisible||visible;
         }else if(node.matches('.leshy-project-name')){
           show(node,!query||groupVisible);groupVisible=false;
         }else if(node.matches('.leshy-session-section')){
           show(node,!query||sectionVisible);groupVisible=false;sectionVisible=false;
+        }else if(node.matches('.empty')){
+          show(node,!query);
         }
       }
+      empty.hidden=!query||matches>0;
     };
     search.oninput=apply;
     // Обновления истории, архива и названий должны сохранять текущий запрос.
-    // Атрибуты не наблюдаем: применение display не запускает новый обход.
+    // Атрибуты не наблюдаем: маркеры поиска не запускают новый обход.
     new MutationObserver(apply).observe(list,{childList:true,subtree:true,characterData:true});
     apply();
   }
