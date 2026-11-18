@@ -63,7 +63,7 @@ def resume_manually(brain_root: Path) -> None:
 
 def _icon_path() -> Path:
     root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
-    return root / "assets" / "leshy-icon.png"
+    return root / "assets" / "leshy-icon.jpg"
 
 
 def start_tray(brain_root: Path, *, host: str = "127.0.0.1", port: int = 8765):
