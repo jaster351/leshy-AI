@@ -403,7 +403,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
 
     # Expose the live HTTP server to the Windows tray for graceful shutdown.
-    from .desktop_tray import register_server, unregister_server
+    from .desktop_tray import register_server, unregister_server, is_shutdown_requested
     register_server(server)
 
     threading.Thread(
@@ -434,7 +434,8 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     )
     print(f"Леший {app.status()['version']} запущен: http://{bind_host}:{bind_port}")
     try:
-        server.serve_forever()
+        if not is_shutdown_requested():
+            server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
