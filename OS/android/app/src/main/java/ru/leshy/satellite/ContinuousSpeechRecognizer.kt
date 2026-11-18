@@ -11,12 +11,12 @@ import android.speech.SpeechRecognizer
 import java.util.Locale
 
 /**
- * An explicit, one-toggle Android voice *session*, not one button per utterance.
- * Speech recognition restarts automatically after each spoken Leshy answer.
+ * Явно включаемый Android-сеанс: одно нажатие запускает целый разговор.
+ * После голосового ответа Лешего распознавание начинается автоматически.
  *
- * System SpeechRecognizer may use an online third-party ASR engine. The session
- * only works with a visible Activity; a separate foreground service would be
- * required for reliable screen-off use on Android 14+.
+ * Системный SpeechRecognizer может передавать звук поставщику распознавания.
+ * Пока сеанс поддерживается только при открытом Activity. Для фона нужен
+ * отдельный режим foreground service с учетом ограничений Android 14+.
  */
 internal class ContinuousSpeechRecognizer(
     private val activity: Activity,
@@ -48,7 +48,11 @@ internal class ContinuousSpeechRecognizer(
         waitingForAnswer = false
         consecutiveErrors = 0
         try {
-            val instance = SpeechRecognizer.createSpeechRecognizer(activity)
+            val instance = if (SpeechRecognizer.isOnDeviceRecognitionAvailable(activity)) {
+                SpeechRecognizer.createOnDeviceSpeechRecognizer(activity)
+            } else {
+                SpeechRecognizer.createSpeechRecognizer(activity)
+            }
             recognizer = instance
             instance.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
@@ -119,7 +123,7 @@ internal class ContinuousSpeechRecognizer(
         }
     }
 
-    /** Used when a text question is submitted during an active conversation. */
+    /** При текстовом вопросе приостанавливаем микрофон до ответа сервера. */
     fun pauseForAnswer() {
         check(Looper.myLooper() == Looper.getMainLooper())
         if (!isActive || waitingForAnswer) return
@@ -130,7 +134,7 @@ internal class ContinuousSpeechRecognizer(
         try { recognizer?.cancel() } catch (_: Exception) { }
     }
 
-    /** Call when TTS finishes (or a text-only answer/error is shown). */
+    /** Вызывается после завершения TTS или вывода ответа текстом. */
     fun resumeAfterAnswer() {
         check(Looper.myLooper() == Looper.getMainLooper())
         if (!isActive || !waitingForAnswer) return
@@ -151,6 +155,7 @@ internal class ContinuousSpeechRecognizer(
                 )
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, activity.packageName)
             }
