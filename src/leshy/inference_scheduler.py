@@ -93,10 +93,6 @@ class InferenceScheduler:
                     self._waiters = [item for item in self._waiters if item is not waiter]
                     self._condition.notify_all()
                     raise InterruptedError("LLM-запрос отменён до запуска")
-                if deadline is not None and time.monotonic() >= deadline:
-                    self._waiters = [item for item in self._waiters if item is not waiter]
-                    self._condition.notify_all()
-                    raise TimeoutError("Ожидание локальной LLM превысило допустимое время")
                 if self._active is None and self._next_waiter() is waiter:
                     self._waiters.remove(waiter)
                     waiter.granted = True
@@ -109,6 +105,10 @@ class InferenceScheduler:
                         queue_depth=len(self._waiters),
                     )
                     return waiter
+                if deadline is not None and time.monotonic() >= deadline:
+                    self._waiters = [item for item in self._waiters if item is not waiter]
+                    self._condition.notify_all()
+                    raise TimeoutError("Ожидание локальной LLM превысило допустимое время")
                 wait_for = 0.1
                 if deadline is not None:
                     wait_for = max(0.01, min(wait_for, deadline - time.monotonic()))
