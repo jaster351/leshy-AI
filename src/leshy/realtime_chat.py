@@ -626,17 +626,12 @@ class RealtimeChatManager:
                 messages.insert(0, ChatMessage("system", layout_hint))
             cinema_plan = None if is_offline_creative_request(message) else cinema_query(message, rows)
             if cinema_plan is not None and not sources:
-                answer = cinema_no_data(cinema_plan)
-                answered_at = self.app._save_assistant(sid, answer)
-                yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": []})
-                if not cancel.is_set():
-                    yield StreamEvent("delta", {"text": answer})
-                yield StreamEvent("done", {
-                    "request_id": rid, "session_id": sid, "answer": answer,
-                    "created_at": answered_at, "sources": [], "stopped": bool(cancel.is_set()),
-                    "cinema": True,
-                })
-                return
+                messages.insert(0, ChatMessage(
+                    "system",
+                    "Кино-каталог не дал достоверных результатов. "
+                    + cinema_no_data(cinema_plan)
+                    + " Не выдумывай даты релизов и источники.",
+                ))
             if search_attempted:
                 if sources:
                     yield StreamEvent("activity", {
@@ -657,59 +652,24 @@ class RealtimeChatManager:
             yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": sources})
             event("chat_stream_started", request_id=rid, session_id=sid, owner_id=owner_id)
 
-            # Release dates from a page actually read this turn can be
-            # grounded deterministically. Never let a model discard the
-            # primary source and repeat its stale release-year claim.
-            grounded_fact = grounded_release_from_context(message, rows, messages, sources, app=self.app)
-            if grounded_fact and not cancel.is_set():
-                for part in self._chunk_fallback(grounded_fact, 160):
-                    if cancel.is_set():
-                        break
-                    yield StreamEvent("delta", {"text": part})
-                answered_at = self.app._save_assistant(sid, grounded_fact) if not cancel.is_set() else utcnow()
-                yield StreamEvent("done", {
-                    "request_id": rid, "session_id": sid,
-                    "answer": grounded_fact if not cancel.is_set() else "",
-                    "created_at": answered_at, "sources": sources,
-                    "stopped": bool(cancel.is_set()), "source_grounded": True,
-                })
-                event("chat_primary_source_release_grounded", source_count=len(sources))
-                return
-
-            # Если live-search не нашёл подтверждённых источников или упал,
-            # НЕ передаём текущие данные LLM: иначе она выдумает дату/цену.
-            # Такой отказ быстрый и прозрачный, обычные чаты не затронуты.
-            strict_live_sources = requires_verified_live_sources(
-                lookup_query, str(plan.get("reason") or "")
+            grounded_fact = grounded_release_from_context(
+                message, rows, messages, sources, app=self.app,
             )
-            if search_attempted and not sources and strict_live_sources and not support_draft_context(message, rows, brain_dir=self.app.settings.brain_dir):
-                marker = "Текущий веб-поиск временно не выполнен:"
-                failure = next(
-                    (
-                        str(item.content).split(marker, 1)[-1].strip()
-                        for item in messages
-                        if item.role == "system" and marker in str(item.content)
-                    ),
-                    "",
-                )
-                answer = (
-                    "Не удалось проверить актуальные сведения: поисковые источники временно недоступны. Попробуйте позже."
-                    if failure else
-                    "Интернет-поиск выполнен, но надёжных источников для ответа не найдено. "
-                    "Я не буду выдавать догадки за проверенные факты."
-                )
-                event("chat_web_search_without_sources", request_id=rid, failed=bool(failure))
-                if not cancel.is_set():
-                    answered_at = self.app._save_assistant(sid, answer)
-                    yield StreamEvent("delta", {"text": answer})
-                else:
-                    answered_at = utcnow()
-                yield StreamEvent("done", {
-                    "request_id": rid, "session_id": sid, "answer": answer if not cancel.is_set() else "",
-                    "created_at": answered_at, "sources": [], "stopped": bool(cancel.is_set()),
-                    "latency_ms": int((time.monotonic() - started) * 1000),
-                })
-                return
+            if grounded_fact:
+                messages.insert(0, ChatMessage(
+                    "system",
+                    "Проверенный результат чтения первоисточника: " + grounded_fact
+                    + "\nНе заменяй его данными из памяти.",
+                ))
+            if search_attempted and not sources and requires_verified_live_sources(
+                lookup_query, str(plan.get("reason") or "")
+            ):
+                messages.insert(0, ChatMessage(
+                    "system",
+                    "Достоверных актуальных источников нет. Не выдумывай "
+                    "текущие цены, даты, новости и версии. Ответь только "
+                    "на подтверждённые части запроса и обозначь ограничение.",
+                ))
 
             # Актуальные сведения (погода, новости и т.п.) проверяем до публикации
             # текста: локальная модель иногда ошибочно заявляет, что интернет
