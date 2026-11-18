@@ -1,17 +1,17 @@
-# Поддержка прямой сборки Windows; AutoBuilder StageOnly использует свой deploy/rollback.
+# Helper for direct Windows build and AutoBuilder deployment.
 
 function Get-LocalGitCommit {
   param([string]$RepositoryPath)
   $git = Get-Command git.exe -ErrorAction SilentlyContinue
-  if (-not $git) { throw 'Git не найден: нельзя проверить версию исходников.' }
+  if (-not $git) { throw 'Git was not found; cannot verify source revision.' }
   $commit = @(& $git.Source -C $RepositoryPath rev-parse --verify HEAD 2>&1)
-  if ($LASTEXITCODE -ne 0 -or -not $commit) { throw 'Не удалось определить git HEAD.' }
+  if ($LASTEXITCODE -ne 0 -or -not $commit) { throw 'Cannot determine Git HEAD.' }
   $value = ([string]$commit[0]).Trim()
-  if ($value -notmatch '^[0-9a-fA-F]{40}$') { throw 'Некорректный SHA текущего git-коммита.' }
+  if ($value -notmatch '^[0-9a-fA-F]{40}$') { throw 'Invalid Git commit SHA.' }
   $dirty = @(& $git.Source -C $RepositoryPath status --porcelain --untracked-files=no 2>&1)
-  if ($LASTEXITCODE -ne 0) { throw 'Не удалось проверить локальные изменения git.' }
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot check Git working tree.' }
   if ($dirty.Count -gt 0) {
-    throw 'В репозитории имеются несохранённые отслеживаемые изменения. Обновление автоматически не выполняется.'
+    throw 'Tracked local changes exist. Refusing automatic deployment.'
   }
   return $value.ToLowerInvariant()
 }
@@ -38,32 +38,32 @@ function Wait-LeshyConversationsIdle {
       $uri.Scheme -notin @('http','https') -or
       $uri.Host -notin @('localhost','127.0.0.1','::1') -or
       $uri.AbsolutePath -ne '/v1/status' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) {
-    throw 'LESHY_BUILD_STATUS_URL должен быть локальным URL http(s)://127.0.0.1:PORT/v1/status.'
+    throw 'LESHY_BUILD_STATUS_URL must be a local http(s) URL ending in /v1/status.'
   }
   $headers = @{}
   if ($env:LESHY_API_TOKEN) { $headers.Authorization = 'Bearer ' + $env:LESHY_API_TOKEN }
   $until = (Get-Date).AddSeconds($TimeoutSeconds)
   $stable = 0
   $lastNotice = [DateTime]::MinValue
-  Write-Host 'Проверка API: ожидание простоя всех ответов Лешего перед обновлением...'
+  Write-Host 'Checking the local API: waiting for Leshy to finish all responses before deployment...'
   while ((Get-Date) -lt $until) {
-    if (@(Get-LiveProcesses).Count -eq 0) { Write-Host 'Приложение уже остановлено.'; return }
+    if (@(Get-LiveProcesses).Count -eq 0) { Write-Host 'The application is already stopped.'; return }
     try {
       $status = Invoke-RestMethod -Uri $uri.AbsoluteUri -Method Get -Headers $headers -TimeoutSec 5 -ErrorAction Stop
     } catch {
-      throw ('Не удалось проверить активные диалоги через API. Леший НЕ остановлен. Проверьте локальный порт, HTTPS и LESHY_API_TOKEN: ' + $_.Exception.Message)
+      throw ('Could not query active conversations. Leshy was NOT stopped. Check local port, HTTPS, and LESHY_API_TOKEN: ' + $_.Exception.Message)
     }
-    if ([string]$status.name -ne 'Леший' -or -not $status.deployment_activity -or
+    if ([string]$status.name -ne (-join @([char]0x041B,[char]0x0435,[char]0x0448,[char]0x0438,[char]0x0439)) -or -not $status.deployment_activity -or
         [int]$status.deployment_activity.schema -ne 1) {
-      throw 'Запущенная версия не поддерживает безопасную проверку deployment_activity. Леший НЕ остановлен. Для первого обновления закройте старую версию вручную.'
+      throw 'The running version does not support deployment_activity. Leshy was NOT stopped. For the initial update, close the old version manually.'
     }
     $reportedBrain = [string]$status.brain_dir
     try {
       $actual = [IO.Path]::GetFullPath($reportedBrain).TrimEnd('\')
       $expected = [IO.Path]::GetFullPath($BrainRoot).TrimEnd('\')
-    } catch { throw 'API не сообщил корректный путь LeshyBrain. Леший НЕ остановлен.' }
+    } catch { throw 'The API did not report a valid LeshyBrain path. Leshy was NOT stopped.' }
     if (-not [string]::Equals($actual,$expected,[StringComparison]::OrdinalIgnoreCase)) {
-      throw 'Локальный API относится к другой установке Лешего. Текущий процесс НЕ остановлен.'
+      throw 'The local API points to a different Leshy instance. No process was stopped.'
     }
     $activity = $status.deployment_activity
     $canStop = ($activity.idle -eq $true -and
@@ -73,22 +73,22 @@ function Wait-LeshyConversationsIdle {
                 [double]$activity.idle_seconds -ge 8)
     if ($canStop) { $stable++ } else { $stable=0 }
     if ($stable -ge 3) {
-      Write-Host 'API подтвердил устойчивый простой. Разрешена остановка для обновления.'
+      Write-Host 'The API confirmed a stable idle period. Deployment may proceed.'
       return
     }
     if (((Get-Date)-$lastNotice).TotalSeconds -ge 10) {
-      Write-Host ('Ожидание простоя: ответов=' + $activity.active_conversations +
-        ', inference=' + $activity.active_inference + ', очередь=' + $activity.waiting_inference)
+      Write-Host ('Waiting for idle: conversations=' + $activity.active_conversations +
+        ', inference=' + $activity.active_inference + ', queue=' + $activity.waiting_inference)
       $lastNotice = Get-Date
     }
     Start-Sleep -Seconds 2
   }
-  throw ('Леший остаётся занят более ' + $TimeoutSeconds + ' сек. Сборка готова, но приложение НЕ остановлено.')
+  throw ('Leshy remained busy for over ' + $TimeoutSeconds + ' seconds. Build staged but application NOT stopped.')
 }
 
 function Save-LeshyBuiltState {
   param([string]$AutoRoot,[string]$Commit,[string]$Version,[string]$LiveRoot)
-  if (-not $Commit) { throw 'Без подтверждённого git SHA результат сборки не кэшируется.' }
+  if (-not $Commit) { throw 'Cannot cache a build without an authenticated Git revision.' }
   $target = Join-Path $AutoRoot 'live-state.json'
   $temp = Join-Path $AutoRoot ('live-state-' + [Guid]::NewGuid().ToString('N') + '.tmp')
   try {
@@ -109,12 +109,12 @@ function Publish-LeshyProgramSafely {
   param([string]$PackageRoot,[string]$LiveRoot,[string]$LiveExe,
         [string]$BrainRoot,[string]$AutoRoot)
   $wasRunning = @(Get-LiveProcesses).Count -gt 0
-  # Компиляция и installer уже готовы; остановка выполняется только при deploy.
+  # Build and installer are ready; stop only at deployment stage.
   if ($wasRunning) { Wait-LeshyConversationsIdle -BrainRoot $BrainRoot }
   $backup = Join-Path $AutoRoot 'direct-live-backup'
   if (Test-Path -LiteralPath $backup) {
-    throw ('Осталась резервная копия прошлого неудачного обновления: ' + $backup +
-      '. Проверьте её вручную; автоматически не удаляем.')
+    throw ('A previous deployment backup exists: ' + $backup +
+      '. Check it manually; it will not be removed automatically.')
   }
   New-Item -ItemType Directory -Path $backup -Force | Out-Null
   $hasBackup = $false
@@ -126,7 +126,7 @@ function Publish-LeshyProgramSafely {
     }
   } catch {
     Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
-    throw ('Не удалось подготовить резервную копию, Леший не остановлен: ' + $_.Exception.Message)
+    throw ('Could not prepare a backup. Leshy was not stopped: ' + $_.Exception.Message)
   }
   $stopped = $false
   try {
@@ -137,20 +137,20 @@ function Publish-LeshyProgramSafely {
       if ($entry.Name -ieq 'LeshyBrain') { continue }
       Copy-Item -LiteralPath $entry.FullName -Destination $LiveRoot -Recurse -Force -ErrorAction Stop
     }
-    if (-not (Test-Path -LiteralPath $LiveExe -PathType Leaf)) { throw 'Новый Leshy.exe отсутствует после публикации.' }
+    if (-not (Test-Path -LiteralPath $LiveExe -PathType Leaf)) { throw 'New Leshy.exe missing after deployment.' }
     if ($wasRunning) {
       Start-Process -FilePath $LiveExe -WorkingDirectory $LiveRoot -ErrorAction Stop | Out-Null
       Start-Sleep -Seconds 3
-      if (@(Get-LiveProcesses).Count -eq 0) { throw 'Новый Леший сразу завершился после запуска.' }
-      Write-Host 'Леший перезапущен; проверка ответов на реальном устройстве ещё требуется.'
+      if (@(Get-LiveProcesses).Count -eq 0) { throw 'The new Leshy process exited immediately.' }
+      Write-Host 'Leshy restarted. On-device chat verification is still required.'
     } else {
-      Write-Host 'Обновление установлено. Леший до сборки не работал и не запущен автоматически.'
+      Write-Host 'Update installed; Leshy was not running before the update, so no automatic start was performed.'
     }
     Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
   } catch {
     $reason = $_.Exception.Message
     if ($stopped) {
-      Write-Warning ('Обновление не удалось: ' + $reason + '. Восстанавливаю предыдущую версию.')
+      Write-Warning ('Deployment failed: ' + $reason + '. Restoring previous version.')
       try {
         Stop-LiveLeshy
         Clear-LiveProgramFiles
@@ -164,10 +164,10 @@ function Publish-LeshyProgramSafely {
         }
         Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
       } catch {
-        Write-Warning ('Автоматический откат не завершён. Резервная копия сохранена: ' + $backup +
-          ' ; ошибка: ' + $_.Exception.Message)
+        Write-Warning ('Rollback did not complete; backup kept at: ' + $backup +
+          ' ; error: ' + $_.Exception.Message)
       }
     }
-    throw ('Не удалось установить новую версию: ' + $reason)
+    throw ('Could not install the updated version: ' + $reason)
   }
 }
