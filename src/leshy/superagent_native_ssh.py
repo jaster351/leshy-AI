@@ -5,7 +5,6 @@ The caller must consume a one-time command approval before invoking it.
 """
 from __future__ import annotations
 
-import base64
 import hashlib
 import ipaddress
 import os
@@ -17,6 +16,7 @@ from typing import Any
 
 from .superagent_remote_permissions import RemotePermissionPolicy, VerifiedActor
 from .superagent_ssh_terminal import _registered_pin
+from .superagent_native_ssh_hostkeys import pinned_known_hosts
 
 _USER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,63}\Z")
 _LIMIT = 32768
@@ -59,25 +59,13 @@ def run_native_ssh_command(
     )
     if scanned.returncode != 0 and not scanned.stdout:
         raise ConnectionError("Unable to retrieve SSH host key")
-    matches = []
-    for raw in scanned.stdout.splitlines():
-        parts = raw.split()
-        if len(parts) < 3 or parts[0].startswith(b"#"):
-            continue
-        try:
-            key = base64.b64decode(parts[2], validate=True)
-        except (ValueError, base64.binascii.Error):
-            continue
-        if hashlib.sha256(key).hexdigest() == pin:
-            matches.append(raw)
-    if not matches:
-        raise PermissionError("SSH host key differs from enrolled fingerprint")
+    pinned_entry = pinned_known_hosts(host, scanned.stdout, pin)
 
     policy.require(actor, host, "execute", observed_fingerprint=pin)
     with tempfile.TemporaryDirectory(prefix="leshy-ssh-") as directory:
         known_hosts = os.path.join(directory, "known_hosts")
         with open(known_hosts, "wb") as handle:
-            handle.write(b"\n".join(matches) + b"\n")
+            handle.write(pinned_entry)
         # Key-only authentication through the user's pre-existing ssh-agent.
         # No private key path, password, or user config is loaded.
         args = [
