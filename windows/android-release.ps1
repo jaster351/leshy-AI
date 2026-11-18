@@ -92,11 +92,31 @@ if (-not $gh) {
     Write-Warning 'GitHub CLI unavailable; APK kept on Desktop and local disk. Publication pending.'
     return
 }
+# In Windows PowerShell 5.1 a native CLI message to stderr becomes a
+# terminating NativeCommandError under ErrorActionPreference='Stop', even
+# when 2>$null is used. Probe gh with process-level redirected streams.
+function Test-GhCommand {
+    param([Parameter(Mandatory=$true)][string[]]$CliArguments)
+    $stamp = [Guid]::NewGuid().ToString('N')
+    $stdout = Join-Path $apkRoot ('gh-probe-' + $stamp + '.out')
+    $stderr = Join-Path $apkRoot ('gh-probe-' + $stamp + '.err')
+    try {
+        $process = Start-Process -FilePath $gh.Source -ArgumentList $CliArguments `
+            -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr -ErrorAction Stop
+        return ($process.ExitCode -eq 0)
+    } catch {
+        Write-Warning ('Could not query GitHub CLI: ' + $_.Exception.Message)
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
+    }
+}
 $releaseRepo = 'jaster351/leshy-AI'
 $tag = 'android-v' + $Version + '-' + $short
-& $gh.Source auth status 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+if (-not (Test-GhCommand -CliArguments @('auth','status'))) {
     Write-Warning 'GitHub CLI needs authentication (gh auth login or GH_TOKEN). Desktop APK is ready; publication pending.'
+    Write-Host ('ANDROID_APK_READY_LOCAL: ' + $latestDesktop)
     return
 }
 $notesFile = Join-Path $apkRoot ('release-notes-' + $short + '.md')
@@ -120,8 +140,7 @@ $notes = @(
 ) + $changes
 $notes | Set-Content -LiteralPath $notesFile -Encoding UTF8
 try {
-    & $gh.Source release view $tag --repo $releaseRepo --json tagName --jq .tagName 2>$null | Out-Null
-    $found = ($LASTEXITCODE -eq 0)
+    $found = Test-GhCommand -CliArguments @('release','view',$tag,'--repo',$releaseRepo,'--json','tagName')
     if ($found) {
         & $gh.Source release upload $tag $desktopCopy --repo $releaseRepo --clobber
     } else {
