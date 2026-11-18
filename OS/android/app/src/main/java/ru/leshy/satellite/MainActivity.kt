@@ -168,6 +168,15 @@ class MainActivity : ComponentActivity() {
             }
         }
         root.addView(dialogueButton)
+        root.addView(Button(this).apply {
+            text = "Отозвать согласие на распознавание речи"
+            setOnClickListener {
+                if (continuousActive) stopContinuousConversation("Разговор завершён.")
+                getSharedPreferences("android_voice_privacy", MODE_PRIVATE)
+                    .edit().putBoolean("system_asr_agreed", false).apply()
+                voiceStatus.text = "Согласие отозвано. Распознавание будет выключено до нового разрешения."
+            }
+        })
         voiceQuestion = EditText(this).apply {
             hint = "Или введите вопрос текстом"
             setSingleLine(false)
@@ -327,6 +336,26 @@ class MainActivity : ComponentActivity() {
         if (continuousActive) return
         if (voiceBusy) {
             voiceStatus.text = "Дождитесь текущего ответа, затем включите разговор."
+            return
+        }
+        val consent = getSharedPreferences("android_voice_privacy", MODE_PRIVATE)
+        if (!consent.getBoolean("system_asr_agreed", false)) {
+            AlertDialog.Builder(this)
+                .setTitle("Разрешить распознавание речи?")
+                .setMessage(
+                    "Сначала используется распознавание на самом телефоне, если оно доступно. " +
+                        "В противном случае системная служба Android может отправлять звук " +
+                        "своему поставщику для распознавания. На сервер Лешего уходит только " +
+                        "распознанный текст по HTTPS. Разрешить использование распознавания?"
+                )
+                .setNegativeButton("Не разрешаю") { _, _ ->
+                    voiceStatus.text = "Без разрешения доступен только текстовый разговор."
+                }
+                .setPositiveButton("Разрешить") { _, _ ->
+                    consent.edit().putBoolean("system_asr_agreed", true).apply()
+                    startContinuousConversation()
+                }
+                .show()
             return
         }
         if (AndroidVoiceCredentials.read(this).isNullOrBlank()) {
