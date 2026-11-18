@@ -85,6 +85,45 @@ internal object AndroidVoiceCredentials {
 internal object AndroidVoiceApi {
     data class Answer(val text: String, val sessionId: String)
 
+    /**
+     * Stop the local HTTP request immediately when the user ends a conversation.
+     * The server may already be generating a response; a future backend change
+     * can add a cancellable task ID for server-side abort.
+     */
+    class RequestHandle {
+        private val lock = Any()
+        private var connection: HttpsURLConnection? = null
+        private var cancelled = false
+
+        fun attach(value: HttpsURLConnection) {
+            synchronized(lock) {
+                if (cancelled) {
+                    value.disconnect()
+                    throw java.util.concurrent.CancellationException("Conversation stopped")
+                }
+                connection = value
+            }
+        }
+
+        fun cancel() {
+            synchronized(lock) {
+                cancelled = true
+                connection?.disconnect()
+                connection = null
+            }
+        }
+
+        fun release() {
+            synchronized(lock) { connection = null }
+        }
+
+        fun checkActive() {
+            synchronized(lock) {
+                if (cancelled) throw java.util.concurrent.CancellationException("Conversation stopped")
+            }
+        }
+    }
+
     private fun connect(server: String, endpoint: String, token: String, method: String): HttpsURLConnection {
         val normalized = ServerReachability.normalize(server)
             ?: throw IllegalArgumentException("Provide a valid HTTPS server address")
@@ -115,10 +154,19 @@ internal object AndroidVoiceApi {
         } finally { connection.disconnect() }
     }
 
-    fun ask(server: String, token: String, message: String, sessionId: String?): Answer {
+    fun ask(
+        server: String,
+        token: String,
+        message: String,
+        sessionId: String?,
+        request: RequestHandle? = null
+    ): Answer {
         require(message.trim().isNotEmpty() && message.length <= 2500)
+        request?.checkActive()
         val connection = connect(server, "/v1/android/voice/chat", token, "POST")
         return try {
+            request?.attach(connection)
+            request?.checkActive()
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             val body = JSONObject().put("message", message)
@@ -140,6 +188,7 @@ internal object AndroidVoiceApi {
                 stream.bufferedReader(StandardCharsets.UTF_8).readText()
             }
             if (text.length > 1000000) throw IllegalStateException("Ответ сервера слишком большой")
+            request?.checkActive()
             val response = JSONObject(text)
             val answer = response.optString("answer", "").trim()
             val sid = response.optString("session_id", "")
