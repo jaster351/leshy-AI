@@ -422,12 +422,14 @@ def _cleanup_orphan_profiles() -> None:
             if removed >= 5:
                 break  # Ограничиваем время задержки открытия окна.
             marker = directory / ".leshy-ui-owner"
+            if directory.is_symlink() or marker.is_symlink():
+                continue
             if not directory.is_dir() or not marker.is_file():
                 continue
             if time.time() - marker.stat().st_mtime < 7 * 24 * 3600:
                 continue
             owner = marker.read_text(encoding="ascii").strip()
-            if not owner.isdecimal():
+            if not owner.isdecimal() or int(owner) < 4:
                 continue
             if _old_owner_is_running(int(owner)):
                 continue
