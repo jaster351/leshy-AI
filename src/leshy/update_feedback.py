@@ -81,7 +81,7 @@ class TrayUpdateFeedback:
         self._changed = changed
         self._lock = threading.Lock()
         self._working = False
-        self.message = "Обновления: проверка ещё не запускалась"
+        self.message = "проверка ещё не запускалась"
         self._restore_last_result()
 
     def _restore_last_result(self) -> None:
@@ -92,8 +92,35 @@ class TrayUpdateFeedback:
         if updated is None or (datetime.now(timezone.utc) - updated).total_seconds() > 24 * 3600:
             return
         text, done = render_state(value)
-        if done:
-            self.message = text
+        self.message = text
+        if not done and value.get("request_id") and value.get("state") in {"checking", "updating"}:
+            # A previous Leshy.exe can exit during deployment. The newly
+            # launched process must pick up the result from the scheduled task.
+            threading.Thread(
+                target=self._watch_existing_request,
+                args=(str(value["request_id"]), str(value["state"])),
+                name="leshy-update-resume-feedback",
+                daemon=True,
+            ).start()
+
+    def _watch_existing_request(self, request_id: str, initial_state: str) -> None:
+        deadline = time.monotonic() + _MAX_CHECK_SECONDS
+        previous = initial_state
+        while time.monotonic() < deadline:
+            payload = _read_json(self._auto / "update-status.json")
+            if payload is None or payload.get("request_id") != request_id:
+                return
+            stamp = _utc_time(str(payload.get("updated_at", "")))
+            if stamp is None or (datetime.now(timezone.utc) - stamp).total_seconds() > _MAX_CHECK_SECONDS:
+                return
+            state = str(payload.get("state", ""))
+            message, done = render_state(payload)
+            if state != previous:
+                self._report(message, notify=True)
+                previous = state
+            if done:
+                return
+            time.sleep(3)
 
     def _report(self, message: str, *, notify: bool) -> None:
         self.message = message
