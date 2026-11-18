@@ -18,6 +18,24 @@ from leshy.dialogue_rules import (
 from leshy.realtime_chat import RealtimeChatManager
 from leshy.storage import Storage
 
+class _RecordingLLM:
+    model = "recording-test-model"
+
+    def __init__(self):
+        self.last_messages = []
+
+    def chat(self, messages):
+        self.last_messages = list(messages)
+        return "Ответ модели"
+
+    def stream_chat(self, messages, cancel_event=None):
+        self.last_messages = list(messages)
+        yield "Ответ модели"
+
+    def evidence(self):
+        return "\n".join(m.content for m in self.last_messages if m.role == "system")
+
+
 
 class DialogueRuleMemoryTests(unittest.TestCase):
     def test_explicit_rule_has_receipt_and_survives_restart(self):
@@ -30,13 +48,15 @@ class DialogueRuleMemoryTests(unittest.TestCase):
             }
             with patch.dict(os.environ, env, clear=False):
                 first = LeshyApp(Settings.from_env())
+                first.llm = _RecordingLLM()
                 result = first.chat(
                     "Установи постоянное правило: обращайся ко мне на Вы.",
                     owner_id="telegram:101",
                     session_id="telegram:101:101",
                 )
-                self.assertIn("Правило сохранено", result["answer"])
-                self.assertIn("ID записи:", result["answer"])
+                self.assertEqual(result["answer"], "Ответ модели")
+                self.assertIn("Правило сохранено", first.llm.evidence())
+                self.assertIn("ID записи:", first.llm.evidence())
                 first.stop_background()
 
                 second = LeshyApp(Settings.from_env())
@@ -58,12 +78,14 @@ class DialogueRuleMemoryTests(unittest.TestCase):
             }
             with patch.dict(os.environ, env, clear=False):
                 app = LeshyApp(Settings.from_env())
+                app.llm = _RecordingLLM()
                 manager = RealtimeChatManager(app)
                 events = list(manager.stream(
                     "Категорически запрещаю использовать звёздочки в оформлении.",
                     owner_id="web:demo",
                 ))
-                self.assertIn("Правило сохранено", events[-1].data.get("answer", ""))
+                self.assertEqual(events[-1].data.get("answer", ""), "Ответ модели")
+                self.assertIn("Правило сохранено", app.llm.evidence())
                 self.assertIn("звёздочки", app._memory_context("web:demo"))
                 app.stop_background()
 
@@ -76,14 +98,18 @@ class DialogueRuleMemoryTests(unittest.TestCase):
             }
             with patch.dict(os.environ, env, clear=False):
                 app = LeshyApp(Settings.from_env())
+                app.llm = _RecordingLLM()
                 q = "Какие постоянные правила общения со мной ты помнишь?"
                 self.assertTrue(is_rule_inspection_request(q))
                 empty = app.chat(q, owner_id="telegram:123")
-                self.assertIn("нет подтверждённых", empty["answer"])
+                self.assertEqual(empty["answer"], "Ответ модели")
+                self.assertIn("нет подтверждённых", app.llm.evidence())
                 app.chat("Запомни правило: отвечай коротко.", owner_id="telegram:123")
+                self.assertIn("Правило сохранено", app.llm.evidence())
                 report = app.chat(q, owner_id="telegram:123")
-                self.assertIn("отвечай коротко", report["answer"])
-                self.assertIn("ID", report["answer"])
+                self.assertEqual(report["answer"], "Ответ модели")
+                self.assertIn("отвечай коротко", app.llm.evidence())
+                self.assertIn("ID", app.llm.evidence())
                 self.assertNotIn("отвечай коротко", verified_rule_report(app.storage, "telegram:456"))
                 app.stop_background()
 
