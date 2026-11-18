@@ -59,3 +59,22 @@
 - Пока статус приложения — **не привязано к серверу**, доступ владельца не выдан. Общий `LESHY_API_TOKEN` запрещено копировать в клиент.
 - Код сохранён в GitHub, но не собирался и не испытывался на Android; требуется отдельное ревью и будущий серверный протокол.
 
+
+
+## Сборка Android APK через существующий AutoBuilder
+
+В Android-ветке существующий Windows AutoBuilder получил на вкладке «Сборка» кнопку **«Собрать Android APK»** и кнопку **«Открыть папку APK»**. Маршрут: windows/autobuilder-ui-v3.ps1 → windows/autobuilder-core.ps1 (Mode android-build) → windows/build-android.ps1. Это тот же интерфейс, не новая сборочная программа.
+
+**Нужно:** Android Studio / Android SDK Platform 35 и Java 17+ (подходит JDK/JBR Android Studio). При первом запуске нужен интернет для Gradle и зависимостей. SDK определяется через ANDROID_HOME, ANDROID_SDK_ROOT, local.properties либо стандартный каталог Android Studio; Java — через JAVA_HOME либо JBR из Android Studio.
+
+**Сборка:**
+1. Откройте свою копию репозитория, содержащую OS/android и изменённые скрипты AutoBuilder. Пока draft PR #306 не слит, этих изменений **нет в main**. Не смешивайте старую версию AutoBuilder UI с новым core.
+2. Откройте обычный Windows AutoBuilder, выберите вкладку «Сборка», нажмите «Собрать Android APK».
+3. После фактически успешной сборки нажмите «Открыть папку APK». Путь: .autobuild/android-apk/Leshy-Android-debug.apk.
+4. Альтернатива в PowerShell из корня той же копии, без открытия интерфейса: powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows\build-android.ps1 -RepositoryPath . (или вызвать windows\autobuilder-core.ps1 с -Mode android-build -RepositoryPath .).
+
+Первый запуск загружает Gradle 8.9 с официального сайта, если его нет в локальном кеше .autobuild/android-tools. Файл проверяется по официальной SHA-256 контрольной сумме до распаковки. Логи сборки: .autobuild/logs/android-build-*.log и .autobuild/logs/autobuilder-gui.log. SHA-256 APK печатается после успешной сборки.
+
+**Изоляция:** операция android-build не останавливает Windows-сервер, не обновляет main, не удаляет LeshyBrain, не публикует release и не выполняет тесты. Но **обычный AutoBuilder при запуске по-прежнему выполняет свою прежнюю серверную операцию startup**. Если сборка серверной части не нужна, используйте прямой вызов windows/build-android.ps1 или отдельную рабочую копию для Android.
+
+**Ограничения:** debug APK не равен готовому спутнику: полноценная авторизация на сервере, диалог, 3D/AR и Android E2E ещё не завершены. Фактическая сборка, запуск и независимая проверка текущего SHA не выполнялись из-за действующего запрета на тесты и сборки без отдельного разрешения.
