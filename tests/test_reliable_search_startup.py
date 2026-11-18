@@ -114,6 +114,30 @@ class ReliableSearchStartupTests(TestCase):
         self.assertTrue(any(isinstance(item, DuckDuckGoHtmlSearch) for item in providers))
 
 
+    def test_stale_configured_chain_is_migrated_without_duplicate_cluster_peer(self):
+        app = _already_created_app()
+        _configure_app_search(app)
+        configured = app.research.search_provider
+        # Emulate a live process whose previously configured provider had a browser.
+        configured.providers = (ChromiumSearch(), *configured.providers)
+        self.assertTrue(configured._leshy_reliable_web)
+        _configure_app_search(app)
+        migrated = app.research.search_provider
+        self.assertIsNot(migrated, configured)
+        self.assertFalse(any(isinstance(item, ChromiumSearch) for item in migrated.providers))
+        self.assertEqual(
+            sum(type(item).__name__ == "ClusterPeerSearch" for item in migrated.providers), 1,
+        )
+        _configure_app_search(app)
+        self.assertIs(app.research.search_provider, migrated)
+
+    def test_browser_constructor_not_called_for_default_search(self):
+        app = _already_created_app()
+        with patch.object(ChromiumSearch, "__init__", side_effect=AssertionError("browser constructed")):
+            _configure_app_search(app)
+        self.assertFalse(any(isinstance(item, ChromiumSearch) for item in app.research.search_provider.providers))
+
+
 if __name__ == "__main__":
     import unittest
 
