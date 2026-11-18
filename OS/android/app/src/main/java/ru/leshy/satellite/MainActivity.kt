@@ -215,6 +215,9 @@ class MainActivity : ComponentActivity() {
         root.addView(micStatus)
         micButton = Button(this).apply {
             setOnClickListener {
+                if (continuousActive) {
+                    stopContinuousConversation("Непрерывный диалог остановлен: выбран отдельный режим микрофона.")
+                }
                 if (ListeningService.isListening) stopListening()
                 else if (ContextCompat.checkSelfPermission(
                     this@MainActivity, Manifest.permission.RECORD_AUDIO
@@ -321,6 +324,10 @@ class MainActivity : ComponentActivity() {
 
     private fun startContinuousConversation() {
         if (continuousActive) return
+        if (voiceBusy) {
+            voiceStatus.text = "Дождитесь текущего ответа, затем включите разговор."
+            return
+        }
         if (AndroidVoiceCredentials.read(this).isNullOrBlank()) {
             voiceStatus.text = "Сначала сохраните ограниченный Android-ключ разговора."
             return
@@ -539,7 +546,7 @@ class MainActivity : ComponentActivity() {
             enabled -> "Был включён ранее; если сервис остановлен системой, нажмите запуск."
             else -> "Микрофон выключен"
         }
-        micButton.text = if (ListeningService.isListening) "Остановить прослушивание" else "Запустить прослушивание"
+        micButton.text = if (ListeningService.isListening) "Остановить фоновый микрофон" else "Включить фоновый микрофон (без диалога)"
     }
 
     private fun startListening() {
