@@ -108,7 +108,12 @@ class RealtimeChatManager:
             expiry=self._pending_stop.pop(rid,0.0)
             if expiry>time.monotonic():
                 cancel.set()
+            if rid in self._cancellations:
+                raise ValueError("Повторяющийся request_id активного запроса")
             self._cancellations[rid] = cancel
+            tracker = getattr(self.app, "conversation_activity", None)
+            if tracker is not None:
+                tracker.begin()
         return rid, cancel
 
     def stop(self, request_id: str) -> bool:
@@ -143,7 +148,10 @@ class RealtimeChatManager:
 
     def _unregister(self, request_id: str) -> None:
         with self._lock:
-            self._cancellations.pop(request_id, None)
+            existed = self._cancellations.pop(request_id, None) is not None
+            tracker = getattr(self.app, "conversation_activity", None)
+            if existed and tracker is not None:
+                tracker.end()
 
     @staticmethod
     def _chunk_fallback(text: str, size: int = 48) -> Iterator[str]:
