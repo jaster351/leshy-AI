@@ -81,7 +81,7 @@ if (-not $gh) {
 }
 $releaseRepo = 'jaster351/leshy-AI'
 $tag = 'android-v' + $Version + '-' + $short
-$authCheck = & $gh.Source auth status 2>&1
+& $gh.Source auth status 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Warning 'GitHub CLI needs authentication (gh auth login or GH_TOKEN). Desktop APK is ready; publication pending.'
     return
@@ -124,7 +124,22 @@ try {
     $raw = & $gh.Source release list --repo $releaseRepo --limit 100 --json tagName,createdAt,isPrerelease
     if ($LASTEXITCODE -ne 0) { throw 'Could not list old Android releases. No remote cleanup performed.' }
     $allReleases = @($raw | ConvertFrom-Json | Where-Object {
-        $_.tagName -match '^android-v\d+\.\d+\.\d+-[0-9a-fA-F]{10}$'
+        $_.tagName -match '^android-v\d+\.\d+\.\d+-[0-9a-fA-F]{10}
+    $keepTags = @($allReleases | Select-Object -First $Keep | ForEach-Object { $_.tagName })
+    $keepTags += $tag
+    foreach ($release in $allReleases) {
+        if ($release.tagName -in $keepTags) { continue }
+        & $gh.Source release delete $release.tagName --repo $releaseRepo --yes --cleanup-tag
+        if ($LASTEXITCODE -eq 0) { Write-Host ('ANDROID_REMOTE_CLEANUP: ' + $release.tagName) }
+        else { Write-Warning ('Could not delete old Android release ' + $release.tagName) }
+    }
+} catch {
+    Write-Warning ('GitHub publication or cleanup incomplete: ' + $_.Exception.Message)
+    Write-Warning 'Desktop APK retained. Release publication will be retried on the next build invocation.'
+} finally {
+    Remove-Item -LiteralPath $notesFile -Force -ErrorAction SilentlyContinue
+}
+ -and $_.isPrerelease -eq $true
     } | Sort-Object createdAt -Descending)
     $keepTags = @($allReleases | Select-Object -First $Keep | ForEach-Object { $_.tagName })
     $keepTags += $tag
