@@ -29,6 +29,8 @@ $LiveStatePath = Join-Path $RuntimeRoot 'live-state.json'
 $UiStatusPath = Join-Path $RuntimeRoot 'ui-status.json'
 $CoreLog = Join-Path $LogsRoot 'autobuilder-gui.log'
 $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+# Совместные API-правила простоя и SHA-cache с windows/build.ps1.
+. (Join-Path $RepoRoot 'windows\build-update-guard.ps1')
 
 New-Item -ItemType Directory -Force -Path $RuntimeRoot, $LogsRoot | Out-Null
 
@@ -226,6 +228,9 @@ function Get-LeshyProcesses {
     return @($result)
 }
 
+# Тот же интерфейс локальной API-проверки, что в прямом build.ps1.
+function Get-LiveProcesses { return @(Get-LeshyProcesses) }
+
 function Stop-Leshy {
     $processes = @(Get-LeshyProcesses)
     if ($processes.Count -eq 0) {
@@ -287,7 +292,7 @@ function Invoke-Build {
     $buildLog = Join-Path $LogsRoot ('live-build-{0}-{1}-{2}.log' -f $version, $shortSha, $stamp)
     Write-CoreLog ('Starting live build ' + $version + ' at ' + $shortSha)
     Write-UiStatus -State 'building' -Message ('Building Leshy ' + $version) -Sha $Sha -Version $version
-    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $BuildScript 2>&1 | Tee-Object -FilePath $buildLog | Out-Host
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $BuildScript -StageOnly 2>&1 | Tee-Object -FilePath $buildLog | Out-Host
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) { throw ('build.ps1 failed with exit code ' + $exitCode + '. Log: ' + $buildLog) }
     $packageExe = Join-Path $PackageRoot 'Leshy.exe'
@@ -325,7 +330,7 @@ function Deploy-Package {
         Clear-ProgramTree -Root $LiveRoot
         Copy-ProgramTree -Source $PackageRoot -Destination $LiveRoot
         if (-not (Test-Path -LiteralPath $LiveExe)) { throw 'Live deployment did not produce Leshy.exe.' }
-        Save-LiveState -Sha $Sha -Version $Version
+        # Commit deployment state only after Start-Leshy succeeds.
         Remove-Item -LiteralPath $BackupRoot -Recurse -Force -ErrorAction SilentlyContinue
         Write-CoreLog ('Live deployment completed. LeshyBrain preserved at ' + $BrainRoot)
     } catch {
@@ -341,19 +346,37 @@ function Deploy-Package {
     }
 }
 
+function Test-CoreBuildCurrent {
+    param([string]$Sha)
+    $state = Read-LiveState
+    $version = (Get-Content -LiteralPath (Join-Path $RepoRoot 'VERSION') -Raw -Encoding UTF8).Trim()
+    $installer = Join-Path $RepoRoot ('dist\LeshySetup-' + $version + '.exe')
+    return ($state -and [string]$state.sha -eq $Sha -and [string]$state.version -eq $version -and
+        (Test-Path -LiteralPath $LiveExe -PathType Leaf) -and
+        (Test-Path -LiteralPath $installer -PathType Leaf))
+}
+
 function Invoke-FullUpdate {
     $sha = Invoke-RepoUpdate
+    if (Test-CoreBuildCurrent -Sha $sha) {
+        Write-CoreLog ('Already deployed ' + $sha.Substring(0,8) + ': skipping compilation and restart.')
+        Start-Leshy
+        Write-UiStatus -State 'ready' -Message 'No new Git changes; build skipped' -Sha $sha
+        return
+    }
     $wasRunning = (@(Get-LeshyProcesses).Count -gt 0)
-    Stop-Leshy
     try {
         $version = Invoke-Build -Sha $sha
+        if ($wasRunning) { Wait-LeshyConversationsIdle -BrainRoot $BrainRoot }
+        Stop-Leshy
         Deploy-Package -Sha $sha -Version $version
         Start-Leshy
+        Save-LiveState -Sha $sha -Version $version
         Write-UiStatus -State 'ready' -Message 'Live update completed' -Sha $sha -Version $version
         Write-CoreLog ('Full live update completed: ' + $version + ' ' + $sha.Substring(0,8))
     } catch {
         Write-CoreLog $_.Exception.Message 'ERROR'
-        if ($wasRunning -or (Test-Path -LiteralPath $LiveExe)) {
+        if ($wasRunning -and @(Get-LeshyProcesses).Count -eq 0 -and (Test-Path -LiteralPath $LiveExe)) {
             try { Start-Leshy } catch { Write-CoreLog ('Could not restore old Leshy: ' + $_.Exception.Message) 'ERROR' }
         }
         throw
@@ -362,24 +385,27 @@ function Invoke-FullUpdate {
 
 function Invoke-Startup {
     $sha = Invoke-RepoUpdate
-    $state = Read-LiveState
-    $deployedSha = if ($state) { [string]$state.sha } else { '' }
-    $needsBuild = (-not (Test-Path -LiteralPath $LiveExe)) -or ($deployedSha -ne $sha)
+    $needsBuild = -not (Test-CoreBuildCurrent -Sha $sha)
     if ($needsBuild) {
-        Write-CoreLog ('Startup detected a pending live build. Deployed=' + $deployedSha + '; repo=' + $sha)
-        Stop-Leshy
+        Write-CoreLog ('Startup detected a pending build at Git commit ' + $sha.Substring(0,8))
+        $wasRunning = (@(Get-LeshyProcesses).Count -gt 0)
         try {
             $version = Invoke-Build -Sha $sha
+            if ($wasRunning) { Wait-LeshyConversationsIdle -BrainRoot $BrainRoot }
+            Stop-Leshy
             Deploy-Package -Sha $sha -Version $version
         } catch {
             Write-CoreLog $_.Exception.Message 'ERROR'
-            if (Test-Path -LiteralPath $LiveExe) {
+            if ($wasRunning -and @(Get-LeshyProcesses).Count -eq 0 -and (Test-Path -LiteralPath $LiveExe)) {
                 try { Start-Leshy } catch { }
             }
             throw
         }
+    } else {
+        Write-CoreLog ('Startup: no new Git changes since ' + $sha.Substring(0,8))
     }
     Start-Leshy
+    if ($needsBuild) { Save-LiveState -Sha $sha -Version $version }
     $state = Read-LiveState
     $versionText = if ($state) { [string]$state.version } else { '' }
     Write-UiStatus -State 'ready' -Message 'Startup update check completed; Leshy started' -Sha $sha -Version $versionText

@@ -25,6 +25,19 @@ $liveRoot = Join-Path $repoRoot 'dist\Leshy'
 $liveExe = Join-Path $liveRoot 'Leshy.exe'
 $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 
+. (Join-Path $PSScriptRoot 'build-update-guard.ps1')
+
+# AutoBuilder вызывает этот скрипт явно с -StageOnly.
+$script:GitCommit = ''
+if (-not $StageOnly) {
+  $script:GitCommit = Get-LocalGitCommit -RepositoryPath $repoRoot
+  $targetInstaller = Join-Path $repoRoot ("dist\LeshySetup-$version.exe")
+  if (Test-LeshyAlreadyBuilt -Commit $script:GitCommit -Version $version -AutoRoot $autoRoot -LiveExe $liveExe -Installer $targetInstaller) {
+    Write-Host ("НЕТ ИЗМЕНЕНИЙ: " + $version + " / " + $script:GitCommit.Substring(0,10) + ". Повторная компиляция и остановка Лешего не нужны.")
+    return
+  }
+}
+
 # Diagnostic output is a single rotating file beside existing build logs.
 $script:profileFile = Join-Path $autoRoot 'logs\build-performance-latest.log'
 $script:profileMirrorFile = Join-Path $brainRoot 'logs\build-performance-latest.log'
@@ -98,24 +111,7 @@ $script:buildOK = $false
 try {
 Build-Stage 'preflight'
 
-# When AutoBuilder launches this script it owns live deployment/rollback itself.
-# Direct/manual build.ps1 runs publish immediately to dist\Leshy.
-if (-not $StageOnly) {
-  try {
-    $coreRunning = $false
-    foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue)) {
-      $cmdline = [string]$proc.CommandLine
-      if ($cmdline -and $cmdline.IndexOf('autobuilder-core.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        $coreRunning = $true
-        break
-      }
-    }
-    if ($coreRunning) {
-      $StageOnly = $true
-      Write-Host 'AutoBuilder core detected: staging package only; AutoBuilder will publish it safely to dist\Leshy.'
-    }
-  } catch { }
-}
+# -StageOnly задаётся AutoBuilder при запуске, а не определяется по процессам.
 
 # Validate syntax and imports before expensive pip upgrades or PyInstaller.
 Build-Stage 'local-module-preflight'
@@ -411,26 +407,13 @@ function Clear-LiveProgramFiles {
 }
 
 function Publish-LiveProgram {
-  Stop-LiveLeshy
-  Clear-LiveProgramFiles
-  foreach ($entry in @(Get-ChildItem -LiteralPath $packageRoot -Force)) {
-    if ($entry.Name -ieq 'LeshyBrain') { continue }
-    Copy-Item -LiteralPath $entry.FullName -Destination $liveRoot -Recurse -Force
-  }
-  if (-not (Test-Path -LiteralPath $liveExe)) { throw "Publishing failed: $liveExe was not created" }
+  Publish-LeshyProgramSafely -PackageRoot $packageRoot -LiveRoot $liveRoot -LiveExe $liveExe -BrainRoot $brainRoot -AutoRoot $autoRoot
 }
 
 # Canonical local output agreed for Leshy:
 #   dist\Leshy\...      compiled runnable program
 #   dist\LeshySetup-*   installer
 # LeshyBrain is persistent user data and is never removed during publication.
-Build-Stage 'publish-or-stage'
-if (-not $StageOnly) {
-  Publish-LiveProgram
-} else {
-  Write-Host 'STAGE ONLY: AutoBuilder will publish the package to dist\Leshy after creating its rollback backup.'
-}
-
 Build-Stage 'inno-setup'
 $isccPath = $null
 $cmd = Get-Command iscc.exe -ErrorAction SilentlyContinue
@@ -453,6 +436,14 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE
 
 $installer = Join-Path $repoRoot ("dist\LeshySetup-$version.exe")
 if (-not (Test-Path -LiteralPath $installer)) { throw "Installer was not created: $installer" }
+
+Build-Stage 'publish-or-stage'
+if (-not $StageOnly) {
+  Publish-LiveProgram
+  Save-LeshyBuiltState -AutoRoot $autoRoot -Commit $script:GitCommit -Version $version -LiveRoot $liveRoot
+} else {
+  Write-Host 'STAGE ONLY: AutoBuilder will publish the package to dist\Leshy after creating its rollback backup.'
+}
 
 if (-not $StageOnly) {
   Write-Host "READY RUNTIME: $liveRoot"

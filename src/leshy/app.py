@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from .conversation_activity import ConversationActivity, tracked_chat
 from hashlib import sha256
 from pathlib import Path
 import os
@@ -62,6 +63,7 @@ class LeshyApp:
 
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or Settings.from_env()
+        self.conversation_activity = ConversationActivity()
         self.capabilities = CapabilityRegistry(self.settings.install_root)
         self.github_facts = GitHubRepositoryEvidence()
         configure_diagnostics(self.settings.brain_dir, VERSION)
@@ -393,6 +395,7 @@ class LeshyApp:
             conn.execute("UPDATE sessions SET updated_at=? WHERE id=?", (answered_at, sid))
         return answered_at
 
+    @tracked_chat
     def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None) -> dict[str, Any]:
         message = str(message or "").strip()
         owner_id = (owner_id or "web:local").strip()[:200]
@@ -789,9 +792,23 @@ class LeshyApp:
         hardware = asdict(self.hardware) if self.hardware is not None else {"error": "hardware detection failed"}
         router_status = getattr(self.llm, "status", None)
         model_status = self.model_downloader.status()
+        dialogue = self.conversation_activity.snapshot()
+        scheduler = getattr(self, "inference_scheduler", None)
+        inference = scheduler.status() if scheduler is not None else {}
+        active_inference = bool(inference.get("active"))
+        waiting_inference = len(inference.get("waiting") or [])
+        deployment_activity = {
+            "schema": 1,
+            **dialogue,
+            "active_inference": active_inference,
+            "waiting_inference": waiting_inference,
+            "idle": dialogue["active_conversations"] == 0
+                    and not active_inference and waiting_inference == 0,
+        }
         return {
             "name": "Леший",
             "version": VERSION,
+            "deployment_activity": deployment_activity,
             "backend": self.settings.llm_backend,
             "model": getattr(self.llm, "model", self.settings.ollama_model),
             "model_ready": bool(model_status.get("exists")) and model_status.get("state") not in {"invalid", "error", "downloading"} if self.settings.llm_backend == "native" else True,
