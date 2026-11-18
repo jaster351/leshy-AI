@@ -622,8 +622,12 @@ class LeshyApp:
             append_live_search(reason or "требуются актуальные данные")
 
         if cinema_plan is not None and not sources:
-            answer = cinema_no_data(cinema_plan)
-            return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": []}
+            context.append(ChatMessage(
+                "system",
+                "Проверка кино-каталога не обнаружила надёжных данных. "
+                "Не объявляй релиз доступным и не придумывай дату. "
+                + cinema_no_data(cinema_plan),
+            ))
 
         strict_live_sources = requires_verified_live_sources(lookup_query, reason or "")
         if search_attempted and not sources and not strict_live_sources:
@@ -638,17 +642,14 @@ class LeshyApp:
                 " но не отказывайся от обычного разговора.",
             ))
         if search_attempted and not sources and strict_live_sources and (not catalog_matches or force_search) and not support_rules:
-            answer = (
-                "Не удалось проверить актуальные сведения: поисковые источники временно недоступны. Попробуйте позже."
-                if search_error else
-                "Интернет-поиск выполнен, но проверенных источников не найдено. "
-                "Не буду выдавать предположения за актуальные факты."
-            )
             event("chat_web_search_without_sources", session_id=sid, failed=bool(search_error))
-            return {
-                "session_id": sid, "answer": answer,
-                "created_at": self._save_assistant(sid, answer), "sources": [],
-            }
+            context.append(ChatMessage(
+                "system",
+                "Невозможно подтвердить текущие факты надёжными источниками. "
+                "Не придумывай цены, даты, новости и версии. Объясни кратко "
+                "ограничение проверки и ответь на те части вопроса, для которых "
+                "достаточно локальных подтверждённых данных.",
+            ))
 
         isolated_rows = conversation_rows_for_mode(rows, mode.kind)
         history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
@@ -656,11 +657,11 @@ class LeshyApp:
         grounded_fact = grounded_release_from_context(message, rows, messages, sources, app=self)
         if grounded_fact:
             event("chat_primary_source_release_grounded", source_count=len(sources))
-            return {
-                "session_id": sid, "answer": grounded_fact,
-                "created_at": self._save_assistant(sid, grounded_fact),
-                "sources": sources, "source_grounded": True,
-            }
+            messages.insert(0, ChatMessage(
+                "system",
+                "Проверенный результат чтения первоисточника: " + grounded_fact
+                + "\nУчитывай его, не подменяй устаревшими знаниями.",
+            ))
         layout_hint = layout_context(message)
         if layout_hint:
             messages.insert(0, ChatMessage("system", layout_hint))
