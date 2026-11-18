@@ -36,7 +36,8 @@ if (-not $StageOnly) {
     Write-Host ("NO CHANGES: " + $version + " / " + $script:GitCommit.Substring(0,10) + ". Windows compilation skipped.")
     # Even when Windows is cached, Android sources might still need an APK.
     Invoke-AndroidBuild -RepositoryPath $repoRoot
-    if (@(Assert-LeshyProcessVisibility).Count -eq 0) {
+    # On a cache hit there is no destructive deploy. Avoid duplicating an elevated process.
+    if (@(Get-Process -Name 'Leshy' -ErrorAction SilentlyContinue).Count -eq 0) {
       Start-LeshyElevated -LiveExe $liveExe -LiveRoot $liveRoot | Out-Null
     }
     return
@@ -412,7 +413,7 @@ function Clear-LiveProgramFiles {
 }
 
 function Publish-LiveProgram {
-  Publish-LeshyProgramSafely -PackageRoot $packageRoot -LiveRoot $liveRoot -LiveExe $liveExe -BrainRoot $brainRoot -AutoRoot $autoRoot
+  return (Publish-LeshyProgramSafely -PackageRoot $packageRoot -LiveRoot $liveRoot -LiveExe $liveExe -BrainRoot $brainRoot -AutoRoot $autoRoot)
 }
 
 # Canonical local output agreed for Leshy:
@@ -444,8 +445,8 @@ if (-not (Test-Path -LiteralPath $installer)) { throw "Installer was not created
 
 Build-Stage 'publish-or-stage'
 if (-not $StageOnly) {
-  Publish-LiveProgram
-  if (@(Assert-LeshyProcessVisibility).Count -eq 0) {
+  $restartedByPublisher = Publish-LiveProgram
+  if (-not $restartedByPublisher) {
     Start-LeshyElevated -LiveExe $liveExe -LiveRoot $liveRoot | Out-Null
   }
   Save-LeshyBuiltState -AutoRoot $autoRoot -Commit $script:GitCommit -Version $version -LiveRoot $liveRoot
