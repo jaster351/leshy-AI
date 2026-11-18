@@ -93,10 +93,36 @@ def start_tray(
     from PIL import Image
     import pystray
 
+    from leshy.update_feedback import TrayUpdateFeedback
+
     url = f"http://127.0.0.1:{int(port)}/"
     image_file = _icon_path()
     image = Image.open(image_file).convert("RGBA")
     holder = {}
+
+    def notify_updates(message: str) -> None:
+        icon = holder.get("icon")
+        if icon is None:
+            return
+        try:
+            icon.notify(message, "Леший: проверка обновлений")
+        except (AttributeError, NotImplementedError, OSError):
+            _LOG.exception("Уведомления Windows недоступны, статус остаётся в меню трея")
+
+    def update_menu() -> None:
+        icon = holder.get("icon")
+        if icon is not None:
+            icon.update_menu()
+
+    # dist/Leshy/LeshyBrain -> repository root.
+    # A standalone installer outside the Git repository cannot invoke this
+    # particular Git Task Scheduler action and reports that clearly.
+    repo_root = Path(brain_root).resolve().parents[2]
+    feedback = TrayUpdateFeedback(
+        repo_root,
+        notify=notify_updates,
+        changed=update_menu,
+    )
 
     def open_web_item(icon=None, item=None):
         if open_web is not None:
@@ -108,17 +134,9 @@ def start_tray(
             webbrowser.open(url)
 
     def check_updates(icon=None, item=None):
-        # Task Scheduler enforces no overlapping builds.
-        exe = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "schtasks.exe")
-        try:
-            subprocess.Popen(
-                [exe, "/Run", "/TN", "Leshy AI - Git Build (15 min)"],
-                creationflags=0x08000000,  # CREATE_NO_WINDOW
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except OSError:
-            _LOG.exception("Cannot request scheduled update")
+        # No more hidden fire-and-forget task. A background monitor reports
+        # checking, already current, building, installed or a real failure.
+        feedback.start()
 
     def exit_leshy(icon, item=None):
         try:
@@ -135,6 +153,14 @@ def start_tray(
     menu = pystray.Menu(
         pystray.MenuItem("Открыть Лешего", open_web_item, default=True),
         pystray.MenuItem("Проверить обновления", check_updates),
+        pystray.MenuItem(
+            lambda item: "Обновления: " + (
+                feedback.message[:92] + "..." if len(feedback.message) > 95
+                else feedback.message
+            ),
+            None,
+            enabled=False,
+        ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Выйти из Лешего", exit_leshy),
     )
