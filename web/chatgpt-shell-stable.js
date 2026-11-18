@@ -58,9 +58,39 @@
   function fresh(){if(typeof window.newChat==='function')window.newChat();else{localStorage.removeItem('leshy.session');$('messages')?.replaceChildren();section('chat')}const u=new URL(location.href);u.searchParams.delete('session');history.replaceState({},'',u);setTimeout(()=>window.loadSessions&&window.loadSessions(),80)}
   function menuButton(label,fn){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;return b}
 
+  function bindSessionSearch(list,search){
+    if(!search)return;
+    const show=(node,visible)=>{
+      if(visible)node.style.removeProperty('display');
+      else node.style.setProperty('display','none','important');
+    };
+    const apply=()=>{
+      const query=search.value.trim().toLowerCase();
+      let groupVisible=false,sectionVisible=false;
+      // Идём от строк к их заголовкам, чтобы пустые группы не занимали место.
+      for(const node of [...list.children].reverse()){
+        if(node.matches('.item,.leshy-session-item')){
+          const title=node.querySelector('.leshy-session-title')||node;
+          // Открытый редактор названия остаётся видимым до завершения правки.
+          const visible=!!node.querySelector('.leshy-session-rename')||!query||title.textContent.toLowerCase().includes(query);
+          show(node,visible);groupVisible=groupVisible||visible;sectionVisible=sectionVisible||visible;
+        }else if(node.matches('.leshy-project-name')){
+          show(node,!query||groupVisible);groupVisible=false;
+        }else if(node.matches('.leshy-session-section')){
+          show(node,!query||sectionVisible);groupVisible=false;sectionVisible=false;
+        }
+      }
+    };
+    search.oninput=apply;
+    // Обновления истории, архива и названий должны сохранять текущий запрос.
+    // Атрибуты не наблюдаем: применение display не запускает новый обход.
+    new MutationObserver(apply).observe(list,{childList:true,subtree:true,characterData:true});
+    apply();
+  }
+
   function buildProfile(side){if($('profileMenuButton'))return true;let foot=side.querySelector('.sidebar-foot');if(!foot)return false;foot.replaceChildren();const btn=document.createElement('button');btn.id='profileMenuButton';btn.innerHTML='<span id="profileAvatar">Л</span><span id="profileCopy"><b>Леший</b><span>Меню и настройки</span></span>';const menu=document.createElement('div');menu.id='profileMenu';for(const [id,label] of [['overview','Обзор'],['knowledge','Знания'],['learning','Обучение'],['tasks','Задачи'],['tools','Инструменты'],['system','Система'],['logs','Логи']])menu.appendChild(menuButton(label,()=>section(id)));const sep=document.createElement('div');sep.className='sep';menu.appendChild(sep);menu.appendChild(menuButton('Marketplace / Магазин',()=>{section('settings');setTimeout(()=>$('marketplaceCard')?.scrollIntoView({behavior:'smooth',block:'start'}),100)}));menu.appendChild(menuButton('Настройки',()=>section('settings')));foot.append(btn,menu);btn.onclick=e=>{e.stopPropagation();menu.classList.toggle('open')};return true}
 
-  function buildSidebar(){const side=document.querySelector('.sidebar');if(!side)return false;const brand=side.querySelector('.brand');if(brand&&!$('sidebarNewChat')){const b=document.createElement('button');b.id='sidebarNewChat';b.type='button';b.title='Новый чат';b.innerHTML=I.edit;b.onclick=fresh;brand.appendChild(b)}if(!$('chatSidebarTools')){const tools=document.createElement('div');tools.id='chatSidebarTools';tools.innerHTML=`<button id="chatSidebarNew" type="button">${I.edit}<span>Новый чат</span></button><div id="chatHistorySearchWrap">${I.search}<input id="chatHistorySearch" placeholder="Поиск чатов"></div>`;(side.querySelector('nav')||brand)?.insertAdjacentElement('afterend',tools);$('chatSidebarNew').onclick=fresh}if(!$('sidebarHistory')){const wrap=document.createElement('div');wrap.id='sidebarHistory';wrap.innerHTML='<div id="sidebarHistoryTitle">Чаты</div>';let list=$('sessionList');if(list){const old=list.closest('.card');wrap.appendChild(list);if(old)old.style.display='none'}else{list=document.createElement('div');list.id='sessionList';list.className='list';wrap.appendChild(list)}const foot=side.querySelector('.sidebar-foot');foot?side.insertBefore(wrap,foot):side.appendChild(wrap);const search=$('chatHistorySearch');if(search)search.oninput=e=>{const q=e.target.value.trim().toLowerCase();list.querySelectorAll('.item,.leshy-session-item').forEach(i=>i.style.display=!q||i.textContent.toLowerCase().includes(q)?'':'none')}}buildProfile(side);return true}
+  function buildSidebar(){const side=document.querySelector('.sidebar');if(!side)return false;const brand=side.querySelector('.brand');if(brand&&!$('sidebarNewChat')){const b=document.createElement('button');b.id='sidebarNewChat';b.type='button';b.title='Новый чат';b.innerHTML=I.edit;b.onclick=fresh;brand.appendChild(b)}if(!$('chatSidebarTools')){const tools=document.createElement('div');tools.id='chatSidebarTools';tools.innerHTML=`<button id="chatSidebarNew" type="button">${I.edit}<span>Новый чат</span></button><div id="chatHistorySearchWrap">${I.search}<input id="chatHistorySearch" placeholder="Поиск чатов"></div>`;(side.querySelector('nav')||brand)?.insertAdjacentElement('afterend',tools);$('chatSidebarNew').onclick=fresh}if(!$('sidebarHistory')){const wrap=document.createElement('div');wrap.id='sidebarHistory';wrap.innerHTML='<div id="sidebarHistoryTitle">Чаты</div>';let list=$('sessionList');if(list){const old=list.closest('.card');wrap.appendChild(list);if(old)old.style.display='none'}else{list=document.createElement('div');list.id='sessionList';list.className='list';wrap.appendChild(list)}const foot=side.querySelector('.sidebar-foot');foot?side.insertBefore(wrap,foot):side.appendChild(wrap);bindSessionSearch(list,$('chatHistorySearch'))}buildProfile(side);return true}
 
   async function shareChat(){const sid=localStorage.getItem('leshy.session')||'';if(!sid){toast('Сначала начните диалог');return}const u=new URL(location.href);u.searchParams.set('session',sid);try{if(navigator.share)await navigator.share({title:'Диалог с Лешим',url:u.toString()});else{await navigator.clipboard.writeText(u.toString());toast('Ссылка скопирована')}}catch(e){if(e.name!=='AbortError')toast('Не удалось поделиться')}}
   async function copyChat(){const text=[...document.querySelectorAll('#messages .msg')].map(n=>n.innerText.trim()).join('\n\n');if(!text){toast('Диалог пуст');return}try{await navigator.clipboard.writeText(text);toast('Диалог скопирован')}catch(_e){toast('Буфер обмена недоступен')}}
