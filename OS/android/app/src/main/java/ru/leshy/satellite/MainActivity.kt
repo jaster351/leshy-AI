@@ -450,6 +450,26 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { checkVoiceConnection() }
         })
         root.addView(gap(24))
+        // A dialog can be reopened: each Settings instance owns fresh views.
+        // Re-attaching controls from a dismissed dialog would crash Android.
+        micStatus = detail("Микрофон выключен")
+        micButton = Button(this).apply {
+            setOnClickListener {
+                if (continuousActive) {
+                    stopContinuousConversation("Разговор остановлен: выбран фоновый микрофон.")
+                }
+                if (ListeningService.isListening) stopListening()
+                else if (ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED) startListening()
+                else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+        deviceStatus = detail("Загрузка данных устройства...")
+        deviceCreateButton = Button(this).apply {
+            text = "Создать локальный ключ устройства"
+            setOnClickListener { createDeviceIdentity() }
+        }
         root.addView(heading("Разрешения и устройство", 18f))
         root.addView(gap(12))
         root.addView(micStatus)
