@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('repo-update','full-update','startup','launch','stop','status')]
+    [ValidateSet('repo-update','full-update','android-build','startup','launch','stop','status')]
     [string]$Mode = 'status',
     [string]$RepositoryPath = '',
     [string]$Remote = 'origin',
@@ -25,6 +25,7 @@ $BrainRoot = Join-Path $LiveRoot 'LeshyBrain'
 $PackageRoot = Join-Path $RuntimeRoot 'package-dist\Leshy'
 $BackupRoot = Join-Path $RuntimeRoot 'live-backup'
 $BuildScript = Join-Path $RepoRoot 'windows\build.ps1'
+$AndroidBuildScript = Join-Path $RepoRoot 'windows\build-android.ps1'
 $LiveStatePath = Join-Path $RuntimeRoot 'live-state.json'
 $UiStatusPath = Join-Path $RuntimeRoot 'ui-status.json'
 $CoreLog = Join-Path $LogsRoot 'autobuilder-gui.log'
@@ -295,6 +296,32 @@ function Invoke-Build {
     return $version
 }
 
+function Invoke-AndroidBuild {
+    # Independent debug APK task: no Windows release/deployment or process interruption.
+    if (-not (Test-Path -LiteralPath $AndroidBuildScript -PathType Leaf)) {
+        throw ('Android build script missing: ' + $AndroidBuildScript)
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'OS\android\settings.gradle.kts') -PathType Leaf)) {
+        throw 'Android source is unavailable in this checked-out branch; select the Android feature branch.'
+    }
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $buildLog = Join-Path $LogsRoot ('android-build-' + $stamp + '.log')
+    Write-CoreLog ('Starting Android debug APK build; log: ' + $buildLog)
+    Write-UiStatus -State 'building' -Message 'Building Android debug APK'
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $AndroidBuildScript -RepositoryPath $RepoRoot 2>&1 |
+        Tee-Object -FilePath $buildLog | Out-Host
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw ('Android APK build failed (exit ' + $exitCode + '). Log: ' + $buildLog)
+    }
+    $apk = Join-Path $RuntimeRoot 'android-apk\Leshy-Android-debug.apk'
+    if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) {
+        throw ('Android build returned success without APK. Log: ' + $buildLog)
+    }
+    Write-CoreLog ('Android debug APK available: ' + $apk)
+    Write-UiStatus -State 'ready' -Message ('Android debug APK: ' + $apk)
+}
+
 function Copy-ProgramTree {
     param([string]$Source, [string]$Destination)
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
@@ -435,6 +462,7 @@ try {
     switch ($Mode) {
         'repo-update' { [void](Invoke-RepoUpdate) }
         'full-update' { Invoke-FullUpdate }
+        'android-build' { Invoke-AndroidBuild }
         'startup' { Invoke-Startup }
         'launch' { Start-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy started' }
         'stop' { Stop-Leshy; Write-UiStatus -State 'ready' -Message 'Leshy stopped' }
