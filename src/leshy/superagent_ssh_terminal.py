@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import hashlib
 import hmac
+import math
 import re
 import socket
 import time
@@ -154,7 +155,13 @@ def run_ssh_terminal_command(
         raise ValueError("Команда SSH не задана")
     if "\x00" in command or len(command.encode("utf-8")) > 4096:
         raise ValueError("Команда SSH слишком длинная")
-    if not (2 <= float(timeout) <= 30):
+    if isinstance(timeout, bool):
+        raise ValueError("Недопустимое время SSH-команды")
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Недопустимое время SSH-команды") from exc
+    if not math.isfinite(timeout) or not (2 <= timeout <= 30):
         raise ValueError("Недопустимое время SSH-команды")
     node = _node_ip(node_id)
     pin = _registered_pin(policy, actor, node, "execute")
