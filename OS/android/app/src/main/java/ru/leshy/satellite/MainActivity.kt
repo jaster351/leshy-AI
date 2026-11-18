@@ -1,6 +1,7 @@
 package ru.leshy.satellite
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -32,6 +33,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var cameraPreview: PreviewView
     private lateinit var serverAddress: EditText
     private lateinit var serverStatus: TextView
+    private lateinit var deviceStatus: TextView
+    private lateinit var deviceCreateButton: Button
+    private val deviceExecutor = Executors.newSingleThreadExecutor()
     private val serverExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -92,6 +96,32 @@ class MainActivity : ComponentActivity() {
             text = "Сохранить адрес и проверить"
             setOnClickListener { checkServer() }
         })
+        root.addView(TextView(this).apply {
+            text = "Привязка телефона: подготовка ключа устройства (без авторизации на сервере)"
+        })
+        deviceStatus = TextView(this).apply {
+            text = "Состояние ключа загружается..."
+        }
+        root.addView(deviceStatus)
+        deviceCreateButton = Button(this).apply {
+            text = "Создать локальный ключ устройства"
+            setOnClickListener { createDeviceIdentity() }
+        }
+        root.addView(deviceCreateButton)
+        root.addView(Button(this).apply {
+            text = "Удалить локальный ключ"
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Удалить ключ устройства?")
+                    .setMessage(
+                        "Действие необратимо. Для будущих серверных привязок " +
+                            "потребуется отдельный отзыв доступа на сервере."
+                    )
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Удалить") { _, _ -> deleteDeviceIdentity() }
+                    .show()
+            }
+        })
         micStatus = TextView(this)
         root.addView(micStatus)
         micButton = Button(this).apply {
@@ -138,6 +168,7 @@ class MainActivity : ComponentActivity() {
         })
         setContentView(ScrollView(this).apply { addView(root) })
         refreshMicStatus()
+        refreshDeviceIdentity()
     }
 
     override fun onResume() {
@@ -161,6 +192,64 @@ class MainActivity : ComponentActivity() {
             val result = ServerReachability.probe(normalized)
             runOnUiThread {
                 if (!isDestroyed) serverStatus.text = result.message
+            }
+        }
+    }
+
+    private fun deviceMessage(identity: DeviceIdentity.PublicIdentity?): String =
+        if (identity == null) {
+            "Ключ ещё не создан. Серверная привязка не выполнена."
+        } else {
+            "Локальный ключ подготовлен. SHA-256 отпечаток открытого ключа:\\n" +
+                identity.fingerprintSha256.chunked(8).joinToString(" ") +
+                "\\nСерверная привязка НЕ выполнена. Доступ к данным владельца не выдан."
+        }
+
+    private fun refreshDeviceIdentity() {
+        deviceExecutor.execute {
+            val message = try {
+                deviceMessage(DeviceIdentity.existing())
+            } catch (_: Exception) {
+                "Не удалось прочитать ключ Android Keystore."
+            }
+            runOnUiThread {
+                if (!isDestroyed && !isFinishing) deviceStatus.text = message
+            }
+        }
+    }
+
+    private fun createDeviceIdentity() {
+        deviceCreateButton.isEnabled = false
+        deviceStatus.text = "Готовим ключ в Android Keystore..."
+        deviceExecutor.execute {
+            val message = try {
+                deviceMessage(DeviceIdentity.createIfMissing())
+            } catch (_: Exception) {
+                "Не удалось создать ключ устройства. Серверная привязка не выполнена."
+            }
+            runOnUiThread {
+                if (!isDestroyed && !isFinishing) {
+                    deviceStatus.text = message
+                    deviceCreateButton.isEnabled = true
+                }
+            }
+        }
+    }
+
+    private fun deleteDeviceIdentity() {
+        deviceCreateButton.isEnabled = false
+        deviceExecutor.execute {
+            val message = try {
+                DeviceIdentity.deleteLocalKey()
+                deviceMessage(null)
+            } catch (_: Exception) {
+                "Не удалось удалить локальный ключ."
+            }
+            runOnUiThread {
+                if (!isDestroyed && !isFinishing) {
+                    deviceStatus.text = message
+                    deviceCreateButton.isEnabled = true
+                }
             }
         }
     }
@@ -271,6 +360,7 @@ class MainActivity : ComponentActivity() {
         detector.close()
         cameraExecutor.shutdown()
         serverExecutor.shutdownNow()
+        deviceExecutor.shutdownNow()
         super.onDestroy()
     }
 }
