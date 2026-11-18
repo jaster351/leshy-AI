@@ -27,19 +27,7 @@ $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 
 . (Join-Path $PSScriptRoot 'build-update-guard.ps1')
 
-# При запуске из AutoBuilder сборщик создаёт только staging-пакет.
-# Проверяем это до локального SHA-cache, чтобы не пропустить нужный пакет.
-if (-not $StageOnly) {
-  try {
-    foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue)) {
-      $cmdline = [string]$proc.CommandLine
-      if ($cmdline -and $cmdline.IndexOf('autobuilder-core.ps1',[StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        $StageOnly = $true
-        break
-      }
-    }
-  } catch { }
-}
+# AutoBuilder вызывает этот скрипт явно с -StageOnly.
 $script:GitCommit = ''
 if (-not $StageOnly) {
   $script:GitCommit = Get-LocalGitCommit -RepositoryPath $repoRoot
@@ -123,24 +111,7 @@ $script:buildOK = $false
 try {
 Build-Stage 'preflight'
 
-# When AutoBuilder launches this script it owns live deployment/rollback itself.
-# Direct/manual build.ps1 runs publish immediately to dist\Leshy.
-if (-not $StageOnly) {
-  try {
-    $coreRunning = $false
-    foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue)) {
-      $cmdline = [string]$proc.CommandLine
-      if ($cmdline -and $cmdline.IndexOf('autobuilder-core.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        $coreRunning = $true
-        break
-      }
-    }
-    if ($coreRunning) {
-      $StageOnly = $true
-      Write-Host 'AutoBuilder core detected: staging package only; AutoBuilder will publish it safely to dist\Leshy.'
-    }
-  } catch { }
-}
+# -StageOnly задаётся AutoBuilder при запуске, а не определяется по процессам.
 
 # Validate syntax and imports before expensive pip upgrades or PyInstaller.
 Build-Stage 'local-module-preflight'
