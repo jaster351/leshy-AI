@@ -61,7 +61,20 @@ if (-not $StageOnly) {
   if (Test-LeshyAlreadyBuilt -Commit $script:GitCommit -Version $version -AutoRoot $autoRoot -LiveExe $liveExe -Installer $targetInstaller) {
     Write-Host ("NO CHANGES: " + $version + " / " + $script:GitCommit.Substring(0,10) + ". Compilation skipped.")
     Start-LeshyElevated -LiveExe $liveExe -LiveRoot $liveRoot
-    Invoke-AndroidClientBuild -RepositoryPath $repoRoot
+    # Avoid re-running Gradle and GitHub Release upload every 15 minutes.
+    # Rebuild the APK only if its own recorded SHA/version or file is missing.
+    $androidReady = $false
+    $androidStateFile = Join-Path $autoRoot 'android-apk\build-state.json'
+    if (Test-Path -LiteralPath $androidStateFile -PathType Leaf) {
+      try {
+        $androidState = Get-Content -LiteralPath $androidStateFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $androidApk = Join-Path $autoRoot ('android-apk\Leshy-Android-' + $version + '-' + $script:GitCommit.Substring(0,10) + '-debug.apk')
+        $androidReady = ([string]$androidState.sha -eq $script:GitCommit -and
+                         [string]$androidState.version -eq $version -and
+                         (Test-Path -LiteralPath $androidApk -PathType Leaf))
+      } catch { }
+    }
+    if (-not $androidReady) { Invoke-AndroidClientBuild -RepositoryPath $repoRoot }
     return
   }
 }
@@ -138,6 +151,9 @@ try {
 $script:buildOK = $false
 try {
 Build-Stage 'preflight'
+Build-Stage 'brand-icon'
+python windows/build-icon.py
+if ($LASTEXITCODE -ne 0) { throw 'Generating the branded Windows icon failed.' }
 
 # AutoBuilder explicitly sets -StageOnly; no process-name inference.
 
@@ -166,8 +182,9 @@ Remove-Item -Recurse -Force $packageDist, $packageWork, $smokePackageRoot -Error
 New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
 
 Build-Stage 'pyinstaller'
-python -m PyInstaller --noconfirm --clean --onedir --console `
+python -m PyInstaller --noconfirm --clean --onedir --windowed `
   --name Leshy `
+  --icon (Join-Path $autoRoot 'brand\Leshy.ico') `
   --paths src `
   --collect-submodules leshy `
   --hidden-import leshy.network_blocking_runtime `
@@ -193,12 +210,15 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --collect-all browser_use `
   --exclude-module browser_use.llm.oci_raw `
   --exclude-module oci `
+  --collect-all pystray `
+  --collect-all PIL `
   --collect-all markitdown `
   --collect-all mcp `
   --collect-all paramiko `
   --collect-all mss `
   --collect-all pyautogui `
   --collect-all pypdf `
+  --add-data "assets;assets" `
   --add-data "web;web" `
   --add-data "resources;resources" `
   --add-data "VERSION;." `
@@ -299,7 +319,8 @@ function Invoke-FrozenSmokeTest {
     $process = Start-Process -FilePath $executable -ArgumentList @(
       '--host', '127.0.0.1',
       '--port', [string]$port,
-      '--no-browser'
+      '--no-browser',
+      '--no-tray'
     ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
 
     $deadline = (Get-Date).AddSeconds(60)
