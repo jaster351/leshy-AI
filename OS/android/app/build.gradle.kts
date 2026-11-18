@@ -11,8 +11,8 @@ android {
         applicationId = "ru.leshy.satellite"
         minSdk = 34
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-dev"
+        versionCode = providers.gradleProperty("leshyVersionCode").orElse("1").get().toInt()
+        versionName = providers.gradleProperty("leshyVersion").orElse("0.1.0-dev").get()
     }
 
     buildTypes {
