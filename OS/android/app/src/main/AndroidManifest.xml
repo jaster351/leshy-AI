@@ -23,7 +23,8 @@
     <application
         android:allowBackup="false"
         android:label="Леший"
-        android:icon="@drawable/ic_leshy"
+        android:icon="@drawable/ic_leshy_brand"
+        android:roundIcon="@drawable/ic_leshy_brand"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
