@@ -14,6 +14,7 @@ from .diagnostics import event, problem
 from .hf_settings import HuggingFaceSettings
 from .model_catalog import apply_saved_model_to_settings, configure_app_model_verifier
 from .os_control_approval import install_os_control
+from .role_authority import role_for_web
 from .runtime_compat import CompatibleRuntimeManager
 from .streaming_backends import install_streaming_backends
 from .telegram_fast import FastTelegramBridge
@@ -82,12 +83,22 @@ def make_handler(app, telegram, settings, model_catalog):
                 if not self._authorized():
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
                 controller = getattr(app, "os_control", None)
+                # Never trust owner_id supplied in a query string. A valid API
+                # token alone does not establish the identity of an OS owner.
+                owner_getter = getattr(self, "_existing_web_owner", None)
+                owner = owner_getter() if callable(owner_getter) else None
+                if not owner or owner == "web:local" or role_for_web(telegram, getattr(app, "owner_identity", None), owner) not in {"creator", "server_owner"}:
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Для управления ОС требуется подтверждённая Web-сессия владельца"})
                 if controller is None or not callable(getattr(controller, "pending", None)):
                     return self._json(HTTPStatus.OK, {"items": []})
                 args = parse.parse_qs(parsed.query)
-                owner = self._arg(args, "owner_id", "web:local")
                 session_id = self._arg(args, "session_id", "")
-                return self._json(HTTPStatus.OK, {"items": controller.pending(owner_id=owner, session_id=session_id)})
+                try:
+                    items = controller.pending(owner_id=owner, session_id=session_id)
+                except PermissionError:
+                    # Unverified LAN/browser clients must not see approval details.
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Нет прав на просмотр подтверждений управления ОС"})
+                return self._json(HTTPStatus.OK, {"items": items})
 
             if parsed.path == "/v1/huggingface/status":
                 if not self._authorized():
@@ -156,7 +167,13 @@ def make_handler(app, telegram, settings, model_catalog):
                     controller = getattr(app, "os_control", None)
                     if controller is None or not callable(getattr(controller, "resolve", None)):
                         raise RuntimeError("Модуль подтверждения системных действий недоступен")
-                    result = controller.resolve(str(body.get("id") or ""), owner_id=str(body.get("owner_id") or "web:local"), allow=bool(body.get("allow")))
+                    owner_getter = getattr(self, "_existing_web_owner", None)
+                    owner = owner_getter() if callable(owner_getter) else None
+                    if not owner or owner == "web:local" or role_for_web(telegram, getattr(app, "owner_identity", None), owner) not in {"creator", "server_owner"}:
+                        return self._json(HTTPStatus.FORBIDDEN, {"error": "Для подтверждения действий требуется Web-сессия владельца"})
+                    if type(body.get("allow")) is not bool:
+                        raise ValueError("Поле allow должно быть логическим true/false")
+                    result = controller.resolve(str(body.get("id") or ""), owner_id=owner, allow=body["allow"])
                     return self._json(HTTPStatus.OK, result)
                 except (ValueError, PermissionError, RuntimeError) as exc:
                     return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
