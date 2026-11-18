@@ -272,7 +272,7 @@ function Start-CoreOperation {
 
 function Set-Busy {
     param([bool]$Busy)
-    foreach ($c in @($updateNow,$repoUpdate,$startLeshy,$stopLeshy,$repoSave,$browseButton)) {
+    foreach ($c in @($updateNow,$repoUpdate,$startLeshy,$stopLeshy,$repoSave,$browseButton,$androidBuildNow,$androidOpenApk)) {
         if ($c) { $c.Enabled = -not $Busy }
     }
     $stateValue.Text = if ($Busy) { $T.busy } else { $T.ready }
@@ -554,6 +554,19 @@ $buildSafe = New-Label $T.data_safe 18 182 750 28 9 $true
 $buildSafe.ForeColor = $ColorGood
 $buildCard.Controls.Add($buildSafe)
 
+# Android debug APK: same AutoBuilder window, independent from server full-update.
+$androidCard = New-Card 20 284 801 168
+$pageBuild.Controls.Add($androidCard)
+$androidNote = New-Label $T.android_build_note 18 14 750 48 9 $false
+$androidNote.ForeColor = $ColorMuted
+$androidCard.Controls.Add($androidNote)
+$androidBuildNow = New-Button $T.android_build 18 72 250 40 $true
+$androidOpenApk = New-Button $T.android_open_apk 282 72 235 40 $false
+$androidCard.Controls.AddRange(@($androidBuildNow,$androidOpenApk))
+$androidApkPath = New-Label $T.android_apk_path 18 120 750 30 8.5 $false
+$androidApkPath.ForeColor = $ColorMuted
+$androidCard.Controls.Add($androidApkPath)
+
 # Logs page
 $pageLogs = New-Object System.Windows.Forms.Panel
 $pageLogs.Dock = 'Fill'
@@ -599,6 +612,15 @@ $updateNow.Add_Click({ Start-CoreOperation 'full-update' $T.full_update_started 
 $repoUpdate.Add_Click({ Start-CoreOperation 'repo-update' $T.repo_updated })
 $startLeshy.Add_Click({ Start-CoreOperation 'launch' $T.start_leshy })
 $stopLeshy.Add_Click({ Start-CoreOperation 'stop' $T.stop_leshy })
+$androidBuildNow.Add_Click({ Start-CoreOperation 'android-build' $T.android_build_started })
+$androidOpenApk.Add_Click({
+    $folder = Join-Path $script:RepositoryPath '.autobuild\android-apk'
+    if (Test-Path -LiteralPath $folder -PathType Container) {
+        Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $folder + '"')
+    } else {
+        [void][System.Windows.Forms.MessageBox]::Show($form,$T.android_no_apk,$T.android_build,[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Information)
+    }
+})
 $autoRepo.Add_CheckedChanged({ Save-Settings })
 $repoSeconds.Add_ValueChanged({ Save-Settings })
 $scheduledBuild.Add_CheckedChanged({ Save-Settings })
