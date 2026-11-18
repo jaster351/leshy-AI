@@ -306,8 +306,18 @@ class MainActivity : ComponentActivity() {
                 putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите с Лешим")
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             }
-            voiceStatus.text = "Слушаю вопрос..."
-            speechInput.launch(request)
+            // The legacy foreground PCM reader would compete for microphone ownership.
+            // This push-to-talk MVP stops that reader before invoking Android speech services.
+            if (ListeningService.isListening) stopListening()
+            voiceStatus.text = "Открываю системное распознавание речи..."
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                if (!isDestroyed) {
+                    try { speechInput.launch(request) }
+                    catch (_: Exception) {
+                        voiceStatus.text = "Не удалось запустить распознавание речи."
+                    }
+                }
+            }, 550L)
         } catch (_: ActivityNotFoundException) {
             voiceStatus.text = "Служба распознавания речи не установлена. Можно ввести вопрос текстом."
         } catch (_: Exception) {
