@@ -52,14 +52,14 @@ if (-not $cacheHit) {
         }
         $cmd = Get-Command javac.exe -ErrorAction SilentlyContinue
         if ($cmd) { $candidates += (Split-Path -Parent (Split-Path -Parent $cmd.Source)) }
-        foreach ($home in $candidates) {
-            if (-not $home) { continue }
-            $java = Join-Path $home 'bin\java.exe'
-            $javac = Join-Path $home 'bin\javac.exe'
+        foreach ($jdkCandidateHome in $candidates) {
+            if (-not $jdkCandidateHome) { continue }
+            $java = Join-Path $jdkCandidateHome 'bin\java.exe'
+            $javac = Join-Path $jdkCandidateHome 'bin\javac.exe'
             if (-not (Test-Path -LiteralPath $java -PathType Leaf) -or -not (Test-Path -LiteralPath $javac -PathType Leaf)) { continue }
             $ver = ([string](@(& $javac -version 2>$null | Select-Object -First 1))).Trim()
             if ($ver -match '^javac\s+(\d+)' -and [int]$Matches[1] -ge 17 -and [int]$Matches[1] -le 23) {
-                return (Resolve-Path -LiteralPath $home).Path
+                return (Resolve-Path -LiteralPath $jdkCandidateHome).Path
             }
         }
         return $null
