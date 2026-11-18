@@ -133,26 +133,12 @@ try {
         throw 'GitHub Release does not report the expected APK asset. Old releases will not be removed.'
     }
     Write-Host ('ANDROID_GITHUB_RELEASE: https://github.com/' + $releaseRepo + '/releases/tag/' + $tag)
-    # Prune only automatic releases with the fixed Android tag pattern.
+    # Prune only automatic prereleases with our fixed Android tag pattern.
+    # Never touch other releases or their tags.
     $raw = & $gh.Source release list --repo $releaseRepo --limit 500 --json tagName,createdAt,isPrerelease
     if ($LASTEXITCODE -ne 0) { throw 'Could not list old Android releases. No remote cleanup performed.' }
     $allReleases = @($raw | ConvertFrom-Json | Where-Object {
-        $_.tagName -match '^android-v\d+\.\d+\.\d+-[0-9a-fA-F]{10}
-    $keepTags = @($allReleases | Select-Object -First $Keep | ForEach-Object { $_.tagName })
-    $keepTags += $tag
-    foreach ($release in $allReleases) {
-        if ($release.tagName -in $keepTags) { continue }
-        & $gh.Source release delete $release.tagName --repo $releaseRepo --yes --cleanup-tag
-        if ($LASTEXITCODE -eq 0) { Write-Host ('ANDROID_REMOTE_CLEANUP: ' + $release.tagName) }
-        else { Write-Warning ('Could not delete old Android release ' + $release.tagName) }
-    }
-} catch {
-    Write-Warning ('GitHub publication or cleanup incomplete: ' + $_.Exception.Message)
-    Write-Warning 'Desktop APK retained. Release publication will be retried on the next build invocation.'
-} finally {
-    Remove-Item -LiteralPath $notesFile -Force -ErrorAction SilentlyContinue
-}
- -and $_.isPrerelease -eq $true
+        $_.tagName -match '^android-v\d+\.\d+\.\d+-[0-9a-fA-F]{10}$' -and $_.isPrerelease -eq $true
     } | Sort-Object createdAt -Descending)
     $keepTags = @($allReleases | Select-Object -First $Keep | ForEach-Object { $_.tagName })
     $keepTags += $tag
