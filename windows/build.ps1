@@ -151,9 +151,6 @@ try {
 $script:buildOK = $false
 try {
 Build-Stage 'preflight'
-Build-Stage 'brand-icon'
-python windows/build-icon.py
-if ($LASTEXITCODE -ne 0) { throw 'Generating the branded Windows icon failed.' }
 
 # AutoBuilder explicitly sets -StageOnly; no process-name inference.
 
@@ -169,6 +166,10 @@ python -m pip install --upgrade pip
 python -m pip install -e "."
 python -m pip install "pyinstaller>=6.11,<7"
 python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+
+Build-Stage 'brand-icon'
+python windows/build-icon.py
+if ($LASTEXITCODE -ne 0) { throw 'Generating the branded Windows icon failed.' }
 
 # Browser engines are intentionally NOT downloaded or packaged here. Leshy uses
 # an existing system Edge/Chrome/Chromium. If none exists on Windows, runtime
