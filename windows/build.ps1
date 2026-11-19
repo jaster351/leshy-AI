@@ -25,6 +25,60 @@ $liveRoot = Join-Path $repoRoot 'dist\Leshy'
 $liveExe = Join-Path $liveRoot 'Leshy.exe'
 $brainRoot = Join-Path $liveRoot 'LeshyBrain'
 
+. (Join-Path $PSScriptRoot 'build-update-guard.ps1')
+
+function Invoke-AndroidClientBuild {
+  param([string]$RepositoryPath)
+  $androidBuilder = Join-Path $PSScriptRoot 'build-android.ps1'
+  if (-not (Test-Path -LiteralPath $androidBuilder -PathType Leaf)) { throw 'Android builder is missing.' }
+  & $androidBuilder -RepositoryPath $RepositoryPath
+  if (-not $?) { throw 'Android APK build or publication stage failed.' }
+}
+
+function Remove-OldWindowsInstallers {
+  param([string]$RepositoryPath,[string]$CurrentVersion,[int]$Keep=3)
+  $dist = Join-Path $RepositoryPath 'dist'
+  if (-not (Test-Path -LiteralPath $dist -PathType Container)) { return }
+  $currentName = 'LeshySetup-' + $CurrentVersion + '.exe'
+  $old = @(Get-ChildItem -LiteralPath $dist -File -Filter 'LeshySetup-*.exe' |
+      Where-Object { $_.Name -match '^LeshySetup-\d+\.\d+\.\d+\.exe$' } |
+      Sort-Object LastWriteTimeUtc -Descending)
+  $keepPaths = @($old | Select-Object -First $Keep | ForEach-Object { $_.FullName })
+  foreach ($entry in $old) {
+    if ($entry.Name -eq $currentName -or $entry.FullName -in $keepPaths) { continue }
+    try {
+      Remove-Item -LiteralPath $entry.FullName -Force -ErrorAction Stop
+      Write-Host ('OLD_WINDOWS_INSTALLER_REMOVED: ' + $entry.Name)
+    } catch { Write-Warning ('Old installer cleanup failed: ' + $entry.Name + '. ' + $_.Exception.Message) }
+  }
+}
+
+# AutoBuilder explicitly invokes this script with -StageOnly.
+$script:GitCommit = ''
+if (-not $StageOnly) {
+  $script:GitCommit = Get-LocalGitCommit -RepositoryPath $repoRoot
+  $targetInstaller = Join-Path $repoRoot ("dist\LeshySetup-$version.exe")
+  if (Test-LeshyAlreadyBuilt -Commit $script:GitCommit -Version $version -AutoRoot $autoRoot -LiveExe $liveExe -Installer $targetInstaller) {
+    Write-Host ("NO CHANGES: " + $version + " / " + $script:GitCommit.Substring(0,10) + ". Compilation skipped.")
+    Start-LeshyElevated -LiveExe $liveExe -LiveRoot $liveRoot
+    # Avoid re-running Gradle and GitHub Release upload every 15 minutes.
+    # Rebuild the APK only if its own recorded SHA/version or file is missing.
+    $androidReady = $false
+    $androidStateFile = Join-Path $autoRoot 'android-apk\build-state.json'
+    if (Test-Path -LiteralPath $androidStateFile -PathType Leaf) {
+      try {
+        $androidState = Get-Content -LiteralPath $androidStateFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $androidApk = Join-Path $autoRoot ('android-apk\Leshy-Android-' + $version + '-' + $script:GitCommit.Substring(0,10) + '-debug.apk')
+        $androidReady = ([string]$androidState.sha -eq $script:GitCommit -and
+                         [string]$androidState.version -eq $version -and
+                         (Test-Path -LiteralPath $androidApk -PathType Leaf))
+      } catch { }
+    }
+    if (-not $androidReady) { Invoke-AndroidClientBuild -RepositoryPath $repoRoot }
+    return
+  }
+}
+
 # Diagnostic output is a single rotating file beside existing build logs.
 $script:profileFile = Join-Path $autoRoot 'logs\build-performance-latest.log'
 $script:profileMirrorFile = Join-Path $brainRoot 'logs\build-performance-latest.log'
@@ -98,24 +152,7 @@ $script:buildOK = $false
 try {
 Build-Stage 'preflight'
 
-# When AutoBuilder launches this script it owns live deployment/rollback itself.
-# Direct/manual build.ps1 runs publish immediately to dist\Leshy.
-if (-not $StageOnly) {
-  try {
-    $coreRunning = $false
-    foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue)) {
-      $cmdline = [string]$proc.CommandLine
-      if ($cmdline -and $cmdline.IndexOf('autobuilder-core.ps1',[System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        $coreRunning = $true
-        break
-      }
-    }
-    if ($coreRunning) {
-      $StageOnly = $true
-      Write-Host 'AutoBuilder core detected: staging package only; AutoBuilder will publish it safely to dist\Leshy.'
-    }
-  } catch { }
-}
+# AutoBuilder explicitly sets -StageOnly; no process-name inference.
 
 # Validate syntax and imports before expensive pip upgrades or PyInstaller.
 Build-Stage 'local-module-preflight'
@@ -130,6 +167,10 @@ python -m pip install -e "."
 python -m pip install "pyinstaller>=6.11,<7"
 python -m pip install "llama-cpp-python>=0.3.27,<0.4" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 
+Build-Stage 'brand-icon'
+python windows/build-icon.py
+if ($LASTEXITCODE -ne 0) { throw 'Generating the branded Windows icon failed.' }
+
 # Browser engines are intentionally NOT downloaded or packaged here. Leshy uses
 # an existing system Edge/Chrome/Chromium. If none exists on Windows, runtime
 # browser code may install one through winget when a browser module is first used.
@@ -142,8 +183,9 @@ Remove-Item -Recurse -Force $packageDist, $packageWork, $smokePackageRoot -Error
 New-Item -ItemType Directory -Force -Path $packageDist, $packageWork | Out-Null
 
 Build-Stage 'pyinstaller'
-python -m PyInstaller --noconfirm --clean --onedir --console `
+python -m PyInstaller --noconfirm --clean --onedir --windowed `
   --name Leshy `
+  --icon (Join-Path $autoRoot 'brand\Leshy.ico') `
   --paths src `
   --collect-submodules leshy `
   --hidden-import leshy.network_blocking_runtime `
@@ -169,6 +211,8 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --collect-all browser_use `
   --exclude-module browser_use.llm.oci_raw `
   --exclude-module oci `
+  --collect-all pystray `
+  --collect-all PIL `
   --collect-all markitdown `
   --collect-all mcp `
   --collect-all paramiko `
@@ -176,6 +220,7 @@ python -m PyInstaller --noconfirm --clean --onedir --console `
   --collect-all mss `
   --collect-all pyautogui `
   --collect-all pypdf `
+  --add-data "assets;assets" `
   --add-data "web;web" `
   --add-data "resources;resources" `
   --add-data "VERSION;." `
@@ -276,7 +321,8 @@ function Invoke-FrozenSmokeTest {
     $process = Start-Process -FilePath $executable -ArgumentList @(
       '--host', '127.0.0.1',
       '--port', [string]$port,
-      '--no-browser'
+      '--no-browser',
+      '--no-tray'
     ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
 
     $deadline = (Get-Date).AddSeconds(60)
@@ -412,26 +458,13 @@ function Clear-LiveProgramFiles {
 }
 
 function Publish-LiveProgram {
-  Stop-LiveLeshy
-  Clear-LiveProgramFiles
-  foreach ($entry in @(Get-ChildItem -LiteralPath $packageRoot -Force)) {
-    if ($entry.Name -ieq 'LeshyBrain') { continue }
-    Copy-Item -LiteralPath $entry.FullName -Destination $liveRoot -Recurse -Force
-  }
-  if (-not (Test-Path -LiteralPath $liveExe)) { throw "Publishing failed: $liveExe was not created" }
+  Publish-LeshyProgramSafely -PackageRoot $packageRoot -LiveRoot $liveRoot -LiveExe $liveExe -BrainRoot $brainRoot -AutoRoot $autoRoot
 }
 
 # Canonical local output agreed for Leshy:
 #   dist\Leshy\...      compiled runnable program
 #   dist\LeshySetup-*   installer
 # LeshyBrain is persistent user data and is never removed during publication.
-Build-Stage 'publish-or-stage'
-if (-not $StageOnly) {
-  Publish-LiveProgram
-} else {
-  Write-Host 'STAGE ONLY: AutoBuilder will publish the package to dist\Leshy after creating its rollback backup.'
-}
-
 Build-Stage 'inno-setup'
 $isccPath = $null
 $cmd = Get-Command iscc.exe -ErrorAction SilentlyContinue
@@ -454,6 +487,15 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE
 
 $installer = Join-Path $repoRoot ("dist\LeshySetup-$version.exe")
 if (-not (Test-Path -LiteralPath $installer)) { throw "Installer was not created: $installer" }
+
+Build-Stage 'publish-or-stage'
+if (-not $StageOnly) {
+  Publish-LiveProgram
+  Save-LeshyBuiltState -AutoRoot $autoRoot -Commit $script:GitCommit -Version $version -LiveRoot $liveRoot
+  Remove-OldWindowsInstallers -RepositoryPath $repoRoot -CurrentVersion $version
+} else {
+  Write-Host 'STAGE ONLY: AutoBuilder will publish the package to dist\Leshy after creating its rollback backup.'
+}
 
 if (-not $StageOnly) {
   Write-Host "READY RUNTIME: $liveRoot"
@@ -487,4 +529,10 @@ $script:buildOK = $true
       } catch { Write-Warning "Could not publish full build profile into LeshyBrain logs: $($_.Exception.Message)" }
     }
   } catch { }
+}
+
+# Windows build/deployment and profile output have completed.
+# StageOnly remains controlled by the existing AutoBuilder.
+if (-not $StageOnly -and $script:buildOK) {
+  Invoke-AndroidClientBuild -RepositoryPath $repoRoot
 }

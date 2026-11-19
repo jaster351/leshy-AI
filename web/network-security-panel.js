@@ -39,6 +39,7 @@
     card.innerHTML=`
       <h3>Подключение к Лешему: HTTP и HTTPS</h3>
       <p class="hint">HTTP подходит для обычного чата. Для микрофона на телефоне и планшете нужен доверенный HTTPS. Параметры меняет подтверждённый хозяин этого сервера.</p>
+      <p class="hint">По умолчанию сервер принимает подключения на интерфейсах IPv4 и IPv6. Можно использовать любой адрес сервера и любой домен, DNS которого направлен на него. Для HTTPS имя или IP должны входить в сертификат. Адреса 0.0.0.0 и :: обозначают привязку ко всем интерфейсам; в браузере открывают localhost, реальный IP или домен.</p>
       <div class="network-fields">
         <label class="network-check"><input id="networkHttpEnabled" type="checkbox"> Включить HTTP</label>
         <label>Порт HTTP<input id="networkHttpPort" class="field" type="number" min="1" max="65535" step="1" placeholder="8765"></label>
@@ -85,9 +86,15 @@
   }
 
   function listenerText(name,listener,enabled,configuredPort){
-    if(listener?.listening===true)return name+': запущен, порт '+listener.port;
-    if(listener?.listening===false)return name+': не запущен'+(listener.error?' — '+listener.error:'');
-    return name+': состояние запуска не подтверждено; сохранён '+(enabled?'порт '+configuredPort:'выключенный режим');
+    let text=listener?.listening===true?name+': запущен, порт '+listener.port
+      :listener?.listening===false?name+': не запущен'+(listener.error?' — '+listener.error:'')
+      :name+': состояние запуска не подтверждено; сохранён '+(enabled?'порт '+configuredPort:'выключенный режим');
+    const labels={bound:'порт привязан',listening:'работает',unavailable:'семейство недоступно',bind_failed:'ошибка привязки',start_failed:'ошибка запуска',stopped:'остановлен'};
+    for(const binding of listener?.bindings||[]){
+      const address=binding.family==='IPv6'?'['+binding.address+']':binding.address;
+      text+='\n  '+binding.family+' '+address+':'+binding.port+' — '+(labels[binding.status]||'не подтверждено')+(binding.error?' ('+binding.error+')':'');
+    }
+    return text;
   }
 
   function render(data,fill=false){

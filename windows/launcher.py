@@ -153,10 +153,13 @@ def _start_llama_watchdog(brain_root: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="Leshy")
-    parser.add_argument("--host", default=os.getenv("LESHY_HOST", "0.0.0.0"))
+    parser.add_argument("--host", default=os.getenv("LESHY_HOST", "auto"),
+                        help="auto: все интерфейсы IPv4/IPv6; явный адрес ограничивает привязку")
     parser.add_argument("--port", type=int, default=None,
                         help="HTTP-порт: явный параметр, LESHY_PORT, сохранённое значение, затем 8765")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--no-tray", action="store_true", help="Do not create the Windows tray icon")
+    parser.add_argument("--scheduled-start", action="store_true", help="Started by the elevated update task")
     parser.add_argument(
         "--check-native-runtime",
         action="store_true",
@@ -177,6 +180,22 @@ def main() -> None:
     install_root = _install_root()
     brain_root = _brain_root()
     legacy_brain = _legacy_brain()
+    # In a console-free PyInstaller executable sys.stdout/stderr are None.
+    # Keep diagnostic print() output instead of losing it on Windows.
+    if os.name == "nt" and getattr(sys, "frozen", False):
+        log_dir = brain_root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        if sys.stdout is None:
+            sys.stdout = open(log_dir / "launcher.stdout.log", "a", encoding="utf-8", buffering=1)
+        if sys.stderr is None:
+            sys.stderr = open(log_dir / "launcher.stderr.log", "a", encoding="utf-8", buffering=1)
+        if sys.stdin is None:
+            sys.stdin = open(os.devnull, "r", encoding="utf-8")
+
+    if os.name == "nt" and not args.scheduled_start:
+        from leshy.desktop_tray import resume_manually
+        resume_manually(brain_root)
+
 
     os.environ["LESHY_INSTALL_ROOT"] = str(install_root)
     os.environ["LESHY_BRAIN_DIR"] = str(brain_root)
@@ -215,15 +234,64 @@ def main() -> None:
     from leshy.diagnostic_publisher import DiagnosticPublisher
     from leshy.web_server import serve
 
+    # Выделенное окно браузера принадлежит этому Leshy.exe, а не общему профилю
+    # Edge/Chrome. Закрытие Лешего освобождает только его окно.
+    browser_ui = None
+    ready_url = None
+    browser_timer = None
+    browser_closing = False
+    browser_lock = threading.Lock()
+
+    def open_window() -> bool:
+        nonlocal browser_ui
+        with browser_lock:
+            if browser_closing or ready_url is None:
+                return False
+            if os.name == "nt":
+                if browser_ui is None:
+                    from leshy.managed_browser import ManagedBrowser
+                    browser_ui = ManagedBrowser(ready_url)
+                return browser_ui.open()
+            return webbrowser.open(ready_url)
+
+    def on_listening(target_url: str) -> None:
+        nonlocal ready_url, browser_timer
+        with browser_lock:
+            if browser_closing:
+                return
+            ready_url = target_url
+        if not args.no_browser:
+            browser_timer = threading.Timer(0.1, open_window)
+            browser_timer.daemon = True
+            browser_timer.start()
+
+    tray_icon = None
+    if os.name == "nt" and not args.no_tray:
+        try:
+            from leshy.desktop_tray import start_tray
+            tray_icon = start_tray(
+                brain_root,
+                port=args.port or 8765,
+                open_web=open_window,
+            )
+        except Exception as exc:
+            # Never make the actual AI runtime unavailable if the tray fails.
+            print(f"System tray unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
+
     publisher = DiagnosticPublisher(brain_root)
     publisher.start()
     try:
-        def open_browser(target_url: str) -> None:
-            timer = threading.Timer(0.1, lambda: webbrowser.open(target_url))
-            timer.daemon = True
-            timer.start()
-        serve(args.host, args.port, on_listening=None if args.no_browser else open_browser)
+        # Даже --no-browser сохраняет адрес для последующего «Открыть» из трея.
+        serve(args.host, args.port, on_listening=on_listening)
     finally:
+        if browser_timer is not None:
+            browser_timer.cancel()
+        with browser_lock:
+            browser_closing = True
+            if browser_ui is not None:
+                browser_ui.close()
+        if tray_icon is not None:
+            tray_icon.stop()
         publisher.stop()
 
 

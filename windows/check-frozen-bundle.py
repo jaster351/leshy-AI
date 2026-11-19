@@ -25,6 +25,7 @@ REQUIRED_MODULES = (
     "leshy.superagent_rdp_profile",
     "leshy.web_transport_settings",
     "leshy.web_certificates",
+    "leshy.web_listeners",
     "leshy.web_transport_runtime",
     "leshy.web_acme",
     "leshy.web_server_impl18",

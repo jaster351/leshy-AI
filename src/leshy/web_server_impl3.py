@@ -357,7 +357,7 @@ def make_handler(app, telegram, settings, model_catalog):
     return Handler
 
 
-def serve(host: str | None = None, port: int | None = None) -> None:
+def serve(host: str | None = None, port: int | None = None, *, handler_factory=None) -> None:
     started_monotonic = time.monotonic()
     settings = previous.base.Settings.from_env()
     HuggingFaceSettings(settings.brain_dir).apply()
@@ -398,19 +398,23 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     warmup_ready = threading.Event()
     shutdown = threading.Event()
 
-    bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0")
+    bind_host = host or os.getenv("LESHY_HOST", "auto")
     server = WebTransportRuntime(settings.brain_dir, bind_host, port)
     app.web_security = server
     # Метаданные локального узла получают фактически выбранный HTTP-порт.
     os.environ["LESHY_PORT"] = str(server.configuration["http_port"])
     try:
-        handler = make_handler(app, telegram, settings, model_catalog)
+        handler = (handler_factory or make_handler)(app, telegram, settings, model_catalog)
         server.bind(handler)
     except BaseException:
         server.close()
         telegram.stop()
         app.stop_background()
         raise
+
+    # Трей завершает тот же runtime, которому принадлежат все HTTP/HTTPS listeners.
+    from .desktop_tray import register_server, unregister_server, is_shutdown_requested
+    register_server(server)
 
     threading.Thread(
         target=_warmup_soft,
@@ -440,9 +444,14 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     )
     for protocol, state in server.status()["runtime"].items():
         if protocol in {"http", "https"} and state.get("status") == "bound":
-            print(f"Леший {app.status()['version']}: {protocol}://{bind_host}:{state['port']}")
+            targets = ", ".join(f"{item['family']} " +
+                                (f"[{item['address']}]" if ":" in item["address"] else item["address"]) +
+                                f":{item['port']}"
+                                for item in state.get("bindings", []) if item["status"] == "bound")
+            print(f"Леший {app.status()['version']}: {protocol.upper()} слушает {targets}")
     try:
-        server.serve_forever()
+        if not is_shutdown_requested():
+            server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
@@ -450,6 +459,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
         server.close()
         telegram.stop()
         app.stop_background()
+        unregister_server(server)
 
 
 def main() -> None:

@@ -1,18 +1,20 @@
-"""Два HTTP/HTTPS listener используют один обработчик и один экземпляр Лешего."""
+"""HTTP/HTTPS на сетевых интерфейсах используют один handler и экземпляр Лешего."""
 from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
 from http.server import ThreadingHTTPServer
+import errno
+import ipaddress
 import os
 from pathlib import Path
 import socket
-import ssl
 import threading
 from typing import Any, Callable
 
 from .diagnostics import problem
 from .web_certificates import WebCertificateStore, covers_hostname
+from .web_listeners import binding_addresses, create_listener
 from .web_transport_settings import WebTransportSettings, validate_settings
 
 
@@ -29,43 +31,6 @@ def listener_ready(callback: Callable[[str], None] | None):
         _listener_callback.reset(token)
 
 
-class _WebServer(ThreadingHTTPServer):
-    daemon_threads = True
-
-    def get_request(self):
-        connection, address = super().get_request()
-        connection.settimeout(60)
-        return connection, address
-
-
-class _TLSWebServer(_WebServer):
-    def __init__(self, address, handler, certificates):
-        self.certificates = certificates
-        super().__init__(address, handler)
-
-    def get_request(self):
-        connection, address = super().get_request()
-        try:
-            context = self.certificates.context()
-            if context is None:
-                raise ssl.SSLError("HTTPS-сертификат недоступен или просрочен")
-            connection = context.wrap_socket(connection, server_side=True, do_handshake_on_connect=False)
-            connection.settimeout(10)
-            return connection, address
-        except Exception:
-            connection.close()
-            raise
-
-    def process_request_thread(self, request, client_address):
-        try:
-            request.do_handshake()
-            request.settimeout(60)
-        except (OSError, ssl.SSLError):
-            self.shutdown_request(request)
-            return
-        super().process_request_thread(request, client_address)
-
-
 class WebTransportRuntime:
     def __init__(self, brain_dir: Path | str, host: str, explicit_http_port: int | None = None):
         self.settings = WebTransportSettings(brain_dir)
@@ -76,8 +41,9 @@ class WebTransportRuntime:
         self._on_listening = _listener_callback.get()
         self.lock = threading.RLock()
         self.certificates = WebCertificateStore(brain_dir, lambda: self.settings.load()["hostname"])
-        self._servers: dict[str, _WebServer] = {}
+        self._servers: dict[str, ThreadingHTTPServer] = {}
         self._threads: dict[str, threading.Thread] = {}
+        self._bindings: dict[str, dict[str, Any]] = {}
         self._states: dict[str, dict[str, Any]] = {
             name: {"enabled": self.configuration[name + "_enabled"],
                    "port": self.configuration[name + "_port"], "listening": False,
@@ -97,36 +63,130 @@ class WebTransportRuntime:
     def listening_url(self) -> str | None:
         """Только реально запущенный listener; не открывать чужой сервис на занятом порте."""
         with self.lock:
-            http = self._states["http"]
-            if http["listening"] and self._threads["http"].is_alive():
-                host = "127.0.0.1" if self.host in {"", "0.0.0.0"} else "::1" if self.host == "::" else self.host
-                if ":" in host:
-                    host = "[" + host + "]"
-                return f"http://{host}:{http['port']}/"
-            https = self._states["https"]
-            host = self.configuration["hostname"]
-            if (https["listening"] and self._threads["https"].is_alive() and host
-                    and self.certificates.context() is not None
-                    and covers_hostname(self.certificates.status(), host)):
-                if ":" in host:
-                    host = "[" + host + "]"
-                return f"https://{host}:{https['port']}/"
+            for protocol in ("http", "https"):
+                if not self._states[protocol]["listening"]:
+                    continue
+                for name, thread in self._threads.items():
+                    if self._protocol(name) != protocol or not thread.is_alive():
+                        continue
+                    binding = self._bindings.get(name, self._states[protocol])
+                    if not binding["listening"]:
+                        continue
+                    if protocol == "https":
+                        host = self.configuration["hostname"]
+                        if (not host or self.certificates.context() is None
+                                or not covers_hostname(self.certificates.status(), host)):
+                            continue
+                    else:
+                        host = binding.get("address", self.host)
+                        host = "127.0.0.1" if host in {"", "auto", "0.0.0.0"} else "::1" if host == "::" else host
+                    if ":" in host:
+                        host = "[" + host.replace("%", "%25") + "]"
+                    return f"{protocol}://{host}:{binding['port']}/"
             return None
 
+    def cluster_profile(self, local_ipv4: str) -> dict:
+        """Кандидат endpoint по живым привязкам; внешняя достижимость не доказана."""
+        unavailable = {"endpoint": None, "accepts_remote": False,
+                       "reason": "Нет пригодного входящего HTTP/HTTPS endpoint; проверьте адрес, SAN или явный advertise",
+                       "reachability_verified": False}
+        with self.lock:
+            for protocol in ("http", "https"):
+                if not self._states[protocol]["listening"]:
+                    continue
+                for name, thread in self._threads.items():
+                    if self._protocol(name) != protocol or not thread.is_alive():
+                        continue
+                    binding = self._bindings.get(name)
+                    if not binding or not binding["listening"]:
+                        continue
+                    try:
+                        address = ipaddress.ip_address(binding["address"].split("%", 1)[0])
+                    except ValueError:
+                        continue
+                    if address.is_loopback:
+                        continue
+                    if protocol == "https":
+                        host = self.configuration["hostname"]
+                        if (not host or host == "localhost" or host.endswith(".localhost")
+                                or self.certificates.context() is None
+                                or not covers_hostname(self.certificates.status(), host)):
+                            continue
+                        try:
+                            target = ipaddress.ip_address(host)
+                            if target.is_loopback or target.is_unspecified or (target.version == 6 and target.is_link_local):
+                                continue
+                        except ValueError:
+                            pass
+                    else:
+                        if address.is_unspecified:
+                            if address.version != 4:
+                                continue  # Не изобретать удалённый IPv6 адрес из wildcard ::.
+                            try:
+                                address = ipaddress.IPv4Address(local_ipv4)
+                            except ValueError:
+                                continue
+                        if address.is_loopback or address.is_unspecified or (address.version == 6 and address.is_link_local):
+                            continue
+                        host = str(address)
+                    if ":" in host:
+                        host = "[" + host.replace("%", "%25") + "]"
+                    return {"endpoint": f"{protocol}://{host}:{binding['port']}", "accepts_remote": True,
+                            "reason": "Кандидат по работающему listener; DNS/сеть и доверие CA у соседей не проверены",
+                            "reachability_verified": False}
+        return unavailable
+
+    @staticmethod
+    def _protocol(name: str) -> str:
+        return name.split("/", 1)[0]
+
+    def _refresh_protocol(self, protocol: str) -> None:
+        """Под self.lock; каждое семейство сохраняет собственный фактический результат."""
+        bindings = [item for name, item in self._bindings.items() if self._protocol(name) == protocol]
+        if not bindings:
+            return
+        listening = any(item["listening"] for item in bindings)
+        bound = any(item["status"] == "bound" for item in bindings)
+        stopped = any(item["status"] == "stopped" for item in bindings)
+        state = "listening" if listening else "bound" if bound else "stopped" if stopped else "bind_failed"
+        self._states[protocol].update(listening=listening, status=state,
+                                     error="" if listening or bound else "Нет доступной привязки " + protocol.upper())
+
     def _bind(self, protocol: str) -> None:
-        if protocol in self._servers or not self.configuration[protocol + "_enabled"]:
+        if (any(self._protocol(name) == protocol for name in self._servers)
+                or not self.configuration[protocol + "_enabled"]):
             return
         if protocol == "https" and self.certificates.context() is None:
             self._states[protocol].update(status="waiting_certificate", listening=False,
                                          error="Загрузите действующий сертификат или получите его через ACME")
             return
-        base = _TLSWebServer if protocol == "https" else _WebServer
-        server_class = type("IPv6WebServer", (base,), {"address_family": socket.AF_INET6}) if ":" in self.host else base
-        address = (self.host, self.configuration[protocol + "_port"])
-        server = (server_class(address, self._handler, self.certificates) if protocol == "https"
-                  else server_class(address, self._handler))
-        self._servers[protocol] = server
-        self._states[protocol].update(status="bound", port=server.server_address[1], listening=False, error="")
+        candidates = binding_addresses(self.host, self.configuration[protocol + "_port"])
+        last_error = None
+        for index, (family, address) in enumerate(candidates):
+            name = protocol if index == 0 else protocol + "/" + str(index)
+            binding = {"family": "IPv6" if family == socket.AF_INET6 else "IPv4",
+                       "address": address[0], "port": address[1], "listening": False, "status": "not_started"}
+            self._bindings[name] = binding
+            try:
+                server = create_listener(family, address, self._handler,
+                                         self.certificates if protocol == "https" else None)
+            except OSError as exc:
+                last_error = exc
+                unavailable = exc.errno in {errno.EAFNOSUPPORT, errno.EPROTONOSUPPORT, errno.ENOPROTOOPT,
+                                           10047, 10043, 10042}
+                binding.update(status="unavailable" if unavailable else "bind_failed",
+                               error="Семейство адресов недоступно" if unavailable else "Адрес или порт занят либо недоступен")
+                continue
+            self._servers[name] = server
+            binding.update(address=server.server_address[0], port=server.server_address[1], status="bound")
+            if len(server.server_address) > 3 and server.server_address[3] and "%" not in binding["address"]:
+                binding["address"] += "%" + str(server.server_address[3])
+            self._states[protocol]["port"] = server.server_address[1]
+        self._refresh_protocol(protocol)
+        if not any(self._protocol(name) == protocol for name in self._servers):
+            if last_error is not None:
+                raise last_error
+            raise OSError("Не найдены подходящие адреса для привязки")
 
     def bind(self, handler) -> None:
         with self.lock:
@@ -139,7 +199,7 @@ class WebTransportRuntime:
                         self._states[name].update(status="bind_failed", listening=False,
                                                   error="Порт " + name.upper() + " занят или недоступен")
                 if not self._servers:
-                    raise RuntimeError("Нет доступного listener: для режима только HTTPS нужен действующий сертификат")
+                    raise RuntimeError("Ни одна HTTP/HTTPS привязка недоступна; проверьте адреса, порты и сертификат")
             except BaseException:
                 for server in self._servers.values():
                     server.server_close()
@@ -150,6 +210,8 @@ class WebTransportRuntime:
         if name in self._threads:
             return
         server = self._servers[name]
+        protocol = self._protocol(name)
+        binding = self._bindings[name]
 
         def run() -> None:
             try:
@@ -158,7 +220,8 @@ class WebTransportRuntime:
                 problem("web_listener_failed", type(exc).__name__, protocol=name)
             finally:
                 with self.lock:
-                    self._states[name].update(listening=False, status="stopped")
+                    binding.update(listening=False, status="stopped")
+                    self._refresh_protocol(protocol)
 
         thread = threading.Thread(target=run, name="leshy-" + name, daemon=True)
         self._threads[name] = thread
@@ -168,15 +231,28 @@ class WebTransportRuntime:
             self._threads.pop(name, None)
             server.server_close()
             self._servers.pop(name, None)
-            self._states[name].update(listening=False, status="start_failed")
+            binding.update(listening=False, status="start_failed", error="Не удалось запустить обработчик")
+            self._refresh_protocol(protocol)
             raise
-        self._states[name].update(listening=True, status="listening")
+        binding.update(listening=True, status="listening")
+        self._refresh_protocol(protocol)
 
     def serve_forever(self) -> None:
         with self.lock:
+            if self._stopping.is_set():
+                return
             self._running = True
             for name in list(self._servers):
-                self._start_server(name)
+                if self._stopping.is_set():
+                    break
+                try:
+                    self._start_server(name)
+                except (OSError, RuntimeError) as exc:
+                    problem("web_listener_start_failed", type(exc).__name__, protocol=self._protocol(name))
+            if self._stopping.is_set():
+                return
+            if not any(thread.is_alive() for thread in self._threads.values()):
+                raise RuntimeError("Не запущен ни один HTTP/HTTPS обработчик")
         self.acme.start()
         if self._on_listening:
             callback, self._on_listening = self._on_listening, None
@@ -212,10 +288,18 @@ class WebTransportRuntime:
                 raise RuntimeError("Сервер останавливается; сертификат не изменён")
             value = self.certificates.install_prepared(prepared)
             # Новые TLS-соединения получают новый контекст. Существующие не обрываем.
-            if self._running and self.configuration["https_enabled"] and "https" not in self._servers:
+            if (self._running and self.configuration["https_enabled"]
+                    and not any(self._protocol(name) == "https" for name in self._servers)):
                 try:
                     self._bind("https")
-                    self._start_server("https")
+                    for name in list(self._servers):
+                        if self._protocol(name) == "https":
+                            try:
+                                self._start_server(name)
+                            except (OSError, RuntimeError):
+                                pass
+                    if not self._states["https"]["listening"]:
+                        raise RuntimeError("HTTPS не запущен")
                 except (OSError, RuntimeError):
                     self._states["https"].update(status="bind_failed", listening=False,
                                                  error="Сертификат сохранён; порт HTTPS занят или недоступен")
@@ -253,6 +337,9 @@ class WebTransportRuntime:
         with self.lock:
             value = self.settings.load()
             states = {name: dict(state) for name, state in self._states.items()}
+            for protocol, state in states.items():
+                state["bindings"] = [dict(binding) for name, binding in self._bindings.items()
+                                     if self._protocol(name) == protocol]
             certificate = self.certificates.status()
             certificate["hostname_matches_settings"] = covers_hostname(certificate, value["hostname"])
             certificate["active_for_new_connections"] = bool(states["https"]["listening"] and certificate.get("valid"))
@@ -264,6 +351,10 @@ class WebTransportRuntime:
                 "acme": self.acme.status(),
                 "capabilities": {"configure": True, "import_certificate": True,
                                  "acme": True, "browser_trust_verified": False}}
+
+    def shutdown(self) -> None:
+        """Совместимый сигнал Windows tray; cleanup выполняет основной serve/finally."""
+        self._stopping.set()
 
     def close(self) -> None:
         self._stopping.set()
@@ -285,3 +376,5 @@ class WebTransportRuntime:
             self._running = False
             for state in self._states.values():
                 state.update(listening=False, status="stopped")
+            for binding in self._bindings.values():
+                binding.update(listening=False, status="stopped")

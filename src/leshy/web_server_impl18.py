@@ -12,6 +12,8 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 from . import web_server_impl17 as previous
+from . import web_server_impl3 as core
+from .web_server_impl6 import prepare_runtime
 from .diagnostics import problem
 from .web_transport_runtime import listener_ready
 
@@ -220,13 +222,11 @@ def make_handler(app, telegram, settings, model_catalog):
 
 def serve(host: str | None = None, port: int | None = None,
           on_listening: Callable[[str], None] | None = None) -> None:
-    original = previous.make_handler
-    previous.make_handler = make_handler
-    try:
-        with listener_ready(on_listening):
-            previous.serve(host=host, port=port)
-    finally:
-        previous.make_handler = original
+    # Подготовка до LeshyApp сохранена; фабрика принадлежит конкретному запуску.
+    # Старые serve-обёртки временно меняют глобальные фабрики и здесь не вызываются.
+    prepare_runtime()
+    with listener_ready(on_listening):
+        core.serve(host=host, port=port, handler_factory=make_handler)
 
 
 def main() -> None:

@@ -212,17 +212,24 @@ def install_superagent_routing(app_class, app=None) -> None:
         intent = parse_superagent_intent(value) if _enabled(self) else None
         if intent is None:
             return _ORIGINAL_CHAT(self, value, owner_id=owner, session_id=session_id)
-        sid = _save_user(self, value, owner, session_id)
-        answer = _execute(_service(self), intent, owner, sid)
-        created_at = self._save_assistant(sid, answer)
-        event("superagent_chat_command", session_id=sid, owner_id=owner, action=intent.action, ticket_id=intent.ticket_id)
-        return {
-            "session_id": sid,
-            "answer": answer,
-            "created_at": created_at,
-            "sources": [],
-            "superagent": True,
-        }
+        tracker = getattr(self, "conversation_activity", None)
+        if tracker is not None:
+            tracker.begin()
+        try:
+            sid = _save_user(self, value, owner, session_id)
+            answer = _execute(_service(self), intent, owner, sid)
+            created_at = self._save_assistant(sid, answer)
+            event("superagent_chat_command", session_id=sid, owner_id=owner, action=intent.action, ticket_id=intent.ticket_id)
+            return {
+                "session_id": sid,
+                "answer": answer,
+                "created_at": created_at,
+                "sources": [],
+                "superagent": True,
+            }
+        finally:
+            if tracker is not None:
+                tracker.end()
 
     def stop_background(self) -> None:
         service = getattr(self, "superagent", None)
