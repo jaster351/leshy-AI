@@ -189,6 +189,26 @@ class RepositoryKnowledgeTests(unittest.TestCase):
         self.assertEqual(matches, [])
         self.assertEqual(self.rows(), [])
 
+    def test_lookup_does_not_match_substrings_inside_other_words(self):
+        record = {**self.record, "topic": "Котировки", "claim": "Цена акций растёт."}
+        self.write(record)
+        self._write_catalog_index({
+            record["id"]: {
+                "version": 1, "package": "knowledge/updates/batch.jsonl",
+                "review_status": "verified",
+            },
+        })
+        self.assertEqual(find_catalog_matches(self.catalog, "кот"), [])
+        self.assertEqual(len(find_catalog_matches(self.catalog, "котировки")), 1)
+
+    def test_lookup_skips_corrupt_or_incomplete_index(self):
+        self.write(self.record)
+        index = self.catalog / "index.json"
+        index.write_text('{"schema_version":1,"records":', encoding="utf-8")
+        self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
+        index.write_bytes(bytes([255]))
+        self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
+
     def test_lookup_requires_a_current_catalog_index(self):
         self.write(self.record)
         self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
