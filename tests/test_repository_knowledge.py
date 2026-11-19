@@ -189,6 +189,24 @@ class RepositoryKnowledgeTests(unittest.TestCase):
         self.assertEqual(matches, [])
         self.assertEqual(self.rows(), [])
 
+    def test_lookup_rejects_truncated_or_non_utf8_index_without_importing(self):
+        self.write(self.record)
+        index = self.catalog / "index.json"
+        for invalid in (b'{"records":', bytes([255, 254])):
+            index.write_bytes(invalid)
+            self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
+            self.assertEqual(
+                load_relevant_catalog_knowledge(
+                    self.knowledge, self.catalog, "public fact", enabled=True,
+                ), [],
+            )
+            self.assertEqual(self.rows(), [])
+
+    def test_lookup_rejects_missing_index_during_refresh(self):
+        self.write(self.record)
+        self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
+        self.assertEqual(self.rows(), [])
+
     def test_lookup_requires_a_current_catalog_index(self):
         self.write(self.record)
         self.assertEqual(find_catalog_matches(self.catalog, "public fact"), [])
