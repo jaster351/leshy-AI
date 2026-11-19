@@ -172,18 +172,28 @@ def save_owner_document(app: Any, owner_id: str, session_id: str, request: str) 
             "Перезапуск и синхронизация с другими узлами не проверены.")
 
 def is_owner_document_status_request(message: str) -> bool:
-    """A question about whether the Cloud4box document was saved."""
-    text = " ".join(str(message or "").casefold().replace("ё", "е").split())
-    if is_owner_document_save_request(message):
+    """Only a short, explicit check of this profile's Cloud4box document.
+
+    Broad words such as 'instructions', 'check', 'Knowledge' or 'rules'
+    inside an unrelated multi-step task are NOT sufficient.
+    """
+    original = str(message or "").strip()
+    if not original or len(original) > 320 or "\n" in original or "\r" in original:
         return False
-    if not any(term in text for term in ("cloud4box", "инструкц", "техподдерж")):
+    text = " ".join(original.casefold().replace("ё", "е").split())
+    if "cloud4box" not in text or is_owner_document_save_request(message):
         return False
-    return bool(
-        any(term in text for term in ("сохранил", "сохранена", "сохранилось",
-                                      "сохранилась", "записана", "записал", "провер",
-                                      "где хранится", "где лежит"))
-        and any(term in text for term in ("памят", "knowledge", "инструкц", "правил", "запис"))
-    )
+    if not re.match(
+        r"^(?:леший[,!:]?\s+)?(?:проверь|проверить|проверка|"
+        r"покажи|где|сохранил|сохранена|сохранилась|"
+        r"сохранились|что\s+сохранено|какая\s+инструкция|"
+        r"ты\s+сохранил|ты\s+запомнил)\b",
+        text,
+    ):
+        return False
+    return any(term in text for term in (
+        "памят", "knowledge", "инструкц", "правил", "запис", "leshybrain",
+    ))
 
 
 def owner_document_status(storage, owner_id: str) -> str:

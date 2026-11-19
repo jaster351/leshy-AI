@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .llm import ChatMessage
+from .long_instruction_context import structured_task_outline
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,21 @@ def apply_context_budget(messages: list[ChatMessage], *, context_size: int,
     partial_dialogue: dict[int, ChatMessage] = {}
     parts = list(paragraphs)
     truncated = 0
+
+    # The full original message is already present in incoming messages.
+    # If it cannot fit in the model's n_ctx, retain a precise section outline
+    # instead of silently removing an instruction-heavy middle. The outline
+    # explicitly distinguishes context compaction from input truncation.
+    if latest_user is not None and len(dialogue[latest_user].content) >= 4200:
+        outline = structured_task_outline(
+            dialogue[latest_user].content,
+            max_chars=max(800, min(3000, budget // 2)),
+        )
+        if outline:
+            partial_dialogue[latest_user] = ChatMessage(
+                dialogue[latest_user].role, outline,
+            )
+            truncated += 1
 
     def render() -> list[ChatMessage]:
         system_content = "\n\n".join(parts[i] for i in sorted(selected_parts))

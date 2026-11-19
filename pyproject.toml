@@ -23,6 +23,8 @@ dependencies = [
   "mcp>=2,<3",
   "mss>=10,<11",
   "pyautogui>=0.9.54,<1",
+  "pystray>=0.19.5,<0.20; platform_system == 'Windows'",
+  "Pillow>=10,<13; platform_system == 'Windows'",
   "huggingface_hub>=0.36,<2",
   "hf_xet>=1.1,<2",
   "phonenumbers>=8.13,<10",
