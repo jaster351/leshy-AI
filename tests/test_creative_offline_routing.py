@@ -83,7 +83,7 @@ class _App:
     def _needs_live_search(self, message):
         return False
 
-    def _memory_context(self, owner_id):
+    def _memory_context(self, owner_id, **kwargs):
         return ""
 
     def live_search(self, *_args, **_kwargs):

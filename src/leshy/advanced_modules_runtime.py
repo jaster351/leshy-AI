@@ -194,14 +194,19 @@ def _handle_advanced(app, kind: str, payload: str, *, owner_id: str, session_id:
 
 
 
-def _compose_memory_context(app, owner_id: str, original: str) -> str:
+def _compose_memory_context(app, owner_id: str, original: str, *,
+                            query: str | None = None, capture_text: str | None = None) -> str:
     """Всегда сохранять проверенные правила базового профиля поверх Mem0 и GraphRAG."""
-    query = app.intelligent_memory.latest_user_query(owner_id)
     blocks: list[str] = []
     if original:
         blocks.append(original)
+    # Нет текущего запроса — сохраняем профиль, но не угадываем тему по последнему
+    # сообщению владельца: оно может принадлежать параллельному другому чату.
+    if not isinstance(query, str) or not query.strip():
+        return "\n\n".join(blocks)
     if module_enabled(app.storage, "intelligent-memory"):
-        memory = app.intelligent_memory.context(owner_id, query, limit=8)
+        memory = app.intelligent_memory.context(
+            owner_id, query, limit=8, capture_text=capture_text if isinstance(capture_text, str) else "")
         if memory:
             # В исходном контексте уже есть постоянные правила и обычная память.
             # Снова найденные записи не должны расходовать токены повторно.
@@ -232,10 +237,11 @@ def install_advanced_modules(app_class, app=None) -> None:
     _ORIGINAL_MEMORY_CONTEXT = app_class._memory_context
     _ORIGINAL_STOP_BACKGROUND = app_class.stop_background
 
-    def memory_context(self, owner_id: str) -> str:
+    def memory_context(self, owner_id: str, *, query: str | None = None,
+                       capture_text: str | None = None) -> str:
         _ensure_components(self)
-        original = _ORIGINAL_MEMORY_CONTEXT(self, owner_id)
-        return _compose_memory_context(self, owner_id, original)
+        original = _ORIGINAL_MEMORY_CONTEXT(self, owner_id, query=query, capture_text=capture_text)
+        return _compose_memory_context(self, owner_id, original, query=query, capture_text=capture_text)
 
     def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None, **kwargs):
         _ensure_components(self)

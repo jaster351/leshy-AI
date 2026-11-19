@@ -271,7 +271,8 @@ class LeshyApp:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def _memory_context(self, owner_id: str) -> str:
+    def _memory_context(self, owner_id: str, *, query: str | None = None,
+                        capture_text: str | None = None) -> str:
         # Explicit owner rules are always loaded; unrelated memories remain bounded.
         # Neither path is controlled by the background self-learning toggle.
         rules = persistent_rule_context(self.storage, owner_id)
@@ -529,7 +530,7 @@ class LeshyApp:
         owner_knowledge = owner_document_context(self.storage, owner_id, message)
         if owner_knowledge:
             context.append(ChatMessage("system", owner_knowledge))
-        memory_context = self._memory_context(owner_id)
+        memory_context = self._memory_context(owner_id, query=lookup_query, capture_text=message)
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
         try:

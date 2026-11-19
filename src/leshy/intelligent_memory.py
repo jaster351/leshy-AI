@@ -227,10 +227,13 @@ class IntelligentMemoryEngine:
         return bool(row and str(row["value"]).strip().lower() in
                     {"1", "true", "yes", "on"})
 
-    def context(self, owner_id: str, query: str, *, limit: int = 8) -> str:
+    def context(self, owner_id: str, query: str, *, limit: int = 8,
+                capture_text: str | None = None) -> str:
         try:
             if self._auto_learning_enabled():
-                self.capture_if_useful(owner_id, query)
+                # Уточнённая тема поиска может быть синтезирована из истории.
+                # В чате сохраняем только исходные слова текущего пользователя.
+                self.capture_if_useful(owner_id, query if capture_text is None else capture_text)
             matches = self.retrieve(owner_id, query, limit=limit)
         except Exception as exc:
             problem("intelligent_memory_context_failed", str(exc), owner_id=str(owner_id or "")[:200])
