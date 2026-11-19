@@ -218,10 +218,12 @@ class AndroidPairing:
             return None
         hashed = hashlib.sha256(token.encode("ascii")).hexdigest()
         with self._lock:
-            for record in self._devices().values():
+            for device_id, record in self._devices().items():
                 fingerprint = str(record.get("sha256") or "")
                 if len(fingerprint) == 64 and hmac.compare_digest(fingerprint, hashed):
-                    return str(record.get("owner_id") or "") or None
+                    # Voice profile is per-device until the current speaker is
+                    # explicitly identified; avoid exposing owner chat history.
+                    return "android-device:" + device_id
         return None
 
     def list_devices(self, owner_id: str) -> list[dict]:
