@@ -174,12 +174,20 @@
 
   function pauseLegacyForCall(){
     if(callPaused)return;
-    resumeLegacy=recognitionRunning&&voiceEnabled&&!recognitionFailed&&localStorage.getItem(voiceKey)==='1';
+    resumeLegacy=(recognitionRunning||recognitionStarting)&&voiceEnabled&&!recognitionFailed&&localStorage.getItem(voiceKey)==='1';
     callPaused=true;resumeApproved=false;legacyEpoch+=1;clearTimeout(restartTimer);
     armed=false;lastVoiceCommandAt=0;pendingStartedAt=0;
     if(legacySpeech&&'speechSynthesis'in window){legacySpeech=null;try{speechSynthesis.cancel()}catch(_e){}}
     if(recognition){try{recognition.abort()}catch(_e){}}
     updateButtons();setState('idle','Wake-word временно приостановлен на время голосового разговора или диктовки.');
+  }
+
+  function stopLegacyAfterCall(){
+    if(callActive())return;
+    legacyEpoch+=1;resumeLegacy=false;resumeApproved=false;callPaused=false;voiceEnabled=false;
+    clearTimeout(restartTimer);armed=false;lastVoiceCommandAt=0;pendingStartedAt=0;
+    if(recognition){try{recognition.abort()}catch(_e){}}
+    updateButtons();setState('idle','Wake-word выключен. Для повторного запуска нажмите «Микрофон».');
   }
 
   async function resumeLegacyAfterCall(){
@@ -188,13 +196,13 @@
     const epoch=legacyEpoch;resumeChecking=true;
     try{
       // При неизвестном разрешении не вызываем getUserMedia и не открываем новый prompt.
-      if(!navigator.permissions?.query){resumeLegacy=false;return;}
+      if(!navigator.permissions?.query){stopLegacyAfterCall();return;}
       const permission=await navigator.permissions.query({name:'microphone'});
-      if(permission.state!=='granted'){resumeLegacy=false;return;}
       if(epoch!==legacyEpoch||callActive()||document.hidden
         ||!resumeLegacy||!voiceEnabled||recognitionFailed||localStorage.getItem(voiceKey)!=='1')return;
+      if(permission.state!=='granted'){stopLegacyAfterCall();return;}
       resumeApproved=true;startRecognition(true);
-    }catch(_e){resumeLegacy=false;}
+    }catch(_e){if(epoch===legacyEpoch)stopLegacyAfterCall();}
     finally{resumeChecking=false;}
   }
 
@@ -204,8 +212,9 @@
     if(!callPaused)return;
     if(detail.phase==='error'||detail.error||document.hidden
       ||['background','session-changed','chat-navigation'].includes(detail.reason)){
-      resumeLegacy=false;return;
+      stopLegacyAfterCall();return;
     }
+    if(!resumeLegacy){stopLegacyAfterCall();return;}
     void resumeLegacyAfterCall();
   }
 
@@ -226,7 +235,7 @@
     if(!Recognition)return null;const r=new Recognition();r.lang='ru-RU';r.continuous=true;r.interimResults=false;r.maxAlternatives=1;
     r.onstart=()=>{
       recognitionStarting=false;
-      if(callActive()||document.hidden||(callPaused&&!resumeApproved)){try{r.abort()}catch(_e){}return;}
+      if(!voiceEnabled||callActive()||document.hidden||(callPaused&&!resumeApproved)){try{r.abort()}catch(_e){}return;}
       callPaused=false;resumeApproved=false;resumeLegacy=false;recognitionRunning=true;recognitionFailed=false;
       updateButtons();setState('listening','Ожидаю ключевую фразу.');
     };
@@ -249,7 +258,7 @@
     if(!voiceEnabled||!Recognition||callActive()||document.hidden||(callPaused&&!resume)||recognitionRunning||recognitionStarting)return;
     if(!recognition)recognition=createRecognition();recognitionStarting=true;
     try{recognition.start();if(!resume)setState('listening','Ожидаю ключевую фразу.');}
-    catch(_e){recognitionStarting=false;if(resume){resumeLegacy=false;resumeApproved=false;}}
+    catch(_e){recognitionStarting=false;if(resume)stopLegacyAfterCall();}
   }
   function stopRecognition(){clearTimeout(restartTimer);armed=false;if(recognition)try{recognition.stop();}catch(_e){}setState('idle','Голосовой режим выключен.');}
   async function enableVoice(){
@@ -262,7 +271,7 @@
   function toggleVoice(){if(voiceEnabled)disableVoice();else enableVoice();}
 
   function speak(text){
-    if(callActive()||callPaused||!voiceReply()||!('speechSynthesis'in window)||Date.now()-lastVoiceCommandAt>120000)return;const clean=String(text||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();if(!clean)return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(clean);legacySpeech=u;u.lang='ru-RU';u.rate=1;u.pitch=.95;
+    if(!voiceEnabled||callActive()||callPaused||!voiceReply()||!('speechSynthesis'in window)||Date.now()-lastVoiceCommandAt>120000)return;const clean=String(text||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim();if(!clean)return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(clean);legacySpeech=u;u.lang='ru-RU';u.rate=1;u.pitch=.95;
     u.onstart=()=>{if(callActive()||callPaused){speechSynthesis.cancel();return;}setState('speaking','Озвучиваю ответ.');};
     u.onend=()=>{if(legacySpeech===u)legacySpeech=null;if(!callActive()&&!callPaused)setState(voiceEnabled?'listening':'idle',voiceEnabled?'Ожидаю ключевую фразу.':'Готов.');};
     u.onerror=()=>{if(legacySpeech===u)legacySpeech=null;if(!callActive()&&!callPaused)setState(voiceEnabled?'listening':'idle','Не удалось озвучить ответ.');};speechSynthesis.speak(u);

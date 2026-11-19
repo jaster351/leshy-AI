@@ -337,7 +337,7 @@
       const onDone=event=>{
         const detail=event.detail||{};
         if(!pending.requestId||detail.request_id!==pending.requestId)return;
-        if(!current(epoch)){pending.settle(cancelled());return}
+        try{requireSession(epoch)}catch(error){pending.settle(error);return}
         if(detail.session_id&&detail.session_id!==currentSession()){
           pending.settle(new Error('Текущий чат изменился. Голосовой ответ не воспроизводится.'));return;
         }
@@ -361,7 +361,7 @@
         // multitask-контроллер возвращает undefined и завершает ход событием done.
         Promise.resolve(returned).then(result=>{
           if(pending.settled)return;
-          if(!current(epoch)){pending.settle(cancelled());return}
+          try{requireSession(epoch)}catch(error){pending.settle(error);return}
           if(result&&typeof result.answer==='string'){
             if(result.session_id&&result.session_id!==currentSession())pending.settle(new Error('Текущий чат изменился. Голосовой ответ не воспроизводится.'));
             else if(result.error)pending.settle(new Error(result.error));
@@ -383,7 +383,8 @@
   }
 
   async function speak(answer,epoch){
-    const text=speechText(answer);if(!text||!current(epoch))return;
+    requireSession(epoch);
+    const text=speechText(answer);if(!text)return;
     phase('thinking','preparing-speech');
     const blob=await voiceRequest('/v1/voice/speak',{
       method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text}),
@@ -392,8 +393,8 @@
     if(!blob.size)throw new Error('Сервер вернул пустую озвучку.');
     const context=state.outputContext;
     if(!context||context.state!=='running')throw new Error('Браузер приостановил звук. Разрешите воспроизведение для сайта и снова нажмите «Позвонить».');
-    const encoded=await blob.arrayBuffer();if(!current(epoch))return;
-    const decoded=await decodeSpeech(context,encoded);if(!current(epoch))return;
+    const encoded=await blob.arrayBuffer();requireSession(epoch);
+    const decoded=await decodeSpeech(context,encoded);requireSession(epoch);
     if(context.state!=='running')throw new Error('Браузер приостановил звук. Снова нажмите «Позвонить».');
     const source=context.createBufferSource();source.buffer=decoded;source.connect(context.destination);
     try{
@@ -529,9 +530,12 @@
         transcribe(capture).catch(error=>{if(currentCapture(capture))fail(error)});
       },SNAPSHOT_INTERVAL_MS);
       capture.maxTimer=setTimeout(()=>{
-        if(currentCapture(capture))void finishTurn(capture,{
-          send:state.mode==='conversation',keepSession:state.mode==='conversation',
-        });
+        if(!currentCapture(capture)||!capture.recording||capture.finishing)return;
+        if(state.mode==='conversation'){
+          fail(new Error(capture.speechSeen
+            ?'Достигнут предел записи 4 минуты без завершения реплики. Она не отправлена. Проверьте черновик и снова нажмите «Позвонить».'
+            :'За 4 минуты речь не обнаружена. Разговор остановлен без отправки. Снова нажмите «Позвонить».'));
+        }else void finishTurn(capture,{send:false,keepSession:false});
       },MAX_RECORDING_MS);
     }catch(error){
       if(current(epoch)){
