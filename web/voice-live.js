@@ -6,6 +6,10 @@
   const MAX_BUFFER_BYTES=8*1024*1024;
   const SNAPSHOT_INTERVAL_MS=3500;
   const MIN_ASR_BYTES=8000;
+  const ASR_BUSY_REJECTION='Локальный ASR уже обрабатывает предыдущий фрагмент. Повторите после его завершения.';
+  const ASR_BUSY_WAIT_MS=1500;
+  const ASR_BUSY_TIMEOUT_MS=30000;
+  const MAX_ASR_BUSY_RETRIES=20;
   const STOP_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>';
   const state={
     enabled:false,mode:'conversation',phase:'off',error:'',recording:false,speaking:false,level:0,
@@ -95,7 +99,12 @@
       }));
       if(!response.ok){
         const data=await response.json().catch(()=>({}));
-        throw new Error(data.error||('Голосовой сервер: HTTP '+response.status));
+        const error=new Error(data.error||('Голосовой сервер: HTTP '+response.status));
+        // busy в status может относиться к другому запросу после ошибки. Только
+        // точный отказ request_gate доказывает, что этот фрагмент не был принят.
+        error.rejectedAsrBusy=path.startsWith('/v1/voice/transcribe?')&&response.status===400
+          &&data.error===ASR_BUSY_REJECTION&&data.voice?.busy===true;
+        throw error;
       }
       const data=await decode(response);
       requireSession(epoch);
@@ -248,6 +257,50 @@
     state.enabled=false;invalidate();phase('error',reason,message);notice(message,6500);
   }
 
+  function waitForAsr(capture){
+    requireSession(capture.epoch);
+    if(!currentCapture(capture))return Promise.reject(cancelled());
+    const controller=new AbortController();state.controllers.add(controller);
+    return new Promise((resolve,reject)=>{
+      let timer=0,done=false;
+      const finish=error=>{
+        if(done)return;done=true;clearTimeout(timer);
+        controller.signal.removeEventListener('abort',onAbort);state.controllers.delete(controller);
+        if(error)reject(error);else resolve();
+      };
+      const onAbort=()=>finish(cancelled());
+      controller.signal.addEventListener('abort',onAbort,{once:true});
+      timer=setTimeout(()=>{
+        try{requireSession(capture.epoch);if(!currentCapture(capture))throw cancelled();finish()}
+        catch(error){finish(error)}
+      },ASR_BUSY_WAIT_MS);
+    });
+  }
+
+  async function requestTranscription(capture,blob,language){
+    const deadline=performance.now()+ASR_BUSY_TIMEOUT_MS;
+    const busyTimeout=()=>new Error('Предыдущее распознавание всё ещё занято. Разговор остановлен; проверьте черновик и повторите вручную.');
+    for(let retry=0;;retry+=1){
+      if(!currentCapture(capture))throw cancelled();
+      // Таймер может проснуться поздно после приостановки вкладки/устройства.
+      if(retry>0&&performance.now()>=deadline)throw busyTimeout();
+      try{
+        return await voiceRequest('/v1/voice/transcribe?language='+encodeURIComponent(language),{
+          method:'POST',headers:{'Content-Type':blob.type||'audio/webm'},body:blob,
+        },capture.epoch,90000,response=>response.json());
+      }catch(error){
+        if(!error.rejectedAsrBusy)throw error;
+        requireSession(capture.epoch);
+        if(!currentCapture(capture))throw cancelled();
+        if(retry>=MAX_ASR_BUSY_RETRIES||performance.now()+ASR_BUSY_WAIT_MS>deadline){
+          throw busyTimeout();
+        }
+        notice('Распознавание ещё занято предыдущим фрагментом · ожидаю',ASR_BUSY_WAIT_MS+200);
+        await waitForAsr(capture);
+      }
+    }
+  }
+
   async function transcribe(capture,final=false){
     if(!currentCapture(capture))return '';
     requireSession(capture.epoch);
@@ -262,9 +315,7 @@
     const task=(async()=>{
       try{
         const language=localStorage.getItem('leshy.voice.language')||'';
-        const data=await voiceRequest('/v1/voice/transcribe?language='+encodeURIComponent(language),{
-          method:'POST',headers:{'Content-Type':blob.type||'audio/webm'},body:blob,
-        },capture.epoch,90000,response=>response.json());
+        const data=await requestTranscription(capture,blob,language);
         if(!currentCapture(capture))return '';
         requireSession(capture.epoch);
         const text=String(data.text||'').trim();
