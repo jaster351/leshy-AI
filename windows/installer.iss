@@ -24,6 +24,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\Leshy.exe
+SetupIconFile=..\.autobuild\brand\Leshy.ico
 SetupLogging=yes
 
 [Languages]

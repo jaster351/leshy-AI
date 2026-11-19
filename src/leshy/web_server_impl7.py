@@ -83,6 +83,9 @@ def _runtime_html(settings) -> bytes:
     """Эталонный chat transport + изолированные UI-модули вокруг него."""
     reference_html = shell._runtime_html(settings)
     html_text = reference_html.decode("utf-8")
+    favicon = '<link rel="icon" type="image/jpeg" href="/leshy-icon.jpg">'
+    if favicon not in html_text:
+        html_text = html_text.replace("</head>", favicon + "\n</head>")
     if 'class="sidebar"' not in html_text and 'id="pane-chat"' not in html_text:
         return reference_html
     for marker in (
@@ -169,6 +172,11 @@ def make_handler(app, telegram, settings, model_catalog):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if parsed.path == "/leshy-icon.jpg":
+                try:
+                    return self._send_asset("leshy-icon.jpg", "image/jpeg")
+                except FileNotFoundError:
+                    return self.send_error(HTTPStatus.NOT_FOUND, "Leshy icon not found")
             if parsed.path.startswith("/share/"):
                 token = parse.unquote(parsed.path[len("/share/"):]).strip()
                 try:
