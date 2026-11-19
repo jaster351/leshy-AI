@@ -6,6 +6,8 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.SystemClock
+import android.net.Uri
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.speech.RecognizerIntent
@@ -62,8 +64,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var serverAddress: EditText
     private lateinit var serverStatus: TextView
     private lateinit var deviceStatus: TextView
+    private lateinit var pairingStatus: TextView
+    @Volatile private var pairingBusy = false
     private lateinit var deviceCreateButton: Button
     private val deviceExecutor = Executors.newSingleThreadExecutor()
+    private val pairingExecutor = Executors.newSingleThreadExecutor()
     private val serverExecutor = Executors.newSingleThreadExecutor()
     private val voiceExecutor = Executors.newCachedThreadPool()
 
@@ -225,6 +230,14 @@ class MainActivity : ComponentActivity() {
         statusPanel.addView(gap(9))
         serverStatus = detail("Сервер ещё не настроен", 15f)
         statusPanel.addView(serverStatus)
+        statusPanel.addView(gap(7))
+        pairingStatus = detail(
+            if (AndroidVoiceCredentials.read(this).isNullOrBlank()) {
+                "Телефон пока не привязан"
+            } else "Ключ разговора сохранён на телефоне",
+            13f
+        )
+        statusPanel.addView(pairingStatus)
         val connectionAction = Button(this).apply {
             text = "Настроить подключение"
             controlStyle(this)
@@ -413,21 +426,44 @@ class MainActivity : ComponentActivity() {
         root.addView(heading("Доступ к разговору", 18f))
         root.addView(gap(7))
         root.addView(detail(
-            "Текущая серверная версия ещё не поддерживает подтверждение телефона автоматически. " +
-                "Ручной ограниченный ключ оставлен как временный способ подключения. " +
-                "Не вводите сюда административный токен.",
+            "Подключение через подтверждение владельца в Web-интерфейсе. " +
+                "Телефон создаёт собственный ключ; токен копировать не требуется.",
             13f
         ))
-        root.addView(gap(10))
+        root.addView(gap(11))
+        root.addView(Button(this).apply {
+            text = "Подключить этот телефон"
+            controlStyle(this, prominent = true)
+            setOnClickListener { startPairing() }
+        })
+        root.addView(gap(8))
+        root.addView(detail(
+            "При первом подключении откроется страница подтверждения. " +
+                "Войдите туда под уже подтверждённым владельцем сервера.",
+            12f
+        ))
+        root.addView(gap(23))
+        root.addView(heading("Дополнительно", 18f))
+        root.addView(gap(9))
+        val legacyAccess = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        legacyAccess.addView(detail(
+            "Временный ручной способ для серверов без поддержки авторегистрации. " +
+                "Это отдельный ограниченный Android-ключ, не токен администратора.",
+            13f
+        ))
+        legacyAccess.addView(gap(9))
         voiceSecret = EditText(this).apply {
             hint = "Временный ключ Android-разговора"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             setSingleLine(true)
             fieldStyle(this)
         }
-        root.addView(voiceSecret)
-        root.addView(gap(10))
-        root.addView(Button(this).apply {
+        legacyAccess.addView(voiceSecret)
+        legacyAccess.addView(gap(10))
+        legacyAccess.addView(Button(this).apply {
             text = "Сохранить ограниченный ключ"
             controlStyle(this)
             setOnClickListener {
@@ -443,12 +479,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
         })
-        root.addView(gap(8))
-        root.addView(Button(this).apply {
+        legacyAccess.addView(gap(8))
+        legacyAccess.addView(Button(this).apply {
             text = "Проверить доступ к разговору"
             controlStyle(this)
             setOnClickListener { checkVoiceConnection() }
         })
+        root.addView(Button(this).apply {
+            text = "Показать резервный ручной способ"
+            controlStyle(this)
+            setOnClickListener {
+                legacyAccess.visibility = if (legacyAccess.visibility == View.GONE) View.VISIBLE else View.GONE
+            }
+        })
+        root.addView(legacyAccess)
         root.addView(gap(24))
         // A dialog can be reopened: each Settings instance owns fresh views.
         // Re-attaching controls from a dismissed dialog would crash Android.
@@ -531,6 +575,74 @@ class MainActivity : ComponentActivity() {
             .window?.setBackgroundDrawableResource(android.R.color.transparent)
         refreshDeviceIdentity()
         refreshMicStatus()
+    }
+
+    private fun startPairing() {
+        if (pairingBusy) {
+            pairingStatus.text = "Привязка уже ожидает подтверждения."
+            return
+        }
+        val normalized = ServerReachability.normalize(serverAddress.text.toString())
+        if (normalized == null) {
+            pairingStatus.text = "Укажите правильный HTTPS-адрес в настройках."
+            return
+        }
+        ServerReachability.saveAddress(this, normalized)
+        pairingBusy = true
+        pairingStatus.text = "Создаём защищённую привязку телефона..."
+        pairingExecutor.execute {
+            try {
+                val ticket = AndroidPairingApi.begin(normalized)
+                val approvalUrl = normalized + "/android/pair?id=" + Uri.encode(ticket.requestId)
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        pairingStatus.text = "Ждём разрешение владельца в браузере..."
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(approvalUrl)))
+                        } catch (_: ActivityNotFoundException) {
+                            pairingStatus.text = "Откройте страницу подтверждения: $approvalUrl"
+                        }
+                    }
+                }
+                val deadline = SystemClock.elapsedRealtime() +
+                    ticket.expiresIn.coerceIn(1, 300) * 1000L
+                var linked = false
+                while (!Thread.currentThread().isInterrupted &&
+                    SystemClock.elapsedRealtime() < deadline) {
+                    Thread.sleep(2500)
+                    val result = AndroidPairingApi.poll(normalized, ticket)
+                    if (result.state == "approved") {
+                        AndroidVoiceCredentials.save(applicationContext, result.conversationKey!!)
+                        linked = true
+                        runOnUiThread {
+                            if (!isDestroyed) {
+                                voiceSession = null
+                                getSharedPreferences("android_voice_session", MODE_PRIVATE)
+                                    .edit().clear().apply()
+                                voiceStatus.text = "Телефон подключён к Лешему. Можно разговаривать."
+                                pairingStatus.text = "Подключено · Доступ к диалогу разрешён"
+                                checkSavedServer()
+                            }
+                        }
+                        break
+                    }
+                }
+                if (!linked) runOnUiThread {
+                    if (!isDestroyed) pairingStatus.text =
+                        "Время подтверждения истекло. Попробуйте подключиться ещё раз."
+                }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isDestroyed) pairingStatus.text =
+                        "Не удалось привязать телефон: " +
+                            (e.message ?: e.javaClass.simpleName)
+                }
+            } finally {
+                pairingBusy = false
+            }
+        }
     }
 
     private fun checkSavedServer() {
@@ -923,6 +1035,7 @@ class MainActivity : ComponentActivity() {
         serverExecutor.shutdownNow()
         voiceExecutor.shutdownNow()
         deviceExecutor.shutdownNow()
+        pairingExecutor.shutdownNow()
         speaker?.stop()
         speaker?.shutdown()
         speaker = null
