@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, Iterator
 
 from .diagnostics import event, problem
 from .distributed_cluster import DistributedClusterRuntime
-from .intelligent_memory import IntelligentMemoryEngine
+from .intelligent_memory import IntelligentMemoryEngine, _canonical_memory
 from .knowledge_graph import KnowledgeGraph
 from .module_settings import module_enabled
 from .multi_agent_orchestrator import MultiAgentOrchestrator
@@ -194,6 +195,25 @@ def _handle_advanced(app, kind: str, payload: str, *, owner_id: str, session_id:
 
 
 
+def _memory_items(text: str) -> list[str]:
+    """Целые элементы списка, включая строки продолжения, без заголовков."""
+    items: list[str] = []
+    current: list[str] = []
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:[-*•]\s+|\d+[.)]\s+)(.*)$", line)
+        if match or not line.strip():
+            if current:
+                items.append("\n".join(current).strip())
+                current = []
+            if match:
+                current = [match.group(1)]
+        elif current:
+            current.append(line.strip())
+    if current:
+        items.append("\n".join(current).strip())
+    return items
+
+
 def _compose_memory_context(app, owner_id: str, original: str, *,
                             query: str | None = None, capture_text: str | None = None) -> str:
     """Всегда сохранять проверенные правила базового профиля поверх Mem0 и GraphRAG."""
@@ -204,6 +224,7 @@ def _compose_memory_context(app, owner_id: str, original: str, *,
     # сообщению владельца: оно может принадлежать параллельному другому чату.
     if not isinstance(query, str) or not query.strip():
         return "\n\n".join(blocks)
+    query = query.strip()
     if module_enabled(app.storage, "intelligent-memory"):
         memory = app.intelligent_memory.context(
             owner_id, query, limit=8, capture_text=capture_text if isinstance(capture_text, str) else "")
@@ -211,10 +232,12 @@ def _compose_memory_context(app, owner_id: str, original: str, *,
             # В исходном контексте уже есть постоянные правила и обычная память.
             # Снова найденные записи не должны расходовать токены повторно.
             extra = []
-            for line in memory.splitlines():
-                content = line.strip().removeprefix("- ").strip()
-                if content and (not original or content not in original):
-                    extra.append(line)
+            seen = {_canonical_memory(item) for item in _memory_items(original)}
+            for content in _memory_items(memory):
+                key = _canonical_memory(content)
+                if key and key not in seen:
+                    extra.append("- " + content)
+                    seen.add(key)
             if extra:
                 blocks.append("Дополнительная интеллектуальная память:\n" + "\n".join(extra))
     if module_enabled(app.storage, "knowledge-graph") and query:

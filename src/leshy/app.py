@@ -445,6 +445,7 @@ class LeshyApp:
         image_job = self.image_generation.enqueue(image_prompt) if image_prompt is not None else None
 
         lookup_query, force_search = contextual_search_query(message, rows, app=self)
+        lookup_query = (lookup_query or "").strip() or message
         context: list[ChatMessage] = [
             ChatMessage(
                 "system",

@@ -10,6 +10,7 @@ import ast
 import builtins
 import __future__ as future_flags
 from pathlib import Path
+import re
 from types import SimpleNamespace
 import unittest
 
@@ -53,14 +54,16 @@ class Fixture:
                 return "Граф: " + owner + ":" + query
 
         self.app = SimpleNamespace(storage=object(), intelligent_memory=Memory(), knowledge_graph=Graph())
-        self.namespace = {"module_enabled": lambda storage, name: self.flags[name]}
+        self.namespace = {"module_enabled": lambda storage, name: self.flags[name], "re": re}
+        load_definition("intelligent_memory.py", "_canonical_memory", self.namespace)
+        load_definition("advanced_modules_runtime.py", "_memory_items", self.namespace)
         self.compose = load_definition("advanced_modules_runtime.py", "_compose_memory_context", self.namespace)
 
 
 class RequestMemoryQueryTests(unittest.TestCase):
     def test_current_request_is_used_instead_of_last_message_from_other_chat(self):
         fixture = Fixture()
-        result = fixture.compose(fixture.app, "owner-a", "Постоянное правило", query="резервная копия",
+        result = fixture.compose(fixture.app, "owner-a", "Постоянное правило", query="  резервная копия\n",
                                  capture_text="Как восстановить копию?")
         self.assertIn("owner-a:резервная копия", result)
         self.assertEqual(fixture.calls, [
@@ -88,6 +91,33 @@ class RequestMemoryQueryTests(unittest.TestCase):
         # Для явно заданной темы без исходного сообщения autocapture запрещён.
         fixture.compose(fixture.app, "owner-a", "", query="Найти сведения")
         self.assertEqual(fixture.calls[0][3], "")
+        # Настоящий SSE build_context должен заменить whitespace lookup исходным
+        # вопросом; app/внешние источники/инструменты здесь только подменены.
+        memory_calls = []
+
+        def imports(name, *args, **kwargs):
+            if name == "conversation_tool_evidence":
+                return SimpleNamespace(conversation_tool_evidence=lambda *a: ("", []))
+            return denied(name)
+
+        namespace = {
+            "__builtins__": dict(vars(builtins), __import__=imports, open=denied),
+            "re": re, "ChatMessage": lambda role, content: SimpleNamespace(role=role, content=content),
+            "FACTUAL_EVIDENCE_POLICY": "Достоверность", "is_offline_creative_request": lambda message: True,
+            "resolve_conversation_mode": lambda *a: SimpleNamespace(kind="personal"),
+            "mode_instruction": lambda *a: "", "support_draft_context": lambda *a, **kw: "",
+            "current_clock_context": lambda: "Часы", "is_self_capability_question": lambda *a: False,
+            "_local_learning_question": lambda *a: False, "read_supplied_source": lambda *a: ("", []),
+            "is_factual_challenge": lambda *a, **kw: False, "owner_document_context": lambda *a: "",
+            "conversation_rows_for_mode": lambda rows, kind: rows,
+        }
+        build = load_definition("realtime_chat.py", "_build_context", namespace, parent="RealtimeChatManager")
+        app = SimpleNamespace(settings=SimpleNamespace(brain_dir=None), storage=None,
+                              _memory_context=lambda owner, **kw: memory_calls.append((owner, kw)) or "")
+        manager = SimpleNamespace(app=app)
+        text = "Напиши текст о резервной копии"
+        build(manager, text, "owner-a", [], lookup_query=" \n\t ", search_plan={"needed": False})
+        self.assertEqual(memory_calls, [("owner-a", {"query": text, "capture_text": text})])
 
     def test_module_switches_are_preserved_for_memory_and_graph_independently(self):
         for memory, graph in ((False, False), (False, True), (True, False)):
@@ -116,6 +146,11 @@ class RequestMemoryQueryTests(unittest.TestCase):
         self.assertEqual(result.count("Отвечай на Вы"), 1)
         self.assertIn("Отдельный найденный факт", result)
         self.assertEqual(fixture.calls[0][2:4], ("уточнённая тема", "исходные слова"))
+        fixture.memory_text = "- Linux\n- ОТВЕЧАЙ   НА ВЫ!\n- Linux"
+        result = fixture.compose(fixture.app, "owner-a", "- Python и Linux помогают работе\n- Отвечай на Вы",
+                                 query="Linux", capture_text="мой вопрос")
+        self.assertEqual(result.count("- Linux"), 1, "Короткая полезная запись не должна исчезать как подстрока длинной")
+        self.assertNotIn("ОТВЕЧАЙ", result, "Нормализованный целый дубль удаляется")
 
     def test_retrieval_rewrite_cannot_be_autosaved_as_user_words(self):
         errors = []
@@ -134,6 +169,8 @@ class RequestMemoryQueryTests(unittest.TestCase):
         self.assertIn("Подтверждённая запись", context(engine, "owner-a", rewrite, capture_text="Как настроить резервную копию?"))
         self.assertEqual(captured, [("owner-a", "Как настроить резервную копию?")])
         self.assertEqual(retrieved, [("owner-a", rewrite, 8)])
+        context(engine, "owner-a", rewrite, capture_text="")
+        self.assertEqual(len(captured), 1, "Wrapper без исходного message только читает, без автосохранения темы")
         enabled[0] = False
         context(engine, "owner-b", "другая тема", capture_text="Я предпочитаю Linux")
         self.assertEqual(len(captured), 1)

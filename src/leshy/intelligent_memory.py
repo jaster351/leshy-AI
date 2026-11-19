@@ -230,7 +230,7 @@ class IntelligentMemoryEngine:
     def context(self, owner_id: str, query: str, *, limit: int = 8,
                 capture_text: str | None = None) -> str:
         try:
-            if self._auto_learning_enabled():
+            if self._auto_learning_enabled() and (capture_text is None or capture_text.strip()):
                 # Уточнённая тема поиска может быть синтезирована из истории.
                 # В чате сохраняем только исходные слова текущего пользователя.
                 self.capture_if_useful(owner_id, query if capture_text is None else capture_text)
