@@ -238,6 +238,13 @@ class WebTransportRuntime:
         self._refresh_protocol(protocol)
 
     def serve_forever(self) -> None:
+        try:
+            self._serve_forever()
+        finally:
+            with self.lock:
+                self._running = False
+
+    def _serve_forever(self) -> None:
         with self.lock:
             if self._stopping.is_set():
                 return

@@ -241,7 +241,7 @@ class WebListenerTests(unittest.TestCase):
         during_start._servers = {"http": Mock(), "http/1": Mock()}
         ready = Mock()
         during_start._on_listening = ready
-        with patch.object(during_start, "_start_server", side_effect=lambda name, server: during_start.shutdown()) as start:
+        with patch.object(during_start, "_start_server", side_effect=lambda name: during_start.shutdown()) as start:
             during_start.serve_forever()
         self.assertEqual(start.call_count, 1)
         self.acme.start.assert_not_called()
