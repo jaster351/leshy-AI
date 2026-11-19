@@ -108,7 +108,12 @@ class RealtimeChatManager:
             expiry=self._pending_stop.pop(rid,0.0)
             if expiry>time.monotonic():
                 cancel.set()
+            if rid in self._cancellations:
+                raise ValueError("Повторяющийся request_id активного запроса")
             self._cancellations[rid] = cancel
+            tracker = getattr(self.app, "conversation_activity", None)
+            if tracker is not None:
+                tracker.begin()
         return rid, cancel
 
     def stop(self, request_id: str) -> bool:
@@ -143,7 +148,10 @@ class RealtimeChatManager:
 
     def _unregister(self, request_id: str) -> None:
         with self._lock:
-            self._cancellations.pop(request_id, None)
+            existed = self._cancellations.pop(request_id, None) is not None
+            tracker = getattr(self.app, "conversation_activity", None)
+            if existed and tracker is not None:
+                tracker.end()
 
     @staticmethod
     def _chunk_fallback(text: str, size: int = 48) -> Iterator[str]:
@@ -305,6 +313,14 @@ class RealtimeChatManager:
         owner_knowledge = owner_document_context(self.app.storage, owner_id, message)
         if owner_knowledge:
             context.append(ChatMessage("system", owner_knowledge))
+        # Existing document/rule/factual backends supply evidence, not text
+        # that bypasses the local language model.
+        from .conversation_tool_evidence import conversation_tool_evidence
+        tool_evidence, tool_sources = conversation_tool_evidence(
+            self.app, message, owner_id, session_id or "", rows,
+        )
+        if tool_evidence:
+            context.append(ChatMessage("system", tool_evidence))
         memory_context = self.app._memory_context(owner_id)
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
@@ -346,7 +362,7 @@ class RealtimeChatManager:
         cinema_plan = None if is_offline_creative_request(message) else cinema_query(message, rows)
         if cinema_plan is not None:
             context.append(ChatMessage("system", cinema_instruction(cinema_plan)))
-        sources: list[dict[str, str]] = list(source_links)
+        sources: list[dict[str, str]] = list(source_links) + tool_sources
         search_attempted = bool(plan.get("needed")) or cinema_plan is not None
         if search_attempted:
             try:
@@ -544,119 +560,9 @@ class RealtimeChatManager:
             )
             return
 
-        # Для сведений об авторах Issues/PR используем только полный GitHub API,
-        # без генерации имён и количества токенами LLM.
-        from .github_facts import is_leshy_repository_audit_request
-        if is_leshy_repository_audit_request(message):
-            rid, cancel = self._register(request_id)
-            sid = ""
-            try:
-                sid, _rows = self._save_user_and_history(message, owner_id, session_id)
-                yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": []})
-                if cancel.is_set():
-                    yield StreamEvent("done", {"request_id": rid, "session_id": sid,
-                                               "answer": "", "sources": [], "stopped": True})
-                    return
-                yield StreamEvent("activity", {
-                    "kind": "web_search", "phase": "searching",
-                    "text": "Получаю фактические сведения из GitHub API…",
-                })
-                github = self.app.github_facts.answer(message)
-                if github is None:
-                    raise RuntimeError("GitHub audit intent unexpectedly missing")
-                if cancel.is_set():
-                    yield StreamEvent("done", {"request_id": rid, "session_id": sid,
-                                               "answer": "", "sources": [], "stopped": True})
-                    return
-                answer = str(github["answer"])
-                sources = list(github["sources"])
-                timestamp = self.app._save_assistant(sid, answer)
-                event("chat_stream_github_facts", request_id=rid,
-                      verified=bool(github["verified"]), receipt_id=github["receipt_id"])
-                for chunk in self._chunk_fallback(answer, 160):
-                    if cancel.is_set():
-                        break
-                    yield StreamEvent("delta", {"text": chunk})
-                yield StreamEvent("done", {
-                    "request_id": rid, "session_id": sid,
-                    "answer": answer if not cancel.is_set() else "",
-                    "created_at": timestamp, "sources": sources,
-                    "stopped": bool(cancel.is_set()),
-                })
-            except Exception as exc:
-                problem("chat_stream_github_facts_failed", type(exc).__name__, request_id=rid)
-                yield StreamEvent("error", {"request_id": rid, "session_id": sid,
-                    "error": "Не удалось проверить сведения GitHub"})
-            finally:
-                self._unregister(rid)
-            return
-
-        # Мгновенный проверяемый ответ на дату/время; погода через API.
-        # Обычные беседы и их быстрый streaming не затрагиваются.
-        from .verified_clock import clock_answer, checked_clock_answer
-        from .weather_runtime import is_weather_request, weather_answer
-        layout_suggestion = suggest_keyboard_layout(message)
-        factual_query = layout_suggestion.corrected if layout_suggestion else message
-        clock = clock_answer(factual_query)
-        if clock is not None or is_weather_request(factual_query):
-            rid, cancel = self._register(request_id)
-            sid = ""
-            try:
-                sid, _rows = self._save_user_and_history(message, owner_id, session_id)
-                yield StreamEvent("start", {"request_id": rid, "session_id": sid})
-                if cancel.is_set():
-                    yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
-                    return
-                if clock is None:
-                    yield StreamEvent("activity", {
-                        "kind": "weather", "phase": "fetching",
-                        "text": "Получаю прогноз из погодного сервиса…",
-                    })
-                    answer = str(weather_answer(factual_query) or "Не удалось получить прогноз.")
-                    sources = (
-                        [{"title": "Open-Meteo", "url": "https://open-meteo.com/en/docs"}]
-                        if "Источник: Open-Meteo" in answer else (
-                            [{"title": "wttr.in", "url": "https://wttr.in/"}]
-                            if "Источник: wttr.in" in answer else []
-                        )
-                    )
-                else:
-                    from .research_policy import research_reason
-                    if research_reason(factual_query) == "явный запрос интернет-поиска":
-                        yield StreamEvent("activity", {
-                            "kind": "web_search", "phase": "searching",
-                            "text": "Проверяю дату в интернете дополнительно к часам компьютера…",
-                        })
-                        answer, sources = checked_clock_answer(factual_query, self.app.live_search)
-                        answer = str(answer or clock)
-                    else:
-                        answer, sources = clock, []
-                if cancel.is_set():
-                    yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
-                    return
-                answer = layout_answer(message, answer)
-                answered_at = self.app._save_assistant(sid, answer)
-                event("chat_factual_tool_answered", kind="clock" if clock is not None else "weather",
-                      session_id=sid, request_id=rid, source_count=len(sources))
-                yield StreamEvent("delta", {"text": answer})
-                yield StreamEvent("done", {
-                    "request_id": rid, "session_id": sid, "answer": answer,
-                    "created_at": answered_at, "sources": sources, "stopped": False,
-                })
-            except Exception as exc:
-                problem("chat_factual_tool_failed", type(exc).__name__, request_id=rid)
-                yield StreamEvent("error", {"request_id": rid, "session_id": sid,
-                                            "error": "Не удалось проверить актуальные данные"})
-            finally:
-                self._unregister(rid)
-            return
-
-        special = (
-            is_direct_rule_request(message)
-            or is_rule_inspection_request(message)
-            or message.lower().startswith(("/remember ", "/memories"))
-            or self.app._image_prompt(message) is not None
-        )
+        # Image jobs retain their action envelope; ordinary conversational
+        # messages, including rules and memory, are generated by the LLM.
+        special = self.app._image_prompt(message) is not None
         if special:
             rid, cancel = self._register(request_id)
             try:
@@ -693,37 +599,6 @@ class RealtimeChatManager:
                 yield StreamEvent("start", {"request_id": rid, "session_id": sid})
                 yield StreamEvent("done", {"request_id": rid, "session_id": sid, "answer": "", "stopped": True})
                 return
-            # Короткие уточнения вроде «А что написал не ты?» должны
-            # продолжать подтверждённую проверку GitHub, а не фантазировать.
-            if is_leshy_repository_audit_request(message, rows):
-                yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": []})
-                yield StreamEvent("activity", {
-                    "kind": "web_search", "phase": "searching",
-                    "text": "Проверяю авторов через GitHub API…",
-                })
-                github = self.app.github_facts.answer(message, rows)
-                if github is None:
-                    raise RuntimeError("GitHub follow-up intent unexpectedly missing")
-                if cancel.is_set():
-                    yield StreamEvent("done", {"request_id": rid, "session_id": sid,
-                                               "answer": "", "sources": [], "stopped": True})
-                    return
-                answer = str(github["answer"])
-                sources = list(github["sources"])
-                saved_at = self.app._save_assistant(sid, answer)
-                event("chat_stream_github_facts_followup", request_id=rid,
-                      verified=bool(github["verified"]), receipt_id=github["receipt_id"])
-                for chunk in self._chunk_fallback(answer, 160):
-                    if cancel.is_set():
-                        break
-                    yield StreamEvent("delta", {"text": chunk})
-                yield StreamEvent("done", {
-                    "request_id": rid, "session_id": sid,
-                    "answer": answer if not cancel.is_set() else "",
-                    "created_at": saved_at, "sources": sources,
-                    "stopped": bool(cancel.is_set()),
-                })
-                return
             lookup_query, force_search = contextual_search_query(message, rows, app=self.app)
             plan = self._search_plan(lookup_query)
             if force_search:
@@ -751,17 +626,12 @@ class RealtimeChatManager:
                 messages.insert(0, ChatMessage("system", layout_hint))
             cinema_plan = None if is_offline_creative_request(message) else cinema_query(message, rows)
             if cinema_plan is not None and not sources:
-                answer = cinema_no_data(cinema_plan)
-                answered_at = self.app._save_assistant(sid, answer)
-                yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": []})
-                if not cancel.is_set():
-                    yield StreamEvent("delta", {"text": answer})
-                yield StreamEvent("done", {
-                    "request_id": rid, "session_id": sid, "answer": answer,
-                    "created_at": answered_at, "sources": [], "stopped": bool(cancel.is_set()),
-                    "cinema": True,
-                })
-                return
+                messages.insert(0, ChatMessage(
+                    "system",
+                    "Кино-каталог не дал достоверных результатов. "
+                    + cinema_no_data(cinema_plan)
+                    + " Не выдумывай даты релизов и источники.",
+                ))
             if search_attempted:
                 if sources:
                     yield StreamEvent("activity", {
@@ -782,59 +652,24 @@ class RealtimeChatManager:
             yield StreamEvent("start", {"request_id": rid, "session_id": sid, "sources": sources})
             event("chat_stream_started", request_id=rid, session_id=sid, owner_id=owner_id)
 
-            # Release dates from a page actually read this turn can be
-            # grounded deterministically. Never let a model discard the
-            # primary source and repeat its stale release-year claim.
-            grounded_fact = grounded_release_from_context(message, rows, messages, sources, app=self.app)
-            if grounded_fact and not cancel.is_set():
-                for part in self._chunk_fallback(grounded_fact, 160):
-                    if cancel.is_set():
-                        break
-                    yield StreamEvent("delta", {"text": part})
-                answered_at = self.app._save_assistant(sid, grounded_fact) if not cancel.is_set() else utcnow()
-                yield StreamEvent("done", {
-                    "request_id": rid, "session_id": sid,
-                    "answer": grounded_fact if not cancel.is_set() else "",
-                    "created_at": answered_at, "sources": sources,
-                    "stopped": bool(cancel.is_set()), "source_grounded": True,
-                })
-                event("chat_primary_source_release_grounded", source_count=len(sources))
-                return
-
-            # Если live-search не нашёл подтверждённых источников или упал,
-            # НЕ передаём текущие данные LLM: иначе она выдумает дату/цену.
-            # Такой отказ быстрый и прозрачный, обычные чаты не затронуты.
-            strict_live_sources = requires_verified_live_sources(
-                lookup_query, str(plan.get("reason") or "")
+            grounded_fact = grounded_release_from_context(
+                message, rows, messages, sources, app=self.app,
             )
-            if search_attempted and not sources and strict_live_sources and not support_draft_context(message, rows, brain_dir=self.app.settings.brain_dir):
-                marker = "Текущий веб-поиск временно не выполнен:"
-                failure = next(
-                    (
-                        str(item.content).split(marker, 1)[-1].strip()
-                        for item in messages
-                        if item.role == "system" and marker in str(item.content)
-                    ),
-                    "",
-                )
-                answer = (
-                    "Не удалось проверить актуальные сведения: поисковые источники временно недоступны. Попробуйте позже."
-                    if failure else
-                    "Интернет-поиск выполнен, но надёжных источников для ответа не найдено. "
-                    "Я не буду выдавать догадки за проверенные факты."
-                )
-                event("chat_web_search_without_sources", request_id=rid, failed=bool(failure))
-                if not cancel.is_set():
-                    answered_at = self.app._save_assistant(sid, answer)
-                    yield StreamEvent("delta", {"text": answer})
-                else:
-                    answered_at = utcnow()
-                yield StreamEvent("done", {
-                    "request_id": rid, "session_id": sid, "answer": answer if not cancel.is_set() else "",
-                    "created_at": answered_at, "sources": [], "stopped": bool(cancel.is_set()),
-                    "latency_ms": int((time.monotonic() - started) * 1000),
-                })
-                return
+            if grounded_fact:
+                messages.insert(0, ChatMessage(
+                    "system",
+                    "Проверенный результат чтения первоисточника: " + grounded_fact
+                    + "\nНе заменяй его данными из памяти.",
+                ))
+            if search_attempted and not sources and requires_verified_live_sources(
+                lookup_query, str(plan.get("reason") or "")
+            ):
+                messages.insert(0, ChatMessage(
+                    "system",
+                    "Достоверных актуальных источников нет. Не выдумывай "
+                    "текущие цены, даты, новости и версии. Ответь только "
+                    "на подтверждённые части запроса и обозначь ограничение.",
+                ))
 
             # Актуальные сведения (погода, новости и т.п.) проверяем до публикации
             # текста: локальная модель иногда ошибочно заявляет, что интернет

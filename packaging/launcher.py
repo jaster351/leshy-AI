@@ -33,13 +33,29 @@ def main() -> None:
     from leshy.diagnostic_publisher import DiagnosticPublisher
     from leshy.web_server import serve
 
+    # В Windows окно принадлежит текущему Leshy.exe и завершается вместе с ним.
+    browser_ui = None
+    if os.name == "nt":
+        from leshy.managed_browser import ManagedBrowser
+        browser_ui = ManagedBrowser(f"http://127.0.0.1:{args.port}/")
     publisher = DiagnosticPublisher(brain_root)
     publisher.start()
+    browser_timer = None
     try:
         if not args.no_browser:
-            threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/")).start()
+            opener = (
+                browser_ui.open if browser_ui is not None
+                else lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/")
+            )
+            browser_timer = threading.Timer(1.2, opener)
+            browser_timer.daemon = True
+            browser_timer.start()
         serve(args.host, args.port)
     finally:
+        if browser_timer is not None:
+            browser_timer.cancel()
+        if browser_ui is not None:
+            browser_ui.close()
         publisher.stop()
 
 

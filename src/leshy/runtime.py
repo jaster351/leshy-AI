@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from .app import LeshyApp
 from .chat_idempotency import install_global_chat_idempotency
-from .owner_knowledge_capture import install_owner_document_routing
-from .constitution_runtime import install_constitution_routing
 from .semantic_research_router import install_semantic_research_router
 from .config import Settings
 from .freshness_cache_runtime import install_freshness_cache_runtime
@@ -25,11 +23,10 @@ class Runtime(LeshyApp):
         install_freshness_memory_runtime()
         install_freshness_cache_runtime()
         install_runtime_latency_fixes()
-        install_owner_document_routing(LeshyApp)
-        # Idempotency ставится последним поверх специальных chat routing, чтобы
-        # повтор одного request_id не создавал второй ответ ни в одном интерфейсе.
+        # Проверки документов и фактов дают модели данные через conversation_tool_evidence.
+        # Не устанавливаем маршруты, которые возвращают готовые ответы без LLM.
+        # Idempotency не допускает повторного выполнения одного request_id.
         install_global_chat_idempotency()
-        install_constitution_routing(LeshyApp)
         install_semantic_research_router()
         super().__init__(settings or Settings.from_env())
         install_freshness_memory_runtime(self)

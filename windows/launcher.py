@@ -156,6 +156,8 @@ def main() -> None:
     parser.add_argument("--host", default=os.getenv("LESHY_HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(os.getenv("LESHY_PORT", "8765")))
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--no-tray", action="store_true", help="Do not create the Windows tray icon")
+    parser.add_argument("--scheduled-start", action="store_true", help="Started by the elevated update task")
     parser.add_argument(
         "--check-native-runtime",
         action="store_true",
@@ -176,6 +178,22 @@ def main() -> None:
     install_root = _install_root()
     brain_root = _brain_root()
     legacy_brain = _legacy_brain()
+    # In a console-free PyInstaller executable sys.stdout/stderr are None.
+    # Keep diagnostic print() output instead of losing it on Windows.
+    if os.name == "nt" and getattr(sys, "frozen", False):
+        log_dir = brain_root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        if sys.stdout is None:
+            sys.stdout = open(log_dir / "launcher.stdout.log", "a", encoding="utf-8", buffering=1)
+        if sys.stderr is None:
+            sys.stderr = open(log_dir / "launcher.stderr.log", "a", encoding="utf-8", buffering=1)
+        if sys.stdin is None:
+            sys.stdin = open(os.devnull, "r", encoding="utf-8")
+
+    if os.name == "nt" and not args.scheduled_start:
+        from leshy.desktop_tray import resume_manually
+        resume_manually(brain_root)
+
 
     os.environ["LESHY_INSTALL_ROOT"] = str(install_root)
     os.environ["LESHY_BRAIN_DIR"] = str(brain_root)
@@ -213,13 +231,46 @@ def main() -> None:
     from leshy.diagnostic_publisher import DiagnosticPublisher
     from leshy.web_server import serve
 
+    # Выделенное окно браузера принадлежит этому Leshy.exe, а не общему профилю
+    # Edge/Chrome. Закрытие Лешего освобождает только его окно.
+    browser_ui = None
+    if os.name == "nt":
+        from leshy.managed_browser import ManagedBrowser
+        browser_ui = ManagedBrowser(f"http://127.0.0.1:{args.port}/")
+
+    tray_icon = None
+    if os.name == "nt" and not args.no_tray:
+        try:
+            from leshy.desktop_tray import start_tray
+            tray_icon = start_tray(
+                brain_root,
+                port=args.port,
+                open_web=browser_ui.open if browser_ui is not None else None,
+            )
+        except Exception as exc:
+            # Never make the actual AI runtime unavailable if the tray fails.
+            print(f"System tray unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
+
     publisher = DiagnosticPublisher(brain_root)
     publisher.start()
+    browser_timer = None
     try:
         if not args.no_browser:
-            threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/")).start()
+            open_window = (
+                browser_ui.open if browser_ui is not None
+                else lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/")
+            )
+            browser_timer = threading.Timer(1.2, open_window)
+            browser_timer.daemon = True
+            browser_timer.start()
         serve(args.host, args.port)
     finally:
+        if browser_timer is not None:
+            browser_timer.cancel()
+        if browser_ui is not None:
+            browser_ui.close()
+        if tray_icon is not None:
+            tray_icon.stop()
         publisher.stop()
 
 
