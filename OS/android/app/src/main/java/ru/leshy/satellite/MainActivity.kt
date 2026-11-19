@@ -13,9 +13,11 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.text.InputType
 import android.provider.Settings
+import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -97,182 +99,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(28, 28, 28, 28)
-        }
-        root.addView(TextView(this).apply {
-            text = "Леший • Android Satellite"
-            textSize = 23f
-        })
-        root.addView(TextView(this).apply {
-            text = "Одна кнопка включает разговор с Лешим на несколько реплик; второе нажатие завершает сеанс."
-            textSize = 14f
-        })
-        root.addView(TextView(this).apply {
-            text = "Адрес сервера (HTTPS). Проверка связи не даёт прав владельца."
-        })
-        serverAddress = EditText(this).apply {
-            hint = "https://server.example:443"
-            setSingleLine(true)
-            setText(ServerReachability.address(this@MainActivity))
-        }
-        root.addView(serverAddress)
-        serverStatus = TextView(this).apply {
-            text = "Связь с сервером ещё не проверялась"
-        }
-        root.addView(serverStatus)
-        root.addView(Button(this).apply {
-            text = "Сохранить адрес и проверить"
-            setOnClickListener { checkServer() }
-        })
-
-        root.addView(TextView(this).apply {
-            text = "Непрерывный разговор: один раз начать, один раз закончить. Между репликами нажимать не нужно."
-            textSize = 16f
-        })
-        voiceStatus = TextView(this).apply {
-            text = "Для первого подключения нужен ограниченный Android-ключ, созданный на сервере."
-        }
-        root.addView(voiceStatus)
-        voiceSecret = EditText(this).apply {
-            hint = "Android voice key (не административный API-токен)"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setSingleLine(true)
-        }
-        root.addView(voiceSecret)
-        root.addView(Button(this).apply {
-            text = "Сохранить ключ разговора"
-            setOnClickListener {
-                val value = voiceSecret.text.toString().trim()
-                try {
-                    AndroidVoiceCredentials.save(this@MainActivity, value)
-                    voiceSecret.setText("")
-                    voiceSession = null
-                    getSharedPreferences("android_voice_session", MODE_PRIVATE).edit().clear().apply()
-                    voiceStatus.text = "Ключ сохранён в Android Keystore. Проверьте соединение."
-                } catch (_: Exception) {
-                    voiceStatus.text = "Ключ не сохранён. Введите выданный сервером Android-ключ."
-                }
-            }
-        })
-        root.addView(Button(this).apply {
-            text = "Проверить доступ к разговору"
-            setOnClickListener { checkVoiceConnection() }
-        })
-        dialogueButton = Button(this).apply {
-            text = "Начать разговор с Лешим"
-            textSize = 18f
-            setOnClickListener {
-                if (continuousActive) stopContinuousConversation("Разговор завершён.")
-                else startContinuousConversation()
-            }
-        }
-        root.addView(dialogueButton)
-        root.addView(Button(this).apply {
-            text = "Отозвать согласие на распознавание речи"
-            setOnClickListener {
-                if (continuousActive) stopContinuousConversation("Разговор завершён.")
-                getSharedPreferences("android_voice_privacy", MODE_PRIVATE)
-                    .edit().putBoolean("system_asr_agreed", false).apply()
-                voiceStatus.text = "Согласие отозвано. Распознавание будет выключено до нового разрешения."
-            }
-        })
-        voiceQuestion = EditText(this).apply {
-            hint = "Или введите вопрос текстом"
-            setSingleLine(false)
-            minLines = 2
-        }
-        root.addView(voiceQuestion)
-        root.addView(Button(this).apply {
-            text = "Отправить вопрос Лешему"
-            setOnClickListener { submitVoiceQuestion(voiceQuestion.text.toString()) }
-        })
-        root.addView(Button(this).apply {
-            text = "Новый разговор"
-            setOnClickListener {
-                voiceSession = null
-                getSharedPreferences("android_voice_session", MODE_PRIVATE).edit().clear().apply()
-                voiceStatus.text = "Новый разговор. Можете задать вопрос."
-            }
-        })
-        root.addView(TextView(this).apply {
-            text = "Привязка телефона: подготовка ключа устройства (без авторизации на сервере)"
-        })
-        deviceStatus = TextView(this).apply {
-            text = "Состояние ключа загружается..."
-        }
-        root.addView(deviceStatus)
-        deviceCreateButton = Button(this).apply {
-            text = "Создать локальный ключ устройства"
-            setOnClickListener { createDeviceIdentity() }
-        }
-        root.addView(deviceCreateButton)
-        root.addView(Button(this).apply {
-            text = "Удалить локальный ключ"
-            setOnClickListener {
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("Удалить ключ устройства?")
-                    .setMessage(
-                        "Действие необратимо. Для будущих серверных привязок " +
-                            "потребуется отдельный отзыв доступа на сервере."
-                    )
-                    .setNegativeButton("Отмена", null)
-                    .setPositiveButton("Удалить") { _, _ -> deleteDeviceIdentity() }
-                    .show()
-            }
-        })
-        micStatus = TextView(this)
-        root.addView(micStatus)
-        micButton = Button(this).apply {
-            setOnClickListener {
-                if (continuousActive) {
-                    stopContinuousConversation("Непрерывный диалог остановлен: выбран отдельный режим микрофона.")
-                }
-                if (ListeningService.isListening) stopListening()
-                else if (ContextCompat.checkSelfPermission(
-                    this@MainActivity, Manifest.permission.RECORD_AUDIO
-                ) == PackageManager.PERMISSION_GRANTED) startListening()
-                else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
-            }
-        }
-        root.addView(micButton)
-        root.addView(Button(this).apply {
-            text = "Настройки энергосбережения Android"
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-            }
-        })
-        root.addView(TextView(this).apply {
-            text = "Камера работает только во время открытого экрана приложения."
-        })
-        cameraButton = Button(this).apply {
-            text = "Включить камеру и обнаружение лиц"
-            setOnClickListener {
-                if (cameraEnabled) stopCamera()
-                else if (ContextCompat.checkSelfPermission(
-                    this@MainActivity, Manifest.permission.CAMERA
-                ) == PackageManager.PERMISSION_GRANTED) startCamera()
-                else cameraPermission.launch(Manifest.permission.CAMERA)
-            }
-        }
-        root.addView(cameraButton)
-        faceStatus = TextView(this).apply {
-            text = "Камера выключена; личность не определена"
-        }
-        root.addView(faceStatus)
-        cameraPreview = PreviewView(this).apply {
-            visibility = View.GONE
-        }
-        root.addView(cameraPreview, LinearLayout.LayoutParams(-1, 600))
-        root.addView(TextView(this).apply {
-            text = "Один сеанс включает несколько реплик: речь распознаёт Android, " +
-                "нейросеть отвечает по HTTPS, после окончания TTS прослушивание " +
-                "возобновляется автоматически. Системная служба распознавания может " +
-                "передавать аудио своему поставщику; Леший получает только текст. " +
-                "Сеанс работает при открытом приложении, не в фоне."
-        })
-        setContentView(ScrollView(this).apply { addView(root) })
+        buildHomeScreen()
         refreshMicStatus()
         refreshDeviceIdentity()
         voiceSession = getSharedPreferences("android_voice_session", MODE_PRIVATE)
@@ -306,6 +133,273 @@ class MainActivity : ComponentActivity() {
                 }
             }
         })
+    }
+
+    private fun buildHomeScreen() {
+        val ui = LeshyMobileUi(this)
+        window.statusBarColor = ui.backgroundColor
+        window.navigationBarColor = ui.backgroundColor
+        window.decorView.systemUiVisibility = 0
+        val screen = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(ui.backgroundColor)
+            clipToPadding = false
+        }
+        val root = ui.column(18)
+        screen.addView(root)
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.ic_leshy_brand)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Эмблема Лешего"
+        }
+        header.addView(logo, LinearLayout.LayoutParams(ui.dp(58), ui.dp(58)))
+        val brand = ui.column().apply {
+            setPadding(ui.dp(12), 0, 0, 0)
+            addView(ui.label("ЛЕШИЙ", 24f, bold = true))
+            addView(ui.label("Персональный ИИ · Android", 12f, muted = true))
+        }
+        header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        ui.add(root, header, bottom = 22)
+
+        val settingsPanel = ui.column()
+        settingsPanel.visibility = View.GONE
+        fun revealSettings() {
+            settingsPanel.visibility = View.VISIBLE
+            screen.post { screen.smoothScrollTo(0, settingsPanel.top + ui.dp(130)) }
+        }
+
+        val conversation = ui.panel(prominent = true)
+        ui.add(conversation, ui.label("ГОЛОСОВОЙ ДИАЛОГ", 12f, muted = true, bold = true))
+        ui.add(conversation, ui.label("Я рядом.", 30f, bold = true), top = 5)
+        ui.add(conversation, ui.label(
+            "Говорите естественно. Леший ответит через Ваш сервер.",
+            14f, muted = true
+        ), top = 6)
+        serverStatus = ui.label(
+            if (ServerReachability.address(this).isBlank())
+                "● Сервер ещё не настроен"
+            else "● Проверяем связь с сервером",
+            13f, muted = true
+        )
+        ui.add(conversation, serverStatus, top = 18)
+        voiceStatus = ui.label(
+            if (AndroidVoiceCredentials.read(this).isNullOrBlank())
+                "Для начала разговора подключите телефон к Лешему."
+            else "Готов к разговору.",
+            15f
+        )
+        ui.add(conversation, voiceStatus, top = 12)
+        dialogueButton = ui.button("🎙 Начать разговор", prominent = true).apply {
+            setOnClickListener {
+                if (continuousActive) {
+                    stopContinuousConversation("Разговор завершён.")
+                } else if (AndroidVoiceCredentials.read(this@MainActivity).isNullOrBlank() ||
+                    ServerReachability.address(this@MainActivity).isBlank()) {
+                    voiceStatus.text = "Настройте адрес сервера и доступ к разговору."
+                    revealSettings()
+                } else {
+                    startContinuousConversation()
+                }
+            }
+        }
+        ui.add(conversation, dialogueButton, top = 18)
+        ui.add(conversation, ui.label(
+            "Нажмите ещё раз, чтобы закончить. Микрофон включается только с Вашего разрешения.",
+            12f, muted = true
+        ), top = 10)
+        ui.add(root, conversation)
+
+        val messageCard = ui.panel()
+        ui.add(messageCard, ui.label("СООБЩЕНИЕ", 12f, muted = true, bold = true))
+        voiceQuestion = ui.input("Напишите Лешему...").apply {
+            setSingleLine(false)
+            minLines = 2
+            maxLines = 5
+        }
+        ui.add(messageCard, voiceQuestion, top = 12)
+        ui.add(messageCard, ui.button("Отправить сообщение", prominent = true).apply {
+            setOnClickListener {
+                if (AndroidVoiceCredentials.read(this@MainActivity).isNullOrBlank() ||
+                    ServerReachability.address(this@MainActivity).isBlank()) {
+                    voiceStatus.text = "Сначала подключите телефон к серверу Лешего."
+                    revealSettings()
+                } else {
+                    submitVoiceQuestion(voiceQuestion.text.toString())
+                }
+            }
+        }, top = 10)
+        ui.add(messageCard, ui.button("Новый диалог").apply {
+            setOnClickListener {
+                voiceSession = null
+                getSharedPreferences("android_voice_session", MODE_PRIVATE).edit().clear().apply()
+                voiceStatus.text = "Новый разговор. Можете задать вопрос."
+            }
+        }, top = 8)
+        ui.add(root, messageCard, top = 16)
+
+        val settingsToggle = ui.button("⚙ Подключение и настройки").apply {
+            contentDescription = "Показать или скрыть настройки подключения и устройства"
+            setOnClickListener {
+                settingsPanel.visibility =
+                    if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                if (settingsPanel.visibility == View.VISIBLE) {
+                    screen.post { screen.smoothScrollTo(0, settingsPanel.top) }
+                }
+            }
+        }
+        ui.add(root, settingsToggle, top = 18)
+
+        val connection = ui.panel()
+        ui.add(connection, ui.label("ПОДКЛЮЧЕНИЕ К ЛЕШЕМУ", 12f, muted = true, bold = true))
+        ui.add(connection, ui.label("Сервер", 17f, bold = true), top = 8)
+        ui.add(connection, ui.label(
+            "Для подключения требуется HTTPS. Автоматическая привязка " +
+                "с подтверждением владельца пока не реализована.",
+            13f, muted = true
+        ), top = 7)
+        serverAddress = ui.input("https://адрес-сервера:порт").apply {
+            setSingleLine(true)
+            setText(ServerReachability.address(this@MainActivity))
+        }
+        ui.add(connection, serverAddress, top = 12)
+        ui.add(connection, ui.button("Сохранить адрес и проверить").apply {
+            setOnClickListener { checkServer() }
+        }, top = 9)
+        ui.add(connection, ui.label(
+            "Временный способ подключения: ограниченный ключ Android-разговора. " +
+                "Не используйте административный токен.",
+            13f, muted = true
+        ), top = 18)
+        voiceSecret = ui.input("Ключ доступа к разговору").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        ui.add(connection, voiceSecret, top = 10)
+        ui.add(connection, ui.button("Сохранить ключ доступа").apply {
+            setOnClickListener {
+                val value = voiceSecret.text.toString().trim()
+                try {
+                    AndroidVoiceCredentials.save(this@MainActivity, value)
+                    voiceSecret.setText("")
+                    voiceSession = null
+                    getSharedPreferences("android_voice_session", MODE_PRIVATE).edit().clear().apply()
+                    voiceStatus.text = "Ключ сохранён в Android Keystore. Проверьте подключение."
+                } catch (_: Exception) {
+                    voiceStatus.text = "Ключ не сохранён. Проверьте правильность значения."
+                }
+            }
+        }, top = 9)
+        ui.add(connection, ui.button("Проверить доступ к разговору").apply {
+            setOnClickListener { checkVoiceConnection() }
+        }, top = 8)
+        ui.add(settingsPanel, connection, top = 12)
+
+        val cameraCard = ui.panel()
+        ui.add(cameraCard, ui.label("КАМЕРА И ЗРЕНИЕ", 12f, muted = true, bold = true))
+        ui.add(cameraCard, ui.label(
+            "Пока Леший только обнаруживает лица. Узнавание людей ещё не подключено.",
+            13f, muted = true
+        ), top = 9)
+        cameraButton = ui.button("Включить камеру и обнаружение лиц").apply {
+            setOnClickListener {
+                if (cameraEnabled) stopCamera()
+                else if (ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.CAMERA
+                ) == PackageManager.PERMISSION_GRANTED) startCamera()
+                else cameraPermission.launch(Manifest.permission.CAMERA)
+            }
+        }
+        ui.add(cameraCard, cameraButton, top = 12)
+        faceStatus = ui.label("Камера выключена; личность не определена", 13f, muted = true)
+        ui.add(cameraCard, faceStatus, top = 10)
+        cameraPreview = PreviewView(this).apply { visibility = View.GONE }
+        cameraCard.addView(cameraPreview, LinearLayout.LayoutParams(-1, ui.dp(220)).apply {
+            topMargin = ui.dp(10)
+        })
+        ui.add(cameraCard, ui.label(
+            "Камера работает только при открытом приложении.",
+            12f, muted = true
+        ), top = 8)
+        ui.add(settingsPanel, cameraCard, top = 14)
+
+        val deviceCard = ui.panel()
+        ui.add(deviceCard, ui.label("БЕЗОПАСНОСТЬ УСТРОЙСТВА", 12f, muted = true, bold = true))
+        ui.add(deviceCard, ui.label(
+            "Локальный ключ устройства сам по себе не даёт доступа к серверу.",
+            13f, muted = true
+        ), top = 9)
+        deviceStatus = ui.label("Состояние ключа загружается...", 13f, muted = true)
+        ui.add(deviceCard, deviceStatus, top = 10)
+        deviceCreateButton = ui.button("Подготовить ключ устройства").apply {
+            setOnClickListener { createDeviceIdentity() }
+        }
+        ui.add(deviceCard, deviceCreateButton, top = 10)
+        ui.add(deviceCard, ui.button("Удалить локальный ключ").apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Удалить ключ устройства?")
+                    .setMessage(
+                        "Действие необратимо. Для будущих серверных привязок " +
+                            "потребуется отдельный отзыв доступа на сервере."
+                    )
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Удалить") { _, _ -> deleteDeviceIdentity() }
+                    .show()
+            }
+        }, top = 8)
+        ui.add(settingsPanel, deviceCard, top = 14)
+
+        val soundCard = ui.panel()
+        ui.add(soundCard, ui.label("МИКРОФОН И ПИТАНИЕ", 12f, muted = true, bold = true))
+        micStatus = ui.label("Микрофон выключен", 13f, muted = true)
+        ui.add(soundCard, micStatus, top = 10)
+        micButton = ui.button("Включить фоновый микрофон (без диалога)").apply {
+            setOnClickListener {
+                if (continuousActive) {
+                    stopContinuousConversation(
+                        "Непрерывный диалог остановлен: выбран отдельный режим микрофона."
+                    )
+                }
+                if (ListeningService.isListening) stopListening()
+                else if (ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED) startListening()
+                else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+        ui.add(soundCard, micButton, top = 10)
+        ui.add(soundCard, ui.button("Настройки энергосбережения Android").apply {
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            }
+        }, top = 8)
+        ui.add(soundCard, ui.button("Отозвать согласие на распознавание речи").apply {
+            setOnClickListener {
+                if (continuousActive) stopContinuousConversation("Разговор завершён.")
+                getSharedPreferences("android_voice_privacy", MODE_PRIVATE)
+                    .edit().putBoolean("system_asr_agreed", false).apply()
+                voiceStatus.text = "Согласие отозвано. Распознавание выключено."
+            }
+        }, top = 8)
+        ui.add(settingsPanel, soundCard, top = 14)
+
+        ui.add(settingsPanel, ui.label(
+            "Речь распознаётся системой Android; она может передавать звук " +
+                "своему поставщику. Леший получает распознанный текст по HTTPS. " +
+                "Непрерывный диалог работает только при открытом приложении.",
+            12f, muted = true
+        ), top = 15, bottom = 10)
+        ui.add(root, settingsPanel)
+        ui.add(root, ui.label(
+            "Леший · Экспериментальный мобильный клиент",
+            12f, muted = true
+        ), top = 24, bottom = 20)
+        setContentView(screen)
     }
 
     override fun onResume() {
