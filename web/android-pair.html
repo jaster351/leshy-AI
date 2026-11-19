@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Леший · Подключение телефона</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#091119;color:#eef8f6}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px}
+    main{max-width:480px;width:100%;background:#13222a;border:1px solid #26414b;border-radius:27px;padding:28px;box-shadow:0 20px 70px #0007}
+    small{color:#7ae9be;letter-spacing:.17em;font-weight:700}h1{font-size:1.65rem;margin:.7rem 0}
+    p{color:#afc5c3;line-height:1.55}.name{color:#eef8f6;font-size:1.2rem;font-weight:700}
+    code{display:block;background:#1b3037;padding:14px;word-wrap:break-word;border-radius:14px;color:#b4d9cd;font-size:.85rem}
+    button{width:100%;border:0;border-radius:16px;background:#7ae9be;padding:16px;font-weight:750;font-size:1rem;color:#091119;cursor:pointer;margin-top:18px}
+    button[disabled]{opacity:.48;cursor:default}.secondary{background:#1b3037;color:#eef8f6;margin-top:9px}
+    #status{min-height:2rem}a{color:#7ae9be}
+  </style>
+</head>
+<body>
+<main>
+  <small>ЛЕШИЙ · ЛИЧНОЕ УСТРОЙСТВО</small>
+  <h1>Подключение телефона</h1>
+  <p>Подтвердите, что Вы доверяете этому Android-устройству. После разрешения телефон получит <strong>только доступ к диалогу</strong>, без прав управления компьютером.</p>
+  <div id="device" class="name">Проверяем запрос…</div>
+  <p id="status" role="status" aria-live="polite"></p>
+  <div id="details" hidden>
+    <p>Отпечаток публичного ключа устройства:</p>
+    <code id="fingerprint"></code>
+    <p>Проверьте, что запрос инициировали именно Вы и что название и отпечаток совпадают с телефоном. Незнакомые устройства не подтверждайте.</p>
+    <button id="approve" type="button">Да, это мой телефон</button>
+    <button id="cancel" type="button" class="secondary">Не подключать</button>
+  </div>
+  <p><a href="/">Вернуться к Лешему</a></p>
+</main>
+<script>
+(() => {
+  "use strict";
+  const id = new URLSearchParams(location.search).get("id") || "";
+  const el = key => document.getElementById(key);
+  const set = msg => { el("status").textContent = msg; };
+  async function request(url, options = {}) {
+    const r = await fetch(url, {credentials:"same-origin", cache:"no-store", ...options});
+    const data = await r.json().catch(() => ({error:"Некорректный ответ сервера"}));
+    if (!r.ok) throw Error(data.error || ("HTTP " + r.status));
+    return data;
+  }
+  async function init() {
+    if (!/^[A-Za-z0-9_-]{24,80}$/.test(id)) {
+      set("Некорректная ссылка. Начните привязку заново в Android.");
+      return;
+    }
+    try {
+      const data = await request("/v1/android/pair/request?id=" + encodeURIComponent(id));
+      el("device").textContent = data.name || "Android";
+      el("fingerprint").textContent = (data.fingerprint || "").match(/.{1,8}/g)?.join(" ") || "";
+      if (data.state === "approved") { set("Телефон уже подтверждён. Вернитесь в приложение."); return; }
+      el("details").hidden = false;
+      set("Запрос действителен ещё " + data.expires_in + " сек.");
+    } catch (e) {
+      set(e.message + ". Откройте основной Web-интерфейс, войдите через подтверждённый профиль Telegram и попробуйте снова.");
+    }
+  }
+  el("approve").addEventListener("click", async () => {
+    el("approve").disabled = true;
+    try {
+      await request("/v1/android/pair/approve", {
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({request_id:id,confirm:true})
+      });
+      el("details").hidden = true;
+      set("Телефон подтверждён. Вернитесь в приложение «Леший» — подключение завершится автоматически.");
+    } catch(e) { set(e.message); el("approve").disabled = false; }
+  });
+  el("cancel").addEventListener("click", () => {
+    el("details").hidden = true;
+    set("Запрос не подтверждён. Без разрешения телефон не получит доступ.");
+  });
+  init();
+})();
+</script>
+</body>
+</html>
