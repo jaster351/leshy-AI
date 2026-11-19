@@ -138,6 +138,13 @@ def make_handler(app, telegram, settings, model_catalog):
                     "error": "Expected JSON"
                 })
             try:
+                # Unauthenticated pairing endpoints must not inherit the
+                # generic handler's 2 MiB request-body allowance.
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                if not 1 <= length <= 4096:
+                    return self._json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {
+                        "error": "Pairing request must be 1 to 4096 bytes"
+                    })
                 body = self._body()
                 if route.endswith("/start"):
                     result = pairing.begin(body, str(self.client_address[0]))
