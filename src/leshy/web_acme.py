@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
+import http.client
+import io
 import ipaddress
 import json
 import math
@@ -122,6 +124,85 @@ class _NoRedirect(request.HTTPRedirectHandler):
         return None
 
 
+class _DeadlineReader(io.RawIOBase):
+    """Проверяет бюджет каждого recv, включая заголовки и chunk framing."""
+
+    def __init__(self, raw, sock, deadline: float, guard: Callable[[], None]):
+        self.raw, self.sock, self.deadline, self.guard = raw, sock, deadline, guard
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        self.guard()
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Истекло время чтения ответа ACME")
+        self.sock.settimeout(min(10.0, remaining))
+        count = self.raw.readinto(buffer)
+        self.guard()
+        if time.monotonic() >= self.deadline:
+            raise TimeoutError("Истекло время чтения ответа ACME")
+        return count
+
+    def close(self):
+        try:
+            self.raw.close()
+        finally:
+            super().close()
+
+
+class _DeadlineSocket:
+    def __init__(self, sock, deadline: float, guard: Callable[[], None]):
+        self.sock, self.deadline, self.guard = sock, deadline, guard
+
+    def makefile(self, mode):
+        raw = self.sock.makefile(mode, buffering=0)
+        try:
+            return io.BufferedReader(_DeadlineReader(raw, self.sock, self.deadline, self.guard))
+        except BaseException:
+            raw.close()
+            raise
+
+
+class _DeadlineHTTPResponse(http.client.HTTPResponse):
+    """Остаток deadline применяется к сокету перед каждым чтением тела."""
+
+    def __init__(self, sock, *args, deadline: float, guard: Callable[[], None], **kwargs):
+        self._acme_socket, self._acme_deadline, self._acme_guard = sock, deadline, guard
+        super().__init__(_DeadlineSocket(sock, deadline, guard), *args, **kwargs)
+
+    def read1(self, amount=-1):
+        self._acme_guard()
+        # stdlib закрывает файл и последний socket-ref сразу на Content-Length.
+        # Следующее чтение EOF не должно менять timeout уже закрытого сокета.
+        if self.fp is None or self._method == "HEAD":
+            return b""
+        remaining = self._acme_deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Истекло время чтения ответа ACME")
+        self._acme_socket.settimeout(min(10.0, remaining))
+        part = super().read1(amount)
+        self._acme_guard()
+        if time.monotonic() >= self._acme_deadline:
+            raise TimeoutError("Истекло время чтения ответа ACME")
+        return part
+
+
+class _DeadlineHTTPSHandler(request.HTTPSHandler):
+    def __init__(self, deadline: float, guard: Callable[[], None]):
+        super().__init__(context=ssl.create_default_context())
+        self.deadline, self.guard = deadline, guard
+
+    def https_open(self, req):
+        def connection(host, **kwargs):
+            value = http.client.HTTPSConnection(host, **kwargs)
+            value.response_class = lambda *args, **extra: _DeadlineHTTPResponse(
+                *args, deadline=self.deadline, guard=self.guard, **extra)
+            return value
+        return self.do_open(connection, req, context=self._context)
+
+
 class _AcmeWire:
     """JWS RS256, один повтор только при явном badNonce, строгий origin CA."""
 
@@ -134,7 +215,7 @@ class _AcmeWire:
         self.nonce = ""
         self.directory: dict = {}
         self.opener = request.build_opener(request.ProxyHandler({}),
-                                          request.HTTPSHandler(context=ssl.create_default_context()),
+                                          _DeadlineHTTPSHandler(deadline, guard),
                                           _NoRedirect())
 
     def check_url(self, value: Any) -> str:
@@ -186,13 +267,18 @@ class _AcmeWire:
             if _NONCE.fullmatch(nonce):
                 self.nonce = nonce
             return response.getcode(), reply_headers, b"".join(chunks)
-        except (error.URLError, OSError, TimeoutError) as exc:
+        except (error.URLError, OSError, http.client.HTTPException) as exc:
             if method == "POST":
                 raise _UnknownOutcome("Ответ ACME потерян; автоматический повтор запрещён") from exc
             raise _AcmeFailure("Не удалось прочитать ресурс центра сертификации") from exc
         finally:
             if response is not None:
-                response.close()
+                try:
+                    response.close()
+                except (OSError, http.client.HTTPException):
+                    # Ошибка cleanup не скрывает неизвестный результат POST
+                    # или отмену; полностью прочитанное тело уже проверено выше.
+                    pass
 
     def discover(self) -> str:
         code, _, raw = self.raw("GET", self.url)
@@ -452,9 +538,16 @@ class WebAcmeService:
         if self._http01_available is not None and not self._http01_available():
             raise _AcmeFailure("Для HTTP-01 нужен включённый и работающий HTTP-порт Лешего с внешним доступом на порт 80")
 
-    def replace_certificate_manually(self, install: Callable[[], dict]) -> dict:
+    def replace_certificate_manually(self, install: Callable[[], dict], *,
+                                     installed_fingerprint: Callable[[], str] | None = None) -> dict:
         """Отозвать старый job и откатить настройки, если запись сертификата не удалась."""
         with self._lock:
+            before = None
+            if installed_fingerprint is not None:
+                try:
+                    before = installed_fingerprint()
+                except Exception:
+                    pass
             previous = dict(self.config)
             if self._job and self._job.is_alive():
                 previous.update(state="outcome_unknown", attention_required=True, outcome_unknown=True,
@@ -463,11 +556,39 @@ class WebAcmeService:
             self._challenges.clear()
             self.config = {**previous, "enabled": False, "auto_renew": False,
                            "consent_scope": "", "state": "disabled"}
+            installer_started = False
             try:
                 self._save()
                 # ACME → core: поздняя установка старого заказа исключена тем же lock.
+                installer_started = True
                 return install()
             except Exception:
+                if installed_fingerprint is not None:
+                    unchanged = not installer_started
+                    if installer_started and isinstance(before, str) and before:
+                        try:
+                            unchanged = installed_fingerprint() == before
+                        except Exception:
+                            unchanged = False
+                    if unchanged:
+                        self.config = previous
+                    else:
+                        self.config.update(enabled=False, auto_renew=False, consent_scope="",
+                                           state="outcome_unknown", attention_required=True, outcome_unknown=True,
+                                           last_error="Смена сертификата не подтверждена; автопродление остановлено")
+                    try:
+                        self._save()
+                    except Exception:
+                        self.config.update(enabled=False, auto_renew=False, consent_scope="",
+                                           state="outcome_unknown", attention_required=True, outcome_unknown=True,
+                                           last_error="Не удалось сохранить состояние смены сертификата; требуется проверка владельцем")
+                        try:
+                            self._save()
+                        except Exception:
+                            pass
+                    # Исходная ошибка установки важнее ошибок записи attention.
+                    raise
+                # Совместимость прямых callers без callback подтверждения записи.
                 self.config = previous
                 try:
                     self._save()

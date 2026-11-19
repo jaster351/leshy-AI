@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 import socket
 from tempfile import TemporaryDirectory
@@ -122,6 +123,12 @@ class AcmeLifecycleTests(unittest.TestCase):
 class IndependentListenerTests(unittest.TestCase):
     def test_busy_http_does_not_prevent_https_bind(self):
         runtime = WebTransportRuntime.__new__(WebTransportRuntime)
+        runtime._issuer_lifecycle_lock = threading.RLock()
+        runtime._stopping = threading.Event()
+        runtime._running = False
+        runtime.acme = Mock()
+        runtime.acme.configuration_guard.side_effect = lambda: nullcontext({"enabled": False, "in_progress": False})
+        runtime.local_ca = Mock()
         runtime.lock = threading.RLock()
         runtime._servers = {}
         runtime._states = {name: {} for name in ("http", "https")}

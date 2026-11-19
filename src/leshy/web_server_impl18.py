@@ -138,6 +138,10 @@ def make_handler(app, telegram, settings, model_catalog):
             # Машинный клиент допустим только с реально настроенным bearer token.
             token = os.getenv("LESHY_API_TOKEN", "").strip()
             authorization = str(self.headers.get("Authorization") or "")
+            if token and not self._private_import_allowed():
+                self._json(HTTPStatus.FORBIDDEN, {
+                    "error": "Голосовой bearer token принимается только через HTTPS или локально на сервере"})
+                return False
             if token and hmac.compare_digest(authorization.encode("utf-8"), ("Bearer " + token).encode("utf-8")):
                 return True
             if token:
@@ -169,6 +173,27 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._send_asset("network-security-panel.js", "application/javascript; charset=utf-8")
                 except FileNotFoundError:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": "Панель HTTP/HTTPS отсутствует в установке"})
+            if route == _PREFIX + "local-ca/root.cer":
+                if not self._web_security_owner():
+                    return
+                if not self._private_import_allowed():
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Скачайте корневой сертификат через HTTPS или локально на самом сервере"})
+                try:
+                    encoded = service.local_ca.public_certificate()
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "application/x-x509-ca-cert")
+                    self.send_header("Content-Disposition", 'attachment; filename="Leshy-local-root.cer"')
+                    self.send_header("Content-Length", str(len(encoded)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(encoded)
+                    return
+                except (ValueError, RuntimeError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                except Exception as exc:
+                    problem("web_local_ca_download_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Корневой сертификат недоступен"})
             if route == _PREFIX + "status":
                 if not self._web_security_owner():
                     return
@@ -176,6 +201,8 @@ def make_handler(app, telegram, settings, model_catalog):
                     value = service.status()
                     value["connection"] = {"tls": self._real_tls(), "loopback": self._loopback(),
                                            "can_import_certificate": self._private_import_allowed(),
+                                           "can_issue_local_ca": self._private_import_allowed(),
+                                           "can_download_local_ca": self._private_import_allowed(),
                                            "separate_protocol_sessions": True}
                     return self._json(HTTPStatus.OK, value)
                 except Exception as exc:
@@ -205,9 +232,16 @@ def make_handler(app, telegram, settings, model_catalog):
                     service.import_certificate(body.get("certificate_pem"), body.get("private_key_pem"),
                                                body.get("key_password"))
                 elif route == _PREFIX + "acme/configure":
-                    service.acme.configure(body)
+                    service.configure_acme(body)
                 elif route == _PREFIX + "acme/issue":
-                    service.acme.issue(body)
+                    service.issue_acme(body)
+                elif route == _PREFIX + "local-ca/issue":
+                    if not self._private_import_allowed():
+                        return self._json(HTTPStatus.FORBIDDEN, {
+                            "error": "Создайте локальный CA через HTTPS или локально на самом сервере"})
+                    service.issue_local_certificate(body)
+                elif route == _PREFIX + "local-ca/disable":
+                    service.disable_local_ca(body)
                 else:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": "Неизвестная операция HTTP/HTTPS"})
                 return self._json(HTTPStatus.OK, service.status())

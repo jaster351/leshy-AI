@@ -28,6 +28,7 @@ REQUIRED_MODULES = (
     "leshy.web_listeners",
     "leshy.web_transport_runtime",
     "leshy.web_acme",
+    "leshy.web_local_ca",
     "leshy.web_server_impl18",
 )
 

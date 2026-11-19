@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 import errno
 import hmac
 from http.server import ThreadingHTTPServer
@@ -98,6 +98,7 @@ class WebListenerTests(unittest.TestCase):
                                       return_value=self.certificates))
         self.acme = Mock()
         self.acme.status.return_value = {}
+        self.acme.configuration_guard.side_effect = lambda: nullcontext({"enabled": False, "in_progress": False})
         self.stack.enter_context(patch("leshy.web_acme.WebAcmeService", return_value=self.acme))
 
     def runtime(self, *, host="auto", saved=None):

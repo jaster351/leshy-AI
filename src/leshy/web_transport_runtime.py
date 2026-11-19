@@ -53,6 +53,12 @@ class WebTransportRuntime:
         self._handler = None
         self._running = False
         self._stopping = threading.Event()
+        # Запуск/остановка продления не берут core-lock и не могут разминуться.
+        self._issuer_lifecycle_lock = threading.RLock()
+        from .web_local_ca import WebLocalCAService
+        self.local_ca = WebLocalCAService(
+            brain_dir, self.prepare_certificate, self.install_prepared_certificate,
+            self.certificates.stored_fingerprint, lambda: self.settings.load()["hostname"])
         from .web_acme import WebAcmeService
         self.acme = WebAcmeService(brain_dir, self.install_certificate, self._http01_available)
 
@@ -158,7 +164,7 @@ class WebTransportRuntime:
             return
         if protocol == "https" and self.certificates.context() is None:
             self._states[protocol].update(status="waiting_certificate", listening=False,
-                                         error="Загрузите действующий сертификат или получите его через ACME")
+                                         error="Загрузите сертификат, получите его через ACME или создайте локальный CA")
             return
         candidates = binding_addresses(self.host, self.configuration[protocol + "_port"])
         last_error = None
@@ -189,6 +195,14 @@ class WebTransportRuntime:
             raise OSError("Не найдены подходящие адреса для привязки")
 
     def bind(self, handler) -> None:
+        # После долгого выключения собственный leaf может истечь. Уже разрешённое
+        # локальное продление выполняется до bind, иначе HTTPS-only не запустится.
+        # Сеть и worker для этого не нужны; pending/чужой сертификат tick не меняет.
+        with self._issuer_lifecycle_lock:
+            if not self._stopping.is_set() and not self._running:
+                with self.acme.configuration_guard() as acme:
+                    if acme.get("enabled") is False and acme.get("in_progress") is False:
+                        self.local_ca.tick()
         with self.lock:
             self._handler = handler
             try:
@@ -260,7 +274,7 @@ class WebTransportRuntime:
                 return
             if not any(thread.is_alive() for thread in self._threads.values()):
                 raise RuntimeError("Не запущен ни один HTTP/HTTPS обработчик")
-        self.acme.start()
+        self._start_issuers()
         if self._on_listening:
             callback, self._on_listening = self._on_listening, None
             url = self.listening_url()
@@ -276,8 +290,9 @@ class WebTransportRuntime:
 
     def install_certificate(self, certificate_pem: str, private_key_pem: str,
                             password: str | None = None) -> dict:
-        with self.lock:
-            return self.install_prepared_certificate(self.prepare_certificate(certificate_pem, private_key_pem, password))
+        # Callback ACME уже держит его lock: подготовка освобождает core до local CA.
+        prepared = self.prepare_certificate(certificate_pem, private_key_pem, password)
+        return self.local_ca.replace_certificate_manually(lambda: self.install_prepared_certificate(prepared))
 
     def prepare_certificate(self, certificate_pem: str, private_key_pem: str,
                             password: str | None = None):
@@ -287,7 +302,47 @@ class WebTransportRuntime:
     def import_certificate(self, certificate_pem: str, private_key_pem: str,
                            password: str | None = None) -> dict:
         prepared = self.prepare_certificate(certificate_pem, private_key_pem, password)
-        return self.acme.replace_certificate_manually(lambda: self.install_prepared_certificate(prepared))
+        return self.acme.replace_certificate_manually(
+            lambda: self.local_ca.replace_certificate_manually(lambda: self.install_prepared_certificate(prepared)),
+            installed_fingerprint=self.certificates.stored_fingerprint)
+
+    def issue_local_certificate(self, body: dict) -> dict:
+        with self.lock:
+            if self._stopping.is_set():
+                raise RuntimeError("Сервер останавливается; локальный сертификат не изменён")
+        with self.acme.configuration_guard() as acme:
+            if acme.get("in_progress") is not False:
+                raise ValueError("Дождитесь завершения текущего запроса ACME перед локальным выпуском")
+            result = self.acme.replace_certificate_manually(
+                lambda: self.local_ca.issue(body), installed_fingerprint=self.certificates.stored_fingerprint)
+        self._start_issuers(local_only=True)
+        return result
+
+    def disable_local_ca(self, body: dict) -> dict:
+        return self.local_ca.disable(body)
+
+    def configure_acme(self, body: dict) -> dict:
+        # Общий порядок ACME → local CA → core исключает два активных продления.
+        # ACME может вернуть state=error после сохранения настроек: тогда локальное
+        # продление остаётся выключенным, а фактический результат виден в статусе.
+        with self.acme.configuration_guard():
+            return self.local_ca.replace_certificate_manually(lambda: self.acme.configure(body))
+
+    def issue_acme(self, body: dict) -> dict:
+        with self.acme.configuration_guard():
+            return self.local_ca.replace_certificate_manually(lambda: self.acme.issue(body))
+
+    def _start_issuers(self, *, local_only: bool = False) -> None:
+        with self._issuer_lifecycle_lock:
+            # close выставляет событие до захвата lock; поздний HTTP-запрос не
+            # возобновляет продление после остановки сервера.
+            if self._stopping.is_set() or not self._running:
+                return
+            with self.acme.configuration_guard() as acme:
+                if not local_only:
+                    self.acme.start()
+                if acme.get("enabled") is False and acme.get("in_progress") is False:
+                    self.local_ca.start()
 
     def install_prepared_certificate(self, prepared) -> dict:
         with self.lock:
@@ -340,7 +395,7 @@ class WebTransportRuntime:
             return {"settings": value, "restart_required": value != self.configuration}
 
     def status(self) -> dict:
-        # Не вызывать ACME под core-lock: выдача сертификата берёт ACME → core.
+        # Статусы издателей читаются вне core: порядок ACME → local CA → core.
         with self.lock:
             value = self.settings.load()
             states = {name: dict(state) for name, state in self._states.items()}
@@ -355,9 +410,9 @@ class WebTransportRuntime:
                        "http_port_override": self._http_override,
                        "https_port_override": self._https_override}
         return {"settings": value, "runtime": runtime, "certificate": certificate,
-                "acme": self.acme.status(),
+                "acme": self.acme.status(), "local_ca": self.local_ca.status(),
                 "capabilities": {"configure": True, "import_certificate": True,
-                                 "acme": True, "browser_trust_verified": False}}
+                                 "acme": True, "local_ca": True, "browser_trust_verified": False}}
 
     def shutdown(self) -> None:
         """Совместимый сигнал Windows tray; cleanup выполняет основной serve/finally."""
@@ -365,10 +420,12 @@ class WebTransportRuntime:
 
     def close(self) -> None:
         self._stopping.set()
-        try:
-            self.acme.stop()
-        except Exception as exc:
-            problem("web_acme_shutdown_failed", type(exc).__name__)
+        with self._issuer_lifecycle_lock:
+            for name, service in (("acme", self.acme), ("local_ca", self.local_ca)):
+                try:
+                    service.stop()
+                except Exception as exc:
+                    problem("web_" + name + "_shutdown_failed", type(exc).__name__)
         with self.lock:
             servers = list(self._servers.items())
         for name, server in servers:

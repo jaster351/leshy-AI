@@ -202,6 +202,24 @@ class WebCertificateStore:
                 return self._context
             return None
 
+    def stored_fingerprint(self) -> str:
+        """Идентичность сохранённого leaf даже после истечения срока; ключ не возвращается."""
+        with self.lock:
+            try:
+                reject_link(self.root)
+                reject_link(self.path)
+                if not self.path.is_file() or self.path.stat().st_size > 1024 * 1024:
+                    return ""
+                material = json.loads(load_secret(self.path))
+                certificate_pem = material.get("certificate_pem")
+                if not isinstance(certificate_pem, str) or len(certificate_pem) > 256 * 1024:
+                    return ""
+                chain = x509.load_pem_x509_certificates(certificate_pem.encode("ascii"))
+                return chain[0].fingerprint(hashes.SHA256()).hex() if chain else ""
+            except Exception:
+                # Повреждённое/недоступное хранилище не подтверждает право продления.
+                return ""
+
     def status(self) -> dict:
         with self.lock:
             value = dict(self._metadata)

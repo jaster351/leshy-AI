@@ -1,7 +1,7 @@
 (function(){
   'use strict';
   const $=id=>document.getElementById(id);
-  let busy=false,portsDirty=false,acmeDirty=false,pollTimer=0,lastStatus=null;
+  let busy=false,portsDirty=false,acmeDirty=false,localDirty=false,pollTimer=0,lastStatus=null;
   const pendingActions=new Set();
 
   async function api(path,body){
@@ -12,8 +12,14 @@
         headers:{'Content-Type':'application/json','X-Leshy-UI':'network-security'},
         body:body===undefined?undefined:JSON.stringify(body),
       });
-      const data=await response.json().catch(()=>({error:'Сервер вернул некорректный ответ'}));
-      if(!response.ok){const error=new Error(data.error||('HTTP '+response.status));error.status=response.status;throw error}
+      const data=await response.json().catch(()=>{throw new Error('Сервер вернул некорректный ответ. Результат действия не подтверждён; проверьте состояние перед повтором.')});
+      if(!response.ok){const error=new Error(data?.error||('HTTP '+response.status));error.status=response.status;throw error}
+      const settings=data?.settings;
+      if(!settings||typeof settings!=='object'||Array.isArray(settings)||typeof settings.hostname!=='string'||
+        ['http_enabled','https_enabled'].some(key=>typeof settings[key]!=='boolean')||
+        ['http_port','https_port'].some(key=>!Number.isInteger(settings[key])||settings[key]<1||settings[key]>65535)){
+        throw new Error('Сервер не подтвердил состояние подключения. Результат действия неизвестен; проверьте состояние перед повтором.');
+      }
       return data;
     }catch(error){
       if(error.name==='AbortError')throw new Error('Сервер не ответил вовремя. Проверьте состояние перед повторным действием.');
@@ -22,7 +28,10 @@
   }
 
   function note(text,bad=false){const node=$('networkSecurityNote');if(node){node.textContent=text||'';node.classList.toggle('bad',bad)}}
-  function secureUpload(){return location.protocol==='https:'||['localhost','127.0.0.1','[::1]','::1'].includes(location.hostname)}
+  function secureUpload(){
+    const host=location.hostname.toLowerCase().replace(/^\[|\]$/g,'');
+    return location.protocol==='https:'||['localhost','::1'].includes(host)||(/^127(?:\.\d{1,3}){3}$/.test(host)&&host.split('.').every(x=>Number(x)<=255));
+  }
 
   function ensure(){
     if($('networkSecurityCard'))return true;const pane=$('pane-settings');if(!pane)return false;
@@ -30,7 +39,7 @@
       #networkSecurityCard{margin-top:12px}#networkSecurityCard[hidden]{display:none!important}
       #networkSecurityCard .network-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;margin:12px 0}
       #networkSecurityCard label{display:grid;gap:6px;font-size:12px;line-height:1.45;min-width:0}#networkSecurityCard .network-check{display:flex;align-items:flex-start;gap:8px}
-      #networkSecurityCard input:not([type=checkbox]),#networkSecurityCard select{box-sizing:border-box;min-width:0;width:100%}#networkSecurityCard input[type=file]{font-size:12px;max-width:100%}
+      #networkSecurityCard input:not([type=checkbox]),#networkSecurityCard select,#networkSecurityCard textarea{box-sizing:border-box;min-width:0;width:100%}#networkSecurityCard textarea{resize:vertical}#networkSecurityCard input[type=file]{font-size:12px;max-width:100%}
       #networkSecurityCard .network-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}#networkSecurityCard button{min-height:40px}
       #networkSecurityCard .network-status{white-space:pre-line;overflow-wrap:anywhere;font-size:12px;line-height:1.55;padding:10px 0}#networkSecurityCard details{margin-top:12px;border-top:1px solid var(--line,#36463f);padding-top:12px}#networkSecurityCard summary{cursor:pointer;font-size:14px}
       #networkSecurityCard .bad{color:#ffb4a8}#networkSecurityCard a{color:#a8dfca}#networkSecurityCard [hidden]{display:none!important}
@@ -59,7 +68,17 @@
         </div>
         <p id="networkImportHelp" class="hint"></p><button class="button secondary" id="networkImport" type="button">Проверить и установить сертификат</button>
       </details>
-      <details><summary>Бесплатный сертификат и автопродление</summary>
+      <details><summary>HTTPS по IP без домена</summary>
+        <p class="hint">Леший создаст локальный центр сертификации и сертификат для указанных IP и имён. Закрытые ключи остаются на сервере. Бесплатное продление работает, пока запущен Леший. При изменении IP добавьте новый адрес и выпустите сертификат повторно.</p>
+        <div class="network-fields"><label>IP и имена сервера, по одному на строку<textarea id="networkLocalNames" class="field" rows="4" maxlength="8192" placeholder="IP сервера или его имя"></textarea></label></div>
+        <label class="network-check"><input id="networkLocalRenew" type="checkbox"> Автоматически продлевать локальный сертификат</label>
+        <p class="hint">На каждом устройстве нужно один раз установить доверие к корневому сертификату этого сервера. Такое доверие распространяется на сертификаты, подписанные его ключом. Сверьте отпечаток SHA-256 через доверенный канал. Леший не меняет доверие устройств автоматически.</p>
+        <label class="network-check"><input id="networkLocalTrustConsent" type="checkbox"> Понимаю действие корневого сертификата и подтверждаю выпуск для перечисленных адресов.</label>
+        <p id="networkLocalHelp" class="hint"></p>
+        <div class="network-actions"><button class="button" id="networkLocalIssue" type="button">Выпустить локальный сертификат</button><button class="button secondary" id="networkLocalRoot" type="button">Скачать корневой сертификат</button><button class="button secondary" id="networkLocalDisable" type="button">Отключить локальное продление</button></div>
+        <div id="networkLocalStatus" class="network-status" role="status" aria-live="polite"></div>
+      </details>
+      <details><summary>Let's Encrypt для домена и автопродление</summary>
         <p class="hint">Леший подтвердит владение доменом через HTTP-01. Центр сертификации обращается к внешнему порту 80; перенаправление на работающий HTTP-порт Лешего нужно настроить на Вашем роутере или сервере. Порты приложения можно выбирать отдельно. Перед выключением HTTP завершите выпуск и отключите автопродление HTTP-01.</p>
         <div class="network-fields">
           <label>Домены через запятую<input id="networkAcmeDomains" class="field" maxlength="1500" placeholder="leshy.example.org"></label>
@@ -79,9 +98,12 @@
     for(const id of ['networkHttpEnabled','networkHttpPort','networkHttpsEnabled','networkHttpsPort','networkHostname'])$(id).addEventListener('input',()=>{portsDirty=true});
     for(const id of ['networkAcmeDomains','networkAcmeEmail','networkAcmeEnvironment'])$(id).addEventListener('input',()=>{acmeDirty=true;$('networkAcmeTermsAgreed').checked=false;$('networkAcmeContactConsent').checked=false});
     for(const id of ['networkAcmeTermsAgreed','networkAcmeRenew','networkAcmeContactConsent'])$(id).addEventListener('change',()=>{acmeDirty=true});
+    for(const id of ['networkLocalNames','networkLocalRenew'])$(id).addEventListener('input',()=>{localDirty=true;$('networkLocalTrustConsent').checked=false;syncButtons()});
+    $('networkLocalTrustConsent').addEventListener('change',syncButtons);
     $('networkRefresh').onclick=()=>refresh(false);
     $('networkSave').onclick=savePorts;$('networkImport').onclick=importCertificate;
     $('networkAcmeSave').onclick=()=>saveAcme(false);$('networkAcmeIssue').onclick=()=>saveAcme(true);
+    $('networkLocalIssue').onclick=issueLocal;$('networkLocalDisable').onclick=disableLocal;$('networkLocalRoot').onclick=downloadLocalRoot;
     return true;
   }
 
@@ -99,7 +121,7 @@
 
   function render(data,fill=false){
     if(!ensure())return;if(!data.settings)throw new Error('Сервер не вернул настройки подключения');
-    lastStatus=data;const settings=data.settings,runtime=data.runtime||{},cert=data.certificate||{},acme=data.acme||{};
+    lastStatus=data;const settings=data.settings,runtime=data.runtime||{},cert=data.certificate||{},acme=data.acme||{},local=data.local_ca||{};
     $('networkSecurityCard').hidden=false;
     if(fill||!portsDirty){
       $('networkHttpEnabled').checked=settings.http_enabled===true;$('networkHttpsEnabled').checked=settings.https_enabled===true;
@@ -120,7 +142,29 @@
       cert.fingerprint_sha256?'Отпечаток SHA-256: '+cert.fingerprint_sha256:'',
       'Доверие сертификату на Вашем устройстве проверяется браузером.',
     ].filter(Boolean).join('\n');
-    $('networkImportHelp').textContent=secureUpload()?'Ключ отправляется только этому серверу и не возвращается в ответе API.':'Для загрузки закрытого ключа откройте HTTPS или localhost на самом сервере.';
+    $('networkImportHelp').textContent=secureUpload()&&data.connection?.can_import_certificate===true?'Ключ отправляется только этому серверу и не возвращается в ответе API.':'Для загрузки закрытого ключа откройте HTTPS или localhost на самом сервере.';
+    if(fill||!localDirty){
+      const names=Array.isArray(local.names)&&local.names.length?local.names:[settings.hostname,location.hostname.replace(/^\[|\]$/g,'')].filter(Boolean);
+      const nextNames=[...new Set(names)].join('\n'),nextRenew=local.configured?local.auto_renew===true:true;
+      if($('networkLocalNames').value!==nextNames||$('networkLocalRenew').checked!==nextRenew)$('networkLocalTrustConsent').checked=false;
+      $('networkLocalNames').value=nextNames;$('networkLocalRenew').checked=nextRenew;localDirty=false;
+    }
+    const localAllowed=secureUpload()&&data.connection?.can_issue_local_ca===true;
+    $('networkLocalHelp').textContent=localAllowed
+      ?'Включите HTTPS в настройках портов и укажите основное IP или имя, входящее в список выше. Установка своего сертификата или настройка Let\'s Encrypt отключает локальное продление. После установки доверия откройте HTTPS по указанному IP или имени.'
+      :'Первый выпуск и скачивание корневого сертификата доступны через доверенный HTTPS или localhost на самом сервере. По удалённому HTTP откройте эту админку на сервере, затем передайте корневой сертификат на устройства через доверенный канал.';
+    const localLabels={not_configured:'Не настроено',issued:'Локальный сертификат установлен',disabled:'Локальное продление выключено',attention:'Нужна проверка состояния'};
+    $('networkLocalStatus').classList.toggle('bad',local.attention_required===true);
+    $('networkLocalStatus').textContent=[
+      'Состояние: '+(localLabels[local.state]||'не подтверждено'),
+      local.names?.length?'Адреса: '+local.names.join(', '):'',
+      local.root_fingerprint_sha256?'Отпечаток корневого сертификата SHA-256: '+local.root_fingerprint_sha256:'',
+      local.root_not_after?'Корневой сертификат действует до: '+local.root_not_after:'',
+      local.certificate_not_after?'Сертификат сервера действует до: '+local.certificate_not_after:'',
+      local.auto_renew===true&&local.renew_at?'Продление после: '+local.renew_at:'',
+      local.last_error||'',
+      'Доверие на этом устройстве ещё нужно проверить в браузере.',
+    ].filter(Boolean).join('\n');
     if(fill||!acmeDirty){
       $('networkAcmeDomains').value=(acme.domains||[]).join(', ');$('networkAcmeEmail').value=acme.email||'';
       $('networkAcmeEnvironment').value=acme.environment||'staging';$('networkAcmeRenew').checked=acme.auto_renew===true;$('networkAcmeTermsAgreed').checked=acme.terms_agreed===true;$('networkAcmeContactConsent').checked=acme.contact_consent===true;acmeDirty=false;
@@ -148,12 +192,62 @@
 
   function syncButtons(){
     if(!$('networkSecurityCard'))return;
-    for(const id of ['networkSave','networkImport','networkAcmeSave','networkAcmeIssue']){
-      let disabled=pendingActions.has(id);
-      if(id==='networkImport')disabled=disabled||!secureUpload();
+    for(const input of $('networkSecurityCard').querySelectorAll('input,select,textarea'))input.disabled=pendingActions.size>0;
+    $('networkRefresh').disabled=pendingActions.size>0;
+    for(const id of ['networkSave','networkImport','networkAcmeSave','networkAcmeIssue','networkLocalIssue','networkLocalDisable','networkLocalRoot']){
+      let disabled=pendingActions.size>0;
+      if(id==='networkImport')disabled=disabled||!secureUpload()||lastStatus?.connection?.can_import_certificate!==true;
       if(id==='networkAcmeIssue')disabled=disabled||lastStatus?.acme?.in_progress===true||$('networkAcmeTerms').hidden;
+      if(id==='networkLocalIssue')disabled=disabled||!secureUpload()||lastStatus?.connection?.can_issue_local_ca!==true||lastStatus?.acme?.in_progress===true||!$('networkLocalTrustConsent').checked;
+      if(id==='networkLocalRoot')disabled=disabled||!secureUpload()||lastStatus?.connection?.can_download_local_ca!==true||!lastStatus?.local_ca?.root_fingerprint_sha256;
+      if(id==='networkLocalDisable')disabled=disabled||lastStatus?.local_ca?.enabled!==true;
       $(id).disabled=disabled;
     }
+  }
+
+  async function issueLocal(){
+    await action($('networkLocalIssue'),async()=>{
+      if(!secureUpload()||lastStatus?.connection?.can_issue_local_ca!==true)throw new Error('Откройте доверенный HTTPS или localhost на самом сервере');
+      if(!$('networkLocalTrustConsent').checked)throw new Error('Подтвердите действие корневого сертификата');
+      const names=$('networkLocalNames').value.split(/[,\s]+/).filter(Boolean);
+      if(!names.length||names.length>32)throw new Error('Укажите от 1 до 32 IP или имён сервера');
+      if(!window.confirm('Выпустить локальный сертификат для:\n'+names.join('\n')+'\nПродление Let\'s Encrypt будет выключено. Доверие к корневому сертификату нужно установить на каждом устройстве.')){note('Выпуск отменён.');return}
+      await api('/v1/web-security/local-ca/issue',{names,auto_renew:$('networkLocalRenew').checked,confirm:true,trust_consent:true});
+      localDirty=false;$('networkLocalTrustConsent').checked=false;
+      const updated=await refresh(false);note(updated?'Локальный сертификат сохранён. Скачайте корневой сертификат, сверьте его отпечаток и настройте доверие на устройствах.':'Запрос завершён, но состояние обновить не удалось. Проверьте его перед повторным выпуском.',!updated);
+    });
+  }
+
+  async function disableLocal(){
+    await action($('networkLocalDisable'),async()=>{
+      if(!window.confirm('Отключить локальное продление? Текущий сертификат останется установленным до истечения срока. Доверие к корневому сертификату на устройствах снимается отдельно.')){note('Отключение отменено.');return}
+      await api('/v1/web-security/local-ca/disable',{confirm:true});localDirty=false;
+      const updated=await refresh(false);note(updated?'Локальное продление выключено. Текущее состояние показано выше.':'Запрос завершён, но состояние обновить не удалось.',!updated);
+    });
+  }
+
+  async function downloadLocalRoot(){
+    await action($('networkLocalRoot'),async()=>{
+      if(!secureUpload()||lastStatus?.connection?.can_download_local_ca!==true)throw new Error('Скачайте корневой сертификат через доверенный HTTPS или localhost на самом сервере');
+      const fingerprint=String(lastStatus?.local_ca?.root_fingerprint_sha256||'').toLowerCase().replace(/:/g,'');
+      if(!/^[0-9a-f]{64}$/.test(fingerprint)||!globalThis.crypto?.subtle)throw new Error('Не удалось проверить отпечаток корневого сертификата');
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),25000);
+      let bytes;
+      try{
+        const response=await fetch('/v1/web-security/local-ca/root.cer',{credentials:'same-origin',cache:'no-store',signal:controller.signal,headers:{'X-Leshy-UI':'network-security'}});
+        if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.error||('HTTP '+response.status))}
+        const length=response.headers.get('Content-Length');
+        if(!/^[1-9]\d*$/.test(length||'')||Number(length)>64*1024)throw new Error('Сервер не подтвердил допустимый размер корневого сертификата');
+        bytes=await response.arrayBuffer();if(!bytes.byteLength||bytes.byteLength>64*1024)throw new Error('Некорректный размер корневого сертификата');
+      }catch(error){if(error.name==='AbortError')throw new Error('Скачивание не завершено. Проверьте соединение перед повтором.');throw error}
+      finally{clearTimeout(timer)}
+      const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');
+      if(digest!==fingerprint)throw new Error('Отпечаток корневого сертификата изменился. Обновите состояние и проверьте его на сервере.');
+      const url=URL.createObjectURL(new Blob([bytes],{type:'application/x-x509-ca-cert'}));
+      const link=document.createElement('a');link.href=url;link.download='Leshy-local-root.cer';document.body.appendChild(link);
+      try{link.click()}finally{link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}
+      note('Корневой сертификат передан браузеру для сохранения. Сверьте SHA-256 с сервером через доверенный канал; установите доверие средствами Вашего устройства.');
+    });
   }
 
   function port(id){const value=Number($(id).value);if(!Number.isInteger(value)||value<1||value>65535)throw new Error('Порт должен быть целым числом от 1 до 65535');return value}
@@ -168,13 +262,13 @@
 
   async function importCertificate(){
     await action($('networkImport'),async()=>{
-      if(!secureUpload())throw new Error('Загрузка закрытого ключа доступна через HTTPS или localhost');
+      if(!secureUpload()||lastStatus?.connection?.can_import_certificate!==true)throw new Error('Загрузка закрытого ключа доступна через HTTPS или localhost на самом сервере');
       const certificate=$('networkCertificateFile').files[0],key=$('networkKeyFile').files[0];
       if(!certificate||!key)throw new Error('Выберите сертификат и соответствующий закрытый ключ');
       if(certificate.size>256*1024||key.size>64*1024)throw new Error('Сертификат ограничен 256 КБ, закрытый ключ — 64 КБ');
       try{
         await api('/v1/web-security/certificate/import',{certificate_pem:await certificate.text(),private_key_pem:await key.text(),key_password:$('networkKeyPassword').value,confirm:true});
-        await refresh(false);note('Сертификат проверен и сохранён. Фактическое состояние HTTPS показано выше.');
+        const updated=await refresh(false);note(updated?'Сертификат проверен и сохранён. Фактическое состояние HTTPS показано выше.':'Импорт завершён, но состояние HTTPS обновить не удалось. Обновите его перед следующим действием.',!updated);
       }finally{$('networkCertificateFile').value='';$('networkKeyFile').value='';$('networkKeyPassword').value=''}
     });
   }
@@ -203,7 +297,7 @@
         }
         render(await api('/v1/web-security/acme/issue',{confirm:true,...(abandonUnknown?{abandon_unknown:true}:{})}));
       }
-      await refresh(false);note(issue?'Запрос выпуска передан. Дождитесь фактического результата в состоянии сертификата.':'Параметры сохранены. Проверьте ссылку на актуальные условия перед выпуском.');
+      const updated=await refresh(false);note(updated?(issue?'Запрос выпуска передан. Дождитесь фактического результата в состоянии сертификата.':'Параметры сохранены. Проверьте ссылку на актуальные условия перед выпуском.'):'Запрос завершён, но состояние обновить не удалось. Проверьте его перед следующим действием.',!updated);
     });
   }
 
