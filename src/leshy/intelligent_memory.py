@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from .diagnostics import event, problem
+from .memory_freshness import memory_is_fresh
 from .storage import utcnow
 
 
@@ -120,7 +121,7 @@ class IntelligentMemoryEngine:
         if not self.looks_durable(value) or self.contains_secret(value):
             return None
 
-        owner = str(owner_id or "")[:200]
+        owner = str(owner_id or "")
         canonical = _canonical_memory(value)
         fingerprint = sha256((owner + "\\0" + canonical).encode("utf-8")).hexdigest()
         with self.storage.connection() as conn:
@@ -170,17 +171,15 @@ class IntelligentMemoryEngine:
                 ORDER BY importance DESC,id DESC
                 LIMIT 1000
                 """,
-                (str(owner_id or "")[:200],),
+                (str(owner_id or ""),),
             ).fetchall()
 
-        now = datetime.now(timezone.utc).timestamp()
+        current = datetime.now(timezone.utc)
+        now = current.timestamp()
         matches: list[MemoryMatch] = []
         for row in rows:
-            expiry = str(row["expires_at"] or "").strip()
-            if expiry:
-                expiry_ts = _parse_time(expiry)
-                if not expiry_ts or expiry_ts <= now:
-                    continue
+            if not memory_is_fresh(row["expires_at"], now=current):
+                continue
             content = str(row["content"] or "")
             item_tokens = _tokens(content)
             if query_tokens and item_tokens:

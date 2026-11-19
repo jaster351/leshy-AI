@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime, timezone
 from .conversation_activity import ConversationActivity, tracked_chat
 from hashlib import sha256
+from itertools import islice
 from pathlib import Path
 import os
 import re
@@ -30,6 +32,7 @@ from .llm import ChatMessage, EchoLLM, LLMUnavailable, OllamaLLM
 from .keyboard_layout import layout_answer, layout_context, suggest_keyboard_layout
 from .local_platform import runtime_platform, installed_llama_server
 from .model_download import ModelDownloader
+from .memory_freshness import memory_is_fresh
 from .native_chat import NativeGGUFLLM
 from .research import DdgsSearch, FallbackSearch, ResearchEngine, SearxngSearch
 from .adaptive_internet_policy import adaptive_research_reason, ttl_for_context, is_explicit_web_request, is_offline_creative_request, requires_verified_live_sources
@@ -276,13 +279,28 @@ class LeshyApp:
         # Explicit owner rules are always loaded; unrelated memories remain bounded.
         # Neither path is controlled by the background self-learning toggle.
         rules = persistent_rule_context(self.storage, owner_id)
+        current = datetime.now(timezone.utc)
         with self.storage.connection() as conn:
-            items = conn.execute(
-                "SELECT content FROM memories WHERE owner_id=? AND kind NOT IN (?,?) "
-                "ORDER BY importance DESC,id DESC LIMIT 8",
+            candidates = conn.execute(
+                "SELECT id,expires_at FROM memories WHERE owner_id=? AND kind NOT IN (?,?) "
+                "ORDER BY importance DESC,id DESC LIMIT 1000",
                 (owner_id, "dialogue_rule", "owner_knowledge_document"),
             ).fetchall()
-        other = "\n".join(f"- {item['content']}" for item in items)
+            # Сначала только сроки и ID: не загружаем до тысячи полных текстов.
+            ids = tuple(item["id"] for item in islice(
+                (item for item in candidates if memory_is_fresh(item["expires_at"], now=current)), 8))
+            items = []
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                items = conn.execute(
+                    "SELECT content,expires_at FROM memories WHERE owner_id=? AND kind NOT IN (?,?) "
+                    f"AND id IN ({placeholders}) ORDER BY importance DESC,id DESC LIMIT 8",
+                    (owner_id, "dialogue_rule", "owner_knowledge_document", *ids),
+                ).fetchall()
+        current = datetime.now(timezone.utc)
+        active = (item for item in items if memory_is_fresh(item["expires_at"], now=current))
+        # Истёкшая первая восьмёрка не должна скрывать следующие живые записи.
+        other = "\n".join(f"- {item['content']}" for item in islice(active, 8))
         return "\n\n".join(part for part in (rules, other) if part)
 
     def _catalog_matches(self, message: str, trusted: list[dict],
