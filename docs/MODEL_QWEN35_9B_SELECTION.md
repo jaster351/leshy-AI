@@ -9,7 +9,7 @@
 
 Проверенный источник GGUF: https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF
 Исходная модель: https://huggingface.co/Qwen/Qwen3.5-9B
-Файл: `Qwen_Qwen3.5-9B-Q4_K_M.gguf`, около 6,17 GB.
+Файл: `Qwen_Qwen3.5-9B-Q4_K_M.gguf`, около 5,87 GB.
 В каталоге закреплена конкретная ревизия файла, а не изменяемая ветка main.
 
 ## Установка и переключение
