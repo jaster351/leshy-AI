@@ -69,12 +69,14 @@ def assess_ports(
             elif ru_ch_ok:
                 state = "possible_restriction"
                 explanation = "Из сети Лешего тайм-аут, но российские узлы Check-Host подключаются; возможна локальная фильтрация"
-            elif ru_ch_timeout and other_ch_ok and reported_tspu:
+            elif ru_ch_timeout and other_ch_ok and not ru_ch_ok:
                 state = "tspu_detected"
                 explanation = (
                     "Совпали: 3/3 timeout из сети Лешего, 3/3 connected из Нидерландов, "
-                    "timeout узлов Check-Host в РФ и tspu_block завершённого Cheburcheck Probe. "
-                    "Это согласованные признаки фильтрации ТСПУ, не техническое доказательство причины."
+                    "timeout узлов Check-Host в РФ и успешные подключения Check-Host за рубежом. "
+                    "Это диагностические признаки блокировки на стороне РФ, "
+                    "а не доказательство, что причина именно в ТСПУ."
+                    + (" Cheburcheck Probe также сообщил tspu_block." if reported_tspu else "")
                 )
             else:
                 state = "likely_blocked"
