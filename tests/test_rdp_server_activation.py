@@ -59,7 +59,7 @@ def test_invalid_license_denied(bad):
     lambda p:p[:2]+b'\x00\x00'+p[4:],
     lambda p:p[:2]+b'\x17\x00'+p[4:],
     lambda p:p[:10]+b'\xff\xff'+p[12:],
-    lambda p:p[:14]+b'RDPA'+p[18:],
+    lambda p:p[:18]+b'\x03\x00'+p[20:],
     lambda p:p[:18]+b'\xff\x00'+p[20:],
     lambda p:p[:22]+b'\x02\x00'+p[24:],
     lambda p:p[:-2],
@@ -78,3 +78,9 @@ def test_unknown_license_flow_is_explicitly_not_supported():
 def test_ignored_license_flags_hi_per_spec():
     data = license_valid()
     parse_valid_client_license(data[:2] + b"\x11\x22" + data[4:])
+
+
+def test_demand_active_descriptor_is_length_counted_not_nul_required():
+    original = demand()
+    share_id, capabilities = parse_demand_active(original[:14] + b"RDPA" + original[18:])
+    assert (share_id, capabilities) == (0x000103ea, (1, 2))
