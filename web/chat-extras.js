@@ -118,14 +118,18 @@
       const newline=intro.indexOf('\n');
       const verdict=(newline>=0?intro.slice(0,newline):intro).trim();
       if(/^IP\s+\S+:\s+/i.test(verdict)){
+        const headline=document.createElement('div');
+        headline.className='leshy-verdict-headline';
+        headline.textContent=verdict;
         const copyVerdict=document.createElement('button');
         copyVerdict.type='button';
         copyVerdict.className='leshy-verdict-copy';
-        copyVerdict.textContent=verdict+'  ⧉';
-        copyVerdict.title='Нажмите, чтобы скопировать решение Лешего';
-        copyVerdict.setAttribute('aria-label','Копировать решение Лешего: '+verdict);
-        copyVerdict.onclick=e=>{e.stopPropagation();copyText(verdict,copyVerdict)};
-        host.appendChild(copyVerdict);
+        copyVerdict.textContent='⧉ Копировать результат';
+        copyVerdict.title='Скопировать IP и всю краткую сводку по портам';
+        copyVerdict.setAttribute('aria-label','Копировать результат диагностики');
+        // Copy the entire concise result, never the private diagnostic log.
+        copyVerdict.onclick=e=>{e.stopPropagation();copyText(intro,copyVerdict)};
+        host.append(headline,copyVerdict);
         if(newline>=0)renderTextPart(host,intro.slice(newline+1).trim(),false);
       }else{
         renderTextPart(host,intro,false);
@@ -135,7 +139,23 @@
       const heading=document.createElement('summary');heading.textContent='Диагностические данные — раскрыть';
       const pre=document.createElement('pre');pre.textContent=report;
       const copy=document.createElement('button');copy.type='button';copy.className='leshy-diagnostic-copy';copy.textContent='Копировать отчёт';
-      copy.onclick=()=>copyText(report,copy);disclosure.append(heading,pre,copy);host.appendChild(disclosure);
+      copy.onclick=()=>copyText(report,copy);
+      const download=document.createElement('button');
+      download.type='button';download.className='leshy-diagnostic-copy';
+      download.textContent='Скачать полный протокол (.txt)';
+      download.onclick=()=>{
+        const foundIp=/\b(?:\d{1,3}\.){3}\d{1,3}\b/.exec(intro);
+        const foundTime=/Время проверки:\s*(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/.exec(report);
+        const stamp=foundTime?'-'+foundTime.slice(1).join(''):'';
+        const filename='leshy-tspu-'+(foundIp?foundIp[0]:'diagnostics')+stamp+'.txt';
+        const blob=new Blob([intro+'\n\n'+report+'\n'],{type:'text/plain;charset=utf-8'});
+        const url=URL.createObjectURL(blob);
+        const link=document.createElement('a');
+        link.href=url;link.download=filename;link.style.display='none';
+        document.body.appendChild(link);link.click();link.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+      };
+      disclosure.append(heading,pre,copy,download);host.appendChild(disclosure);
       const trailing=value.slice(end+close.length).trim();
       if(trailing)renderTextPart(host,trailing,false);
       return;
