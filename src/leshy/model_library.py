@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from hashlib import sha256
+import hmac
 import os
 from pathlib import Path
 import threading
 import time
 from typing import Any
 from urllib import request
+from urllib.error import HTTPError
 
 from .diagnostics import event, problem
 
@@ -30,6 +33,7 @@ class RecommendedModel:
     vision: bool = False
     mmproj_filename: str = ""
     mmproj_url: str = ""
+    sha256: str = ""
 
 
 RECOMMENDED_MODELS: tuple[RecommendedModel, ...] = (
@@ -45,6 +49,28 @@ RECOMMENDED_MODELS: tuple[RecommendedModel, ...] = (
         best_for="Обычный чат, инструменты, поиск, RAG и работа на 16 ГБ RAM без чрезмерного pagefile.",
         memory_note="Рекомендуется как стабильный legacy/fallback вариант.",
         runtime="legacy-compatible",
+    ),
+    RecommendedModel(
+        id="qwen35-9b-original-q4km",
+        title="Qwen3.5 9B (оригинальная) — Q4_K_M",
+        filename="Qwen_Qwen3.5-9B-Q4_K_M.gguf",
+        url="https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF/resolve/c512afe1bc55a45304dbe577088139fb9405b02e/Qwen_Qwen3.5-9B-Q4_K_M.gguf",
+        quant="Q4_K_M",
+        size_label="≈5,87 ГБ",
+        family="Qwen3.5 9B",
+        description=(
+            "Оригинальная Qwen3.5 9B без сторонней модификации инструкционного поведения. "
+            "Потенциальное улучшение качества по сравнению с Qwen3 8B; "
+            "реальный эффект и совместимость с Vulkan проверяются после установки."
+        ),
+        best_for="Русский диалог, рассуждения, задачи агента и работа с инструментами.",
+        memory_note=(
+            "Для видеокарты с 8 ГБ VRAM возможен частичный offload при большом контексте. "
+            "Сохраните Qwen3 8B для мгновенного отката; не переключать автоматически "
+            "без успешной проверки модели и backend."
+        ),
+        runtime="modern",
+        sha256="dcdc2a0977b42d9494b99671e74834027d0eaf9e925f8e03cc1880e617be1d39",
     ),
     RecommendedModel(
         id="qwen35-9b-uncensored-q4km",
@@ -184,42 +210,123 @@ class ModelLibraryManager:
         with self._lock:
             self._job.update(values)
 
-    def _download_one(self, url: str, filename: str, *, stage: str) -> int:
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    def _download_one(
+        self, url: str, filename: str, *, stage: str, expected_sha256: str = "",
+    ) -> int:
+        """Download in the background with safe byte-range resume.
+
+        The catalog owns the URL and file name; this is not an arbitrary URL
+        downloader. A pinned SHA-256, when available, is mandatory before
+        atomically replacing an installed GGUF.
+        """
+        if not str(url).startswith("https://huggingface.co/"):
+            raise ValueError("Модели можно скачивать только из HTTPS-каталога Hugging Face")
         target = self.models_dir / Path(filename).name
+        expected = str(expected_sha256 or "").strip().lower()
+        if expected and (len(expected) != 64 or any(ch not in "0123456789abcdef" for ch in expected)):
+            raise ValueError("Неправильная контрольная сумма модели")
         if target.is_file() and self._is_gguf(target):
-            return int(target.stat().st_size)
+            if not expected or hmac.compare_digest(self._file_sha256(target), expected):
+                return int(target.stat().st_size)
+
         temporary = target.with_name(target.name + ".download")
-        downloaded = 0
-        req = request.Request(url, headers={"User-Agent": "Leshy-AI/model-library"})
+        offset = temporary.stat().st_size if temporary.is_file() else 0
+        if offset > MAX_MODEL_BYTES:
+            temporary.unlink()
+            offset = 0
+        if offset and expected and self._is_gguf(temporary):
+            if hmac.compare_digest(self._file_sha256(temporary), expected):
+                os.replace(temporary, target)
+                return offset
+        if not expected:
+            # No immutable digest means bytes from an earlier session cannot
+            # safely be combined with today's potentially changed URL.
+            offset = 0
+
+        headers = {"User-Agent": "Leshy-AI/model-library"}
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
+        req = request.Request(url, headers=headers)
         try:
-            with request.urlopen(req, timeout=90) as response, temporary.open("wb") as output:
-                total = int(response.headers.get("Content-Length") or 0)
+            try:
+                response = request.urlopen(req, timeout=90)
+            except HTTPError as exc:
+                if not offset or exc.code != 416:
+                    raise
+                # Server says the partial range is no longer satisfiable.
+                # Start a fresh GET, never treat the partial file as complete.
+                temporary.unlink(missing_ok=True)
+                offset = 0
+                response = request.urlopen(
+                    request.Request(url, headers={"User-Agent": "Leshy-AI/model-library"}),
+                    timeout=90,
+                )
+            with response:
+                if not str(response.geturl()).startswith("https://"):
+                    raise ValueError("Небезопасное перенаправление при загрузке модели")
+                status = int(getattr(response, "status", 0) or response.getcode())
+                if offset and status == 206:
+                    content_range = str(response.headers.get("Content-Range") or "")
+                    if not content_range.startswith(f"bytes {offset}-"):
+                        temporary.unlink(missing_ok=True)
+                        raise ValueError("Сервер прислал неверный диапазон продолжения загрузки")
+                elif offset and status == 200:
+                    # Range ignored: restart rather than append duplicate bytes.
+                    offset = 0
+                elif status != 200:
+                    raise ValueError(f"Недопустимый HTTP-статус скачивания: {status}")
+
+                remaining = int(response.headers.get("Content-Length") or 0)
+                total = offset + remaining if remaining else 0
                 if total > MAX_MODEL_BYTES:
                     raise ValueError("Удалённый GGUF превышает лимит 128 ГБ")
-                self._set(state=stage, total=total, downloaded=0, current_file=filename)
-                while True:
-                    chunk = response.read(8 * 1024 * 1024)
-                    if not chunk:
-                        break
-                    downloaded += len(chunk)
-                    if downloaded > MAX_MODEL_BYTES:
-                        raise ValueError("GGUF превысил лимит 128 ГБ")
-                    output.write(chunk)
-                    self._set(downloaded=downloaded)
-                output.flush()
-                os.fsync(output.fileno())
+                self._set(state=stage, total=total, downloaded=offset, current_file=filename)
+                downloaded = offset
+                with temporary.open("ab" if offset else "wb") as output:
+                    while True:
+                        chunk = response.read(8 * 1024 * 1024)
+                        if not chunk:
+                            break
+                        downloaded += len(chunk)
+                        if downloaded > MAX_MODEL_BYTES:
+                            raise ValueError("GGUF превысил лимит 128 ГБ")
+                        output.write(chunk)
+                        self._set(downloaded=downloaded)
+                    output.flush()
+                    os.fsync(output.fileno())
+                if total and downloaded != total:
+                    raise OSError(
+                        f"Загрузка прервана: {downloaded} из {total} байт; "
+                        "остаток будет скачан при повторной попытке"
+                    )
             if not self._is_gguf(temporary):
+                temporary.unlink(missing_ok=True)
                 raise ValueError(f"Файл {filename} не содержит сигнатуру GGUF")
+            if expected and not hmac.compare_digest(self._file_sha256(temporary), expected):
+                temporary.unlink(missing_ok=True)
+                raise ValueError("SHA-256 модели не совпал с контрольной суммой издателя")
             os.replace(temporary, target)
             return downloaded
         except Exception:
-            temporary.unlink(missing_ok=True)
+            # Preserve incomplete downloads on network errors for byte-range
+            # resume; never publish an unverified .download as an installed GGUF.
             raise
 
     def _run(self, model: RecommendedModel, include_vision: bool) -> None:
         try:
             event("model_library_download_started", model_id=model.id, filename=model.filename)
-            main_bytes = self._download_one(model.url, model.filename, stage="downloading_model")
+            main_bytes = self._download_one(
+                model.url, model.filename, stage="downloading_model",
+                expected_sha256=model.sha256,
+            )
             vision_bytes = 0
             if include_vision and model.vision and model.mmproj_url and model.mmproj_filename:
                 vision_bytes = self._download_one(model.mmproj_url, model.mmproj_filename, stage="downloading_vision")
