@@ -77,6 +77,27 @@ class _NoRedirects(request.HTTPRedirectHandler):
         raise ValueError("Кластерный узел не должен перенаправлять запросы")
 
 
+def _replication_skip_reason(endpoint: str) -> str:
+    """Без DNS/HTTP: прежняя LAN-IP граница репликации отличается от cluster tasks."""
+    if not endpoint:
+        return "no_endpoint"
+    try:
+        target = parse.urlsplit(endpoint)
+        if target.scheme not in {"http", "https"} or not target.hostname:
+            return "invalid_endpoint"
+        try:
+            address = ipaddress.ip_address(target.hostname)
+        except ValueError:
+            return "dns_not_supported"
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+            address = address.ipv4_mapped
+        if not address.is_private or address.is_loopback or address.is_link_local or address.is_unspecified:
+            return "outside_lan"
+        return ""
+    except (ValueError, TypeError):
+        return "invalid_endpoint"
+
+
 class KnowledgeSyncService:
     """Каждый доверенный узел опрашивает соседей раз в 5 с, курсор — на peer."""
 
@@ -91,6 +112,7 @@ class KnowledgeSyncService:
             "enabled": True, "state": "waiting", "last_sync": "",
             "last_error": "", "received_total": 0, "sent_total": 0,
             "last_received": 0, "peer_count": 0, "last_peer": "",
+            "eligible_peer_count": 0, "skipped_peers": [],
         }
         # Ключ шифрования отличается от подписей кластерных задач.
         key = urlsafe_b64encode(sha256(cluster.identity.secret + b":knowledge-sync-v1").digest())
@@ -208,6 +230,9 @@ class KnowledgeSyncService:
         return {"payload": payload.decode("ascii")}
 
     def _pull_peer(self, peer, cursor: int) -> dict:
+        reason = _replication_skip_reason(peer.endpoint)
+        if reason:
+            raise ValueError("Неподдерживаемый LAN-маршрут репликации: " + reason)
         request_data = {"cursor": cursor}
         token = self._cipher.encrypt(json.dumps(request_data).encode("utf-8")).decode("ascii")
         body = {"payload": token}
@@ -216,15 +241,6 @@ class KnowledgeSyncService:
         signature = hmac.new(
             self.cluster.identity.secret, timestamp.encode("ascii") + b"\n" + raw, "sha256",
         ).hexdigest()
-        target = parse.urlsplit(peer.endpoint)
-        try:
-            address = ipaddress.ip_address(target.hostname or "")
-        except ValueError as exc:
-            raise ValueError("Ожидается IP-адрес узла локальной сети") from exc
-        if target.scheme not in {"http", "https"} or (
-            not address.is_private or address.is_loopback or address.is_link_local
-        ):
-            raise ValueError("Репликация разрешена только на доверенные LAN-адреса")
         req = request.Request(
             peer.endpoint.rstrip("/") + "/v1/cluster/knowledge-sync/pull",
             data=raw, method="POST",
@@ -294,18 +310,28 @@ class KnowledgeSyncService:
             try:
                 cluster = self.cluster
                 if not module_enabled(self.app.storage, "distributed-cluster") or not bool(getattr(cluster, "_autodiscovery_configured", True)):
-                    self._patch(state="disabled", peer_count=0)
+                    self._patch(state="disabled", peer_count=0, eligible_peer_count=0, skipped_peers=[])
                     continue
                 peers = [
                     peer for peer in cluster.orchestrator.peers()
                     if peer.node_id != cluster.identity.node_id
                 ]
-                self._patch(peer_count=len(peers))
+                eligible, skipped = [], []
+                for peer in peers:
+                    reason = _replication_skip_reason(peer.endpoint)
+                    if reason:
+                        skipped.append({"node_id": str(peer.node_id)[:100], "reason": reason})
+                    else:
+                        eligible.append(peer)
+                self._patch(peer_count=len(peers), eligible_peer_count=len(eligible), skipped_peers=skipped)
                 if not peers:
-                    self._patch(state="waiting", last_received=0)
+                    self._patch(state="waiting", last_received=0, last_error="")
+                    continue
+                if not eligible:
+                    self._patch(state="unsupported_targets", last_received=0, last_error="")
                     continue
                 total = 0
-                for peer in peers:
+                for peer in eligible:
                     if self._stop.is_set():
                         break
                     stage = "read_cursor"

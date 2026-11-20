@@ -248,9 +248,10 @@ unset LESHY_LLM_BACKEND
 
 ## 5.11. Доступ из LAN
 
+В варианте HTTP/HTTPS из [описания сетевых настроек](WEB_HTTP_HTTPS_CERTIFICATES.md) `auto` включает отдельные привязки IPv4 и IPv6. Порт берётся из настроек администратора; без сохранённых настроек HTTP использует 8765. Явные `LESHY_PORT`, `LESHY_HTTPS_PORT` и `--port` имеют приоритет и показаны в панели как переопределения. Чтобы менять порт из интерфейса, уберите соответствующее переопределение из окружения или параметров службы.
+
 ```bash
-export LESHY_HOST=0.0.0.0
-export LESHY_PORT=8765
+export LESHY_HOST=auto
 python -m leshy.web_server
 ```
 
@@ -270,8 +271,7 @@ Wants=network-online.target
 Type=simple
 User=leshy
 WorkingDirectory=/opt/leshy-AI
-Environment=LESHY_HOST=0.0.0.0
-Environment=LESHY_PORT=8765
+Environment=LESHY_HOST=auto
 ExecStart=/opt/leshy-AI/.venv/bin/python -m leshy.web_server
 Restart=on-failure
 RestartSec=5
@@ -366,8 +366,7 @@ python -m leshy.web_server
 ## 6.7. LAN
 
 ```bash
-export LESHY_HOST=0.0.0.0
-export LESHY_PORT=8765
+export LESHY_HOST=auto
 python -m leshy.web_server
 ```
 
@@ -392,8 +391,7 @@ python -m leshy.web_server
   <key>WorkingDirectory</key><string>/Users/USERNAME/leshy-AI</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>LESHY_HOST</key><string>0.0.0.0</string>
-    <key>LESHY_PORT</key><string>8765</string>
+    <key>LESHY_HOST</key><string>auto</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -496,8 +494,7 @@ Remove-Item Env:LESHY_LLM_BACKEND -ErrorAction SilentlyContinue
 ## 7.4. LAN
 
 ```powershell
-$env:LESHY_HOST="0.0.0.0"
-$env:LESHY_PORT="8765"
+$env:LESHY_HOST="auto"
 python -m leshy.web_server
 ```
 
@@ -581,13 +578,13 @@ dist/Leshy/Leshy
 Запуск:
 
 ```bash
-./dist/Leshy/Leshy --host 127.0.0.1 --port 8765
+./dist/Leshy/Leshy
 ```
 
 LAN:
 
 ```bash
-./dist/Leshy/Leshy --host 0.0.0.0 --port 8765
+./dist/Leshy/Leshy --host auto
 ```
 
 ## 9.3. Проверка frozen-сборки
@@ -656,7 +653,7 @@ dist/Leshy/Leshy
 Запуск:
 
 ```bash
-./dist/Leshy/Leshy --host 127.0.0.1 --port 8765
+./dist/Leshy/Leshy
 ```
 
 Для публичного распространения macOS-сборки потребуются Developer ID, `codesign` и notarization Apple.
@@ -783,7 +780,7 @@ python -m pip install -e .
 Используйте:
 
 ```text
-LESHY_HOST=0.0.0.0
+LESHY_HOST=auto
 ```
 
 и разрешите порт в firewall только для доверенной сети.

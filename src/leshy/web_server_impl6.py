@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from . import web_server_impl5 as previous
 from .app import LeshyApp
 from .freshness_cache_runtime import install_freshness_cache_runtime
@@ -9,6 +11,8 @@ from .learning_command_runtime import install_explicit_learning_routing
 from .reliable_web_runtime import install_reliable_web_runtime
 from .runtime_latency_fix import install_runtime_latency_fixes
 from .voice_tts_ru import RussianLocalVoiceTTS
+
+_RUNTIME_PREPARATION_LOCK = threading.RLock()
 
 
 def _install_russian_voice_tts() -> None:
@@ -39,9 +43,14 @@ def make_handler(app, telegram, settings, model_catalog):
     return previous.make_handler(app, telegram, settings, model_catalog)
 
 
-def serve(host: str | None = None, port: int | None = None) -> None:
+def prepare_runtime() -> None:
     # Общие runtime-политики ставятся до создания LeshyApp/Telegram, поэтому
     # Web, голос, Telegram и startup recovery используют один и тот же контур.
+    with _RUNTIME_PREPARATION_LOCK:
+        _prepare_runtime()
+
+
+def _prepare_runtime() -> None:
     install_explicit_learning_routing(LeshyApp)
     install_reliable_web_runtime(LeshyApp)
     # Freshness/cache ставятся до latency-layer: stale fallback и fresh cache
@@ -51,6 +60,10 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     install_runtime_latency_fixes()
     install_creator_identity_routing(LeshyApp)
     _install_russian_voice_tts()
+
+
+def serve(host: str | None = None, port: int | None = None) -> None:
+    prepare_runtime()
     previous.serve(host=host, port=port)
 
 
