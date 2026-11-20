@@ -107,10 +107,7 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
         r"(?m)^\d{1,3}(?:\.\d{1,3}){3}: IP заблокирован ТСПУ",
         answer,
     ))
-    modern = bool(re.search(
-        r"(?m)^IP-адрес \S+\. Блокировка ТСПУ не подтверждена\.",
-        answer,
-    )) and "Проверка " in answer
+    modern = "[[LESHY_DIAGNOSTICS]]" in answer and "Проверка IP:" in answer
     confirmed = bool(re.search(
         r"(?m)^IP-адрес \S+ заблокирован ТСПУ\.",
         answer,
@@ -122,7 +119,9 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
 
 def _explain_saved_diagnostic(previous: str) -> str:
     """Replay previous measured results or explicitly admit missing evidence."""
-    marker = previous.find("\n\nПроверка ")
+    marker = previous.find("\n[[LESHY_DIAGNOSTICS]]")
+    if marker < 0:
+        marker = previous.find("\n\nПроверка ")
     if "подтверждена по 3/3 признакам" in previous:
         return (
             "Предыдущая проверка получила три согласованных признака: "
@@ -132,7 +131,7 @@ def _explain_saved_diagnostic(previous: str) -> str:
             "а не прямое наблюдение на оборудовании ТСПУ. "
             "Новые проверки для этого пояснения не запускались.\n\n" + previous
         )
-    if marker >= 0 and "Запуски инструментов (ID;" in previous:
+    if marker >= 0 and ("Запуски инструментов (ID;" in previous or "[[LESHY_DIAGNOSTICS]]" in previous):
         report = previous[marker:].strip()
         return (
             "Механизм проверки: Леший выполняет TCP Connect к портам 22 и 3389 "
@@ -168,59 +167,47 @@ def _service_label(metadata: dict[str, Any]) -> str:
 
 
 def _compact_answer(metadata: dict[str, Any]) -> str:
-    """Only a separately verified TSPU attribution permits a copyable categorical conclusion.
-
-    Legacy probability/heuristic scores are never proof, even when equal to 100.
-    """
+    """Readable evidence-first result; unavailable probes are never treated as negative."""
     target = str(metadata.get("target") or "").strip()
-    if target and metadata.get("blocking_attribution") == "confirmed_three_signals":
-        ports = ", ".join(str(p) for p in metadata.get("matched_ports") or [])
-        remote = metadata.get("remote") or []
-        russian = [
-            row for row in remote if isinstance(row, dict)
-            and str(row.get("country_code") or "").lower() == "ru"
-            and row.get("port") in (metadata.get("matched_ports") or [])
-        ]
-        ru_timeouts = sum(row.get("status") == "timeout" for row in russian)
-        chebur = metadata.get("chebur_probe") or {}
-        observations = chebur.get("observations") or []
-        blocked_probes = sum(
+    verdict = str(metadata.get("verdict") or "Недостаточно данных для вывода").rstrip(".")
+    lines = [f"Проверка IP: {target}", f"Итог: {verdict}."]
+
+    chebur = metadata.get("cheburcheck") or {}
+    if chebur.get("ok"):
+        lines.append("Списки Cheburcheck: " + (
+            "адрес найден" if chebur.get("blocked") else "адрес не найден"
+        ) + " (это не проверка фактической TCP-фильтрации).")
+    else:
+        lines.append("Списки Cheburcheck: проверить не удалось.")
+
+    probe = metadata.get("chebur_probe") or {}
+    if probe.get("ok") and probe.get("finished"):
+        blocked = sum(
             "tspu_block" in (row.get("verdicts") or [])
-            for row in observations if isinstance(row, dict)
+            for row in (probe.get("observations") or []) if isinstance(row, dict)
         )
-        port_lines = []
-        for port in (22, 3389):
-            direct = next(
-                (row.get("status") for row in metadata.get("local") or []
-                 if isinstance(row, dict) and row.get("port") == port),
-                "нет измерения",
-            )
-            rows = [
-                row for row in remote if isinstance(row, dict) and row.get("port") == port
-            ]
-            ru = [row for row in rows if str(row.get("country_code") or "").lower() == "ru"]
-            abroad = [row for row in rows if row not in ru]
-            port_lines.append(
-                f"TCP/{port}: локально {direct}; Check-Host РФ: "
-                f"{sum(row.get('status') == 'connected' for row in ru)}/{len(ru)} подключений, "
-                f"{sum(row.get('status') == 'timeout' for row in ru)} timeout; "
-                f"зарубежные: {sum(row.get('status') == 'connected' for row in abroad)}/{len(abroad)}."
-            )
-        return (
-            f"IP-адрес {target}: блокировка ТСПУ подтверждена по 3/3 признакам.\n"
-            + "\n".join(port_lines) + "\n"
-            + f"Совпадение на TCP/{ports}: РФ {ru_timeouts} timeout из {len(russian)} проверок.\n"
-            + f"Cheburcheck: tspu_block ({blocked_probes}/{len(observations)} сканеров); "
-            "проверка завершена."
+        lines.append(f"Распределённый Probe: завершён, tspu_block у {blocked} сканеров.")
+    else:
+        error = str(probe.get("error") or "результат недоступен").strip()
+        lines.append("Распределённый Probe: " + error[:170] + ".")
+
+    local = metadata.get("local") or []
+    remote = metadata.get("remote") or []
+    for port in (22, 3389):
+        local_status = next(
+            (str(row.get("status") or "неизвестно") for row in local
+             if isinstance(row, dict) and row.get("port") == port), "нет измерения"
         )
-    if (
-        target
-        and metadata.get("blocking_attribution") == "confirmed_tspu"
-        and metadata.get("proof_verification") == "verified"
-        and str(metadata.get("proof_record_id") or "").strip()
-    ):
-        return f"IP-адрес {target} заблокирован ТСПУ."
-    return f"IP-адрес {target}. Блокировка ТСПУ не подтверждена." if target else "Блокировка ТСПУ не подтверждена."
+        nodes = [row for row in remote if isinstance(row, dict) and row.get("port") == port]
+        ru = [row for row in nodes if str(row.get("country_code") or "").lower() == "ru"]
+        abroad = [row for row in nodes if str(row.get("country_code") or "").lower() not in ("", "ru")]
+        ru_ok = sum(row.get("status") == "connected" for row in ru)
+        abroad_ok = sum(row.get("status") == "connected" for row in abroad)
+        lines.append(
+            f"TCP/{port}: локально {local_status}; РФ {ru_ok}/{len(ru)}; "
+            f"зарубежье {abroad_ok}/{len(abroad)} подключений."
+        )
+    return "\n".join(lines)
 
 
 def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
@@ -247,20 +234,13 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     for url in check_host_reports:
         sources.append({"title": "Результаты Check-Host", "url": url})
     summary = _compact_answer(response.metadata)
-    is_three_signal = response.metadata.get("blocking_attribution") == "confirmed_three_signals"
-    if not is_three_signal and (
-        response.metadata.get("blocking_attribution") != "confirmed_tspu"
-        or not response.metadata.get("proof_record_id")
-        or response.metadata.get("proof_verification") != "verified"
-    ):
-        # The complete diagnostic report remains visible when no full conclusion is possible.
-        summary += "\n\n" + response.text
+    details = response.text.strip()
+    if details:
+        summary += "\n\n[[LESHY_DIAGNOSTICS]]\n" + details + "\n[[/LESHY_DIAGNOSTICS]]"
     response.metadata["copyable_conclusion"] = (
-        summary if is_three_signal or (
-            response.metadata.get("blocking_attribution") == "confirmed_tspu"
-            and response.metadata.get("proof_verification") == "verified"
-            and response.metadata.get("proof_record_id")
-        ) else ""
+        _compact_answer(response.metadata)
+        if response.metadata.get("blocking_attribution") == "confirmed_three_signals"
+        else ""
     )
     return summary, sources, response.metadata
 
