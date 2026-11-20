@@ -98,9 +98,9 @@ def parse_demand_active(data: bytes) -> tuple[int, tuple[int, ...]]:
     caps_end = caps_start + caps_len
     if caps_end + 4 != len(data):
         raise RDPActivationError("Demand Active lengths do not match packet")
-    descriptor = data[desc_start:caps_start]
-    if not descriptor or descriptor[-1] != 0:
-        raise RDPActivationError("Demand Active source descriptor invalid")
+    # Source descriptor is a length-counted opaque byte array (not UTF-8).
+    # Some servers terminate it with NUL, but the specification does not
+    # require a terminator; never decode or log this untrusted field.
     count, _pad = struct.unpack_from("<HH", data, caps_start)
     if count < 2 or count > 64:
         raise RDPActivationError("Demand Active capability count invalid")
