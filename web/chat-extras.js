@@ -114,7 +114,22 @@
     const begin=!streaming?value.indexOf(open):-1;
     const end=begin>=0?value.indexOf(close,begin+open.length):-1;
     if(begin>=0&&end>=0){
-      renderRich(host,value.slice(0,begin),{streaming:false});
+      const intro=value.slice(0,begin).trim();
+      const newline=intro.indexOf('\n');
+      const verdict=(newline>=0?intro.slice(0,newline):intro).trim();
+      if(/^IP\s+[^\s:]+:\s+/i.test(verdict)){
+        const copyVerdict=document.createElement('button');
+        copyVerdict.type='button';
+        copyVerdict.className='leshy-verdict-copy';
+        copyVerdict.textContent=verdict+'  ⧉';
+        copyVerdict.title='Нажмите, чтобы скопировать решение Лешего';
+        copyVerdict.setAttribute('aria-label','Копировать решение Лешего: '+verdict);
+        copyVerdict.onclick=e=>{e.stopPropagation();copyText(verdict,copyVerdict)};
+        host.appendChild(copyVerdict);
+        if(newline>=0)renderTextPart(host,intro.slice(newline+1).trim(),false);
+      }else{
+        renderTextPart(host,intro,false);
+      }
       const report=value.slice(begin+open.length,end).trim();
       const disclosure=document.createElement('details');disclosure.className='leshy-diagnostic-details';
       const heading=document.createElement('summary');heading.textContent='Диагностические данные — раскрыть';
