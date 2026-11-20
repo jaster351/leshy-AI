@@ -47,7 +47,7 @@ class TspuVerdictTests(unittest.TestCase):
             own, checks,
             cheburcheck=CheburcheckEvidence(ok=True, blocked=True),
         )
-        self.assertIn("Блокировка на стороне ТСПУ не подтверждена", verdict)
+        self.assertIn("Блокировка не обнаружена на стороне ТСПУ по имеющимся данным", verdict)
         self.assertEqual(ports["22"]["state"], "owned_path_restriction")
 
     def test_check_host_russian_success_prevents_tspu_assertion(self):
@@ -61,7 +61,7 @@ class TspuVerdictTests(unittest.TestCase):
             TcpObservation("check-host", 22, "connected", country_code="nl", node="nl1"),
         )
         verdict, ports = assess_ports(own, checks)
-        self.assertIn("Блокировка на стороне ТСПУ не подтверждена", verdict)
+        self.assertIn("Блокировка не обнаружена на стороне ТСПУ по имеющимся данным", verdict)
         self.assertNotIn("Обнаружена блокировка на стороне ТСПУ", verdict)
         self.assertEqual(ports["22"]["state"], "owned_path_restriction")
         self.assertIn("Check-Host из РФ подключается", ports["22"]["explanation"])
