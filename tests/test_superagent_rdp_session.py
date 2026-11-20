@@ -5,6 +5,9 @@ import pytest
 
 from leshy.superagent_rdp_session import RDPFrame, RDPSessionController
 
+_RGB_FRAME_INITIAL = bytes(800 * 600 * 3)
+_RGB_FRAME_CHANGED = b"\x01" * (800 * 600 * 3)
+
 
 class FakeBackend:
     def __init__(self):
@@ -18,7 +21,7 @@ class FakeBackend:
         return object()
 
     def capture(self, connection):
-        return RDPFrame(800, 600, b"test-image-bytes")
+        return RDPFrame(800, 600, _RGB_FRAME_INITIAL, "RGB")
 
     def click(self, connection, x, y):
         self.clicks.append((x, y))
@@ -114,7 +117,7 @@ def test_observe_frame_and_unique_receipt_for_identical_pixels():
     sid = broker.open("alice", "192.0.2.10", "a" * 64)
     first, pixels = broker.observe_frame("alice", sid)
     second, pixels2 = broker.observe_frame("alice", sid)
-    assert pixels == pixels2 == b"test-image-bytes"
+    assert pixels == pixels2 == _RGB_FRAME_INITIAL
     assert first.frame_digest != second.frame_digest
     with pytest.raises(PermissionError):
         broker.click("alice", sid, frame_digest=first.frame_digest, x=1, y=1)
@@ -148,7 +151,7 @@ def test_text_validation_and_revocation():
 class ChangingScreenBackend(FakeBackend):
     def __init__(self):
         super().__init__()
-        self.pixels = b"initial-frame"
+        self.pixels = _RGB_FRAME_INITIAL
         self.capture_count = 0
         self.on_capture = None
 
@@ -156,7 +159,7 @@ class ChangingScreenBackend(FakeBackend):
         self.capture_count += 1
         if self.on_capture is not None:
             self.on_capture(self.capture_count)
-        return RDPFrame(800, 600, self.pixels)
+        return RDPFrame(800, 600, self.pixels, "RGB")
 
 
 def test_changed_desktop_blocks_click_without_dispatch():
@@ -165,7 +168,7 @@ def test_changed_desktop_blocks_click_without_dispatch():
     broker.backend = backend
     sid = broker.open("alice", "192.0.2.10", "a" * 64)
     receipt = broker.observe("alice", sid)
-    backend.pixels = b"screen-changed"
+    backend.pixels = _RGB_FRAME_CHANGED
     with pytest.raises(PermissionError, match="desktop changed"):
         broker.click("alice", sid, frame_digest=receipt.frame_digest, x=10, y=10)
     assert backend.clicks == []
@@ -180,7 +183,7 @@ def test_changed_desktop_blocks_keyboard_input():
     broker.backend = backend
     sid = broker.open("alice", "192.0.2.10", "a" * 64)
     receipt = broker.observe("alice", sid)
-    backend.pixels = b"screen-changed"
+    backend.pixels = _RGB_FRAME_CHANGED
     with pytest.raises(PermissionError, match="desktop changed"):
         broker.type_text("alice", sid, frame_digest=receipt.frame_digest, text="hello")
     assert backend.texts == []
