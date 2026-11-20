@@ -8,6 +8,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import ipaddress
+import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -26,7 +28,7 @@ EUROPE_COUNTRIES = frozenset((
 def configured() -> bool:
     return bool(
         os.environ.get("LESHY_EU_PROBE_URL", "").strip()
-        and os.environ.get("LESHY_EU_PROBE_TOKEN", "").strip()
+        and os.environ.get("LESHY_EU_PROBE_PASSWORD", "").strip()
     )
 
 
@@ -54,23 +56,25 @@ class _NeverRedirect(request.HTTPRedirectHandler):
 
 def _remote_ssh22(ip: str, *, timeout: float) -> dict:
     base = os.environ["LESHY_EU_PROBE_URL"].strip().rstrip("/")
-    token = os.environ["LESHY_EU_PROBE_TOKEN"].strip()
+    password = os.environ["LESHY_EU_PROBE_PASSWORD"].strip()
+    if len(password) < 48 or len(password) > 128 or not password.isascii() or not password.isdecimal():
+        raise ValueError("LESHY_EU_PROBE_PASSWORD должен содержать 48-128 цифр")
     url = parse.urlsplit(base)
     if (
-        url.scheme != "https" or not url.hostname or url.username or url.password
+        url.scheme not in ("http", "https") or not url.hostname or url.username or url.password
         or url.query or url.fragment or (url.path not in ("", "/"))
     ):
-        raise ValueError("LESHY_EU_PROBE_URL должен быть HTTPS-адресом без параметров")
+        raise ValueError("LESHY_EU_PROBE_URL должен быть HTTP(S)-адресом без пути и параметров")
     nonce = secrets.token_hex(16)
-    payload = json.dumps({"target": ip, "nonce": nonce}, separators=(",", ":")).encode("utf-8")
+    timestamp = int(time.time())
+    message = f"v1|{ip}|{nonce}|{timestamp}|22".encode("ascii")
+    proof = hmac.new(password.encode("ascii"), message, hashlib.sha256).hexdigest()
+    payload = json.dumps({
+        "target": ip, "nonce": nonce, "timestamp": timestamp, "password": proof,
+    }, separators=(",", ":")).encode("utf-8")
     req = request.Request(
         base + "/v1/ssh/check", data=payload, method="POST",
-        headers={
-            "Authorization": "Bearer " + token,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Cache-Control": "no-store",
-        },
+        headers={"Content-Type": "application/json", "Accept": "application/json", "Cache-Control": "no-store"},
     )
     opener = request.build_opener(_NeverRedirect)
     with opener.open(req, timeout=timeout) as res:
@@ -82,6 +86,15 @@ def _remote_ssh22(ip: str, *, timeout: float) -> dict:
     result = json.loads(data.decode("utf-8"))
     if not isinstance(result, dict):
         raise ValueError("EU probe: некорректный JSON")
+    signature = result.pop("signature", "")
+    canonical = json.dumps(
+        result, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    expected_signature = hmac.new(
+        password.encode("ascii"), canonical, hashlib.sha256
+    ).hexdigest()
+    if not isinstance(signature, str) or not hmac.compare_digest(signature, expected_signature):
+        raise ValueError("EU probe: подпись ответа не совпала")
     if (
         result.get("target") != ip or result.get("port") != 22
         or result.get("nonce") != nonce or result.get("completed") is not True
