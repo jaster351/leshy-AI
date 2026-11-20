@@ -17,7 +17,18 @@ done
 STAGED="$(mktemp)"
 BACKUP_SCRIPT="$(mktemp /opt/leshy-probe/.server.old.XXXXXX)"
 BACKUP_ENV="$(mktemp /etc/.leshy-probe.env.old.XXXXXX)"
-trap 'rm -f "$STAGED"' EXIT
+UPDATED=0
+on_exit() {
+  status=$?
+  if [[ "$status" -ne 0 && "$UPDATED" -eq 1 ]]; then
+    echo "Updating probe failed; restoring its previous script/config." >&2
+    cp -p "$BACKUP_SCRIPT" "$SCRIPT" || true
+    cp -p "$BACKUP_ENV" "$ENV_FILE" || true
+    systemctl restart "$UNIT" || true
+  fi
+  rm -f "$STAGED"
+}
+trap on_exit EXIT
 curl --fail --location --silent --show-error --connect-timeout 10 --max-time 30 \
   https://raw.githubusercontent.com/jaster351/leshy-AI/main/tools/eu_ssh_probe_server.py \
   -o "$STAGED"
@@ -30,7 +41,8 @@ cp -p "$SCRIPT" "$BACKUP_SCRIPT"
 cp -p "$ENV_FILE" "$BACKUP_ENV"
 chmod 0600 "$BACKUP_ENV"
 
-if ! (
+UPDATED=1
+(
   set -e
   install -m 0755 "$STAGED" "$SCRIPT"
   python3 - "$ENV_FILE" <<'PY'
@@ -68,13 +80,8 @@ PY
   systemctl is-active --quiet "$UNIT"
   sleep 1
   systemctl is-active --quiet "$UNIT"
-); then
-  echo "Update failed. Restoring previous probe script and settings." >&2
-  cp -p "$BACKUP_SCRIPT" "$SCRIPT"
-  cp -p "$BACKUP_ENV" "$ENV_FILE"
-  systemctl restart "$UNIT" || true
-  exit 1
-fi
+)
+UPDATED=0
 rm -f "$BACKUP_SCRIPT" "$BACKUP_ENV"
 echo "Independent EU probe active: HTTP TCP/8768, signed numeric password auth."
 echo "Shared secret is stored locally in $ENV_FILE; do NOT paste it into chats."
