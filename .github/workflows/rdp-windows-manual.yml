@@ -47,4 +47,6 @@ jobs:
             tests/test_rdp_client_info_channel.py `
             tests/test_rdp_tls_probe.py `
             tests/test_rdp_frame_codec.py `
-            tests/test_superagent_rdp_session.py
+            tests/test_superagent_rdp_session.py `
+            tests/test_rdp_frame_receipt_validation.py `
+            tests/test_rdp_observation_atomicity.py
