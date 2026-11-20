@@ -27,6 +27,22 @@ _SEEN: list[float] = []
 _ACTIVE = threading.BoundedSemaphore(value=2)
 _MAX_PER_MINUTE = 15
 
+_NONCES_LOCK = threading.Lock()
+_NONCES: dict[str, float] = {}
+
+
+def _new_nonce(nonce: str) -> bool:
+    now = time.monotonic()
+    with _NONCES_LOCK:
+        expired = [key for key, stamp in _NONCES.items() if now - stamp > 90]
+        for key in expired:
+            del _NONCES[key]
+        if nonce in _NONCES:
+            return False
+        _NONCES[nonce] = now
+        return True
+
+
 
 def _check_tcp22(target: str) -> dict:
     stamp = time.monotonic()
@@ -127,6 +143,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._authorized(body, target, nonce):
             self._respond(401, {"error": "unauthorized"})
+            return
+        if not _new_nonce(nonce):
+            self._respond(409, {"error": "replayed_request"})
             return
         if not _allowed_request():
             self._respond(429, {"error": "rate_limited"})
