@@ -202,6 +202,22 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
         return f"IP-адрес {target}. Блокировка ТСПУ не подтверждена."
     lines = [f"Проверка IP: {target}", f"Итог: {verdict}."]
 
+    owned = metadata.get("eu_ssh_comparison") or {}
+    if owned.get("status") not in (None, "", "not_configured"):
+        local = owned.get("local_attempts") or []
+        abroad = owned.get("eu_attempts") or []
+        lines.append(
+            "Свой EU-агент (SSH/22): РФ "
+            + str(sum(x.get("status") == "connected" for x in local))
+            + "/" + str(len(local))
+            + ", Европа "
+            + str(sum(x.get("status") == "connected" for x in abroad))
+            + "/" + str(len(abroad))
+            + " успешных соединений."
+        )
+        if owned.get("reason"):
+            lines.append(str(owned["reason"])[:180] + ".")
+
     chebur = metadata.get("cheburcheck") or {}
     if chebur.get("ok"):
         lines.append("Списки Cheburcheck: " + (
@@ -269,7 +285,9 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
         summary += "\n\n[[LESHY_DIAGNOSTICS]]\n" + details + "\n[[/LESHY_DIAGNOSTICS]]"
     response.metadata["copyable_conclusion"] = (
         _compact_answer(response.metadata)
-        if response.metadata.get("blocking_attribution") == "confirmed_three_signals"
+        if response.metadata.get("blocking_attribution") in (
+            "confirmed_three_signals", "eu_ssh_ru_filtered", "eu_ssh_port_reachable",
+        )
         else ""
     )
     return summary, sources, response.metadata
