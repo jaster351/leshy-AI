@@ -47,6 +47,27 @@ RECOMMENDED_MODELS: tuple[RecommendedModel, ...] = (
         runtime="legacy-compatible",
     ),
     RecommendedModel(
+        id="qwen35-9b-original-q4km",
+        title="Qwen3.5 9B (оригинальная) — Q4_K_M",
+        filename="Qwen_Qwen3.5-9B-Q4_K_M.gguf",
+        url="https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF/resolve/c512afe1bc55a45304dbe577088139fb9405b02e/Qwen_Qwen3.5-9B-Q4_K_M.gguf",
+        quant="Q4_K_M",
+        size_label="≈6,17 ГБ",
+        family="Qwen3.5 9B",
+        description=(
+            "Оригинальная Qwen3.5 9B без сторонней модификации инструкционного поведения. "
+            "Потенциальное улучшение качества по сравнению с Qwen3 8B; "
+            "реальный эффект и совместимость с Vulkan проверяются после установки."
+        ),
+        best_for="Русский диалог, рассуждения, задачи агента и работа с инструментами.",
+        memory_note=(
+            "Для видеокарты с 8 ГБ VRAM возможен частичный offload при большом контексте. "
+            "Сохраните Qwen3 8B для мгновенного отката; не переключать автоматически "
+            "без успешной проверки модели и backend."
+        ),
+        runtime="modern",
+    ),
+    RecommendedModel(
         id="qwen35-9b-uncensored-q4km",
         title="Qwen3.5 9B Uncensored Aggressive — Q4_K_M",
         filename="Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
