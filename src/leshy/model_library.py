@@ -227,6 +227,8 @@ class ModelLibraryManager:
         downloader. A pinned SHA-256, when available, is mandatory before
         atomically replacing an installed GGUF.
         """
+        if not str(url).startswith("https://huggingface.co/"):
+            raise ValueError("Модели можно скачивать только из HTTPS-каталога Hugging Face")
         target = self.models_dir / Path(filename).name
         expected = str(expected_sha256 or "").strip().lower()
         if expected and (len(expected) != 64 or any(ch not in "0123456789abcdef" for ch in expected)):
@@ -239,6 +241,14 @@ class ModelLibraryManager:
         offset = temporary.stat().st_size if temporary.is_file() else 0
         if offset > MAX_MODEL_BYTES:
             temporary.unlink()
+            offset = 0
+        if offset and expected and self._is_gguf(temporary):
+            if hmac.compare_digest(self._file_sha256(temporary), expected):
+                os.replace(temporary, target)
+                return offset
+        if not expected:
+            # No immutable digest means bytes from an earlier session cannot
+            # safely be combined with today's potentially changed URL.
             offset = 0
 
         headers = {"User-Agent": "Leshy-AI/model-library"}
@@ -260,6 +270,8 @@ class ModelLibraryManager:
                     timeout=90,
                 )
             with response:
+                if not str(response.geturl()).startswith("https://"):
+                    raise ValueError("Небезопасное перенаправление при загрузке модели")
                 status = int(getattr(response, "status", 0) or response.getcode())
                 if offset and status == 206:
                     content_range = str(response.headers.get("Content-Range") or "")
