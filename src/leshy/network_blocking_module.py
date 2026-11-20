@@ -961,6 +961,20 @@ class NetworkBlockingChecker:
             ),
         ]
         eu = result.eu_ssh_comparison
+        if result.port_verdicts:
+            lines.append("Сводка по проверяемым портам:")
+            for port in ("22", "3389"):
+                item = result.port_verdicts.get(port)
+                if not item:
+                    continue
+                lines.append(
+                    f"{item.get('label')}: {item.get('state')}; "
+                    f"локально {item.get('local_ok')}/{item.get('local_total')}, "
+                    f"Нидерланды {item.get('nl_ok')}/{item.get('nl_total')}, "
+                    f"Check-Host РФ {item.get('checkhost_ru_ok')}/{item.get('checkhost_ru_total')} "
+                    f"(timeout {item.get('checkhost_ru_timeout')}); "
+                    f"{item.get('explanation')}"
+                )
         if eu.get("local_attempts") and eu.get("eu_attempts"):
             lines.append(
                 "SSH/22, три повтора: РФ "
