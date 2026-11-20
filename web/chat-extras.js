@@ -117,7 +117,7 @@
       const intro=value.slice(0,begin).trim();
       const newline=intro.indexOf('\n');
       const verdict=(newline>=0?intro.slice(0,newline):intro).trim();
-      if(/^IP\s+[^\s:]+:\s+/i.test(verdict)){
+      if(/^IP\s+\S+:\s+/i.test(verdict)){
         const copyVerdict=document.createElement('button');
         copyVerdict.type='button';
         copyVerdict.className='leshy-verdict-copy';
