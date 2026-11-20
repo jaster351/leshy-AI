@@ -14,7 +14,8 @@ from urllib import parse, request
 from .diagnostics import event, problem
 from .modules import ModuleManifest, ModuleRequest, ModuleResponse
 from .network_service_fingerprint import collect_service_fingerprint
-from .eu_ssh_probe import compare_ssh22, configured as eu_ssh_probe_configured
+from .eu_ssh_probe import compare_tcp_ports, configured as eu_ssh_probe_configured
+from .network_blocking_verdict import assess_ports
 from .verified_tool_receipts import VerifiedToolReceipts, ToolReceipt
 
 
@@ -103,6 +104,7 @@ class BlockingAssessment:
     check_host_complete: bool = False
     os_fingerprint: dict[str, Any] = field(default_factory=dict)
     eu_ssh_comparison: dict[str, Any] = field(default_factory=dict)
+    port_verdicts: dict[str, Any] = field(default_factory=dict)
 
 
 class NetworkBlockingChecker:
@@ -126,13 +128,13 @@ class NetworkBlockingChecker:
         *,
         local_timeout_seconds: float = 5.0,
         http_timeout_seconds: float = 12.0,
-        check_host_wait_seconds: float = 120.0,
-        chebur_probe_wait_seconds: float = 125.0,
+        check_host_wait_seconds: float = 25.0,
+        chebur_probe_wait_seconds: float = 30.0,
     ) -> None:
         self.local_timeout_seconds = max(0.5, min(float(local_timeout_seconds), 30.0))
         self.http_timeout_seconds = max(3.0, min(float(http_timeout_seconds), 30.0))
-        self.check_host_wait_seconds = max(3.0, min(float(check_host_wait_seconds), 150.0))
-        self.chebur_probe_wait_seconds = max(10.0, min(float(chebur_probe_wait_seconds), 135.0))
+        self.check_host_wait_seconds = max(3.0, min(float(check_host_wait_seconds), 40.0))
+        self.chebur_probe_wait_seconds = max(10.0, min(float(chebur_probe_wait_seconds), 40.0))
         self._nodes_cache: tuple[float, dict[str, dict[str, Any]]] = (0.0, {})
         self._receipts = VerifiedToolReceipts()
 
@@ -804,7 +806,7 @@ class NetworkBlockingChecker:
             return evidence, self._chebur_probe(evidence.query_id)
 
         with ThreadPoolExecutor(max_workers=3, thread_name_prefix="leshy-blocking") as pool:
-            eu_future = pool.submit(compare_ssh22, normalized) if eu_ssh_probe_configured() else None
+            eu_future = pool.submit(compare_tcp_ports, normalized) if eu_ssh_probe_configured() else None
             remote_future = (
                 pool.submit(self._check_host, normalized, expected_ports)
                 if include_web else pool.submit(self._check_host, normalized)
@@ -819,36 +821,15 @@ class NetworkBlockingChecker:
             os_fingerprint=fingerprint,
             eu_ssh_comparison=eu_ssh,
         )
+        overall_verdict, port_verdicts = assess_ports(
+            eu_ssh, remote, cheburcheck=chebur, chebur_probe=probe,
+        )
+        result = replace(
+            result,
+            verdict=f"IP {normalized}: {overall_verdict}",
+            port_verdicts=port_verdicts,
+        )
         eu_status = str(eu_ssh.get("status") or "")
-        if eu_status == "ru_unreachable_eu_reachable":
-            result = replace(
-                result,
-                verdict=(
-                    "Адрес недоступен по SSH TCP/22 из РФ, но доступен из Европы: "
-                    "обнаружены признаки региональной блокировки; механизм ТСПУ не установлен"
-                ),
-                reasons=result.reasons + (
-                    "Собственный зарубежный узел трижды установил TCP-соединение с SSH/22, "
-                    "из российской точки три подключения завершились тайм-аутом. "
-                    "Причину (ТСПУ, провайдер или маршрут) по одним TCP-подключениям определить нельзя.",
-                ),
-            )
-        elif eu_status == "both_connected":
-            result = replace(
-                result,
-                verdict="SSH TCP/22 доступен из России и Европы — блокировка этого порта не выявлена",
-                reasons=result.reasons + ("Сравнение двух контролируемых точек: 3/3 подключения с каждой стороны.",),
-            )
-        elif eu_status == "both_unreachable":
-            result = replace(
-                result,
-                verdict="SSH TCP/22 недоступен из России и Европы; региональная блокировка не подтверждена",
-            )
-        elif eu_status == "ru_connected":
-            result = replace(
-                result,
-                verdict="SSH TCP/22 доступен из России; блокировка SSH из РФ не обнаружена",
-            )
         receipts = [
             self._receipts.record(
                 "tcp.connect", "success" if local else "error",
@@ -864,9 +845,7 @@ class NetworkBlockingChecker:
         if eu_status != "not_configured":
             receipts.append(self._receipts.record(
                 "eu.ssh22",
-                "success" if eu_status in {
-                    "both_connected", "ru_unreachable_eu_reachable", "both_unreachable", "ru_connected",
-                } else "error",
+                "success" if bool(eu_ssh.get("ports")) else "error",
                 eu_ssh,
             ))
         if chebur.query_id:
@@ -982,6 +961,20 @@ class NetworkBlockingChecker:
             ),
         ]
         eu = result.eu_ssh_comparison
+        if result.port_verdicts:
+            lines.append("Сводка по проверяемым портам:")
+            for port in ("22", "3389"):
+                item = result.port_verdicts.get(port)
+                if not item:
+                    continue
+                lines.append(
+                    f"{item.get('label')}: {item.get('state')}; "
+                    f"локально {item.get('local_ok')}/{item.get('local_total')}, "
+                    f"Нидерланды {item.get('nl_ok')}/{item.get('nl_total')}, "
+                    f"Check-Host РФ {item.get('checkhost_ru_ok')}/{item.get('checkhost_ru_total')} "
+                    f"(timeout {item.get('checkhost_ru_timeout')}); "
+                    f"{item.get('explanation')}"
+                )
         if eu.get("local_attempts") and eu.get("eu_attempts"):
             lines.append(
                 "SSH/22, три повтора: РФ "
@@ -1144,26 +1137,22 @@ class NetworkBlockingModule:
                 "diagnostic_score": result.tspu_probability,
                 "diagnostic_score_type": "heuristic_not_calibrated_probability",
                 "blocking_attribution": (
-                    "eu_ssh_ru_filtered" if result.eu_ssh_comparison.get("status") == "ru_unreachable_eu_reachable"
-                    else "eu_ssh_port_reachable" if result.eu_ssh_comparison.get("status") == "both_connected"
-                    else "confirmed_three_signals" if result.three_signal_confirmed
-                    else "probe_reported_tspu" if (
-                        result.chebur_probe.ok and result.chebur_probe.finished
-                        and any("tspu_block" in item.verdicts for item in result.chebur_probe.observations)
+                    "tspu_detected" if any(
+                        row.get("state") == "tspu_detected" for row in result.port_verdicts.values()
                     )
-                    else "listed_blocked" if result.cheburcheck.ok and result.cheburcheck.blocked
-                    else "geographic_filtering" if result.matched_ports
+                    else "likely_region_filtered" if any(
+                        row.get("state") == "likely_blocked" for row in result.port_verdicts.values()
+                    )
+                    else "not_blocked_tested_ports" if result.port_verdicts and all(
+                        row.get("state") == "not_blocked" for row in result.port_verdicts.values()
+                    )
                     else "inconclusive"
                 ),
                 "signals_met": result.signals_met,
                 "three_signal_confirmed": result.three_signal_confirmed,
                 "matched_ports": list(result.matched_ports),
                 "check_host_complete": result.check_host_complete,
-                "copyable_conclusion": (
-                    f"IP {result.target}: блокировка подтверждена по 3/3 диагностическим признакам "
-                    f"(TCP {', '.join(str(p) for p in result.matched_ports)})."
-                    if result.three_signal_confirmed else ""
-                ),
+                "copyable_conclusion": result.verdict,
                 "availability_percent": result.availability_percent,
                 "verdict": result.verdict,
                 "local": [asdict(item) for item in result.local],
@@ -1173,6 +1162,7 @@ class NetworkBlockingModule:
                 "reasons": list(result.reasons),
                 "checked_at_epoch": result.checked_at_epoch,
                 "eu_ssh_comparison": result.eu_ssh_comparison,
+                "port_verdicts": result.port_verdicts,
                 "tool_receipts": [asdict(r) for r in result.tool_receipts],
             },
         )

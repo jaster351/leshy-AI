@@ -13,6 +13,8 @@
 .workspace{display:none;height:100vh;grid-template-columns:220px minmax(0,1fr) 310px;background:var(--line);gap:1px}body.full .start{display:none}body.full .workspace{display:grid}.sidebar,.main,.context{background:rgba(5,14,10,.96);min-height:0}.sidebar{padding:18px 13px;display:flex;flex-direction:column}.brand{display:flex;align-items:center;gap:10px;font-weight:750;font-size:20px;padding:5px 8px 20px}.mini-core{width:29px;height:29px;border-radius:50%;background:radial-gradient(circle,#b0edc5,#347b55 50%,#0c2619 72%);box-shadow:0 0 22px rgba(111,226,158,.26)}nav{display:grid;gap:5px}.nav-item{border-color:transparent;background:transparent;text-align:left;padding:10px 11px;color:#b6c8bc;font-size:14px}.nav-item.active{background:rgba(112,199,147,.13);border-color:var(--line);color:#fff}.sidebar-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:13px;display:grid;gap:8px}.sidebar-foot .hint{margin:0}
 .main{display:flex;flex-direction:column;overflow:hidden}.main-head{height:64px;display:flex;align-items:center;justify-content:space-between;gap:14px;border-bottom:1px solid var(--line);padding:0 20px}.head-title{display:flex;align-items:baseline;gap:9px}.head-title strong{font-size:16px}.head-title span{font-size:11px;color:var(--muted)}.head-actions{display:flex;align-items:center;gap:8px}.state{font-size:12px;color:var(--accent)}.pane{display:none;flex:1;min-height:0;overflow:auto;padding:22px}.pane.active{display:block}.pane.chat-pane.active{display:flex;flex-direction:column;padding:0}.section-title{font-size:22px;margin:0 0 6px}.section-subtitle{color:var(--muted);font-size:13px;margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}.card{border:1px solid var(--line);background:rgba(12,29,21,.72);border-radius:15px;padding:14px;min-width:0}.card h3{font-size:14px;margin:0 0 10px}.metric{font-size:28px;font-weight:700}.muted,.hint{color:var(--muted);font-size:11px;line-height:1.45}.good{color:var(--accent)}.bad{color:var(--danger)}.warn{color:var(--warn)}.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0;font-size:12px}.row span:first-child{color:var(--muted)}.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}.field{width:100%;border:1px solid var(--line);background:#07110d;color:var(--text);border-radius:11px;padding:10px;outline:none}.field:focus{border-color:rgba(147,221,177,.42)}textarea.field{min-height:90px;resize:vertical}.toolbar .field,.toolbar select{width:auto;min-width:180px}.list{display:grid;gap:8px}.item{border:1px solid var(--line);border-radius:12px;background:rgba(7,17,13,.72);padding:11px}.item-title{font-weight:650;font-size:13px}.item-meta{font-size:11px;color:var(--muted);margin-top:4px}.item-body{font-size:12px;line-height:1.5;margin-top:7px;white-space:pre-wrap;word-break:break-word}.item-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:14px}.badge{display:inline-flex;padding:3px 7px;border-radius:999px;border:1px solid var(--line);font-size:10px;color:var(--muted)}
 .messages{flex:1;overflow:auto;padding:24px max(24px,6vw)}.msg{max-width:840px;margin:0 auto 18px;line-height:1.57;white-space:pre-wrap}.msg.user{background:rgba(127,201,157,.09);border:1px solid var(--line);padding:13px 16px;border-radius:16px}.msg.assistant{padding:4px}.who{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:6px}.sources{font-size:11px;margin-top:9px;color:var(--muted)}.sources a{color:var(--accent);text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chat-compose{padding:14px max(24px,6vw) 20px;border-top:1px solid rgba(151,218,177,.06)}
+.leshy-verdict-copy{display:block;margin:3px 0 10px;padding:8px 10px;max-width:100%;text-align:left;white-space:normal;overflow-wrap:anywhere;cursor:pointer;border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--text);font:inherit;font-weight:650}
+.leshy-verdict-copy:hover,.leshy-verdict-copy:focus-visible{border-color:var(--accent);outline-offset:2px}
 .leshy-diagnostic-details{white-space:normal;margin-top:14px;border:1px solid var(--line);border-radius:12px;background:rgba(96,190,133,.04);overflow:hidden}
 .leshy-diagnostic-details summary{cursor:pointer;padding:12px 14px;color:var(--accent);font-size:13px;font-weight:650;list-style-position:inside}
 .leshy-diagnostic-details[open] summary{border-bottom:1px solid var(--line)}
@@ -139,7 +141,31 @@ function renderChatMessageBody(body,raw,role){
   const at=role==='assistant'?text.indexOf(open):-1;
   const until=at>=0?text.indexOf(close,at+open.length):-1;
   if(at<0||until<0){body.textContent=text;return;}
-  const summary=document.createElement('div');summary.textContent=text.slice(0,at).trim();
+  const intro=text.slice(0,at).trim();
+  const firstBreak=intro.indexOf('\n');
+  const verdict=(firstBreak>=0?intro.slice(0,firstBreak):intro).trim();
+  const summary=document.createElement('div');
+  if(/^IP\s+\S+:\s+/i.test(verdict)){
+    const copyVerdict=document.createElement('button');
+    copyVerdict.type='button';
+    copyVerdict.className='leshy-verdict-copy';
+    copyVerdict.textContent=verdict+'  ⧉';
+    copyVerdict.title='Нажмите, чтобы скопировать решение Лешего';
+    copyVerdict.setAttribute('aria-label','Копировать решение Лешего: '+verdict);
+    copyVerdict.onclick=async e=>{
+      e.stopPropagation();
+      try{await navigator.clipboard.writeText(verdict);copyVerdict.title='Решение скопировано'}
+      catch(_e){copyVerdict.title='Не удалось скопировать'}
+    };
+    summary.append(copyVerdict);
+    if(firstBreak>=0){
+      const rest=document.createElement('div');
+      rest.textContent=intro.slice(firstBreak+1).trim();
+      summary.append(rest);
+    }
+  }else{
+    summary.textContent=intro;
+  }
   const details=document.createElement('details');details.className='leshy-diagnostic-details';
   const toggle=document.createElement('summary');toggle.textContent='Диагностические данные — раскрыть';
   const report=document.createElement('pre');const rawReport=text.slice(at+open.length,until).trim();report.textContent=rawReport;

@@ -200,6 +200,33 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
                 "Cheburcheck: tspu_block."
             )
         return f"IP-адрес {target}. Блокировка ТСПУ не подтверждена."
+    # The new per-port verdict is concise. Full diagnostic receipts stay in
+    # the collapsible diagnostic section assembled in _run().
+    port_verdicts = metadata.get("port_verdicts") or {}
+    if port_verdicts:
+        lines = [verdict.rstrip(".") + "."]
+        for port in ("22", "3389"):
+            row = port_verdicts.get(port) or {}
+            if not row:
+                continue
+            lines.append(
+                f"{row.get('label')}: {row.get('explanation')}. "
+                f"Леший {row.get('local_ok', 0)}/{row.get('local_total', 0)}, "
+                f"Нидерланды {row.get('nl_ok', 0)}/{row.get('nl_total', 0)}, "
+                f"Check-Host РФ {row.get('checkhost_ru_ok', 0)}/"
+                f"{row.get('checkhost_ru_total', 0)} успешно."
+            )
+        chebur = metadata.get("cheburcheck") or {}
+        if chebur.get("ok"):
+            lines.append(
+                "Cheburcheck (списки): "
+                + ("адрес найден" if chebur.get("blocked") else "не найден")
+                + "."
+            )
+        else:
+            lines.append("Cheburcheck: данных нет.")
+        return "\n".join(lines)
+
     lines = [f"Проверка IP: {target}", f"Итог: {verdict}."]
 
     owned = metadata.get("eu_ssh_comparison") or {}
@@ -283,13 +310,9 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     details = response.text.strip()
     if details:
         summary += "\n\n[[LESHY_DIAGNOSTICS]]\n" + details + "\n[[/LESHY_DIAGNOSTICS]]"
-    response.metadata["copyable_conclusion"] = (
-        _compact_answer(response.metadata)
-        if response.metadata.get("blocking_attribution") in (
-            "confirmed_three_signals", "eu_ssh_ru_filtered", "eu_ssh_port_reachable",
-        )
-        else ""
-    )
+    response.metadata["copyable_conclusion"] = str(
+        response.metadata.get("verdict") or ""
+    ).strip()
     return summary, sources, response.metadata
 
 
