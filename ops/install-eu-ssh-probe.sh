@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs only the loopback-bound probe. Expose via HTTPS reverse proxy separately.
+# Installs only the standalone HMAC-protected TCP/22 reachability probe.
 set -euo pipefail
 
 if [[ "$EUID" -ne 0 ]]; then
@@ -33,20 +33,25 @@ install -d -m 0755 "$INSTALL_DIR"
 install -m 0755 "$SOURCE" "$INSTALL_DIR/agent.py"
 
 if [[ ! -e "$ENV_FILE" ]]; then
-  TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+  PASSWORD="$(python3 -c 'import secrets; print("".join(str(secrets.randbelow(10)) for _ in range(64)))')"
   umask 077
   cat > "$ENV_FILE" <<EOF
-LESHY_PROBE_API_TOKEN=$TOKEN
+LESHY_PROBE_PASSWORD=$PASSWORD
 LESHY_PROBE_COUNTRY_CODE=$COUNTRY
 LESHY_PROBE_NODE=europe-1
-LESHY_PROBE_BIND_HOST=127.0.0.1
+LESHY_PROBE_BIND_HOST=0.0.0.0
 LESHY_PROBE_PORT=8768
 EOF
   chmod 0600 "$ENV_FILE"
-  echo "Created $ENV_FILE with a unique secret. Keep it private."
+  unset PASSWORD
+  echo "Created $ENV_FILE with a random 64-digit password. Keep it private."
 else
   chmod 0600 "$ENV_FILE"
-  echo "Keeping existing $ENV_FILE (including token and country)."
+  if ! grep -q '^LESHY_PROBE_PASSWORD=' "$ENV_FILE"; then
+    echo "Existing config uses legacy bearer authentication. Upgrade using configure-eu-ssh-probe-password.sh first." >&2
+    exit 1
+  fi
+  echo "Keeping existing $ENV_FILE (including password and country)."
 fi
 
 cat > "$UNIT_FILE" <<'EOF'
@@ -76,5 +81,5 @@ EOF
 systemctl daemon-reload
 systemctl enable --now leshy-eu-ssh-probe.service
 systemctl restart leshy-eu-ssh-probe.service
-echo "Leshy EU SSH probe installed on 127.0.0.1:8768."
-echo "Next: configure public HTTPS reverse proxy and LESHY_EU_PROBE_URL/TOKEN on Windows."
+echo "Standalone EU SSH probe installed on 0.0.0.0:8768."
+echo "Configure the EU server IP and shared numeric password only in the Windows Leshy settings."
