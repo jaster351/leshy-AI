@@ -123,7 +123,7 @@
     const text=cleanText(node);if(!text)return;
     try{
       button.classList.add('active');speakingButton=button;
-      const r=await fetch('/v1/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+      const r=await fetch('/v1/voice/speak',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Leshy-UI':'voice'},body:JSON.stringify({text})});
       if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||('HTTP '+r.status))}
       const blob=await r.blob(),url=URL.createObjectURL(blob),audio=new Audio(url);speakingUrl=url;speakingAudio=audio;
       audio.onended=stopSpeaking;audio.onerror=stopSpeaking;await audio.play();
