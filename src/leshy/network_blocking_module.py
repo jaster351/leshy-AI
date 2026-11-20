@@ -917,7 +917,12 @@ class NetworkBlockingChecker:
             f"Проверка {result.target}",
             f"Время проверки: {checked}",
             f"Итог диагностики: {result.verdict}.",
-            f"Совпавшие признаки: {result.signals_met}/3. Полный Check-Host: {'да' if result.check_host_complete else 'нет'}.",
+            (
+                "Совпадение тайм-аутов РФ и локальной точки при зарубежной доступности "
+                "на одном TCP-порту: "
+                + (", ".join(f"TCP/{port}" for port in result.matched_ports) or "не обнаружено")
+                + f". Полный Check-Host: {'да' if result.check_host_complete else 'нет'}."
+            ),
             f"Профиль по доступным портам (не подтверждение ОС): {result.profile}",
             "Проверка сервисов: SSH TCP/22 и RDP TCP/3389 — оба порта тестируются независимо.",
             (
