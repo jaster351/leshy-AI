@@ -28,6 +28,7 @@ from .rdp_credssp_credentials import (
     RDPCredentials, validate_sealed_authinfo_tsrequest,
 )
 from .native_spnego import _check_target, new_native_spnego
+from .rdp_confirm_active import ConfirmActiveReceipt, build_confirm_active
 from .rdp_server_activation import (
     MAX_SERVER_PACKET, RDPActivationError, RDPServerActivation,
     read_server_mcs_data, parse_valid_client_license, parse_demand_active,
@@ -124,6 +125,9 @@ class PinnedRDPCredSSPChannel:
         self._client_info_receipt: RDPClientInfoReceipt | None = None
         self._server_activation_attempted = False
         self._server_activation: RDPServerActivation | None = None
+        self._mcs_display: tuple[int, int] | None = None
+        self._confirm_active_attempted = False
+        self._confirm_active_receipt: ConfirmActiveReceipt | None = None
 
     def _check(self) -> None:
         if self._closed:
@@ -286,6 +290,7 @@ class PinnedRDPCredSSPChannel:
             settings = parse_mcs_connect_response(response)
             self._check()
             self._mcs_settings = settings
+            self._mcs_display = (width, height)
             return settings
         except BaseException:
             self.close()
@@ -420,6 +425,46 @@ class PinnedRDPCredSSPChannel:
             self._server_activation = result
             return result
         except BaseException:
+            self.close()
+            raise
+
+    def send_confirm_active(self) -> ConfirmActiveReceipt:
+        """Send bounded Confirm Active capabilities; no graphics or input yet.
+
+        Only after the licensed server's Demand Active on the SAME pinned
+        TLS connection. No legacy security header is used under enhanced
+        security. Once sent, the channel remains in unfinalized state.
+        """
+        if (self._closed or self._confirm_active_attempted
+                or self._server_activation is None or self._mcs_display is None
+                or self._mcs_joined is None or self._client_info_receipt is None
+                or self._credssp is None or not self._credssp.credentials_delegated):
+            raise RDPChannelError("Confirm Active requires licensed MCS and Demand Active")
+        self._confirm_active_attempted = True
+        try:
+            self._check()
+            packet = build_confirm_active(
+                share_id=self._server_activation.share_id,
+                user_channel_id=self._mcs_joined.user_channel_id,
+                io_channel_id=self._mcs_joined.io_channel_id,
+                width=self._mcs_display[0], height=self._mcs_display[1],
+                color_depth=24,
+                server_capability_types=self._server_activation.capability_types,
+            )
+            self._check()
+            self._tls.settimeout(_time_left(self._deadline))
+            self._tls.sendall(packet)
+            self._check()
+            receipt = ConfirmActiveReceipt(
+                share_id=self._server_activation.share_id,
+                user_channel_id=self._mcs_joined.user_channel_id,
+                io_channel_id=self._mcs_joined.io_channel_id,
+            )
+            self._confirm_active_receipt = receipt
+            return receipt
+        except BaseException:
+            # A partial send can change server state. No blind retry or
+            # receipt publication; revoke the entire TLS/GSS channel.
             self.close()
             raise
 
