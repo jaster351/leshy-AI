@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import ipaddress
+import math
 import socket
 import ssl
 import struct
@@ -103,7 +104,7 @@ def probe_rdp_tls(node_ip: str, expected_tls_sha256: str, *, port: int = 3389,
         raise PermissionError("Invalid RDP TLS SHA-256 pin") from exc
     if type(port) is not int or not (1 <= port <= 65535):
         raise ValueError("Invalid RDP port")
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not (0.1 <= timeout <= 15.0):
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or not (0.1 <= timeout <= 15.0):
         raise ValueError("Invalid RDP timeout")
 
     deadline = time.monotonic() + timeout
