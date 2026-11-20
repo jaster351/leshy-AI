@@ -155,6 +155,10 @@ class RDPSessionController:
                 raise ValueError("Invalid framebuffer dimensions")
             if not isinstance(frame.pixels, bytes) or not (0 < len(frame.pixels) <= 32 * 1024 * 1024):
                 raise ValueError("Empty or oversized framebuffer")
+            if frame.pixel_format in {"RGB", "RGBA"}:
+                channels = 3 if frame.pixel_format == "RGB" else 4
+                if len(frame.pixels) != frame.width * frame.height * channels:
+                    raise ValueError("Decoded framebuffer byte count does not match dimensions")
             # Frame bytes are never stored in session state or audits.
             digest = hashlib.sha256(
                 secrets.token_bytes(16) + frame.width.to_bytes(4, "big") +
