@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Operator-owned European SSH reachability probe (TCP/22 only).
 
-Run behind an HTTPS reverse proxy on 127.0.0.1. No SSH login, port scanning,
-DNS resolution, or traffic proxying is performed. Requires a shared secret.
+Run on loopback behind an HTTPS reverse proxy, or serve HTTPS directly on
+0.0.0.0 with a certificate and private key. No SSH login or port scanning.
+Requires a shared secret; never accept public unencrypted HTTP.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import ssl
 import socket
 import threading
 import time
@@ -144,10 +146,23 @@ def main() -> None:
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", node):
         raise SystemExit("Invalid LESHY_PROBE_NODE")
     host = os.environ.get("LESHY_PROBE_BIND_HOST", "127.0.0.1")
-    if host not in ("127.0.0.1", "::1"):
-        raise SystemExit("Probe must bind to loopback behind an HTTPS reverse proxy")
+    if host not in ("127.0.0.1", "0.0.0.0"):
+        raise SystemExit("Bind host must be loopback or all IPv4 interfaces")
+    cert = os.environ.get("LESHY_PROBE_TLS_CERT", "").strip()
+    key = os.environ.get("LESHY_PROBE_TLS_KEY", "").strip()
+    if bool(cert) != bool(key):
+        raise SystemExit("Both LESHY_PROBE_TLS_CERT and LESHY_PROBE_TLS_KEY are required")
+    if host != "127.0.0.1" and not cert:
+        raise SystemExit("Public listening requires TLS cert and key; plain HTTP is forbidden")
+    context = None
+    if cert:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(certfile=cert, keyfile=key)
     port = int(os.environ.get("LESHY_PROBE_PORT", "8768"))
     server = ThreadingHTTPServer((host, port), Handler)
+    if context is not None:
+        server.socket = context.wrap_socket(server.socket, server_side=True)
     server.api_token = token
     server.country_code = country
     server.node = node
