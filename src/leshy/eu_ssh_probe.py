@@ -113,9 +113,11 @@ def _remote_port(ip: str, port: int, *, timeout: float) -> dict:
     country = str(result.get("country_code") or "").upper()
     if country not in EUROPE_COUNTRIES:
         raise ValueError("EU probe: регион зарубежного узла не подтверждён настройками")
+    # The signed node response is authoritative for the *configured* country.
+    # A stale Windows preference (e.g. DE after migrating the node to NL) must
+    # not make both port probes fail; still return the actual signed country.
     expected = os.environ.get("LESHY_EU_PROBE_EXPECTED_COUNTRY", "").strip().upper()
-    if expected and country != expected:
-        raise ValueError("EU probe: код страны не совпадает с заданным")
+    country_setting_mismatch = bool(expected and country != expected)
     try:
         stamp = datetime.fromisoformat(str(result["checked_at_utc"]).replace("Z", "+00:00"))
         if abs((datetime.now(timezone.utc) - stamp).total_seconds()) > 45:
@@ -134,6 +136,7 @@ def _remote_port(ip: str, port: int, *, timeout: float) -> dict:
         raise ValueError("EU probe: неполные результаты трёх TCP-попыток")
     return {
         "country_code": country,
+        "country_setting_mismatch": country_setting_mismatch,
         "node": str(result.get("node") or "")[:80],
         "attempts": attempts,
         "checked_at_utc": str(result["checked_at_utc"]),
