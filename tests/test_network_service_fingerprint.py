@@ -32,8 +32,8 @@ class OsFingerprintTests(unittest.TestCase):
         self.assertEqual(family, "Linux/Unix")
         self.assertEqual(confidence, "средняя")
 
-    def test_rdp_or_smb_alone_has_low_confidence(self):
-        family, confidence, evidence = _classify([row(3389), row(445)])
+    def test_rdp_alone_has_low_confidence(self):
+        family, confidence, evidence = _classify([row(3389)])
         self.assertEqual(family, "возможно Windows")
         self.assertEqual(confidence, "низкая")
         self.assertIn("Linux", evidence[0])
@@ -65,8 +65,7 @@ class OsFingerprintTests(unittest.TestCase):
             "evidence": ["Нет достоверных баннеров"], "completed": True,
             "ports": [
                 row(22, "refused"), row(80, "connected"),
-                row(443, "timeout"), row(445, "refused"),
-                row(3389, "refused"),
+                row(443, "timeout"), row(3389, "refused"),
             ],
         }
 
@@ -117,8 +116,8 @@ class OsFingerprintTests(unittest.TestCase):
             report = collect_service_fingerprint(
                 "1.1.1.1", [row(22, "refused"), row(3389, "refused")]
             )
-        self.assertEqual(requests, [445])
-        self.assertEqual([r["port"] for r in report["ports"]], [22, 445, 3389])
+        self.assertEqual(requests, [])
+        self.assertEqual([r["port"] for r in report["ports"]], [22, 3389])
 
     def test_explicit_web_probe_checks_http_and_https(self):
         from leshy.network_service_fingerprint import collect_service_fingerprint
@@ -137,7 +136,7 @@ class OsFingerprintTests(unittest.TestCase):
                 "1.1.1.1", [row(22, "refused"), row(3389, "refused")],
                 include_web=True,
             )
-        self.assertEqual(set(requests), {80, 443, 445})
+        self.assertEqual(set(requests), {80, 443})
 
 
 if __name__ == "__main__":
