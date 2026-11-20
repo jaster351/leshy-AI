@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import socket
+import ssl
 import time
 from urllib import error, parse, request
 
@@ -72,7 +73,10 @@ def _remote_ssh22(ip: str, *, timeout: float) -> dict:
             "Cache-Control": "no-store",
         },
     )
-    opener = request.build_opener(_NeverRedirect)
+    # Optional pinned self-signed probe certificate; never disable TLS verification.
+    pinned_cert = os.environ.get("LESHY_EU_PROBE_CA_CERT", "").strip()
+    context = ssl.create_default_context(cafile=pinned_cert if pinned_cert else None)
+    opener = request.build_opener(_NeverRedirect, request.HTTPSHandler(context=context))
     with opener.open(req, timeout=timeout) as res:
         if res.status != 200:
             raise ValueError("EU probe: неожиданный HTTP-статус")
