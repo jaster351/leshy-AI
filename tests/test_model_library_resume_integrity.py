@@ -19,6 +19,9 @@ class _Response(BytesIO):
         self.status = status
         self.headers = headers
 
+    def geturl(self):
+        return "https://cdn-lfs.huggingface.co/test/model.gguf"
+
 
 def test_pinned_model_has_published_sha256():
     model = next(x for x in RECOMMENDED_MODELS if x.id == "qwen35-9b-original-q4km")
