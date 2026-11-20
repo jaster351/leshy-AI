@@ -89,6 +89,16 @@ class RecordingCursor:
         self.operation["rows"] = int(row is not None)
         return row
 
+    def fetchmany(self, size):
+        rows = self.cursor.fetchmany(size)
+        self.operation["rows"] += len(rows)
+        self.operation.setdefault("batches", []).append(len(rows))
+        return rows
+
+    def close(self):
+        self.operation["closed"] = True
+        self.cursor.close()
+
 
 class RecordingConnection:
     def __init__(self, storage):
@@ -232,7 +242,7 @@ class MemoryFreshnessGraphTests(unittest.TestCase):
 
     def test_actual_base_context_skips_expired_first_eight_without_reading_thousand_payloads(self):
         fixture = Fixture(self)
-        for index in range(8):
+        for index in range(1005):
             fixture.memory(f"Истёкшая запись {index}", expiry=NOW.isoformat(), importance=1.0)
         for index in range(10):
             fixture.memory(f"Живая запись {index}", importance=0.8)
@@ -250,7 +260,10 @@ class MemoryFreshnessGraphTests(unittest.TestCase):
         selects = [item for item in fixture.storage.operations if item["sql"].startswith("SELECT")]
         self.assertEqual(len(selects), 2)
         self.assertIn("SELECT id,expires_at", selects[0]["sql"])
-        self.assertIn("LIMIT 1000", selects[0]["sql"])
+        self.assertNotIn("LIMIT", selects[0]["sql"])
+        self.assertTrue(selects[0]["closed"])
+        self.assertGreater(selects[0]["rows"], 1000)
+        self.assertLessEqual(max(selects[0]["batches"]), 128)
         self.assertIn("SELECT content,expires_at", selects[1]["sql"])
         self.assertIn("LIMIT 8", selects[1]["sql"])
         self.assertLessEqual(selects[1]["rows"], 8)
@@ -289,7 +302,10 @@ class MemoryFreshnessGraphTests(unittest.TestCase):
         fixture = Fixture(self)
         texts = ["Уязвимость CVE-2026-1000 затрагивает Python версии 3.11",
                  "Уязвимость CVE-2026-2000 затрагивает Python версии 3.11",
-                 "Уязвимость CVE-2026-1000 затрагивает Python версии 3.12"]
+                 "Уязвимость CVE-2026-1000 затрагивает Python версии 3.12",
+                 "Уязвимость CVE-2026-10000 затрагивает Python версии 3.11",
+                 "Уязвимость CVE-2026-1000suffix затрагивает Python версии 3.11",
+                 "Уязвимость CVE-2026-1000суффикс затрагивает Python версии 3.11"]
         identifiers = []
         for text in texts:
             identifier = fixture.knowledge(text)
@@ -313,7 +329,15 @@ class MemoryFreshnessGraphTests(unittest.TestCase):
                                msg="Нулевой current confidence не заменяется default или cached weight")
         trusted = fixture.storage.db.execute("SELECT * FROM knowledge WHERE status='trusted'").fetchall()
         expected = fixture.knowledge_type(fixture.storage, vector_index=None)._search_rows(query, trusted, 30)
-        self.assertEqual([item.text for item in rows], [item["claim"] for item in expected])
+        self.assertIn(texts[0], [item["claim"] for item in expected])
+        self.assertIn(texts[3], [item["claim"] for item in expected],
+                      msg="Graph обязан усилить подстрочный фильтр KnowledgeBase для целого CVE")
+        for text in ("Уязвимость GHSA-aaaa-bbbb-cccc затрагивает Python",
+                     "Уязвимость GHSA-aaaa-bbbb-ccccd затрагивает Python"):
+            identifier = fixture.knowledge(text)
+            fixture.link("knowledge", identifier, text)
+        ghsa = fixture.graph.search("owner-a", "Уязвимость GHSA-aaaa-bbbb-cccc Python", limit=30)
+        self.assertEqual([item.text for item in ghsa], ["Уязвимость GHSA-aaaa-bbbb-cccc затрагивает Python"])
         # Синхронизация также не индексирует заведомо непригодные источники.
         sync = Fixture(self)
         sync.knowledge("Python актуальная запись", confidence=0)
@@ -323,7 +347,22 @@ class MemoryFreshnessGraphTests(unittest.TestCase):
         sync.knowledge("Python повреждённая запись \ufffd")
         sync.memory("Истёкшая память", expiry=NOW.isoformat())
         sync.memory("Живая память", expiry="2026-11-19T12:00:01Z")
+        # Более 1200/1000 непригодных источников не скрывают живой хвост.
+        for index in range(1205):
+            sync.knowledge(f"Python истёкший источник {index}", confidence=1.0,
+                           data_class="dynamic", checked_at=(NOW - timedelta(hours=1)).isoformat(), ttl=1)
+        for index in range(1005):
+            sync.memory(f"Истёкший источник памяти {index}", importance=1.0, expiry=NOW.isoformat())
         self.assertEqual(sync.graph.sync(owner_id="owner-a"), {"knowledge": 1, "memories": 1})
+        source_scans = [operation for operation in sync.storage.operations if
+                        operation["sql"].startswith(("SELECT * FROM knowledge WHERE status=",
+                                                     "SELECT id,content,importance,source,expires_at FROM memories"))]
+        self.assertEqual(len(source_scans), 2)
+        for operation in source_scans:
+            self.assertNotIn("LIMIT", operation["sql"])
+            self.assertTrue(operation["closed"])
+            self.assertGreater(operation["rows"], 1000)
+            self.assertLessEqual(max(operation["batches"]), 128)
         indexed = sync.storage.db.execute(
             "SELECT label FROM knowledge_graph_nodes WHERE kind IN ('knowledge','memory')").fetchall()
         self.assertEqual({row["label"] for row in indexed}, {"Python актуальная запись", "Живая память"})
@@ -331,8 +370,8 @@ class MemoryFreshnessGraphTests(unittest.TestCase):
             "SELECT DISTINCT e.weight FROM knowledge_graph_edges e "
             "JOIN knowledge_graph_nodes n ON n.id=e.target_id WHERE n.kind='knowledge'").fetchall()
         self.assertEqual([row["weight"] for row in weights], [0.2])
-        self.assertEqual(sync.storage.db.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0], 4)
-        self.assertEqual(sync.storage.db.execute("SELECT COUNT(*) FROM memories").fetchone()[0], 2)
+        self.assertEqual(sync.storage.db.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0], 1209)
+        self.assertEqual(sync.storage.db.execute("SELECT COUNT(*) FROM memories").fetchone()[0], 1007)
 
     def test_owner_b_is_synchronized_without_waiting_for_owner_a_cooldown(self):
         fixture = Fixture(self)

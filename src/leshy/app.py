@@ -276,19 +276,31 @@ class LeshyApp:
 
     def _memory_context(self, owner_id: str, *, query: str | None = None,
                         capture_text: str | None = None) -> str:
-        # Explicit owner rules are always loaded; unrelated memories remain bounded.
-        # Neither path is controlled by the background self-learning toggle.
+        # Постоянные правила владельца читаются независимо от фонового обучения.
+        # Восемь обычных воспоминаний выбираются после проверки срока.
         rules = persistent_rule_context(self.storage, owner_id)
         current = datetime.now(timezone.utc)
         with self.storage.connection() as conn:
             candidates = conn.execute(
                 "SELECT id,expires_at FROM memories WHERE owner_id=? AND kind NOT IN (?,?) "
-                "ORDER BY importance DESC,id DESC LIMIT 1000",
+                "ORDER BY importance DESC,id DESC",
                 (owner_id, "dialogue_rule", "owner_knowledge_document"),
-            ).fetchall()
-            # Сначала только сроки и ID: не загружаем до тысячи полных текстов.
-            ids = tuple(item["id"] for item in islice(
-                (item for item in candidates if memory_is_fresh(item["expires_at"], now=current)), 8))
+            )
+            # Читаем только сроки и ID порциями. Истёкший префикс любой длины
+            # не должен навсегда скрывать живую запись дальше по индексу.
+            ids = []
+            try:
+                while len(ids) < 8:
+                    batch = candidates.fetchmany(128)
+                    if not batch:
+                        break
+                    for item in batch:
+                        if memory_is_fresh(item["expires_at"], now=current):
+                            ids.append(item["id"])
+                            if len(ids) == 8:
+                                break
+            finally:
+                candidates.close()
             items = []
             if ids:
                 placeholders = ",".join("?" for _ in ids)

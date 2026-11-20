@@ -206,40 +206,58 @@ class KnowledgeGraph:
                 with self.storage.connection() as conn:
                     for kind, scope in due:
                         if kind == "knowledge":
-                            rows = conn.execute(
+                            cursor = conn.execute(
                                 "SELECT * FROM knowledge WHERE status='trusted' "
-                                "ORDER BY confidence DESC,id DESC LIMIT 1200"
-                            ).fetchall()
-                            for raw in rows:
-                                row = dict(raw)
-                                text = str(row["claim"] or "").strip()
-                                if (not text or not is_fresh(row, now=checked_now)
-                                        or corrupted_knowledge_row(row)):
-                                    continue
-                                self._link_fact(
-                                    conn, owner_id=scope, fact_kind=kind,
-                                    fact_key=f"knowledge:{int(row['id'])}", text=text,
-                                    source=str(row["source_url"] or ""),
-                                    weight=max(0.2, min(float(0.8 if row["confidence"] is None else row["confidence"]), 1.0)),
-                                )
-                                knowledge_count += 1
+                                "ORDER BY confidence DESC,id DESC"
+                            )
+                            try:
+                                while knowledge_count < 1200:
+                                    rows = cursor.fetchmany(128)
+                                    if not rows:
+                                        break
+                                    for raw in rows:
+                                        row = dict(raw)
+                                        text = str(row["claim"] or "").strip()
+                                        if (not text or not is_fresh(row, now=checked_now)
+                                                or corrupted_knowledge_row(row)):
+                                            continue
+                                        self._link_fact(
+                                            conn, owner_id=scope, fact_kind=kind,
+                                            fact_key=f"knowledge:{int(row['id'])}", text=text,
+                                            source=str(row["source_url"] or ""),
+                                            weight=max(0.2, min(float(0.8 if row["confidence"] is None else row["confidence"]), 1.0)),
+                                        )
+                                        knowledge_count += 1
+                                        if knowledge_count == 1200:
+                                            break
+                            finally:
+                                cursor.close()
                         else:
-                            rows = conn.execute(
+                            cursor = conn.execute(
                                 "SELECT id,content,importance,source,expires_at FROM memories "
-                                "WHERE owner_id=? ORDER BY importance DESC,id DESC LIMIT 1000",
+                                "WHERE owner_id=? ORDER BY importance DESC,id DESC",
                                 (scope,),
-                            ).fetchall()
-                            for row in rows:
-                                text = str(row["content"] or "").strip()
-                                if not text or not memory_is_fresh(row["expires_at"], now=checked_now):
-                                    continue
-                                self._link_fact(
-                                    conn, owner_id=scope, fact_kind=kind,
-                                    fact_key=f"memory:{int(row['id'])}", text=text,
-                                    source=str(row["source"] or "memory"),
-                                    weight=max(0.2, min(float(0.6 if row["importance"] is None else row["importance"]), 1.0)),
-                                )
-                                memory_count += 1
+                            )
+                            try:
+                                while memory_count < 1000:
+                                    rows = cursor.fetchmany(128)
+                                    if not rows:
+                                        break
+                                    for row in rows:
+                                        text = str(row["content"] or "").strip()
+                                        if not text or not memory_is_fresh(row["expires_at"], now=checked_now):
+                                            continue
+                                        self._link_fact(
+                                            conn, owner_id=scope, fact_kind=kind,
+                                            fact_key=f"memory:{int(row['id'])}", text=text,
+                                            source=str(row["source"] or "memory"),
+                                            weight=max(0.2, min(float(0.6 if row["importance"] is None else row["importance"]), 1.0)),
+                                        )
+                                        memory_count += 1
+                                        if memory_count == 1000:
+                                            break
+                            finally:
+                                cursor.close()
             except Exception as exc:
                 problem("knowledge_graph_sync_failed", type(exc).__name__, owner_id=owner[:200])
                 return {"knowledge": 0, "memories": 0}
@@ -326,9 +344,16 @@ class KnowledgeGraph:
                                 (owner, *batch),
                             ).fetchall()
                         current[kind].update((int(row["id"]), dict(row)) for row in rows)
-                # Тот же полный запрос и ограничения CVE/версий/целостности,
-                # что у KnowledgeBase. Конструктор и _search_rows не читают БД.
-                knowledge_rows = list(current["knowledge"].values())
+                # Сохраняем фильтры KnowledgeBase. Дополнительно отличаем полный
+                # CVE/GHSA от его подстроки в другом идентификаторе.
+                identifier_checks = [re.compile(
+                    r"(?<![\w-])" + re.escape(identifier) + r"(?![\w-])", re.I)
+                    for identifier in re.findall(
+                        r"\bCVE-\d{4}-\d{4,}\b|\bGHSA-[0-9a-z-]+\b", query, re.I)]
+                knowledge_rows = [row for row in current["knowledge"].values()
+                                  if all(check.search(f"{row['topic']} {row['claim']}")
+                                         for check in identifier_checks)]
+                # Конструктор и _search_rows не читают БД.
                 accepted = KnowledgeBase(self.storage, vector_index=None)._search_rows(
                     query, knowledge_rows, len(knowledge_rows))
                 current["knowledge"] = {int(row["id"]): row for row in accepted}
