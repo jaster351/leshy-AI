@@ -13,8 +13,8 @@ import ssl
 import time
 
 
-_SERVICE = {22: "SSH", 80: "HTTP", 443: "HTTPS", 445: "SMB", 3389: "RDP"}
-_EXTRA_PORTS = (445,)
+_SERVICE = {22: "SSH", 80: "HTTP", 443: "HTTPS", 3389: "RDP"}
+_EXTRA_PORTS: tuple[int, ...] = ()
 _READ_LIMIT = 2048
 
 
@@ -110,9 +110,9 @@ def _classify(ports: list[dict]) -> tuple[str, str, list[str]]:
     if hints:
         return hints[0][0], "средняя", [message for _, message in hints]
     connected = {row["port"] for row in ports if row["status"] == "connected"}
-    if 3389 in connected or 445 in connected:
+    if 3389 in connected:
         return "возможно Windows", "низкая", [
-            "Открыт RDP/3389 или SMB/445; эти протоколы существуют и на Linux (xrdp/Samba)."
+            "Открыт RDP/3389; он поддерживается и на Linux (xrdp)."
         ]
     if 22 in connected:
         return "возможно Linux/Unix", "низкая", [
