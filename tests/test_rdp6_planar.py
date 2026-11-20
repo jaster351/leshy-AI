@@ -10,7 +10,7 @@ from leshy.rdp6_planar import (
 def test_raw_rgb_pixels_with_no_alpha_and_pad():
     # Red, green, blue, white; planar scan lines in stream order.
     stream = bytes([0x20]) + bytes([255, 0, 0, 255]) + bytes([0, 255, 0, 255]) + bytes([0, 0, 255, 255])
-    expected = bytes.fromhex("ff0000 00ff00 0000ff ffffff")
+    expected = bytes.fromhex("0000ff ffffff ff0000 00ff00")
     assert decompress_rdp6_planar(stream, 2, 2) == expected
     assert decompress_rdp6_planar(stream + b"\xae", 2, 2) == expected
 
