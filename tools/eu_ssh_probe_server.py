@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Operator-owned European SSH reachability probe (TCP/22 only).
+"""Operator-owned EU reachability probe for SSH/22 and RDP/3389.
 
 Run a standalone HTTP service on any IPv4 interface. Authenticate requests
 and responses with an HMAC derived from an operator-generated numeric password.
-The password itself is never transmitted. No SSH login or port scanning.
+The password itself is never transmitted. No SSH/RDP login or port scanning.
 HTTP does not encrypt target IP addresses or other diagnostic metadata.
 """
 from __future__ import annotations
@@ -44,10 +44,10 @@ def _new_nonce(nonce: str) -> bool:
 
 
 
-def _check_tcp22(target: str) -> dict:
+def _check_tcp(target: str, port: int) -> dict:
     stamp = time.monotonic()
     try:
-        with socket.create_connection((target, 22), timeout=2.5):
+        with socket.create_connection((target, port), timeout=2.5):
             status = "connected"
     except ConnectionRefusedError:
         status = "refused"
@@ -59,6 +59,11 @@ def _check_tcp22(target: str) -> dict:
         "status": status,
         "elapsed_ms": max(0, int((time.monotonic() - stamp) * 1000)),
     }
+
+
+def _check_tcp22(target: str) -> dict:
+    """Keep compatibility with existing standalone SSH/22 tests."""
+    return _check_tcp(target, 22)
 
 
 def _validate_target(raw: object) -> str:
@@ -98,7 +103,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _authorized(self, body: dict, target: str, nonce: str) -> bool:
+    def _authorized(self, body: dict, target: str, nonce: str, port: int = 22) -> bool:
         timestamp = body.get("timestamp")
         proof = body.get("password")
         if isinstance(timestamp, bool) or not isinstance(timestamp, int):
@@ -107,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
             return False
         if not isinstance(proof, str) or re.fullmatch(r"[0-9a-f]{64}", proof) is None:
             return False
-        message = f"v1|{target}|{nonce}|{timestamp}|22".encode("ascii")
+        message = f"v1|{target}|{nonce}|{timestamp}|{port}".encode("ascii")
         expected = hmac.new(
             self.server.password.encode("ascii"), message, hashlib.sha256
         ).hexdigest()
@@ -117,7 +122,9 @@ class Handler(BaseHTTPRequestHandler):
         self._respond(404, {"error": "not_found"})
 
     def do_POST(self) -> None:
-        if self.path != "/v1/ssh/check":
+        # Fixed allowlist; never provide arbitrary port scanning through this API.
+        port = {"/v1/ssh/check": 22, "/v1/rdp/check": 3389}.get(self.path)
+        if port is None:
             self._respond(404, {"error": "not_found"})
             return
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
@@ -135,13 +142,15 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError("Expected JSON object")
             target = _validate_target(body["target"])
+            if body.get("port", port) != port or isinstance(body.get("port", port), bool):
+                raise ValueError("mismatched requested port")
             nonce = body["nonce"]
             if not isinstance(nonce, str) or re.fullmatch(r"[0-9a-f]{32}", nonce) is None:
                 raise ValueError("invalid nonce")
         except (KeyError, TypeError, ValueError, UnicodeError):
             self._respond(400, {"error": "invalid_target_or_nonce"})
             return
-        if not self._authorized(body, target, nonce):
+        if not self._authorized(body, target, nonce, port):
             self._respond(401, {"error": "unauthorized"})
             return
         if not _new_nonce(nonce):
@@ -156,12 +165,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = {
                 "version": 1,
-                "target": target, "port": 22, "nonce": nonce,
+                "target": target, "port": port, "nonce": nonce,
                 "country_code": self.server.country_code,
                 "node": self.server.node,
                 "checked_at_utc": datetime.now(timezone.utc).isoformat(),
                 "completed": True,
-                "attempts": [_check_tcp22(target) for _ in range(3)],
+                "attempts": [_check_tcp(target, port) for _ in range(3)],
             }
             content = json.dumps(
                 result, ensure_ascii=True, sort_keys=True, separators=(",", ":")
