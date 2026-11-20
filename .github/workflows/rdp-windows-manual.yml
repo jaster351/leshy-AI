@@ -45,6 +45,8 @@ jobs:
             tests/test_rdp_mcs_channel_join.py `
             tests/test_rdp_client_info.py `
             tests/test_rdp_client_info_channel.py `
+            tests/test_rdp_server_activation.py `
+            tests/test_rdp_server_activation_channel.py `
             tests/test_rdp_tls_probe.py `
             tests/test_rdp_frame_codec.py `
             tests/test_superagent_rdp_session.py
