@@ -268,8 +268,11 @@ class WebSecurityReviewGuardTests(unittest.TestCase):
                 self.assertEqual(handler._identity_cookie_header(None), "")
         self.assertFalse(fixture.handler(tls=True, cookies={"owner": "plain-only"})._voice_allowed())
         self.assertFalse(fixture.handler(cookies={"__Host-owner": "secure-only"})._voice_allowed())
+        for options in ({}, {"forwarded": True}, {"host": "localhost:8765"}):
+            self.assertFalse(fixture.handler(cookies={"owner": "session"}, **options)._voice_allowed())
         for tls, key in ((False, "owner"), (True, "__Host-owner")):
-            self.assertTrue(fixture.handler(tls=tls, cookies={key: "session"})._voice_allowed())
+            local = {} if tls else {"peer": "127.0.0.1", "host": "localhost:8765"}
+            self.assertTrue(fixture.handler(tls=tls, cookies={key: "session"}, **local)._voice_allowed())
             for options in ({"ui": None}, {"ui": "network-security"},
                             {"origin": "https://other.example.invalid"},
                             {"origin": ("https" if tls else "http") + "://192.0.2.10:9999"},

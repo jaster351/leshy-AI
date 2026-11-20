@@ -84,6 +84,7 @@ class WebListenerTests(unittest.TestCase):
                 self.stack.enter_context(patch("leshy." + module + "." + operation, side_effect=forbidden))
         self.stack.enter_context(patch("leshy.web_transport_settings.private_path"))
         self.stack.enter_context(patch("leshy.web_transport_runtime.problem"))
+        self.probe = self.stack.enter_context(patch("leshy.web_transport_runtime.probe_listener", return_value=True))
         self.stack.enter_context(patch("leshy.distributed_cluster.problem"))
         self.stack.enter_context(patch("leshy.distributed_cluster.event"))
         self.stack.enter_context(patch("leshy.cluster_knowledge_sync.problem"))
@@ -92,7 +93,8 @@ class WebListenerTests(unittest.TestCase):
         self.stack.enter_context(patch("leshy.cluster_knowledge_sync.request.build_opener", side_effect=forbidden))
         self.certificates = Mock()
         self.certificates.context.return_value = object()
-        self.certificates.status.return_value = {"configured": True, "valid": True,
+        self.certificates.readiness_tls_snapshot.return_value = (object(), DIGEST, HOST)
+        self.certificates.status.return_value = {"configured": True, "valid": True, "fingerprint_sha256": DIGEST,
                                                  "dns_names": [HOST], "ip_addresses": []}
         self.stack.enter_context(patch("leshy.web_transport_runtime.WebCertificateStore",
                                       return_value=self.certificates))
@@ -112,9 +114,9 @@ class WebListenerTests(unittest.TestCase):
         protocol = runtime._protocol(name)
         runtime._bindings[name] = {"family": "IPv6" if ":" in address else "IPv4",
                                    "address": address, "port": port,
-                                   "listening": True, "status": "listening"}
+                                   "listening": True, "ready": True, "status": "listening"}
         runtime._threads[name] = Mock(is_alive=Mock(return_value=True))
-        runtime._states[protocol].update(listening=True, status="listening", port=port)
+        runtime._states[protocol].update(listening=True, ready=True, status="listening", port=port)
 
     def test_auto_and_explicit_plans_do_not_expand_resolved_hosts(self):
         self.assertEqual(web_listeners.binding_addresses("auto", 8765), [
@@ -209,7 +211,7 @@ class WebListenerTests(unittest.TestCase):
 
     def test_partial_ipv4_failure_keeps_live_ipv6_status_and_actual_url(self):
         runtime = self.runtime(saved={"https_enabled": False})
-        server = Mock(server_address=("::", 19000, 0, 0))
+        server = Mock(address_family=socket.AF_INET6, server_address=("::", 19000, 0, 0))
         def factory(family, address, handler, certificates):
             if family == socket.AF_INET:
                 raise OSError(errno.EADDRINUSE, "Тестовый порт IPv4 занят")

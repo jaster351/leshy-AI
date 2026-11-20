@@ -1,9 +1,9 @@
-"""Fail-fast build diagnostics for missing Leshy Python modules.
+"""Ранняя диагностика отсутствующих Python-модулей Лешего при сборке.
 
-Usage:
+Запуск:
     python windows/check-frozen-bundle.py source
     python windows/check-frozen-bundle.py archive .autobuild/pyinstaller-work/Leshy/PYZ-00.toc .autobuild/package-dist/Leshy
-This script does not modify source files, installation, or build caches.
+Скрипт не изменяет исходники, установку и кэши сборки.
 """
 from __future__ import annotations
 
@@ -29,14 +29,14 @@ REQUIRED_MODULES = (
     "leshy.web_transport_runtime",
     "leshy.web_acme",
     "leshy.web_local_ca",
+    "leshy.web_readiness",
     "leshy.web_server_impl18",
 )
 
 
 def source_preflight(root: Path) -> None:
-    # Parse *every* checked-in Python module before installing dependencies or
-    # spending minutes building a frozen EXE. Invalid syntax may look like
-    # "missing module" in PyInstaller's warning output.
+    # Разобрать каждый исходный Python-модуль до установки зависимостей и сборки
+    # EXE: синтаксическая ошибка может выглядеть как отсутствие модуля в PyInstaller.
     verified = 0
     errors: list[str] = []
     for directory in ("src", "tests", "windows"):
@@ -56,11 +56,11 @@ def source_preflight(root: Path) -> None:
             verified += 1
     if errors:
         raise RuntimeError(
-            f"Invalid Python syntax in {len(errors)} source(s):\n"
+            f"Ошибки синтаксиса Python в {len(errors)} исходниках:\n"
             + "\n".join(errors)
-            + "\nCorrect all reported files before building."
+            + "\nИсправьте все указанные файлы перед сборкой."
         )
-    print(f"BUILD PREFLIGHT OK: {verified} Python sources parsed.")
+    print(f"BUILD PREFLIGHT OK: разобрано Python-исходников: {verified}.")
 
     source = root / "src"
     sys.path.insert(0, str(source))
@@ -68,31 +68,31 @@ def source_preflight(root: Path) -> None:
         expected = source.joinpath(*module.split(".")).with_suffix(".py").resolve()
         if not expected.is_file():
             raise RuntimeError(
-                f"Missing local source: {expected}. "
-                "Check git status, sparse-checkout, and git ls-files for this path."
+                f"Локальный исходник отсутствует: {expected}. "
+                "Проверьте git status, sparse-checkout и git ls-files для этого пути."
             )
         spec = importlib.util.find_spec(module)
         origin = Path(str(spec.origin or "")).resolve() if spec else None
         if origin != expected:
             raise RuntimeError(
-                f"Wrong import location for {module}: {origin!s} (expected {expected}). "
-                "The build may be using a stale/duplicate Python installation."
+                f"Неверный путь импорта {module}: {origin!s} (ожидается {expected}). "
+                "Сборка может использовать устаревшую или дублирующую установку Python."
             )
-        # Python's import finder can resolve a module with invalid source;
-        # compile it without executing side effects before building the EXE.
+        # Поиск модуля может найти синтаксически неверный исходник; проверяем
+        # компиляцию без исполнения побочных действий до сборки EXE.
         compile(expected.read_bytes(), str(expected), "exec")
         print(f"BUILD PREFLIGHT OK: {module} -> {expected}")
 
 
 def archive_preflight(path: Path, package_root: Path) -> None:
     if not path.is_file():
-        raise RuntimeError(f"Missing PyInstaller manifest: {path}")
+        raise RuntimeError(f"Манифест PyInstaller отсутствует: {path}")
     content = path.read_text(encoding="utf-8", errors="replace")
     repository_root = Path(__file__).resolve().parents[1]
     source_root = repository_root / "src" / "leshy"
     for module in REQUIRED_MODULES:
         if module in content:
-            print(f"PYINSTALLER MANIFEST OK: {module} (compiled PYZ)")
+            print(f"PYINSTALLER MANIFEST OK: {module} (скомпилированный PYZ)")
             continue
         filename = module.rsplit(".", 1)[-1] + ".py"
         expected = source_root / filename
@@ -100,16 +100,16 @@ def archive_preflight(path: Path, package_root: Path) -> None:
             package_root / "_internal" / "leshy" / filename,
             package_root / "leshy" / filename,
         )
-        # Source fallback can be loaded explicitly by frozen launcher.
+        # Frozen-launcher может явно загрузить резервный исходник.
         if any(
             candidate.is_file() and candidate.read_bytes() == expected.read_bytes()
             for candidate in candidates
         ):
-            print(f"PYINSTALLER MANIFEST OK: {module} (verified frozen source fallback)")
+            print(f"PYINSTALLER MANIFEST OK: {module} (проверенный резервный исходник)")
             continue
         raise RuntimeError(
-            f"PyInstaller failed to package required module {module}: "
-            f"neither PYZ nor unchanged source fallback found in {package_root}."
+            f"PyInstaller не включил обязательный модуль {module}: "
+            f"ни PYZ, ни неизменённый резервный исходник не найдены в {package_root}."
         )
 
 
@@ -121,7 +121,7 @@ def main() -> int:
     elif mode == "archive" and len(sys.argv) == 4:
         archive_preflight(Path(sys.argv[2]), Path(sys.argv[3]))
     else:
-        raise SystemExit("Usage: check-frozen-bundle.py source | archive <PYZ-00.toc> <package-root>")
+        raise SystemExit("Запуск: check-frozen-bundle.py source | archive <PYZ-00.toc> <package-root>")
     return 0
 
 

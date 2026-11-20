@@ -269,6 +269,7 @@ class RuntimeFixture:
                                                    Event=FakeEvent, Thread=denied),
                      "_listener_callback": SimpleNamespace(get=lambda: None),
                      "covers_hostname": lambda certificate, host: True,
+                     "time": SimpleNamespace(monotonic=lambda: 0.0), "probe_listener": denied,
                      "problem": lambda *args, **kwargs: trace.event("diagnostic")}
         runtime_class = definitions("web_transport_runtime.py", {"WebTransportRuntime"}, namespace)["WebTransportRuntime"]
         self.runtime = runtime_class("synthetic-brain", "0.0.0.0")
@@ -299,7 +300,17 @@ class FakeParentHandler:
 
 
 class HandlerFixture:
-    class TLS:
+    class Connection:
+        def __init__(self):
+            self.timeout = 60
+
+        def gettimeout(self):
+            return self.timeout
+
+        def settimeout(self, value):
+            self.timeout = value
+
+    class TLS(Connection):
         pass
 
     def __init__(self):
@@ -337,16 +348,19 @@ class HandlerFixture:
                      "ssl": SimpleNamespace(SSLSocket=self.TLS), "ipaddress": ipaddress,
                      "urlsplit": urlsplit, "re": re, "json": json,
                      "_PREFIX": "/v1/web-security/", "_VOICE_PATHS": set(),
-                     "_MAX_JSON": 512 * 1024, "problem": lambda *args, **kwargs: None,
+                     "_MAX_JSON": 512 * 1024, "_BODY_DEADLINE_SECONDS": 10.0,
+                     "READINESS_PATH": "/v1/web-ready", "response_proof": denied,
+                     "time": SimpleNamespace(monotonic=lambda: 0.0),
+                     "problem": lambda *args, **kwargs: None,
                      "_PREVIOUS_MAKE_HANDLER": lambda *args: FakeParentHandler}
         factory = definitions("web_server_impl18.py",
-                              {"_origin_tuple", "_unambiguous_object", "make_handler"}, namespace)["make_handler"]
+                              {"_origin_tuple", "_unambiguous_object", "_SecurityBodyTimeout", "make_handler"}, namespace)["make_handler"]
         self.handler_class = factory(app, telegram, None, None)
 
     def request(self, method, route, *, tls=False, peer="192.0.2.20", host="192.0.2.10:8765",
                 owner="web:owner", ui="network-security", origin=None, forwarded=False):
         handler = self.handler_class.__new__(self.handler_class)
-        handler.connection = self.TLS() if tls else object()
+        handler.connection = self.TLS() if tls else self.Connection()
         handler.client_address = (peer, 43210)
         handler.owner = owner
         handler.path = "/v1/web-security/" + route

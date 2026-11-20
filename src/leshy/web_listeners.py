@@ -6,6 +6,7 @@ import ipaddress
 import os
 import socket
 import ssl
+import threading
 
 
 def binding_addresses(host: str, port: int) -> list[tuple[int, tuple]]:
@@ -52,6 +53,29 @@ def _peer_address(address: tuple) -> tuple:
 
 class _WebServer(ThreadingHTTPServer):
     daemon_threads = True
+    max_connection_workers = 32
+
+    def __init__(self, *args, **kwargs):
+        self._worker_slots = threading.BoundedSemaphore(self.max_connection_workers)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        # Лимит относится к одному listener и не блокирует accept-loop.
+        if not self._worker_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._worker_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        # Слот удерживается и при TLS handshake, и при чтении/ответе handler.
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._worker_slots.release()
 
     def server_bind(self):
         if os.name == "nt":
@@ -94,14 +118,15 @@ class _TLSWebServer(_WebServer):
             connection.close()
             raise
 
-    def process_request_thread(self, request, client_address):
+    def finish_request(self, request, client_address):
         try:
             request.do_handshake()
             request.settimeout(60)
         except (OSError, ssl.SSLError):
-            self.shutdown_request(request)
             return
-        super().process_request_thread(request, client_address)
+        # Общий process_request_thread закроет сокет и освободит слот
+        # также при отказе handshake или исключении самого handler.
+        super().finish_request(request, client_address)
 
 
 class _IPv6Binding:

@@ -59,6 +59,11 @@ def inspect_certificate(certificate_pem: str, private_key_pem: str,
             or (isinstance(key, ec.EllipticCurvePrivateKey) and key.key_size >= 256)):
         raise ValueError("HTTPS требует RSA не менее 2048 бит или EC не менее 256 бит")
     leaf = chain[0]
+    try:
+        if leaf.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            raise ValueError("Серверный сертификат не должен быть сертификатом центра сертификации")
+    except x509.ExtensionNotFound:
+        pass
     public_format = (serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     if leaf.public_key().public_bytes(*public_format) != key.public_key().public_bytes(*public_format):
         raise ValueError("Закрытый ключ не соответствует сертификату")
@@ -112,7 +117,7 @@ def inspect_certificate(certificate_pem: str, private_key_pem: str,
             "valid_until": min(item.not_valid_after_utc for item in chain).isoformat(),
             "fingerprint_sha256": leaf.fingerprint(hashes.SHA256()).hex(),
             "valid": True, "browser_trust_verified": False,
-            "validation": "Ключ, SAN, срок и цепочка проверены локально; доверие браузера не проверено"}, normalized
+            "validation": "Проверены ключ, SAN, сроки и подписи соседних сертификатов; доверие корню и браузеру не проверено"}, normalized
 
 
 @dataclass(slots=True, repr=False)
@@ -130,6 +135,8 @@ class WebCertificateStore:
         self.hostname_provider = hostname_provider
         self.lock = threading.RLock()
         self._context: ssl.SSLContext | None = None
+        self._readiness_context: ssl.SSLContext | None = None
+        self._public_chain_pem = ""
         self._metadata: dict = {"configured": False, "valid": False, "browser_trust_verified": False}
         self._load()
 
@@ -165,7 +172,10 @@ class WebCertificateStore:
             metadata, key = inspect_certificate(material["certificate_pem"], material["private_key_pem"],
                                                  self.hostname_provider())
             context = self._context_for(material["certificate_pem"], key)
+            public_chain = "".join(item.public_bytes(serialization.Encoding.PEM).decode("ascii")
+                                   for item in x509.load_pem_x509_certificates(material["certificate_pem"].encode("ascii")))
             self._metadata, self._context = metadata, context
+            self._public_chain_pem = public_chain
         except Exception:
             self._metadata = {"configured": True, "valid": False, "browser_trust_verified": False,
                               "error": "Сохранённый сертификат недоступен или не прошёл проверку; импортируйте действующий"}
@@ -187,9 +197,12 @@ class WebCertificateStore:
                 raise ValueError("Срок или имя сертификата изменились до активации; повторите проверку")
             reject_link(self.path)
             reject_link(self.path.with_suffix(self.path.suffix + ".tmp"))
+            public_chain = "".join(item.public_bytes(serialization.Encoding.PEM).decode("ascii")
+                                   for item in x509.load_pem_x509_certificates(prepared.certificate_pem.encode("ascii")))
             save_secret(self.path, json.dumps({"certificate_pem": prepared.certificate_pem,
                                                "private_key_pem": prepared.private_key_pem}, ensure_ascii=True))
             self._context, self._metadata = prepared.context, prepared.metadata
+            self._public_chain_pem, self._readiness_context = public_chain, None
             return dict(prepared.metadata)
 
     def install(self, certificate_pem: str, private_key_pem: str, password: str | None = None) -> dict:
@@ -219,6 +232,30 @@ class WebCertificateStore:
             except Exception:
                 # Повреждённое/недоступное хранилище не подтверждает право продления.
                 return ""
+
+    def readiness_tls_snapshot(self, expected_hostname: str) -> tuple[ssl.SSLContext, str, str] | None:
+        """Локальная проверка своего leaf; не проверка доверия клиентских устройств."""
+        with self.lock:
+            if self.context() is None or not self._public_chain_pem:
+                return None
+            selected_hostname = expected_hostname
+            if not selected_hostname:
+                names = self._metadata.get("ip_addresses", []) + self._metadata.get("dns_names", [])
+                if not names:
+                    return None
+                selected_hostname = names[0]
+                if selected_hostname.startswith("*."):
+                    selected_hostname = "readiness." + selected_hostname[2:]
+            if not covers_hostname(self._metadata, selected_hostname):
+                return None
+            if self._readiness_context is None:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+                # Только нормализованные публичные сертификаты, без изменения доверия ОС.
+                context.load_verify_locations(cadata=self._public_chain_pem)
+                self._readiness_context = context
+            return self._readiness_context, self._metadata["fingerprint_sha256"], selected_hostname
 
     def status(self) -> dict:
         with self.lock:

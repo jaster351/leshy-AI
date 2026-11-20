@@ -237,7 +237,7 @@ class WebLocalCAService:
     def _new_authority():
         key = ec.generate_private_key(ec.SECP256R1())
         name = x509.Name([x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Леший"),
-                          x509.NameAttribute(NameOID.COMMON_NAME, "Леший: локальный центр сертификации")])
+                          x509.NameAttribute(NameOID.COMMON_NAME, "Leshy Local CA")])
         certificate = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
                        .public_key(key.public_key()).serial_number(x509.random_serial_number())
                        .not_valid_before(_now() - timedelta(minutes=5)).not_valid_after(_now() + _ROOT_LIFETIME)

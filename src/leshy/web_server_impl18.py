@@ -8,6 +8,7 @@ import json
 import os
 import re
 import ssl
+import time
 from typing import Callable
 from urllib.parse import urlsplit
 
@@ -16,12 +17,18 @@ from . import web_server_impl3 as core
 from .web_server_impl6 import prepare_runtime
 from .diagnostics import problem
 from .web_transport_runtime import listener_ready
+from .web_readiness import READINESS_PATH, response_proof
 
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
 _PREFIX = "/v1/web-security/"
 _VOICE_PATHS = {"/v1/voice/transcribe", "/v1/voice/speak"}
 _MAX_JSON = 512 * 1024
+_BODY_DEADLINE_SECONDS = 10.0
+
+
+class _SecurityBodyTimeout(ValueError):
+    """Общий срок получения административного тела запроса истёк."""
 
 
 def _origin_tuple(value: str):
@@ -114,18 +121,47 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def _security_body(self) -> dict:
             if str(self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower() != "application/json":
+                self.close_connection = True
                 raise ValueError("Требуется Content-Type application/json")
             if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) != 1:
+                self.close_connection = True
                 raise ValueError("Требуется однозначный Content-Length без потокового кодирования")
-            try:
-                length = int(self.headers["Content-Length"])
-            except (ValueError, TypeError) as exc:
-                raise ValueError("Некорректная длина запроса") from exc
+            raw_length = self.headers["Content-Length"]
+            if not isinstance(raw_length, str) or not re.fullmatch(r"[0-9]{1,6}", raw_length):
+                self.close_connection = True
+                raise ValueError("Некорректная длина запроса")
+            length = int(raw_length)
             if not 0 < length <= _MAX_JSON:
+                self.close_connection = True
                 raise ValueError("Размер запроса должен быть от 1 байта до 512 КБ")
-            raw = self.rfile.read(length)
-            if len(raw) != length:
-                raise ValueError("Запрос не получен полностью")
+            deadline = time.monotonic() + _BODY_DEADLINE_SECONDS
+            previous_timeout = self.connection.gettimeout()
+            raw = bytearray()
+            try:
+                while len(raw) < length:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise _SecurityBodyTimeout("Тело запроса не получено за 10 секунд")
+                    self.connection.settimeout(remaining)
+                    part = self.rfile.read1(min(16 * 1024, length - len(raw)))
+                    if not part:
+                        raise ValueError("Запрос не получен полностью")
+                    raw.extend(part)
+                    if time.monotonic() >= deadline:
+                        raise _SecurityBodyTimeout("Тело запроса не получено за 10 секунд")
+            except TimeoutError as exc:
+                self.close_connection = True
+                raise _SecurityBodyTimeout("Тело запроса не получено за 10 секунд") from exc
+            except (OSError, ValueError) as exc:
+                self.close_connection = True
+                if isinstance(exc, OSError):
+                    raise ValueError("Не удалось получить тело запроса полностью") from exc
+                raise
+            finally:
+                try:
+                    self.connection.settimeout(previous_timeout)
+                except OSError:
+                    self.close_connection = True
             try:
                 body = json.loads(raw.decode("utf-8"), object_pairs_hook=_unambiguous_object)
             except (UnicodeError, ValueError) as exc:
@@ -138,9 +174,9 @@ def make_handler(app, telegram, settings, model_catalog):
             # Машинный клиент допустим только с реально настроенным bearer token.
             token = os.getenv("LESHY_API_TOKEN", "").strip()
             authorization = str(self.headers.get("Authorization") or "")
-            if token and not self._private_import_allowed():
+            if not self._private_import_allowed():
                 self._json(HTTPStatus.FORBIDDEN, {
-                    "error": "Голосовой bearer token принимается только через HTTPS или локально на сервере"})
+                    "error": "Голосовой API доступен через HTTPS или локально на самом сервере"})
                 return False
             if token and hmac.compare_digest(authorization.encode("utf-8"), ("Bearer " + token).encode("utf-8")):
                 return True
@@ -154,6 +190,24 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_GET(self):
             route = urlsplit(self.path).path
+            if route == READINESS_PATH:
+                nonces = self.headers.get_all("X-Leshy-Readiness", [])
+                try:
+                    if len(nonces) != 1:
+                        raise ValueError("Нет однозначного запроса готовности")
+                    proof = response_proof(getattr(self.server, "_leshy_readiness_secret", None), nonces[0])
+                except ValueError:
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "Проверка готовности недоступна"})
+                encoded = json.dumps({"proof": proof}, separators=(",", ":")).encode("ascii")
+                self.close_connection = True
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(encoded)
+                return
             challenge_prefix = "/.well-known/acme-challenge/"
             if route.startswith(challenge_prefix):
                 token = route[len(challenge_prefix):]
@@ -245,6 +299,8 @@ def make_handler(app, telegram, settings, model_catalog):
                 else:
                     return self._json(HTTPStatus.NOT_FOUND, {"error": "Неизвестная операция HTTP/HTTPS"})
                 return self._json(HTTPStatus.OK, service.status())
+            except _SecurityBodyTimeout as exc:
+                return self._json(HTTPStatus.REQUEST_TIMEOUT, {"error": str(exc)})
             except (ValueError, RuntimeError) as exc:
                 return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             except Exception as exc:

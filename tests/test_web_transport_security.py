@@ -67,6 +67,9 @@ class CertificateImportTests(unittest.TestCase):
         metadata, _ = inspect_certificate(pem, secret, "127.0.0.1")
         self.assertEqual(metadata["ip_addresses"], ["127.0.0.1"])
         self.assertFalse(metadata["browser_trust_verified"])
+        _, _, pem, secret = material(ca=True)
+        with self.assertRaisesRegex(ValueError, "центра сертификации"):
+            inspect_certificate(pem, secret, "test.invalid")
 
     def test_mismatched_key_rejected(self):
         _, _, pem, _ = material()
@@ -79,6 +82,8 @@ class CertificateImportTests(unittest.TestCase):
         _, _, pem, secret = material(days=10, issuer_key=issuer_key, issuer_name=issuer.subject)
         metadata, _ = inspect_certificate(pem + issuer_pem, secret, "test.invalid")
         self.assertEqual(metadata["valid_until"], issuer.not_valid_after_utc.isoformat())
+        self.assertFalse(metadata["browser_trust_verified"])
+        self.assertIn("доверие корню и браузеру не проверено", metadata["validation"])
 
     def test_end_entity_cannot_sign_intermediate_chain(self):
         issuer, issuer_key, issuer_pem, _ = material(ca=False)

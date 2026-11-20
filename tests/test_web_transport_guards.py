@@ -90,7 +90,7 @@ class WebTransportGuardTests(unittest.TestCase):
     def test_http_off_rejected_during_renewal_or_active_job(self):
         runtime = self.runtime()
         self.certificate(runtime)
-        runtime._states["http"]["listening"] = True
+        runtime._states["http"].update(listening=True, ready=True)
         runtime.acme.configure(self.consent())
         before = runtime.settings.path.read_bytes()
         with patch.object(runtime.settings, "save", wraps=runtime.settings.save) as save:
@@ -112,7 +112,11 @@ class WebTransportGuardTests(unittest.TestCase):
         self.assertNotEqual(runtime.acme.config["state"], "issuing")
         runtime.settings.save({"http_enabled": True, "confirm": True})
         ready = WebTransportRuntime(self.root, "127.0.0.1")
-        ready._states["http"]["listening"] = True
+        ready._states["http"].update(listening=True, ready=False)
+        with self.assertRaisesRegex(_AcmeFailure, "HTTP-01"):
+            ready.acme.issue({"confirm": True})
+        self.thread.assert_not_called()
+        ready._states["http"]["ready"] = True
         with patch("leshy.web_acme.threading.Thread") as thread:
             thread.return_value.is_alive.return_value = True
             ready.acme.issue({"confirm": True})
@@ -126,7 +130,7 @@ class WebTransportGuardTests(unittest.TestCase):
     def test_http_off_during_terms_discovery_cannot_enable_renewal(self):
         runtime = self.runtime()
         self.certificate(runtime)
-        runtime._states["http"]["listening"] = True
+        runtime._states["http"].update(listening=True, ready=True)
         def discover_after_transport_change():
             runtime.save_settings({"http_enabled": False, "confirm": True})
             return TERMS
@@ -152,7 +156,7 @@ class WebTransportGuardTests(unittest.TestCase):
         runtime._servers["https"] = Mock()
         def start(protocol):
             order.append("start")
-            runtime._states[protocol].update(listening=True, port=9443)
+            runtime._states[protocol].update(listening=True, ready=True, port=9443)
             runtime._threads[protocol] = Mock(is_alive=Mock(return_value=True))
         with patch.object(runtime, "_start_server", side_effect=start), \
                 patch.object(runtime.acme, "start", side_effect=lambda: order.append("acme")), \
@@ -166,7 +170,7 @@ class WebTransportGuardTests(unittest.TestCase):
     def test_tls_target_requires_context_san_and_live_thread(self):
         runtime = self.runtime()
         context, metadata = self.certificate(runtime)
-        runtime._states["https"].update(listening=True, port=9443)
+        runtime._states["https"].update(listening=True, ready=True, port=9443)
         runtime._threads["https"] = Mock(is_alive=Mock(return_value=True))
         with self.subTest(reason="context"):
             context.return_value = None
@@ -182,7 +186,7 @@ class WebTransportGuardTests(unittest.TestCase):
 
     def test_ipv6_http_target_uses_actual_bound_port(self):
         runtime = self.runtime(host="::")
-        runtime._states["http"].update(listening=True, port=19000)
+        runtime._states["http"].update(listening=True, ready=True, port=19000)
         runtime._threads["http"] = Mock(is_alive=Mock(return_value=True))
         self.assertNotEqual(runtime.configuration["http_port"], 19000)
         self.assertEqual(runtime.listening_url(), "http://[::1]:19000/")

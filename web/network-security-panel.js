@@ -108,13 +108,14 @@
   }
 
   function listenerText(name,listener,enabled,configuredPort){
-    let text=listener?.listening===true?name+': запущен, порт '+listener.port
+    let text=listener?.listening===true?(listener.ready===true?name+': готов, порт '+listener.port:name+': порт '+listener.port+' открыт; ответ веб-интерфейса ещё не подтверждён')
       :listener?.listening===false?name+': не запущен'+(listener.error?' — '+listener.error:'')
       :name+': состояние запуска не подтверждено; сохранён '+(enabled?'порт '+configuredPort:'выключенный режим');
     const labels={bound:'порт привязан',listening:'работает',unavailable:'семейство недоступно',bind_failed:'ошибка привязки',start_failed:'ошибка запуска',stopped:'остановлен'};
     for(const binding of listener?.bindings||[]){
       const address=binding.family==='IPv6'?'['+binding.address+']':binding.address;
-      text+='\n  '+binding.family+' '+address+':'+binding.port+' — '+(labels[binding.status]||'не подтверждено')+(binding.error?' ('+binding.error+')':'');
+      const state=binding.status==='listening'?(binding.ready===true?'обработчик ответил':'ответ обработчика ещё не подтверждён'):(labels[binding.status]||'не подтверждено');
+      text+='\n  '+binding.family+' '+address+':'+binding.port+' — '+state+(binding.error?' ('+binding.error+')':'')+(binding.readiness_error?' ('+binding.readiness_error+')':'');
     }
     return text;
   }
@@ -174,7 +175,7 @@
     const issuing=acme.in_progress===true;
     syncButtons();
     const acmeLabels={disabled:'Выключено',needs_consent:'Нужно согласие с текущими условиями',ready:'Настроено, выпуск ещё не подтверждён',issuing:'Выпуск выполняется',issued:'Сертификат получен',error:'Нужна проверка ошибки',outcome_unknown:'Результат прошлого запроса неизвестен',terms_changed:'Условия центра изменились — нужно новое согласие'};
-    $('networkAcmeStatus').textContent='Состояние: '+(acmeLabels[acme.state]||'не подтверждено')+(acme.last_error?'\n'+acme.last_error:'')+(acme.renew_at?'\nПроверка продления после: '+acme.renew_at:'');
+    $('networkAcmeStatus').textContent='Состояние: '+(acmeLabels[acme.state]||'не подтверждено')+(acme.last_error?'\n'+acme.last_error:'')+(acme.renew_at?'\nПроверка продления после: '+acme.renew_at:'')+(acme.http01_public_port_80_verified===true?'':'\nВнешняя доступность TCP 80 не проверена. Проверьте DNS и маршрутизацию до сервера.');
     clearTimeout(pollTimer);if(issuing&&!document.hidden)pollTimer=setTimeout(()=>refresh(false),2500);
   }
 
