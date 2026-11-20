@@ -12,6 +12,7 @@ import struct
 
 from .rdp_server_activation import RDPActivationError, read_server_mcs_data
 from .rdp_interleaved_rle import RDPInterleavedError, decompress_interleaved_rle
+from .rdp6_planar import RDP6PlanarError, RDP6PlanarUnsupported, decompress_rdp6_planar
 
 _MAX_RECTANGLES = 64
 _MAX_RECT_SIDE = 4096
@@ -119,8 +120,8 @@ def parse_bitmap_update(
         pos += 18
         # BITMAP_COMPRESSION (0x0001) and NO_BITMAP_COMPRESSION_HDR
         # (0x0400) are the only flags implemented; without compression
-        # the latter has no meaning. 32bpp compression is RDP6 planar,
-        # NOT Interleaved RLE: reject it rather than misdecode pixels.
+        # the latter has no meaning. At 32bpp the stream uses RDP6 planar
+        # compression; it must NEVER be passed to Interleaved RLE.
         if flags & ~0x0401 or flags == 0x0400:
             raise RDPBitmapUnsupported("Unsupported RDP bitmap flags")
         if bpp not in (16, 24, 32):
@@ -137,8 +138,6 @@ def parse_bitmap_update(
         if width * height * 3 > _MAX_RECT_RGB:
             raise RDPBitmapError("Bitmap allocation exceeds limits")
         if flags & 0x0001:
-            if bpp == 32:
-                raise RDPBitmapUnsupported("32bpp RDP6 planar bitmap codec is not implemented")
             compressed = data[pos:pos + size]
             if not flags & 0x0400:
                 # TS_CD_HEADER: first-row size MUST be zero. The main
@@ -151,10 +150,18 @@ def parse_bitmap_update(
                         or raw_size not in (stride * height, width * height * (bpp // 8))):
                     raise RDPBitmapError("Invalid RDP compressed bitmap header")
                 compressed = compressed[8:]
-            try:
-                rgb = decompress_interleaved_rle(compressed, width, height, bpp)
-            except RDPInterleavedError as exc:
-                raise RDPBitmapError("Invalid RDP Interleaved RLE stream") from exc
+            if bpp == 32:
+                try:
+                    rgb = decompress_rdp6_planar(compressed, width, height)
+                except RDP6PlanarUnsupported as exc:
+                    raise RDPBitmapUnsupported("Unsupported RDP6 planar color mode") from exc
+                except RDP6PlanarError as exc:
+                    raise RDPBitmapError("Invalid RDP6 planar bitmap stream") from exc
+            else:
+                try:
+                    rgb = decompress_interleaved_rle(compressed, width, height, bpp)
+                except RDPInterleavedError as exc:
+                    raise RDPBitmapError("Invalid RDP Interleaved RLE stream") from exc
         else:
             if size != stride * height:
                 raise RDPBitmapError("Bitmap stride or allocation exceeds limits")

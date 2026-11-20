@@ -58,6 +58,8 @@ jobs:
             tests/test_rdp_bitmap_compositor_channel.py `
             tests/test_rdp_interleaved_rle.py `
             tests/test_rdp_bitmap_rle_wire.py `
+            tests/test_rdp6_planar.py `
+            tests/test_rdp6_bitmap_wire.py `
             tests/test_rdp_tls_probe.py `
             tests/test_rdp_frame_codec.py `
             tests/test_superagent_rdp_session.py
