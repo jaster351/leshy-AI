@@ -85,3 +85,15 @@ the desktop may still change between the preflight capture and the server
 processing the input. Native backends need their own connection lifecycle,
 timeouts and platform tests. Screenshots and input are still unavailable
 to the user until a real transport and an authorized integration exist.
+
+## Безопасность повторного наблюдения (подготовка, не E2E)
+
+При начале нового снимка старое разрешение на клик или ввод текста
+немедленно становится недействительным. Если получение кадра завершилось
+таймаутом, отказом авторизации или ошибкой декодирования метаданных,
+предыдущее разрешение не восстанавливается. Новый digest публикуется
+только после полного вычисления контрольных значений кадра.
+
+Добавлены регрессионные сценарии неудачного повторного снимка и
+некорректного формата кадра. Тесты не запускались в рамках этого изменения;
+настоящий RDP backend и пользовательский E2E по-прежнему отсутствуют.

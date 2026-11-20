@@ -219,3 +219,97 @@ def test_unchanged_desktop_allows_click_after_recapture():
     broker.click("alice", sid, frame_digest=receipt.frame_digest, x=2, y=3)
     assert backend.clicks == [(2, 3)]
     assert backend.capture_count == 2
+
+
+def test_failed_recapture_invalidates_prior_click_receipt():
+    broker, _, _, _ = setup_controller()
+    backend = ChangingScreenBackend()
+    broker.backend = backend
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+
+    def fail_capture(connection):
+        raise TimeoutError("RDP capture timed out")
+
+    backend.capture = fail_capture
+    with pytest.raises(TimeoutError):
+        broker.observe("alice", sid)
+    # Restore the desktop: a failed observation must still consume the old
+    # authorization receipt, not silently reactivate it.
+    backend.capture = lambda connection: RDPFrame(800, 600, b"initial-frame")
+    with pytest.raises(PermissionError, match="stale or already used"):
+        broker.click("alice", sid, frame_digest=receipt.frame_digest, x=2, y=3)
+    assert backend.clicks == []
+
+
+def test_malformed_frame_does_not_publish_partial_receipt():
+    broker, _, _, _ = setup_controller()
+    backend = ChangingScreenBackend()
+    broker.backend = backend
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+    backend.capture = lambda connection: RDPFrame(
+        800, 600, b"initial-frame", pixel_format="invalid-☃"
+    )
+    with pytest.raises(UnicodeEncodeError):
+        broker.observe("alice", sid)
+    backend.capture = lambda connection: RDPFrame(800, 600, b"initial-frame")
+    with pytest.raises(PermissionError, match="stale or already used"):
+        broker.click("alice", sid, frame_digest=receipt.frame_digest, x=2, y=3)
+    assert backend.clicks == []
+
+
+def test_png_reauthorization_failure_consumes_receipt_after_permission_restored():
+    """A failed PNG observation must never authorize a later click."""
+    broker, _, _, allowed = setup_controller()
+    backend = ChangingScreenBackend()
+    backend.capture = lambda connection: RDPFrame(
+        1, 1, b"\\x01\\x02\\x03", pixel_format="RGB"
+    )
+    broker.backend = backend
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    original_get = broker._get
+    calls = [0]
+
+    def revoke_on_second_get(owner_id, session_id):
+        calls[0] += 1
+        if calls[0] == 1:
+            allowed.clear()
+        return original_get(owner_id, session_id)
+
+    broker._get = revoke_on_second_get
+    with pytest.raises(PermissionError):
+        broker.observe_png("alice", sid)
+    allowed.add("alice")
+    session = broker._sessions[sid]
+    assert session.used is True
+    with pytest.raises(PermissionError, match="stale or already used"):
+        broker.click("alice", sid, frame_digest=session.frame_digest, x=0, y=0)
+    assert backend.clicks == []
+
+
+def test_revoked_observation_cannot_reactivate_old_receipt_after_restore():
+    """The authorization failure itself must consume the previous receipt."""
+    broker, backend, _, allowed = setup_controller()
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    previous = broker.observe("alice", sid)
+    allowed.clear()
+    with pytest.raises(PermissionError, match="No permission"):
+        broker.observe_frame("alice", sid)
+    allowed.add("alice")
+    with pytest.raises(PermissionError, match="stale or already used"):
+        broker.click("alice", sid, frame_digest=previous.frame_digest, x=1, y=1)
+    assert backend.clicks == []
+    refreshed = broker.observe("alice", sid)
+    broker.click("alice", sid, frame_digest=refreshed.frame_digest, x=1, y=1)
+    assert backend.clicks == [(1, 1)]
+
+
+def test_wrong_owner_observation_does_not_consume_legitimate_receipt():
+    broker, backend, _, _ = setup_controller()
+    sid = broker.open("alice", "192.0.2.10", "a" * 64)
+    receipt = broker.observe("alice", sid)
+    with pytest.raises(PermissionError):
+        broker.observe_frame("bob", sid)
+    broker.click("alice", sid, frame_digest=receipt.frame_digest, x=1, y=1)
+    assert backend.clicks == [(1, 1)]
