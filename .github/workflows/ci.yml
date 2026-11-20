@@ -50,6 +50,8 @@ jobs:
         run: |
           python -m pytest -q -ra \
             tests/test_superagent_rdp_session.py \
+            tests/test_rdp_frame_receipt_validation.py \
+            tests/test_rdp_observation_atomicity.py \
             tests/test_rdp_frame_codec.py \
             tests/test_rdp_tls_probe.py \
             tests/test_superagent_rdp_tls.py \
