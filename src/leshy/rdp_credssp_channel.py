@@ -28,6 +28,10 @@ from .rdp_credssp_credentials import (
     RDPCredentials, validate_sealed_authinfo_tsrequest,
 )
 from .native_spnego import _check_target, new_native_spnego
+from .rdp_server_activation import (
+    MAX_SERVER_PACKET, RDPActivationError, RDPServerActivation,
+    read_server_mcs_data, parse_valid_client_license, parse_demand_active,
+)
 from .rdp_client_info import (
     RDPClientInfoReceipt, build_client_info_pdu,
 )
@@ -118,6 +122,8 @@ class PinnedRDPCredSSPChannel:
         self._mcs_joined: MCSJoinedChannels | None = None
         self._client_info_attempted = False
         self._client_info_receipt: RDPClientInfoReceipt | None = None
+        self._server_activation_attempted = False
+        self._server_activation: RDPServerActivation | None = None
 
     def _check(self) -> None:
         if self._closed:
@@ -362,6 +368,58 @@ class PinnedRDPCredSSPChannel:
         except BaseException:
             # Failure after any part of a packet may have reached the server.
             # Do not retry automatically or reuse the compromised channel.
+            self.close()
+            raise
+
+    def _read_activation_tpkt(self) -> bytes:
+        """One bounded, complete post-Client-Info packet on the pinned TLS socket."""
+        self._check()
+        header = _read_exact(self._tls, 4, self._deadline)
+        if header[:2] != b"\x03\x00":
+            raise RDPActivationError("Invalid activation TPKT header")
+        size = int.from_bytes(header[2:4], "big")
+        if not 16 <= size <= MAX_SERVER_PACKET:
+            raise RDPActivationError("Invalid activation TPKT size")
+        packet = header + _read_exact(self._tls, size - 4, self._deadline)
+        self._check()
+        return packet
+
+    def receive_server_activation(self) -> RDPServerActivation:
+        """Read approved personal-RDP licensing and Demand Active, not a desktop.
+
+        Only the STATUS_VALID_CLIENT licensing flow is implemented.
+        Unsupported RDPELE license requests fail closed; this method never
+        guesses a valid license and never automatically retries login.
+        """
+        if (self._closed or self._server_activation_attempted
+                or self._client_info_receipt is None or self._mcs_joined is None
+                or self._credssp is None or not self._credssp.credentials_delegated):
+            raise RDPChannelError("RDP server activation requires completed Client Info")
+        self._server_activation_attempted = True
+        try:
+            self._check()
+            user, payload = read_server_mcs_data(
+                self._read_activation_tpkt(),
+                expected_io_channel=self._mcs_joined.io_channel_id,
+            )
+            parse_valid_client_license(payload)
+            self._check()
+            demand_user, demand_data = read_server_mcs_data(
+                self._read_activation_tpkt(),
+                expected_io_channel=self._mcs_joined.io_channel_id,
+            )
+            if demand_user != user:
+                raise RDPActivationError("Activation server user channel changed")
+            share_id, types = parse_demand_active(demand_data)
+            self._check()
+            result = RDPServerActivation(
+                share_id=share_id, server_mcs_user_id=user,
+                io_channel_id=self._mcs_joined.io_channel_id,
+                capability_types=types,
+            )
+            self._server_activation = result
+            return result
+        except BaseException:
             self.close()
             raise
 
