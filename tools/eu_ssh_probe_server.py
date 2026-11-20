@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """Operator-owned European SSH reachability probe (TCP/22 only).
 
-Run on loopback behind an HTTPS reverse proxy, or serve HTTPS directly on
-0.0.0.0 with a certificate and private key. No SSH login or port scanning.
-Requires a shared secret; never accept public unencrypted HTTP.
+Run a standalone HTTP service on any IPv4 interface. Authenticate requests
+and responses with an HMAC derived from an operator-generated numeric password.
+The password itself is never transmitted. No SSH login or port scanning.
+HTTP does not encrypt target IP addresses or other diagnostic metadata.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
+import hashlib
+import hmac
 import json
 import os
 import re
 import secrets
-import ssl
 import socket
 import threading
 import time
@@ -24,7 +26,6 @@ _LIMIT = threading.Lock()
 _SEEN: list[float] = []
 _ACTIVE = threading.BoundedSemaphore(value=2)
 _MAX_PER_MINUTE = 15
-_STATUS = frozenset(("connected", "timeout", "refused", "error"))
 
 
 def _check_tcp22(target: str) -> dict:
@@ -81,10 +82,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _authorized(self) -> bool:
-        provided = self.headers.get("Authorization", "")
-        expected = "Bearer " + self.server.api_token  # type: ignore[attr-defined]
-        return secrets.compare_digest(provided, expected)
+    def _authorized(self, body: dict, target: str, nonce: str) -> bool:
+        timestamp = body.get("timestamp")
+        proof = body.get("password")
+        if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+            return False
+        if abs(time.time() - timestamp) > 45:
+            return False
+        if not isinstance(proof, str) or re.fullmatch(r"[0-9a-f]{64}", proof) is None:
+            return False
+        message = f"v1|{target}|{nonce}|{timestamp}|22".encode("ascii")
+        expected = hmac.new(
+            self.server.password.encode("ascii"), message, hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(proof, expected)
 
     def do_GET(self) -> None:
         self._respond(404, {"error": "not_found"})
@@ -92,9 +103,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.path != "/v1/ssh/check":
             self._respond(404, {"error": "not_found"})
-            return
-        if not self._authorized():
-            self._respond(401, {"error": "unauthorized"})
             return
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             self._respond(415, {"error": "json_required"})
@@ -106,6 +114,20 @@ class Handler(BaseHTTPRequestHandler):
         if size < 2 or size > 512:
             self._respond(413, {"error": "invalid_body_size"})
             return
+        try:
+            body = json.loads(self.rfile.read(size).decode("utf-8"))
+            if not isinstance(body, dict):
+                raise ValueError("Expected JSON object")
+            target = _validate_target(body["target"])
+            nonce = body["nonce"]
+            if not isinstance(nonce, str) or re.fullmatch(r"[0-9a-f]{32}", nonce) is None:
+                raise ValueError("invalid nonce")
+        except (KeyError, TypeError, ValueError, UnicodeError):
+            self._respond(400, {"error": "invalid_target_or_nonce"})
+            return
+        if not self._authorized(body, target, nonce):
+            self._respond(401, {"error": "unauthorized"})
+            return
         if not _allowed_request():
             self._respond(429, {"error": "rate_limited"})
             return
@@ -113,57 +135,42 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(429, {"error": "busy"})
             return
         try:
-            try:
-                body = json.loads(self.rfile.read(size).decode("utf-8"))
-                target = _validate_target(body["target"])
-                nonce = body["nonce"]
-                if not isinstance(nonce, str) or re.fullmatch(r"[0-9a-f]{32}", nonce) is None:
-                    raise ValueError("invalid nonce")
-            except (KeyError, TypeError, ValueError, UnicodeError):
-                self._respond(400, {"error": "invalid_target_or_nonce"})
-                return
-            attempts = [_check_tcp22(target) for _ in range(3)]
-            self._respond(200, {
+            result = {
                 "version": 1,
                 "target": target, "port": 22, "nonce": nonce,
-                "country_code": self.server.country_code,  # type: ignore[attr-defined]
-                "node": self.server.node,  # type: ignore[attr-defined]
+                "country_code": self.server.country_code,
+                "node": self.server.node,
                 "checked_at_utc": datetime.now(timezone.utc).isoformat(),
-                "completed": True, "attempts": attempts,
-            })
+                "completed": True,
+                "attempts": [_check_tcp22(target) for _ in range(3)],
+            }
+            content = json.dumps(
+                result, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            result["signature"] = hmac.new(
+                self.server.password.encode("ascii"), content, hashlib.sha256
+            ).hexdigest()
+            self._respond(200, result)
         finally:
             _ACTIVE.release()
 
 
 def main() -> None:
-    token = os.environ.get("LESHY_PROBE_API_TOKEN", "").strip()
+    password = os.environ.get("LESHY_PROBE_PASSWORD", "").strip()
     country = os.environ.get("LESHY_PROBE_COUNTRY_CODE", "").strip().upper()
     node = os.environ.get("LESHY_PROBE_NODE", "europe-1").strip()
-    if len(token) < 32:
-        raise SystemExit("Set LESHY_PROBE_API_TOKEN to a random secret (>=32 chars)")
+    if re.fullmatch(r"[0-9]{48,128}", password) is None:
+        raise SystemExit("LESHY_PROBE_PASSWORD must contain 48-128 random digits")
     if not re.fullmatch(r"[A-Z]{2}", country) or country == "RU":
         raise SystemExit("Set LESHY_PROBE_COUNTRY_CODE to the actual foreign country")
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", node):
         raise SystemExit("Invalid LESHY_PROBE_NODE")
-    host = os.environ.get("LESHY_PROBE_BIND_HOST", "127.0.0.1")
+    host = os.environ.get("LESHY_PROBE_BIND_HOST", "0.0.0.0")
     if host not in ("127.0.0.1", "0.0.0.0"):
         raise SystemExit("Bind host must be loopback or all IPv4 interfaces")
-    cert = os.environ.get("LESHY_PROBE_TLS_CERT", "").strip()
-    key = os.environ.get("LESHY_PROBE_TLS_KEY", "").strip()
-    if bool(cert) != bool(key):
-        raise SystemExit("Both LESHY_PROBE_TLS_CERT and LESHY_PROBE_TLS_KEY are required")
-    if host != "127.0.0.1" and not cert:
-        raise SystemExit("Public listening requires TLS cert and key; plain HTTP is forbidden")
-    context = None
-    if cert:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.load_cert_chain(certfile=cert, keyfile=key)
     port = int(os.environ.get("LESHY_PROBE_PORT", "8768"))
     server = ThreadingHTTPServer((host, port), Handler)
-    if context is not None:
-        server.socket = context.wrap_socket(server.socket, server_side=True)
-    server.api_token = token
+    server.password = password
     server.country_code = country
     server.node = node
     server.daemon_threads = True
