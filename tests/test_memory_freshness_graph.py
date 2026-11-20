@@ -390,12 +390,28 @@ class MemoryFreshnessGraphTests(unittest.TestCase):
         fixture = Fixture(self)
         fixture.knowledge("Python справочное знание")
         fixture.memory("Резервирование личная память")
+        original_link = fixture.graph._link_fact
+        writes = []
+
+        def link_after_source_close(*args, **kwargs):
+            # Проверяем порядок на одном SQLite-соединении, не конкуренцию WAL.
+            scans = [operation for operation in fixture.storage.operations if
+                     operation["sql"].startswith(("SELECT * FROM knowledge WHERE status=",
+                                                  "SELECT id,content,importance,source,expires_at FROM memories"))]
+            self.assertTrue(scans, "До записи должен быть прочитан источник")
+            self.assertTrue(all(operation.get("closed", False) for operation in scans),
+                            "Курсоры источников должны быть закрыты до записи графа")
+            writes.append(kwargs["fact_kind"])
+            return original_link(*args, **kwargs)
+
+        fixture.graph._link_fact = link_after_source_close
         fixture.storage.fail_next_commit = True
         self.assertEqual(fixture.graph.sync(owner_id="owner-a"), {"knowledge": 0, "memories": 0})
         self.assertEqual(fixture.storage.db.execute("SELECT COUNT(*) FROM knowledge_graph_nodes").fetchone()[0], 0)
         self.assertEqual(fixture.graph.sync(owner_id="owner-a"), {"knowledge": 1, "memories": 1})
         self.assertEqual(len(fixture.problems), 1)
         self.assertEqual(len(fixture.events), 1)
+        self.assertEqual(writes, ["knowledge", "memory", "knowledge", "memory"])
 
     def test_private_shared_malformed_and_cross_owner_graph_hits_are_isolated(self):
         fixture = Fixture(self)

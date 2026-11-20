@@ -205,13 +205,17 @@ class KnowledgeGraph:
             try:
                 with self.storage.connection() as conn:
                     for kind, scope in due:
+                        # Закрываем чтение источника до первой записи графа:
+                        # активный read snapshot нельзя безопасно повысить
+                        # до write после чужого commit в режиме WAL.
+                        prepared = []
                         if kind == "knowledge":
                             cursor = conn.execute(
                                 "SELECT * FROM knowledge WHERE status='trusted' "
                                 "ORDER BY confidence DESC,id DESC"
                             )
                             try:
-                                while knowledge_count < 1200:
+                                while len(prepared) < 1200:
                                     rows = cursor.fetchmany(128)
                                     if not rows:
                                         break
@@ -221,17 +225,20 @@ class KnowledgeGraph:
                                         if (not text or not is_fresh(row, now=checked_now)
                                                 or corrupted_knowledge_row(row)):
                                             continue
-                                        self._link_fact(
-                                            conn, owner_id=scope, fact_kind=kind,
-                                            fact_key=f"knowledge:{int(row['id'])}", text=text,
-                                            source=str(row["source_url"] or ""),
-                                            weight=max(0.2, min(float(0.8 if row["confidence"] is None else row["confidence"]), 1.0)),
-                                        )
-                                        knowledge_count += 1
-                                        if knowledge_count == 1200:
+                                        prepared.append(row)
+                                        if len(prepared) == 1200:
                                             break
                             finally:
                                 cursor.close()
+                            for row in prepared:
+                                self._link_fact(
+                                    conn, owner_id=scope, fact_kind=kind,
+                                    fact_key=f"knowledge:{int(row['id'])}",
+                                    text=str(row["claim"] or "").strip(),
+                                    source=str(row["source_url"] or ""),
+                                    weight=max(0.2, min(float(0.8 if row["confidence"] is None else row["confidence"]), 1.0)),
+                                )
+                                knowledge_count += 1
                         else:
                             cursor = conn.execute(
                                 "SELECT id,content,importance,source,expires_at FROM memories "
@@ -239,7 +246,7 @@ class KnowledgeGraph:
                                 (scope,),
                             )
                             try:
-                                while memory_count < 1000:
+                                while len(prepared) < 1000:
                                     rows = cursor.fetchmany(128)
                                     if not rows:
                                         break
@@ -247,17 +254,20 @@ class KnowledgeGraph:
                                         text = str(row["content"] or "").strip()
                                         if not text or not memory_is_fresh(row["expires_at"], now=checked_now):
                                             continue
-                                        self._link_fact(
-                                            conn, owner_id=scope, fact_kind=kind,
-                                            fact_key=f"memory:{int(row['id'])}", text=text,
-                                            source=str(row["source"] or "memory"),
-                                            weight=max(0.2, min(float(0.6 if row["importance"] is None else row["importance"]), 1.0)),
-                                        )
-                                        memory_count += 1
-                                        if memory_count == 1000:
+                                        prepared.append(row)
+                                        if len(prepared) == 1000:
                                             break
                             finally:
                                 cursor.close()
+                            for row in prepared:
+                                self._link_fact(
+                                    conn, owner_id=scope, fact_kind=kind,
+                                    fact_key=f"memory:{int(row['id'])}",
+                                    text=str(row["content"] or "").strip(),
+                                    source=str(row["source"] or "memory"),
+                                    weight=max(0.2, min(float(0.6 if row["importance"] is None else row["importance"]), 1.0)),
+                                )
+                                memory_count += 1
             except Exception as exc:
                 problem("knowledge_graph_sync_failed", type(exc).__name__, owner_id=owner[:200])
                 return {"knowledge": 0, "memories": 0}
