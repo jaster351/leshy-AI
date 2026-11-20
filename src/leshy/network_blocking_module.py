@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field, replace
 import ipaddress
 import json
+import os
 import re
 import socket
 import time
@@ -114,8 +115,8 @@ class NetworkBlockingChecker:
     4. параллельно выполняется независимая TCP-проверка Check-Host из российских
        и зарубежных точек.
 
-    PROBE_ID/PROBE_TOKEN не нужны: без token Cheburcheck использует публичные
-    видимые probe-узлы. Токен нужен только для адресного собственного probe.
+    Распределённый Cheburcheck Probe требует API-токен.
+    Публичная проверка списков работает без авторизации.
     """
 
     def __init__(
@@ -195,15 +196,14 @@ class NetworkBlockingChecker:
         return any(marker in lower for marker in markers)
 
     @staticmethod
-    def _request(url: str, *, accept: str, timeout: float):
-        req = request.Request(
-            url,
-            headers={
-                "Accept": accept,
-                "User-Agent": "Leshy-NetworkDiagnostics/1.0 (+https://github.com/jaster351/leshy-AI)",
-            },
-            method="GET",
-        )
+    def _request(url: str, *, accept: str, timeout: float, auth_token: str = ""):
+        headers = {
+            "Accept": accept,
+            "User-Agent": "Leshy-NetworkDiagnostics/1.0 (+https://github.com/jaster351/leshy-AI)",
+        }
+        if auth_token:
+            headers["Authorization"] = "Bearer " + auth_token
+        req = request.Request(url, headers=headers, method="GET")
         return request.urlopen(req, timeout=timeout)
 
     @classmethod
@@ -309,6 +309,9 @@ class NetworkBlockingChecker:
     def _chebur_probe(self, query_id: str) -> CheburProbeSummary:
         if not query_id:
             return CheburProbeSummary(ok=False, error="Cheburcheck не выдал id для динамической проверки")
+        api_token = os.environ.get("LESHY_CHEBURCHECK_API_TOKEN", "").strip()
+        if not api_token:
+            return CheburProbeSummary(ok=False, error="не выполнен: нужен API-токен Cheburcheck (LESHY_CHEBURCHECK_API_TOKEN)")
         url = CHEBURCHECK_PROBE_ENDPOINT.format(query_id=parse.quote(query_id, safe=""))
         state: dict[str, Any] = {"online_probes": 0, "responded_probes": 0, "observations": [], "finished": False}
         deadline = time.monotonic() + self.chebur_probe_wait_seconds
@@ -319,6 +322,7 @@ class NetworkBlockingChecker:
                 url,
                 accept="text/event-stream",
                 timeout=self.chebur_probe_wait_seconds + 10.0,
+                auth_token=api_token,
             ) as response:
                 for raw_line in response:
                     if time.monotonic() > deadline:
@@ -724,15 +728,17 @@ class NetworkBlockingChecker:
                 "Совпали: тайм-аут прямого TCP, тайм-аут из РФ в полном отчёте "
                 "Check-Host на том же порту и итоговый tspu_block от Cheburcheck."
             )
-        elif signals_met >= 2:
-            score = max(score, 65)
-            verdict = "Вероятная блокировка (2/3 признака), но блокировка ТСПУ не подтверждена"
-        elif score >= 70:
-            verdict = "Есть серьёзные признаки фильтрации, но блокировка ТСПУ не подтверждена"
-        elif score >= 30:
-            verdict = "Есть косвенные признаки фильтрации, но блокировка ТСПУ не подтверждена"
+        elif official_tspu:
+            verdict = "Cheburcheck Probe обнаружил tspu_block; есть признаки фильтрации, механизм требует независимой проверки"
+        elif chebur.ok and chebur.blocked:
+            verdict = "Адрес найден в блокировочных списках Cheburcheck; фактическая TCP-фильтрация не установлена"
+        elif matched_ports:
+            ports = ", ".join(f"TCP/{port}" for port in matched_ports)
+            verdict = f"Обнаружены признаки избирательного ограничения доступа из РФ на {ports}; механизм не установлен"
+        elif geographic_tspu:
+            verdict = "Есть географические различия TCP-доступности; необходимы повторные проверки по тем же портам"
         else:
-            verdict = "Блокировка ТСПУ не подтверждена"
+            verdict = "Недостаточно данных для вывода о наличии или отсутствии блокировки"
 
         if not service_ports:
             reasons.append("Ни TCP/22, ни TCP/3389 не подтвердили работающий сервис; ОС не угадывается по закрытым портам.")
@@ -910,13 +916,13 @@ class NetworkBlockingChecker:
         lines = [
             f"Проверка {result.target}",
             f"Время проверки: {checked}",
-            f"Оценка уверенности в признаках блокировки ТСПУ: {result.tspu_probability}% (условный диагностический индекс, не статистическая вероятность).",
+            f"Итог диагностики: {result.verdict}.",
             (
-                "Статус подтверждения: блокировка ТСПУ подтверждена по методике 3/3."
-                if result.three_signal_confirmed
-                else "Статус подтверждения: блокировка ТСПУ не подтверждена."
+                "Совпадение тайм-аутов РФ и локальной точки при зарубежной доступности "
+                "на одном TCP-порту: "
+                + (", ".join(f"TCP/{port}" for port in result.matched_ports) or "не обнаружено")
+                + f". Полный Check-Host: {'да' if result.check_host_complete else 'нет'}."
             ),
-            f"Совпавшие признаки: {result.signals_met}/3. Полный Check-Host: {'да' if result.check_host_complete else 'нет'}.",
             f"Профиль по доступным портам (не подтверждение ОС): {result.profile}",
             "Проверка сервисов: SSH TCP/22 и RDP TCP/3389 — оба порта тестируются независимо.",
             (
@@ -1010,7 +1016,7 @@ class NetworkBlockingChecker:
             )
 
         lines.append(f"Вывод по ТСПУ: {result.verdict}.")
-        lines.append("Расчётный балл признаков не является процентом достоверности блокировки.")
+        lines.append("Внутренний индекс признаков не является вероятностью блокировки.")
         if not result.remote:
             lines.append("Check-Host: результатов нет; проверить российские и зарубежные узлы не удалось.")
         lines.append(f"Успешные TCP-подключения среди завершённых наблюдений: {result.availability_percent}% (не вероятность блокировки).")
@@ -1080,7 +1086,16 @@ class NetworkBlockingModule:
                 "tspu_probability": result.tspu_probability,
                 "diagnostic_score": result.tspu_probability,
                 "diagnostic_score_type": "heuristic_not_calibrated_probability",
-                "blocking_attribution": "confirmed_three_signals" if result.three_signal_confirmed else "unconfirmed",
+                "blocking_attribution": (
+                    "confirmed_three_signals" if result.three_signal_confirmed
+                    else "probe_reported_tspu" if (
+                        result.chebur_probe.ok and result.chebur_probe.finished
+                        and any("tspu_block" in item.verdicts for item in result.chebur_probe.observations)
+                    )
+                    else "listed_blocked" if result.cheburcheck.ok and result.cheburcheck.blocked
+                    else "geographic_filtering" if result.matched_ports
+                    else "inconclusive"
+                ),
                 "signals_met": result.signals_met,
                 "three_signal_confirmed": result.three_signal_confirmed,
                 "matched_ports": list(result.matched_ports),

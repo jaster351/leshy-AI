@@ -80,7 +80,7 @@ class ThreeSignalBlockingTests(unittest.TestCase):
         result = assess(chebur_probe=probe(finished=False))
         self.assertFalse(result.three_signal_confirmed)
         self.assertEqual(result.signals_met, 2)
-        self.assertIn("2/3", result.verdict)
+        self.assertIn("избирательного ограничения", result.verdict)
 
     def test_mismatched_ports_do_not_combine(self):
         result = assess(remote_results=remote(ssh_ru="connected", rdp_ru="timeout"))

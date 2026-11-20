@@ -108,7 +108,24 @@
 
   function renderRich(host,text,{streaming=false}={}){
     host.textContent='';host.className='chat-rich-body';
-    const value=String(text||'');let pos=0;
+    const value=String(text||'');
+    const open='\n\n[[LESHY_DIAGNOSTICS]]\n';
+    const close='\n[[/LESHY_DIAGNOSTICS]]';
+    const begin=!streaming?value.indexOf(open):-1;
+    const end=begin>=0?value.indexOf(close,begin+open.length):-1;
+    if(begin>=0&&end>=0){
+      renderRich(host,value.slice(0,begin),{streaming:false});
+      const report=value.slice(begin+open.length,end).trim();
+      const disclosure=document.createElement('details');disclosure.className='leshy-diagnostic-details';
+      const heading=document.createElement('summary');heading.textContent='Диагностические данные — раскрыть';
+      const pre=document.createElement('pre');pre.textContent=report;
+      const copy=document.createElement('button');copy.type='button';copy.className='leshy-diagnostic-copy';copy.textContent='Копировать отчёт';
+      copy.onclick=()=>copyText(report,copy);disclosure.append(heading,pre,copy);host.appendChild(disclosure);
+      const trailing=value.slice(end+close.length).trim();
+      if(trailing)renderTextPart(host,trailing,false);
+      return;
+    }
+    let pos=0;
     while(pos<value.length){
       const start=value.indexOf('```',pos);
       if(start<0){renderTextPart(host,value.slice(pos),streaming);break}

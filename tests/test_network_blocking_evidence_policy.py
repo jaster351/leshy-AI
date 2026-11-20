@@ -41,7 +41,7 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
             CheburcheckEvidence(ok=True, blocked=False, target=TEST_IP),
         )
         self.assertEqual(result.tspu_probability, 0)
-        self.assertIn("не подтверждена", result.verdict)
+        self.assertIn("Недостаточно данных", result.verdict)
         self.assertTrue(any("Connection Refused" in reason for reason in result.reasons))
 
     def test_combined_evidence_raises_index_without_proving_tspu(self):
@@ -55,7 +55,7 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
                                                      CheburcheckEvidence(ok=True, blocked=False, target=TEST_IP))
         self.assertGreater(combined.tspu_probability, single.tspu_probability)
         self.assertLess(combined.tspu_probability, 100)
-        self.assertIn("не подтверждена", combined.verdict)
+        self.assertIn("найден в блокировочных списках", combined.verdict)
 
     def test_missing_external_probes_never_imply_no_block(self):
         result = NetworkBlockingChecker._assessment(
@@ -64,9 +64,9 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
         self.assertLessEqual(result.tspu_probability, 20)
         self.assertTrue(any("не предоставил" in text for text in result.reasons))
         output = NetworkBlockingChecker.format(result)
-        self.assertIn("Оценка уверенности в признаках блокировки ТСПУ:", output)
+        self.assertIn("Итог диагностики:", output)
         self.assertIn("Check-Host: результатов нет", output)
-        self.assertIn("Статус подтверждения:", output)
+        self.assertIn("Недостаточно данных", output)
 
     def test_results_have_real_receipts_without_claiming_proof(self):
         checker = NetworkBlockingChecker()

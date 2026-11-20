@@ -15,7 +15,7 @@ from .telegram_vision import (LocalTelegramVision, image_attachment, VisionUnava
 from .telegram_vision_context import RecentTelegramPhotos
 from .photo_geolocation import is_photo_geolocation_request
 from .photo_location_memory import PhotoLocationMemory, parse_photo_correction
-from .telegram_rich import TelegramBridge as RichTelegramBridge, telegram_html_chunks
+from .telegram_rich import TelegramBridge as RichTelegramBridge, telegram_html_chunks, telegram_diagnostic_html_chunks
 
 
 _ADMIN_COMMANDS = {"/learning_on", "/learning_off"}
@@ -40,6 +40,9 @@ def _dialogue_text_with_reply(message: dict, text: str) -> str:
 
 def _partial_text(text: str, limit: int = 3800) -> str:
     value = _THINK_RE.sub("", str(text or "")).replace("</think>", "").strip()
+    diagnostic_at = value.find("\n\n[[LESHY_DIAGNOSTICS]]\n")
+    if diagnostic_at >= 0:
+        value = value[:diagnostic_at].strip() + "\n\nДиагностические данные будут доступны после завершения проверки."
     if len(value) > limit:
         value = value[: limit - 1] + "…"
     return value or "…"
@@ -178,7 +181,7 @@ class FastTelegramBridge(RichTelegramBridge):
         }
 
     def _finalize_answer(self, chat_id, telegram_message_id: int, answer: str, reply_to_message_id: int | None, *, approval: dict | None = None) -> int:
-        chunks = telegram_html_chunks(answer)
+        chunks = telegram_diagnostic_html_chunks(answer)
         if not chunks:
             chunks = ["…"]
         keyboard = self._approval_keyboard(approval)

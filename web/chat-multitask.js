@@ -87,7 +87,11 @@
   }
   function updateStreamingBox(stream){
     if(sid()!==stream.sessionId||!stream.body||!stream.body.isConnected)return;
-    stream.body.textContent=stream.raw;const c=document.createElement('span');c.className='leshy-stream-caret';stream.body.appendChild(c);
+    const markerAt=stream.raw.indexOf('\n\n[[LESHY_DIAGNOSTICS]]\n');
+    stream.body.textContent=markerAt>=0
+      ?stream.raw.slice(0,markerAt)+'\n\nДиагностические данные — после завершения проверки'
+      :stream.raw;
+    const c=document.createElement('span');c.className='leshy-stream-caret';stream.body.appendChild(c);
     const m=$('messages');if(m&&m.scrollHeight-m.scrollTop-m.clientHeight<180)m.scrollTop=m.scrollHeight;
   }
   function scheduleRender(stream){

@@ -90,7 +90,8 @@
       }
       if(parsed.visible){
         const body=document.createElement('div');
-        body.textContent=parsed.visible;
+        if(typeof renderChatMessageBody==='function')renderChatMessageBody(body,parsed.visible,role);
+        else body.textContent=parsed.visible;
         box.appendChild(body);
       }
     }else{
