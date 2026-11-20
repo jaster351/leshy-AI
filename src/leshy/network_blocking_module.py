@@ -792,7 +792,7 @@ class NetworkBlockingChecker:
                 error=str(item.get("detail") or "")[:180],
             )
             for item in fingerprint.get("ports", [])
-            if int(item.get("port") or 0) in (80, 443, 445)
+            if int(item.get("port") or 0) in (80, 443)
         )
         local = tuple(sorted((*initial_local, *extra_local), key=lambda item: item.port))
 
@@ -885,11 +885,11 @@ class NetworkBlockingChecker:
     def _port_results(result: BlockingAssessment) -> dict[int, dict[str, Any]]:
         """Always surface both port probes and remote country results."""
         data: dict[int, dict[str, Any]] = {}
-        for port in sorted({*GEO_PORTS, 445, *(item.port for item in result.local), *(item.port for item in result.remote)}):
+        for port in sorted({*GEO_PORTS, *(item.port for item in result.local), *(item.port for item in result.remote)}):
             local = next((item for item in result.local if item.port == port), None)
             remote = [item for item in result.remote if item.port == port]
             data[port] = {
-                "service": {22: "SSH", 80: "HTTP", 443: "HTTPS", 445: "SMB", 3389: "RDP"}[port],
+                "service": {22: "SSH", 80: "HTTP", 443: "HTTPS", 3389: "RDP"}[port],
                 "local_status": local.status if local else "not_checked",
                 "local_error": local.error if local else "",
                 "remote": [
