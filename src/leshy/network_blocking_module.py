@@ -728,15 +728,17 @@ class NetworkBlockingChecker:
                 "Совпали: тайм-аут прямого TCP, тайм-аут из РФ в полном отчёте "
                 "Check-Host на том же порту и итоговый tspu_block от Cheburcheck."
             )
-        elif signals_met >= 2:
-            score = max(score, 65)
-            verdict = "Вероятная блокировка (2/3 признака), но блокировка ТСПУ не подтверждена"
-        elif score >= 70:
-            verdict = "Есть серьёзные признаки фильтрации, но блокировка ТСПУ не подтверждена"
-        elif score >= 30:
-            verdict = "Есть косвенные признаки фильтрации, но блокировка ТСПУ не подтверждена"
+        elif official_tspu:
+            verdict = "Cheburcheck Probe обнаружил tspu_block; есть признаки фильтрации, механизм требует независимой проверки"
+        elif chebur.ok and chebur.blocked:
+            verdict = "Адрес найден в блокировочных списках Cheburcheck; фактическая TCP-фильтрация не установлена"
+        elif matched_ports:
+            ports = ", ".join(f"TCP/{port}" for port in matched_ports)
+            verdict = f"Обнаружены признаки избирательного ограничения доступа из РФ на {ports}; механизм не установлен"
+        elif geographic_tspu:
+            verdict = "Есть географические различия TCP-доступности; необходимы повторные проверки по тем же портам"
         else:
-            verdict = "Блокировка ТСПУ не подтверждена"
+            verdict = "Недостаточно данных для вывода о наличии или отсутствии блокировки"
 
         if not service_ports:
             reasons.append("Ни TCP/22, ни TCP/3389 не подтвердили работающий сервис; ОС не угадывается по закрытым портам.")
@@ -914,12 +916,7 @@ class NetworkBlockingChecker:
         lines = [
             f"Проверка {result.target}",
             f"Время проверки: {checked}",
-            f"Оценка уверенности в признаках блокировки ТСПУ: {result.tspu_probability}% (условный диагностический индекс, не статистическая вероятность).",
-            (
-                "Статус подтверждения: блокировка ТСПУ подтверждена по методике 3/3."
-                if result.three_signal_confirmed
-                else "Статус подтверждения: блокировка ТСПУ не подтверждена."
-            ),
+            f"Итог диагностики: {result.verdict}.",
             f"Совпавшие признаки: {result.signals_met}/3. Полный Check-Host: {'да' if result.check_host_complete else 'нет'}.",
             f"Профиль по доступным портам (не подтверждение ОС): {result.profile}",
             "Проверка сервисов: SSH TCP/22 и RDP TCP/3389 — оба порта тестируются независимо.",
@@ -1014,7 +1011,7 @@ class NetworkBlockingChecker:
             )
 
         lines.append(f"Вывод по ТСПУ: {result.verdict}.")
-        lines.append("Расчётный балл признаков не является процентом достоверности блокировки.")
+        lines.append("Внутренний индекс признаков не является вероятностью блокировки.")
         if not result.remote:
             lines.append("Check-Host: результатов нет; проверить российские и зарубежные узлы не удалось.")
         lines.append(f"Успешные TCP-подключения среди завершённых наблюдений: {result.availability_percent}% (не вероятность блокировки).")
@@ -1084,7 +1081,16 @@ class NetworkBlockingModule:
                 "tspu_probability": result.tspu_probability,
                 "diagnostic_score": result.tspu_probability,
                 "diagnostic_score_type": "heuristic_not_calibrated_probability",
-                "blocking_attribution": "confirmed_three_signals" if result.three_signal_confirmed else "unconfirmed",
+                "blocking_attribution": (
+                    "confirmed_three_signals" if result.three_signal_confirmed
+                    else "probe_reported_tspu" if (
+                        result.chebur_probe.ok and result.chebur_probe.finished
+                        and any("tspu_block" in item.verdicts for item in result.chebur_probe.observations)
+                    )
+                    else "listed_blocked" if result.cheburcheck.ok and result.cheburcheck.blocked
+                    else "geographic_filtering" if result.matched_ports
+                    else "inconclusive"
+                ),
                 "signals_met": result.signals_met,
                 "three_signal_confirmed": result.three_signal_confirmed,
                 "matched_ports": list(result.matched_ports),
