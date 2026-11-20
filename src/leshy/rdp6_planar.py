@@ -99,10 +99,16 @@ def decompress_rdp6_planar(data: bytes, width: int, height: int) -> bytes:
     else:
         red, green, blue = planes
     rgb = bytearray(size * 3)
-    for i in range(size):
-        rgb[i * 3] = red[i]
-        rgb[i * 3 + 1] = green[i]
-        rgb[i * 3 + 2] = blue[i]
+    # TS_BITMAP_DATA scanlines arrive bottom-first. For the top-down RGB
+    # consumer, flip only after every color plane has been validated.
+    for y in range(height):
+        source_row = (height - 1 - y) * width
+        for x in range(width):
+            source = source_row + x
+            dest = (y * width + x) * 3
+            rgb[dest] = red[source]
+            rgb[dest + 1] = green[source]
+            rgb[dest + 2] = blue[source]
     return bytes(rgb)
 
 
