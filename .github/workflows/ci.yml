@@ -71,7 +71,9 @@ jobs:
             tests/test_rdp_server_activation.py \
             tests/test_rdp_server_activation_channel.py \
             tests/test_rdp_confirm_active.py \
-            tests/test_rdp_confirm_active_channel.py
+            tests/test_rdp_confirm_active_channel.py \
+            tests/test_rdp_finalization.py \
+            tests/test_rdp_finalization_channel.py
       - name: Проверить реальный Browser E2E
         run: |
           BROWSER="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"

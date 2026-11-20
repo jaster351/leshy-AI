@@ -29,6 +29,10 @@ from .rdp_credssp_credentials import (
 )
 from .native_spnego import _check_target, new_native_spnego
 from .rdp_confirm_active import ConfirmActiveReceipt, build_confirm_active
+from .rdp_finalization import (
+    RDPFinalizationError, RDPFinalizationStatus,
+    client_finalization_packets, parse_server_finalization,
+)
 from .rdp_server_activation import (
     MAX_SERVER_PACKET, RDPActivationError, RDPServerActivation,
     read_server_mcs_data, parse_valid_client_license, parse_demand_active,
@@ -128,6 +132,8 @@ class PinnedRDPCredSSPChannel:
         self._mcs_display: tuple[int, int] | None = None
         self._confirm_active_attempted = False
         self._confirm_active_receipt: ConfirmActiveReceipt | None = None
+        self._finalization_attempted = False
+        self._finalization_status: RDPFinalizationStatus | None = None
 
     def _check(self) -> None:
         if self._closed:
@@ -465,6 +471,57 @@ class PinnedRDPCredSSPChannel:
         except BaseException:
             # A partial send can change server state. No blind retry or
             # receipt publication; revoke the entire TLS/GSS channel.
+            self.close()
+            raise
+
+    def finalize_mcs_connection(self) -> RDPFinalizationStatus:
+        """Sequentially finish the bounded TLS/MCS control handshake.
+
+        The outgoing PDUs (Sync, Cooperate, Request Control, Font List) are
+        ordered independently of server replies by MS-RDPBCGR. Four inbound
+        acknowledgements must then be individually verified. This does NOT
+        create a framebuffer, grant RDP keyboard/mouse, or prove Windows logon.
+        """
+        if (self._closed or self._finalization_attempted
+                or self._confirm_active_receipt is None
+                or self._server_activation is None or self._mcs_joined is None
+                or self._credssp is None or not self._credssp.credentials_delegated):
+            raise RDPChannelError("RDP finalization requires completed Confirm Active")
+        self._finalization_attempted = True
+        try:
+            activation = self._server_activation
+            user = self._mcs_joined.user_channel_id
+            io = self._mcs_joined.io_channel_id
+            if (activation.io_channel_id != io
+                    or self._confirm_active_receipt.share_id != activation.share_id
+                    or self._confirm_active_receipt.user_channel_id != user
+                    or self._confirm_active_receipt.io_channel_id != io):
+                raise RDPFinalizationError("Conflicting RDP activation identities")
+            packets = client_finalization_packets(
+                share_id=activation.share_id, user_channel_id=user, io_channel_id=io
+            )
+            for packet in packets:
+                self._check()
+                self._tls.settimeout(_time_left(self._deadline))
+                self._tls.sendall(packet)
+                self._check()
+            stages = ("synchronize", "cooperate", "granted_control", "font_map")
+            for stage in stages:
+                self._check()
+                packet = self._read_activation_tpkt()
+                parse_server_finalization(
+                    packet, expected=stage, share_id=activation.share_id,
+                    server_user_id=activation.server_mcs_user_id,
+                    user_channel_id=user, io_channel_id=io,
+                )
+                self._check()
+            status = RDPFinalizationStatus(
+                activation.share_id, user, io, stages,
+            )
+            self._finalization_status = status
+            return status
+        except BaseException:
+            # Uncertain partial sends/receives are never replayed automatically.
             self.close()
             raise
 
