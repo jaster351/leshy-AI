@@ -117,3 +117,4 @@ def test_invalid_server_confirmation_rejected(stage, invalid):
 def test_wrong_mcs_origin_rejected(stage):
     with pytest.raises(RDPFinalizationError):
         check(indicated(data_pdu(0x28,struct.pack("<HHHH",0,0,3,4)),origin=1003),stage)
+
