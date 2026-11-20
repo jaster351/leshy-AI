@@ -145,7 +145,7 @@ function renderChatMessageBody(body,raw,role){
   const firstBreak=intro.indexOf('\n');
   const verdict=(firstBreak>=0?intro.slice(0,firstBreak):intro).trim();
   const summary=document.createElement('div');
-  if(/^IP\s+[^\s:]+:\s+/i.test(verdict)){
+  if(/^IP\s+\S+:\s+/i.test(verdict)){
     const copyVerdict=document.createElement('button');
     copyVerdict.type='button';
     copyVerdict.className='leshy-verdict-copy';
