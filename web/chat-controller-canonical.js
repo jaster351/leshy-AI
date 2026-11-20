@@ -46,7 +46,10 @@
   function render(req){
     const ui=ensureBox(req);
     if(!ui||!ui.body)return;
-    ui.body.textContent=req.raw;
+    const diagnosticAt=req.raw.indexOf('\n\n[[LESHY_DIAGNOSTICS]]\n');
+    ui.body.textContent=diagnosticAt>=0
+      ?req.raw.slice(0,diagnosticAt)+'\n\nДиагностические данные появятся после завершения проверки.'
+      :req.raw;
     const root=$('messages');if(root&&root.scrollHeight-root.scrollTop-root.clientHeight<180)root.scrollTop=root.scrollHeight;
   }
   function finalRender(req,answer,sources){
