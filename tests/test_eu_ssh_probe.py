@@ -1,4 +1,4 @@
-"""No live network is used: controlled RU and EU SSH/22 outcome regression tests."""
+"""No live network: controlled SSH/22, RDP/3389 and Check-Host regressions."""
 from __future__ import annotations
 
 import importlib.util
@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from leshy.eu_ssh_probe import compare_ssh22
+from leshy.eu_ssh_probe import compare_ssh22, compare_rdp3389, compare_tcp_ports
 from leshy.network_blocking_module import (
     CheburcheckEvidence, CheburProbeSummary, NetworkBlockingChecker, NetworkBlockingModule, TcpObservation,
 )
@@ -16,15 +16,15 @@ from leshy.modules import ModuleRequest
 
 CONFIG = {
     "LESHY_EU_PROBE_URL": "https://probe.example.com",
-    "LESHY_EU_PROBE_TOKEN": "x" * 64,
-    "LESHY_EU_PROBE_EXPECTED_COUNTRY": "DE",
+    "LESHY_EU_PROBE_PASSWORD": "1" * 64,
+    "LESHY_EU_PROBE_EXPECTED_COUNTRY": "NL",
     "LESHY_RU_PROBE_CONFIRMED": "1",
 }
 
 
 def eu(*states):
     return {
-        "country_code": "DE", "node": "europe-1",
+        "country_code": "NL", "node": "europe-1",
         "checked_at_utc": "2026-11-20T12:00:00Z",
         "attempts": [{"status": state, "elapsed_ms": 5} for state in states],
     }
@@ -53,6 +53,19 @@ def test_operator_owned_eu_comparison(local_states, eu_states, expected):
     assert len(result["local_attempts"]) == 3
     assert len(result["eu_attempts"]) == 3
     assert result["port"] == 22
+
+
+
+def test_rdp_3389_uses_independent_local_and_european_attempts():
+    with patch.dict("os.environ", CONFIG):
+        with (
+            patch("leshy.eu_ssh_probe._tcp3389", side_effect=local(*(("timeout",) * 3))),
+            patch("leshy.eu_ssh_probe._remote_rdp3389", return_value=eu(*(("connected",) * 3))),
+        ):
+            result = compare_rdp3389("1.1.1.1")
+    assert result["port"] == 3389
+    assert result["status"] == "ru_unreachable_eu_reachable"
+    assert len(result["local_attempts"]) == len(result["eu_attempts"]) == 3
 
 
 def test_local_vantage_must_be_confirmed_as_ru():
@@ -94,15 +107,24 @@ def test_network_checker_uses_owned_european_result_even_when_cheburcheck_fails(
             "evidence": [], "completed": False,
         }),
         patch("leshy.network_blocking_module.eu_ssh_probe_configured", return_value=True),
-        patch("leshy.network_blocking_module.compare_ssh22", return_value=proof),
+        patch("leshy.network_blocking_module.compare_tcp_ports", return_value={
+            **proof, "ports": {
+                "22": proof,
+                "3389": {
+                    "status": "both_unreachable", "port": 3389, "target": "1.1.1.1",
+                    "local_attempts": [{"status": "timeout"}] * 3,
+                    "eu_attempts": [{"status": "timeout"}] * 3,
+                },
+            },
+        }),
         patch.object(checker, "_check_host", return_value=()),
         patch.object(checker, "_cheburcheck", return_value=CheburcheckEvidence(ok=False)),
         patch.object(checker, "_chebur_probe", return_value=CheburProbeSummary(ok=False)),
     ):
         result = checker.check("1.1.1.1")
-    assert "из РФ" in result.verdict
-    assert "из Европы" in result.verdict
-    assert "механизм ТСПУ не установлен" in result.verdict
+    assert "IP 1.1.1.1" in result.verdict
+    assert "Вероятная блокировка" in result.verdict
+    assert result.port_verdicts["22"]["state"] == "likely_blocked"
     assert result.eu_ssh_comparison["status"] == "ru_unreachable_eu_reachable"
     assert 445 not in [item.port for item in result.local]
     assert 445 not in NetworkBlockingChecker._port_results(result)
