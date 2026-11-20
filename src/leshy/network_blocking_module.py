@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field, replace
 import ipaddress
 import json
+import os
 import re
 import socket
 import time
@@ -114,8 +115,8 @@ class NetworkBlockingChecker:
     4. параллельно выполняется независимая TCP-проверка Check-Host из российских
        и зарубежных точек.
 
-    PROBE_ID/PROBE_TOKEN не нужны: без token Cheburcheck использует публичные
-    видимые probe-узлы. Токен нужен только для адресного собственного probe.
+    Распределённый Cheburcheck Probe требует API-токен.
+    Публичная проверка списков работает без авторизации.
     """
 
     def __init__(
@@ -195,15 +196,14 @@ class NetworkBlockingChecker:
         return any(marker in lower for marker in markers)
 
     @staticmethod
-    def _request(url: str, *, accept: str, timeout: float):
-        req = request.Request(
-            url,
-            headers={
-                "Accept": accept,
-                "User-Agent": "Leshy-NetworkDiagnostics/1.0 (+https://github.com/jaster351/leshy-AI)",
-            },
-            method="GET",
-        )
+    def _request(url: str, *, accept: str, timeout: float, auth_token: str = ""):
+        headers = {
+            "Accept": accept,
+            "User-Agent": "Leshy-NetworkDiagnostics/1.0 (+https://github.com/jaster351/leshy-AI)",
+        }
+        if auth_token:
+            headers["Authorization"] = "Bearer " + auth_token
+        req = request.Request(url, headers=headers, method="GET")
         return request.urlopen(req, timeout=timeout)
 
     @classmethod
@@ -309,6 +309,9 @@ class NetworkBlockingChecker:
     def _chebur_probe(self, query_id: str) -> CheburProbeSummary:
         if not query_id:
             return CheburProbeSummary(ok=False, error="Cheburcheck не выдал id для динамической проверки")
+        api_token = os.environ.get("LESHY_CHEBURCHECK_API_TOKEN", "").strip()
+        if not api_token:
+            return CheburProbeSummary(ok=False, error="не выполнен: нужен API-токен Cheburcheck (LESHY_CHEBURCHECK_API_TOKEN)")
         url = CHEBURCHECK_PROBE_ENDPOINT.format(query_id=parse.quote(query_id, safe=""))
         state: dict[str, Any] = {"online_probes": 0, "responded_probes": 0, "observations": [], "finished": False}
         deadline = time.monotonic() + self.chebur_probe_wait_seconds
@@ -319,6 +322,7 @@ class NetworkBlockingChecker:
                 url,
                 accept="text/event-stream",
                 timeout=self.chebur_probe_wait_seconds + 10.0,
+                auth_token=api_token,
             ) as response:
                 for raw_line in response:
                     if time.monotonic() > deadline:
