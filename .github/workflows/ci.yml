@@ -80,7 +80,9 @@ jobs:
             tests/test_rdp_bitmap_surface_wire.py \
             tests/test_rdp_bitmap_compositor_channel.py \
             tests/test_rdp_interleaved_rle.py \
-            tests/test_rdp_bitmap_rle_wire.py
+            tests/test_rdp_bitmap_rle_wire.py \
+            tests/test_rdp6_planar.py \
+            tests/test_rdp6_bitmap_wire.py
       - name: Проверить реальный Browser E2E
         run: |
           BROWSER="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
