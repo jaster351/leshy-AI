@@ -101,10 +101,39 @@ class TelegramBridge(BaseTelegramBridge):
     """Telegram bridge с форматированием кода как настоящих pre/code блоков."""
 
     def _send_answer(self, chat_id: int | str, text: str, *, reply_to_message_id: int | None = None) -> None:
-        chunks = telegram_html_chunks(text)
+        value = str(text or "")
+        opening = "\n\n[[LESHY_DIAGNOSTICS]]\n"
+        closing = "\n[[/LESHY_DIAGNOSTICS]]"
+        start = value.find(opening)
+        finish = value.find(closing, start + len(opening)) if start >= 0 else -1
+        if start >= 0 and finish >= 0:
+            # Telegram supports native expandable quotations; the main answer
+            # remains readable while all diagnostic evidence stays available.
+            summary = value[:start].strip()
+            report = value[start + len(opening):finish].strip()
+            trailing = value[finish + len(closing):].strip()
+            chunks = telegram_html_chunks(summary + (("\n" + trailing) if trailing else ""))
+            while report:
+                # Escape after slicing, then ensure rendered Telegram HTML is under
+                # the payload limit even for text containing many entities.
+                take = min(1400, len(report))
+                while take > 1 and len(html.escape(report[:take], quote=False)) > 3200:
+                    take = max(1, take // 2)
+                boundary = report.rfind("\n", max(0, take // 2), take)
+                if boundary > 0:
+                    take = boundary + 1
+                part, report = report[:take], report[take:]
+                quote = "<blockquote expandable>" + html.escape(part.strip(), quote=False) + "</blockquote>"
+                label = "<b>Диагностические данные — раскрыть</b>\n"
+                block = label + quote
+                if chunks and len(chunks[-1]) + len(block) + 1 <= 3900:
+                    chunks[-1] += "\n" + block
+                else:
+                    chunks.append(block)
+        else:
+            chunks = telegram_html_chunks(value)
         for index, rendered in enumerate(chunks):
             payload = {"chat_id": chat_id, "text": rendered or "…", "parse_mode": "HTML"}
-            # Каждый первый ответ остаётся привязанным к исходному сообщению.
             if index == 0 and reply_to_message_id:
                 payload["reply_parameters"] = {
                     "message_id": int(reply_to_message_id),
