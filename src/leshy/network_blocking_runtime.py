@@ -107,7 +107,13 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
         r"(?m)^\d{1,3}(?:\.\d{1,3}){3}: IP заблокирован ТСПУ",
         answer,
     ))
-    modern = "[[LESHY_DIAGNOSTICS]]" in answer and "Проверка IP:" in answer
+    modern = (
+        ("[[LESHY_DIAGNOSTICS]]" in answer and "Проверка IP:" in answer)
+        or (bool(re.search(
+            r"(?m)^IP-адрес \\S+\\. Блокировка ТСПУ не подтверждена\\.",
+            answer,
+        )) and "Проверка " in answer)
+    )
     confirmed = bool(re.search(
         r"(?m)^IP-адрес \S+ заблокирован ТСПУ\.",
         answer,
@@ -170,6 +176,30 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
     """Readable evidence-first result; unavailable probes are never treated as negative."""
     target = str(metadata.get("target") or "").strip()
     verdict = str(metadata.get("verdict") or "Недостаточно данных для вывода").rstrip(".")
+    # Keep legacy metadata consumers readable; live probes always carry a verdict.
+    if not metadata.get("verdict"):
+        attribution = str(metadata.get("blocking_attribution") or "")
+        if (
+            attribution == "confirmed_tspu"
+            and metadata.get("proof_verification") == "verified"
+            and str(metadata.get("proof_record_id") or "").strip()
+        ):
+            return f"IP-адрес {target} заблокирован ТСПУ."
+        if attribution == "confirmed_three_signals":
+            ports = ", ".join(str(p) for p in (metadata.get("matched_ports") or []))
+            ru = [
+                row for row in (metadata.get("remote") or [])
+                if isinstance(row, dict)
+                and str(row.get("country_code") or "").lower() == "ru"
+                and row.get("port") in (metadata.get("matched_ports") or [])
+            ]
+            timeouts = sum(row.get("status") == "timeout" for row in ru)
+            return (
+                f"IP-адрес {target}: блокировка ТСПУ подтверждена по 3/3 признакам.\\n"
+                f"TCP/{ports}: РФ {timeouts} timeout из {len(ru)} проверок; "
+                "Cheburcheck: tspu_block."
+            )
+        return f"IP-адрес {target}. Блокировка ТСПУ не подтверждена."
     lines = [f"Проверка IP: {target}", f"Итог: {verdict}."]
 
     chebur = metadata.get("cheburcheck") or {}
