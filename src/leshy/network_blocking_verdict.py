@@ -14,10 +14,24 @@ PORT_NAMES = {22: "SSH/22", 3389: "RDP/3389"}
 def assess_ports(
     owned: dict[str, Any],
     check_host: tuple[Any, ...],
+    *,
+    cheburcheck: Any = None,
+    chebur_probe: Any = None,
 ) -> tuple[str, dict[str, dict[str, Any]]]:
     """Return a concise verdict and an independent assessment for each port."""
     all_ports = owned.get("ports") or {"22": owned}
     assessments: dict[str, dict[str, Any]] = {}
+    # Only a completed Cheburcheck probe's tspu_block is direct service
+    # attribution; list inclusion alone says nothing about live TCP filtering.
+    reported_tspu = bool(
+        chebur_probe and getattr(chebur_probe, "ok", False)
+        and getattr(chebur_probe, "finished", False)
+        and any(
+            "tspu_block" in getattr(row, "verdicts", ())
+            for row in getattr(chebur_probe, "observations", ())
+        )
+    )
+    listed = bool(cheburcheck and getattr(cheburcheck, "ok", False) and getattr(cheburcheck, "blocked", False))
 
     for port in (22, 3389):
         pair = all_ports.get(str(port)) or {}
@@ -55,12 +69,21 @@ def assess_ports(
             elif ru_ch_ok:
                 state = "possible_restriction"
                 explanation = "Из сети Лешего тайм-аут, но российские узлы Check-Host подключаются; возможна локальная фильтрация"
+            elif ru_ch_timeout and other_ch_ok and reported_tspu:
+                state = "tspu_detected"
+                explanation = (
+                    "Совпали: 3/3 timeout из сети Лешего, 3/3 connected из Нидерландов, "
+                    "timeout узлов Check-Host в РФ и tspu_block завершённого Cheburcheck Probe. "
+                    "Это согласованные признаки фильтрации ТСПУ, не техническое доказательство причины."
+                )
             else:
                 state = "likely_blocked"
                 explanation = (
-                    "Вероятная блокировка из РФ: три тайм-аута локально, три подключения из Нидерландов"
-                    + ("; российские узлы Check-Host также получают timeout" if ru_ch_timeout else
-                       "; Check-Host не подтвердил ограничение из РФ")
+                    "Вероятное ограничение из РФ: три тайм-аута локально, "
+                    "три подключения из Нидерландов"
+                    + ("; Check-Host также сообщает о тайм-аутах в РФ"
+                       if ru_ch_timeout else "; Check-Host не подтвердил фильтрацию")
+                    + ("; адрес в списках Cheburcheck" if listed else "")
                 )
         elif len(local) == 3 and all(x == "refused" for x in local) and eu_ok == 3:
             state = "possible_restriction"
@@ -84,17 +107,23 @@ def assess_ports(
             "checkhost_foreign_total": len(eu_ch),
         }
 
+    detected = [v["label"] for v in assessments.values() if v["state"] == "tspu_detected"]
     likely = [v["label"] for v in assessments.values() if v["state"] == "likely_blocked"]
     possible = [v["label"] for v in assessments.values() if v["state"] == "possible_restriction"]
     available = [v["label"] for v in assessments.values() if v["state"] == "not_blocked"]
-    if likely:
-        verdict = "Вероятная блокировка из РФ: " + ", ".join(likely) + ". Механизм ТСПУ не установлен"
+    if detected:
+        verdict = (
+            "Обнаружена блокировка на стороне ТСПУ: " + ", ".join(detected)
+            + " (по совокупности диагностических признаков)"
+        )
+    elif likely:
+        verdict = "Вероятная блокировка из РФ: " + ", ".join(likely) + ". Причина не доказана"
     elif possible:
         verdict = "Возможное ограничение доступа: " + ", ".join(possible) + ". Причина не установлена"
     elif len(available) == 2:
-        verdict = "Блокировка SSH/22 и RDP/3389 из сети Лешего не выявлена"
+        verdict = "Блокировка не обнаружена на стороне ТСПУ для SSH/22 и RDP/3389"
     elif available:
-        verdict = "Доступен " + ", ".join(available) + "; по другому порту недостаточно данных"
+        verdict = "Блокировка не обнаружена на стороне ТСПУ для " + ", ".join(available) + "; другой порт не подтверждён"
     else:
-        verdict = "Недостаточно данных, чтобы подтвердить или исключить блокировку SSH/22 и RDP/3389"
+        verdict = "Недостаточно данных, чтобы подтвердить или исключить блокировку TCP/22 и TCP/3389"
     return verdict, assessments
