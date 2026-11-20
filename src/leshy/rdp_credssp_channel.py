@@ -29,6 +29,7 @@ from .rdp_credssp_credentials import (
 )
 from .native_spnego import _check_target, new_native_spnego
 from .rdp_confirm_active import ConfirmActiveReceipt, build_confirm_active
+from .rdp_bitmap_update import RDPBitmapRectangle, parse_bitmap_update
 from .rdp_finalization import (
     RDPFinalizationError, RDPFinalizationStatus,
     client_finalization_packets, parse_server_finalization,
@@ -522,6 +523,37 @@ class PinnedRDPCredSSPChannel:
             return status
         except BaseException:
             # Uncertain partial sends/receives are never replayed automatically.
+            self.close()
+            raise
+
+    def receive_bitmap_rectangles(self) -> tuple[RDPBitmapRectangle, ...]:
+        """Read ONE strictly decoded slow-path bitmap update, not a desktop.
+
+        Only after validated finalization on this exact pinned TLS socket.
+        The returned RGB rectangles are partial patches, not a framebuffer
+        receipt and never proof that remote keyboard/mouse is safe to use.
+        Compressed, clipped or unrecognized PDUs fail closed until supported.
+        """
+        if (self._closed or self._finalization_status is None
+                or self._server_activation is None or self._mcs_joined is None
+                or self._mcs_display is None or self._credssp is None
+                or not self._credssp.credentials_delegated):
+            raise RDPChannelError("Bitmap update requires finalized owner-approved RDP")
+        try:
+            self._check()
+            packet = self._read_activation_tpkt()
+            result = parse_bitmap_update(
+                packet,
+                share_id=self._server_activation.share_id,
+                server_user_id=self._server_activation.server_mcs_user_id,
+                io_channel_id=self._mcs_joined.io_channel_id,
+                desktop_width=self._mcs_display[0],
+                desktop_height=self._mcs_display[1],
+            )
+            self._check()
+            return result
+        except BaseException:
+            # Do not expose partial graphics or continue on unknown codecs.
             self.close()
             raise
 
