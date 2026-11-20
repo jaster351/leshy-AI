@@ -310,13 +310,9 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     details = response.text.strip()
     if details:
         summary += "\n\n[[LESHY_DIAGNOSTICS]]\n" + details + "\n[[/LESHY_DIAGNOSTICS]]"
-    response.metadata["copyable_conclusion"] = (
-        _compact_answer(response.metadata)
-        if response.metadata.get("blocking_attribution") in (
-            "confirmed_three_signals", "eu_ssh_ru_filtered", "eu_ssh_port_reachable",
-        )
-        else ""
-    )
+    response.metadata["copyable_conclusion"] = str(
+        response.metadata.get("verdict") or ""
+    ).strip()
     return summary, sources, response.metadata
 
 
