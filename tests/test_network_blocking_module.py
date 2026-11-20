@@ -45,9 +45,9 @@ class NetworkBlockingModuleTests(unittest.TestCase):
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, remote, chebur)
         self.assertEqual(result.profile, "Linux/SSH")
         self.assertEqual(result.service_ports, (22,))
-        self.assertEqual(result.tspu_probability, 65)
-        self.assertIn("не подтверждена", result.verdict)
-        self.assertIn("ТСПУ", result.verdict)
+        self.assertEqual(result.tspu_probability, 55)
+        self.assertIn("избирательного ограничения", result.verdict)
+        self.assertIn("механизм не установлен", result.verdict)
         self.assertTrue(any("узел Check-Host в РФ" in reason for reason in result.reasons))
 
     def test_ru_and_foreign_success_do_not_indicate_tspu(self) -> None:
@@ -62,7 +62,7 @@ class NetworkBlockingModuleTests(unittest.TestCase):
         chebur = CheburcheckEvidence(ok=True, blocked=False, target="203.0.113.10")
         result = NetworkBlockingChecker._assessment("203.0.113.10", local, remote, chebur)
         self.assertLessEqual(result.tspu_probability, 20)
-        self.assertIn("не подтверждена", result.verdict.lower())
+        self.assertIn("недостаточно данных", result.verdict.lower())
 
     def test_cheburcheck_listing_without_geographic_proof_is_probabilistic(self) -> None:
         local = (
