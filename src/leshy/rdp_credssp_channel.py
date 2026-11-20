@@ -19,6 +19,7 @@ import re
 import socket
 import ssl
 import time
+import threading
 from typing import Callable, Any
 
 from .rdp_tls_probe import _negotiate, _time_left
@@ -30,6 +31,7 @@ from .rdp_credssp_credentials import (
 from .native_spnego import _check_target, new_native_spnego
 from .rdp_confirm_active import ConfirmActiveReceipt, build_confirm_active
 from .rdp_bitmap_update import RDPBitmapRectangle, parse_bitmap_update
+from .rdp_bitmap_compositor import RDPBitmapCompositor, RDPComposedFrame
 from .rdp_finalization import (
     RDPFinalizationError, RDPFinalizationStatus,
     client_finalization_packets, parse_server_finalization,
@@ -135,6 +137,9 @@ class PinnedRDPCredSSPChannel:
         self._confirm_active_receipt: ConfirmActiveReceipt | None = None
         self._finalization_attempted = False
         self._finalization_status: RDPFinalizationStatus | None = None
+        self._bitmap_surface: RDPBitmapCompositor | None = None
+        # TLS receives must never interleave between concurrent callers.
+        self._bitmap_receive_lock = threading.Lock()
 
     def _check(self) -> None:
         if self._closed:
@@ -557,6 +562,32 @@ class PinnedRDPCredSSPChannel:
             self.close()
             raise
 
+    def receive_bitmap_frame(self) -> RDPComposedFrame | None:
+        """Accumulate one real bitmap update; publish ONLY complete coverage.
+
+        This internal read-only output is neither a verified screenshot
+        receipt nor permission for keyboard/mouse. It cannot paint unknown
+        pixels or decode compressed Bitmap Updates. Network access remains
+        serialized and owner-checked within the existing pinned TLS channel.
+        """
+        with self._bitmap_receive_lock:
+            if (self._closed or self._finalization_status is None
+                    or self._mcs_display is None):
+                raise RDPChannelError("RGB framebuffer requires finalized RDP")
+            try:
+                self._check()
+                if self._bitmap_surface is None:
+                    self._bitmap_surface = RDPBitmapCompositor(
+                        self._mcs_display[0], self._mcs_display[1],
+                    )
+                patches = self.receive_bitmap_rectangles()
+                frame = self._bitmap_surface.apply(patches)
+                self._check()
+                return frame
+            except BaseException:
+                self.close()
+                raise
+
     def close(self) -> None:
         if self._closed:
             return
@@ -565,7 +596,12 @@ class PinnedRDPCredSSPChannel:
             if self._credssp is not None:
                 self._credssp.close()
         finally:
-            self._tls.close()
+            try:
+                self._tls.close()
+            finally:
+                if self._bitmap_surface is not None:
+                    # Revoke local coverage if the pinned connection closes.
+                    self._bitmap_surface.reset()
 
     def __enter__(self):
         return self
