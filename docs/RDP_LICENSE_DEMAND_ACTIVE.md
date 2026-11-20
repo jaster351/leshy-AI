@@ -49,7 +49,7 @@ A real Windows RDP Server interoperability/E2E test remains mandatory.
 
 ## Tests
 
-- **24/24 local pytest checks passed**, for the independent codec and
+- **25/25 local pytest checks passed**, for the independent codec and
   malformed MCS, license and capability envelopes, plus compileall.
 - `tests/test_rdp_server_activation_channel.py` adds fake-TLS sequencing,
   owner revocation, gate, wrong channel and partial packet regressions.
