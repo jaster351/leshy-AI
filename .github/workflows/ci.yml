@@ -75,7 +75,10 @@ jobs:
             tests/test_rdp_finalization.py \
             tests/test_rdp_finalization_channel.py \
             tests/test_rdp_bitmap_update.py \
-            tests/test_rdp_bitmap_channel.py
+            tests/test_rdp_bitmap_channel.py \
+            tests/test_rdp_bitmap_compositor.py \
+            tests/test_rdp_bitmap_surface_wire.py \
+            tests/test_rdp_bitmap_compositor_channel.py
       - name: Проверить реальный Browser E2E
         run: |
           BROWSER="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
