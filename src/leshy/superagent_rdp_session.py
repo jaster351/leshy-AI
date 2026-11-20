@@ -147,9 +147,14 @@ class RDPSessionController:
     def observe_frame(self, owner_id: str, session_id: str) -> tuple[FrameReceipt, bytes]:
         """In-process frame transfer only; never expose pixels to diagnostics."""
         with self._lock:
-            session = self._get(owner_id, session_id)
-            # A failed/new observation must invalidate any prior action receipt.
+            # Verify identity without relying on the current grant first:
+            # revocation must consume any outstanding observation receipt.
+            # A different owner must NEVER invalidate the legitimate owner.
+            session = self._sessions.get(session_id)
+            if session is None or not hmac.compare_digest(session.owner_id, owner_id):
+                raise PermissionError("RDP session unavailable")
             session.used = True
+            self.authorize(owner_id, session.node_id)
             frame = self.backend.capture(session.connection)
             # Capture may block; recheck permissions before returning any pixels.
             self.authorize(owner_id, session.node_id)
@@ -172,11 +177,16 @@ class RDPSessionController:
                 secrets.token_bytes(16) + frame.width.to_bytes(4, "big") +
                 frame.height.to_bytes(4, "big") + frame.pixels
             ).hexdigest()
+            # Never publish a new digest until every fallible value is
+            # ready. A failed format encoding or clock must leave old
+            # receipts spent and not create partially actionable state.
+            content_digest = self._content_digest(frame)
+            captured_at = self.clock()
             session.frame_digest = digest
-            session.captured_at = self.clock()
+            session.captured_at = captured_at
             session.width, session.height = frame.width, frame.height
             session.pixel_format = frame.pixel_format
-            session.content_digest = self._content_digest(frame)
+            session.content_digest = content_digest
             session.used = False
             return FrameReceipt(session_id, digest, frame.width, frame.height), frame.pixels
 
@@ -188,7 +198,16 @@ class RDPSessionController:
         """
         with self._lock:
             receipt, pixels = self.observe_frame(owner_id, session_id)
-            session = self._get(owner_id, session_id)
+            session = self._sessions.get(session_id)
+            try:
+                session = self._get(owner_id, session_id)
+            except BaseException:
+                # Post-capture authorization can fail. If access is later
+                # restored, the failed PNG must not enable a stale click.
+                if (session is not None and
+                        hmac.compare_digest(session.owner_id, owner_id)):
+                    session.used = True
+                raise
             if session.pixel_format not in {"RGB", "RGBA"}:
                 session.used = True
                 raise ValueError("Native RDP backend has not decoded the framebuffer")
