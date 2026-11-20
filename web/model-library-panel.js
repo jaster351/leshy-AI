@@ -278,13 +278,13 @@
     const state=job&&job.state||'idle';
     box.classList.toggle('active',['queued','downloading_model','downloading_vision'].includes(state));
     if(state==='idle'){box.textContent='Загрузки сейчас нет.';return;}
-    if(state==='error'){box.textContent='Ошибка загрузки: '+(job.error||'неизвестная ошибка')+'\\nНажмите «Скачать в Леший» снова: недокачанный файл будет продолжен, если сервер поддерживает Range.';return;}
-    if(state==='ready'){box.textContent='Модель загружена в LeshyBrain\\\\models. Для переключения нажмите «Сделать активной» в её карточке.';return;}
+    if(state==='error'){box.textContent='Ошибка загрузки: '+(job.error||'неизвестная ошибка')+'\nНажмите «Скачать в Леший» снова: недокачанный файл будет продолжен, если сервер поддерживает Range.';return;}
+    if(state==='ready'){box.textContent='Модель загружена в LeshyBrain\\models. Для переключения нажмите «Сделать активной» в её карточке.';return;}
     const total=Number(job.total||0),done=Number(job.downloaded||0);
     const pct=total?Math.min(100,done*100/total):0;
     const part=state==='downloading_vision'?'vision-проектор':'модель';
     box.textContent='Леший скачивает '+part+': '+(job.current_file||job.model_id||'')+(total?' · '+pct.toFixed(1)+'%':'')+
-      '\\n'+(done/1073741824).toFixed(2)+' ГиБ получено'+(total?' из '+(total/1073741824).toFixed(2)+' ГиБ':'')+'\\nФайл сохраняется в LeshyBrain\\\\models.';
+      '\n'+(done/1073741824).toFixed(2)+' ГиБ получено'+(total?' из '+(total/1073741824).toFixed(2)+' ГиБ':'')+'\nФайл сохраняется в LeshyBrain\\models.';
   }
 
   async function loadLibrary(){
