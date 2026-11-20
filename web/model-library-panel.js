@@ -18,6 +18,10 @@
     node.id='leshyModelLibraryStyle';
     node.textContent=`
       #modelLibraryCard{margin-top:12px}
+      #modelLibraryQuick{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:12px 0;padding:12px;border:1px solid #315a7c;border-radius:10px;background:rgba(74,155,232,.06)}
+      #modelLibraryQuick .quick-description{flex:1 1 260px;font-size:12px;line-height:1.5}
+      #modelLibraryQuick .quick-note{font-size:11px;color:var(--muted)}
+      #modelLibraryQuick button{min-height:38px}
       #modelLibraryRuntime{display:grid;grid-template-columns:minmax(0,240px) 1fr;gap:10px;align-items:center;margin:10px 0 14px;padding:10px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.02)}
       #modelLibraryRuntime .runtime-note{font-size:11px;color:var(--muted);line-height:1.45}
       #modelLibraryGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
@@ -58,7 +62,13 @@
     card.id='modelLibraryCard';
     card.innerHTML=`
       <h3>Каталог рекомендуемых моделей</h3>
-      <div class="muted">Готовые модели для Лешего. У каждой указано, что это за модель, для каких задач она подходит и насколько тяжела для памяти.</div>
+      <div class="muted">Леший скачивает GGUF самостоятельно и сохраняет в LeshyBrain\\models. Не нужно искать файлы или вручную переносить их.</div>
+      <div id="modelLibraryQuick">
+        <div class="quick-description"><strong>Рекомендуется: Qwen3.5 9B (оригинальная) · Q4_K_M</strong>
+          <div class="quick-note">Около 5,87 ГБ. Леший сам скачает и проверит SHA-256, сохранив текущую модель. После загрузки можно сделать новую активной.</div>
+        </div>
+        <button id="modelLibraryRecommendedDownload" class="button" type="button">Скачать в Леший</button>
+      </div>
       <div id="modelLibraryRuntime">
         <select class="field" id="runtimeMode">
           <option value="auto">Авто — рекомендовано</option>
@@ -90,6 +100,7 @@
     const local=$('localModelCard');
     if(local && local.parentNode) local.parentNode.insertBefore(card,local.nextSibling);
     else pane.appendChild(card);
+    $('modelLibraryRecommendedDownload').onclick=()=>downloadModel('qwen35-9b-original-q4km',false);
     $('runtimeMode').onchange=saveRuntimeMode;
     $('modelRepoSearchButton').onclick=searchRepositories;
     $('modelRepoName').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();searchRepositories();}};
@@ -210,7 +221,7 @@
     const download=document.createElement('button');
     download.className='button secondary small';
     download.type='button';
-    download.textContent=model.installed?'Проверить / докачать':'Скачать';
+    download.textContent=model.installed?'Проверить / докачать':'Скачать в Леший';
     download.onclick=()=>downloadModel(model.id,model.vision);
     actions.appendChild(download);
 
@@ -222,7 +233,8 @@
       browser.href=model.url;
       browser.target='_blank';
       browser.rel='noopener noreferrer';
-      browser.textContent='Скачать через браузер';
+      browser.textContent='Прямая ссылка на GGUF';
+      browser.href=model.url+(model.url.includes('?')?'&':'?')+'download=true';
       actions.appendChild(browser);
       if(model.vision && model.mmproj_url && /^https:\/\/huggingface\.co\//i.test(model.mmproj_url)){
         const projector=document.createElement('a');
@@ -266,12 +278,13 @@
     const state=job&&job.state||'idle';
     box.classList.toggle('active',['queued','downloading_model','downloading_vision'].includes(state));
     if(state==='idle'){box.textContent='Загрузки сейчас нет.';return;}
-    if(state==='error'){box.textContent='Ошибка загрузки: '+(job.error||'неизвестная ошибка');return;}
-    if(state==='ready'){box.textContent='Загрузка завершена. Модель появилась в списке локальных GGUF.';return;}
+    if(state==='error'){box.textContent='Ошибка загрузки: '+(job.error||'неизвестная ошибка')+'\\nНажмите «Скачать в Леший» снова: недокачанный файл будет продолжен, если сервер поддерживает Range.';return;}
+    if(state==='ready'){box.textContent='Модель загружена в LeshyBrain\\\\models. Для переключения нажмите «Сделать активной» в её карточке.';return;}
     const total=Number(job.total||0),done=Number(job.downloaded||0);
     const pct=total?Math.min(100,done*100/total):0;
     const part=state==='downloading_vision'?'vision-проектор':'модель';
-    box.textContent='Скачивается '+part+': '+(job.current_file||job.model_id||'')+(total?' · '+pct.toFixed(1)+'%':'')+'\nФайл сохраняется в LeshyBrain\\models.';
+    box.textContent='Леший скачивает '+part+': '+(job.current_file||job.model_id||'')+(total?' · '+pct.toFixed(1)+'%':'')+
+      '\\n'+(done/1073741824).toFixed(2)+' ГиБ получено'+(total?' из '+(total/1073741824).toFixed(2)+' ГиБ':'')+'\\nФайл сохраняется в LeshyBrain\\\\models.';
   }
 
   async function loadLibrary(){
