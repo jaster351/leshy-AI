@@ -52,7 +52,7 @@ RECOMMENDED_MODELS: tuple[RecommendedModel, ...] = (
         filename="Qwen_Qwen3.5-9B-Q4_K_M.gguf",
         url="https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF/resolve/c512afe1bc55a45304dbe577088139fb9405b02e/Qwen_Qwen3.5-9B-Q4_K_M.gguf",
         quant="Q4_K_M",
-        size_label="≈6,17 ГБ",
+        size_label="≈5,87 ГБ",
         family="Qwen3.5 9B",
         description=(
             "Оригинальная Qwen3.5 9B без сторонней модификации инструкционного поведения. "
