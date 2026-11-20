@@ -125,7 +125,7 @@ def compare_ssh22(ip: str) -> dict:
     """
     try:
         target = ipaddress.ip_address(str(ip).strip())
-        if not target.is_global or target.ipv4_mapped:
+        if not target.is_global or getattr(target, "ipv4_mapped", None):
             raise ValueError("IP должен быть публичным")
     except ValueError:
         return {"status": "invalid_target", "reason": "нужен публичный IP-адрес"}
