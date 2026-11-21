@@ -59,7 +59,9 @@ def test_real_decoded_rgb_is_encoded_only_in_memory_without_input_grant():
     obs = observations[0]
     assert obs.width == 2 and obs.height == 1
     assert obs.png.startswith(b"\x89PNG\r\n\x1a\n")
-    assert obs.content_sha256 == hashlib.sha256(frame().rgb).hexdigest()
+    assert obs.content_sha256 == hashlib.sha256(
+        (2).to_bytes(4, "big") + (1).to_bytes(4, "big") + frame().rgb
+    ).hexdigest()
     assert not obs.input_enabled
     assert not hasattr(obs, "frame_digest")
 
@@ -160,3 +162,16 @@ def test_invalid_delivery_limit_closes_channel(limit):
             max_png_frames=limit,
         )
     assert transport.closed and transport.seen == 0
+
+
+def test_same_bytes_at_different_dimensions_are_distinct_observations():
+    transport = FakeFinalizedChannel([
+        frame(update=1),
+        frame(width=1, height=2, update_count=2),
+    ])
+    images = []
+    result = stream_native_rdp_png(
+        transport, images.append, reauthorize=lambda: None
+    )
+    assert len(images) == 2 and result.unchanged_frames_skipped == 0
+    assert images[0].content_sha256 != images[1].content_sha256

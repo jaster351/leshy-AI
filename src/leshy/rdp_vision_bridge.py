@@ -98,7 +98,7 @@ def stream_native_rdp_png(
                 raise ValueError("Invalid or non-decoded RDP framebuffer")
             # The pixel digest is for duplicate suppression only, not proof of
             # owner approval, nor a token that could ever authorize input.
-            digest = hashlib.sha256(frame.rgb).hexdigest()
+            digest = hashlib.sha256(\n                frame.width.to_bytes(4, "big") +\n                frame.height.to_bytes(4, "big") + frame.rgb\n            ).hexdigest()
             if digest == last_digest:
                 unchanged += 1
                 last_update = frame.update_count
