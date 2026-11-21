@@ -102,6 +102,14 @@ class SuperAgentRDPCognitiveSession:
         """Live authenticated session + node grant + ticket Stop at each call."""
         if self._cancel.is_set():
             raise PermissionError("RDP cognition stopped")
+        # Runtime remote-admin kill switch is independent of the node grant.
+        # Real SuperAgent instances always provide storage. Legacy isolated
+        # service mocks may not have one and never expose a public endpoint.
+        storage = getattr(self._service, "storage", None)
+        if storage is not None:
+            from .module_settings import module_enabled
+            if not module_enabled(storage, "remote-admin"):
+                raise PermissionError("Remote administration disabled")
         stop = getattr(self._service, "_stop", None)
         if isinstance(stop, threading.Event) and stop.is_set():
             raise PermissionError("SuperAgent worker stopped")

@@ -36,3 +36,9 @@ Registered session != connected RDP: status uses registered=true for an
 owner-bound in-process control record and connected=true only while the
 native graphics channel is currently active. The Web panel must not
 equate a registered ticket to a working desktop.
+
+The previously referenced module setting "remote-admin" is now defined
+explicitly in the app's existing module registry, with default_enabled=False
+and a dependency on SuperAgent. This restores the configuration switch
+used by existing SSH/RDP routes. The RDP cognitive session also checks this
+kill switch at each authorization boundary on real SuperAgent instances.

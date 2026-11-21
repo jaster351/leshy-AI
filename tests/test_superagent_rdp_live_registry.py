@@ -207,3 +207,11 @@ def test_registered_but_no_transport_does_not_claim_a_live_rdp_connection():
     assert data["screen_available"] is False
     assert data["status"] == "waiting_for_native_transport"
     assert controls.stop(user, "SA-1")["stopped"] is True
+
+
+def test_remote_admin_toggle_is_explicit_and_off_by_default():
+    from leshy.module_settings import MODULE_SETTINGS
+    options = {item.name: item for item in MODULE_SETTINGS}
+    assert "remote-admin" in options
+    assert options["remote-admin"].default_enabled is False
+    assert "superagent" in options["remote-admin"].dependencies
