@@ -144,9 +144,9 @@ class LeshyApp:
         if backend == "inkling-original":
             # Separate original Safetensors/NVFP4 checkpoint; leave GGUF candidates as fallbacks.
             # No weight download or large runtime imports occur during normal startup.
-            from .inkling_original import InklingOriginalLLM
+            from .inkling_sidecar import InklingOriginalSidecarLLM
             original_kind = "gpu" if caps is not None and bool(getattr(caps, "gpu", False)) else "cpu"
-            candidates.append((f"{original_kind}-inkling-original", InklingOriginalLLM(self.settings.brain_dir)))
+            candidates.append((f"{original_kind}-inkling-original", InklingOriginalSidecarLLM(self.settings.brain_dir)))
         if backend == "inferssd":
             # The WiCi InferSSD engine streams supported GGUF MoE experts from LOCAL NVMe.
             # No Wi-Fi GPU, no external inference API; leave current GGUF backends as fallback.
