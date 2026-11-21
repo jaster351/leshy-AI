@@ -73,10 +73,13 @@ class InferSSDLocalLLM:
         return result
 
     def _installed_home(self) -> Path:
-        if os.name == "nt":
-            for home in self._candidate_homes():
-                if (home / "current" / "bin" / "inferssd.exe").is_file():
-                    return home
+        for home in self._candidate_homes():
+            candidate = (
+                home / "current" / "bin" / "inferssd.exe" if os.name == "nt"
+                else home / "bin" / "inferssd"
+            )
+            if candidate.is_file():
+                return home
         return self._candidate_homes()[0]
 
     def _executable(self) -> str:
@@ -92,6 +95,8 @@ class InferSSDLocalLLM:
                 for home in self._candidate_homes():
                     candidates.append(str(home / "current" / "bin" / "inferssd.exe"))
             else:
+                for home in self._candidate_homes():
+                    candidates.append(str(home / "bin" / "inferssd"))
                 candidates.append(str(Path.home() / ".local" / "bin" / "inferssd"))
             # Official Windows install exposes inferssd.cmd to the shell, while
             # its actual executable lives in current/bin/inferssd.exe.
@@ -145,6 +150,12 @@ class InferSSDLocalLLM:
         # directly to avoid cmd.exe argument interpretation: supply exactly the
         # same resource descriptor to this local subprocess only.
         child_env = os.environ.copy()
+        if os.name != "nt":
+            for home in self._candidate_homes():
+                wrapper = home / "bin" / "inferssd"
+                if wrapper.is_file() and wrapper.resolve() == Path(exe).resolve():
+                    child_env["INFERSSD_HOME"] = str(home)
+                    break
         if os.name == "nt":
             for home in self._candidate_homes():
                 native = home / "current" / "bin" / "inferssd.exe"
