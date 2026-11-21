@@ -14,30 +14,28 @@
 В корне репозитория Лешего выполните:
 
 ```powershell
-.\windows\Prepare-InklingOriginal.ps1 -SsdRoot 'D:\AI-SSD' -Download
+.\windows\Prepare-InklingOriginal.ps1 -Download
 ```
 
-Скачивает весь оригинальный snapshot Hugging Face (веса, конфигурацию, процессор, токенизатор) в D:\AI-SSD\LeshyModels\Inkling-2-Mini-original. Поддерживается продолжение прерванной загрузки через HF cache. Манифест завершения записывается только в конце. GGUF остаётся активной моделью.
+Скачивает оригинальный snapshot Hugging Face (веса, конфигурацию, процессор, токенизатор) рядом с установленным Лешим в `dist\Leshy\LeshyBrain\models\Inkling-2-Mini-original`, а файлы SSD offload размещает в `dist\Leshy\LeshyBrain\offload\Inkling-2-Mini`. Если установленная сборка отсутствует, используется `LeshyBrain` в корне репозитория. Для нестандартной установки можно явно указать `-BrainDir 'C:\путь\к\LeshyBrain'`. Старые пути `LESHY_INKLING_MODEL_DIR` и `LESHY_SSD_OFFLOAD_DIR` в окружении пользователя переписываются на эти каталоги. Прерванная загрузка использует HF cache; активная GGUF не заменяется.
 
 Статус без повторной загрузки:
 
 ```powershell
-.\windows\Prepare-InklingOriginal.ps1 -SsdRoot 'D:\AI-SSD'
+.\windows\Prepare-InklingOriginal.ps1
 ```
 
 ## 2. Экспериментальный original-format SSD offload
 
 ```powershell
-.\windows\Prepare-InklingOriginal.ps1 -SsdRoot 'D:\AI-SSD' -InstallInference
-$env:LESHY_INKLING_MODEL_DIR = 'D:\AI-SSD\LeshyModels\Inkling-2-Mini-original'
-$env:LESHY_SSD_OFFLOAD_DIR = 'D:\AI-SSD\LeshyOffload\Inkling-2-Mini'
+.\windows\Prepare-InklingOriginal.ps1 -InstallInference
 $env:LESHY_INKLING_RAM_GIB = '8'
 $env:LESHY_INKLING_VRAM_GIB = '6'
 $env:PYTHONPATH = (Join-Path (Get-Location) 'src')
 py -3.11 -m leshy.inkling_original ask --question 'Как Вас зовут?'
 ```
 
-Проверка не гарантирует успешное размещение mixed NVFP4/MXFP8 оригинала на 8 ГБ VRAM; при нехватке памяти или неподдерживаемом формате должна выводиться реальная ошибка. После успешного вывода можно включить экспериментальный backend: `.\\windows\\Prepare-InklingOriginal.ps1 -SsdRoot 'D:\\AI-SSD' -Activate` (путь записан здесь с двойными обратными слешами для Markdown, в PowerShell вводить по одному). Windows-сборка запускает отдельный локальный Python sidecar: torch/transformers не требуется в самом PyInstaller EXE. Препаратор ставит только Python-модуль Лешего в внешний Python 3.11; зависимости ML устанавливаются флагом -InstallInference. При отказе оригинала fallback GGUF остаётся. Работа на RTX 3070 не подтверждена.
+Проверка не гарантирует успешное размещение mixed NVFP4/MXFP8 оригинала на 8 ГБ VRAM; при нехватке памяти или неподдерживаемом формате должна выводиться реальная ошибка. После успешного вывода можно включить экспериментальный backend: `.\windows\Prepare-InklingOriginal.ps1 -Activate`. Windows-сборка запускает отдельный локальный Python sidecar: torch/transformers не требуется в самом PyInstaller EXE. Препаратор ставит только Python-модуль Лешего в внешний Python 3.11; зависимости ML устанавливаются флагом -InstallInference. При отказе оригинала fallback GGUF остаётся. Работа на RTX 3070 не подтверждена.
 
 ## 3. Реальный InferSSD для поддерживаемых GGUF MoE
 
