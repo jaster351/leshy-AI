@@ -3,7 +3,7 @@
 # Never modify the active LLM backend or read weights from another cluster node.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BRAIN="\${LESHY_BRAIN_DIR:-$ROOT/dist/Leshy/LeshyBrain}"
+BRAIN="${LESHY_BRAIN_DIR:-$ROOT/dist/Leshy/LeshyBrain}"
 mkdir -p "$BRAIN/runtime/model-provision" "$BRAIN/logs"
 LOCK="$BRAIN/runtime/model-provision/linux.lock"
 LOG="$BRAIN/logs/model-auto-provision-linux.log"
@@ -41,7 +41,7 @@ if ! command -v inferssd >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/inferssd" 
 fi
 # Do not auto-download an unsupported giant GGUF. InferSSD uses a verified
 # local path only if one is selected for this particular server.
-if [[ -n "\${LESHY_INFERSSD_GGUF_PATH:-}" ]]; then
+if [[ -n "${LESHY_INFERSSD_GGUF_PATH:-}" ]]; then
   if [[ -f "$LESHY_INFERSSD_GGUF_PATH" ]]; then
     echo "INFERSSD_LOCAL_GGUF_PATH=$LESHY_INFERSSD_GGUF_PATH"
   else
