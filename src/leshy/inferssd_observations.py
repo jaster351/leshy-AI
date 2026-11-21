@@ -121,10 +121,10 @@ def _read_native_events(path: Path) -> dict[str, Any]:
     return result
 
 
-def native_streaming_status(model: Path) -> dict[str, Any]:
+def native_streaming_status(model: Path, home: Path | None = None) -> dict[str, Any]:
     """Evidence is returned only for a recent matching local native run."""
     target = Path(model).expanduser().resolve()
-    roots = infer_home() / "state" / "runs"
+    roots = (Path(home).expanduser().resolve() if home else infer_home()) / "state" / "runs"
     default = {
         "ssd_streaming_verified": False,
         "source": "native-events.jsonl",
