@@ -16,6 +16,12 @@ import android.provider.Settings
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.FrameLayout
+import androidx.activity.OnBackPressedCallback
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.widget.doAfterTextChanged
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -53,6 +59,73 @@ class MainActivity : ComponentActivity() {
     private var voiceSession: String? = null
     private var speaker: TextToSpeech? = null
     private var speakerReady = false
+    private lateinit var screen: FrameLayout
+    private lateinit var settingsScreen: ScrollView
+    private var hologram: HologramView? = null
+    private var hologramOpen = false
+    private var avatarPhase = "idle"
+    private var avatarSpeechId: String? = null
+    private var avatarSpeechText = ""
+    private var avatarGaze = 0f
+    private fun avatarState(state: String) {
+        avatarPhase = state
+        hologram?.setPhase(state)
+        refreshHologramStatus()
+    }
+
+    private fun refreshHologramStatus() {
+        if (::voiceStatus.isInitialized) hologram?.setStatus(
+            voiceStatus.text.toString().take(200), continuousActive, cameraEnabled
+        )
+    }
+
+    private fun openHologram() {
+        if (hologramOpen) return
+        val panel = hologram ?: HologramView(this, {
+            closeHologram()
+        }, {
+            if (continuousActive) stopContinuousConversation("Разговор завершён.")
+            else startContinuousConversation()
+            refreshHologramStatus()
+        }, {
+            if (cameraEnabled) stopCamera()
+            else if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+            else cameraPermission.launch(Manifest.permission.CAMERA)
+        }).also {
+            hologram = it
+            screen.addView(it, FrameLayout.LayoutParams(-1, -1))
+        }
+        hologramOpen = true
+        settingsScreen.visibility = View.GONE
+        panel.visibility = View.VISIBLE
+        panel.setPhase(avatarPhase)
+        panel.setGaze(avatarGaze)
+        refreshHologramStatus()
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        WindowCompat.getInsetsController(window, screen).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+        panel.setActive(true)
+    }
+
+    private fun closeHologram() {
+        if (!hologramOpen) return
+        hologramOpen = false
+        hologram?.setActive(false)
+        hologram?.visibility = View.GONE
+        settingsScreen.visibility = View.VISIBLE
+        WindowCompat.getInsetsController(window, screen).show(WindowInsetsCompat.Type.systemBars())
+        if (!continuousActive) window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun finishAvatarSpeech(id: String?) {
+        if (id == null || id != avatarSpeechId) return
+        avatarSpeechId = null
+        avatarSpeechText = ""
+        avatarState(if (continuousActive) "listening" else "idle")
+    }
+
     private var voiceBusy = false
     private lateinit var serverAddress: EditText
     private lateinit var serverStatus: TextView
@@ -104,6 +177,11 @@ class MainActivity : ComponentActivity() {
         root.addView(TextView(this).apply {
             text = "Леший • Android Satellite"
             textSize = 23f
+        })
+        root.addView(Button(this).apply {
+            text = "Голограмма • режим умной колонки"
+            textSize = 18f
+            setOnClickListener { openHologram() }
         })
         root.addView(TextView(this).apply {
             text = "Одна кнопка включает разговор с Лешим на несколько реплик; второе нажатие завершает сеанс."
@@ -272,7 +350,19 @@ class MainActivity : ComponentActivity() {
                 "передавать аудио своему поставщику; Леший получает только текст. " +
                 "Сеанс работает при открытом приложении, не в фоне."
         })
-        setContentView(ScrollView(this).apply { addView(root) })
+        settingsScreen = ScrollView(this).apply { addView(root) }
+        screen = FrameLayout(this).apply { addView(settingsScreen, FrameLayout.LayoutParams(-1, -1)) }
+        setContentView(screen)
+        voiceStatus.doAfterTextChanged { refreshHologramStatus() }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (hologramOpen) closeHologram()
+                else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
         refreshMicStatus()
         refreshDeviceIdentity()
         voiceSession = getSharedPreferences("android_voice_session", MODE_PRIVATE)
@@ -286,9 +376,43 @@ class MainActivity : ComponentActivity() {
             }
         }
         speaker?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) { }
+            override fun onStart(utteranceId: String?) {
+                runOnUiThread {
+                    if (!isDestroyed && utteranceId != null && utteranceId == avatarSpeechId) {
+                        avatarState("speaking")
+                    }
+                }
+            }
+            // Android reports word/range playback timing when supported by the TTS engine.
+            // These are approximate mouth shapes, not a phoneme alignment model.
+            override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
+                runOnUiThread {
+                    if (isDestroyed || utteranceId == null || utteranceId != avatarSpeechId) return@runOnUiThread
+                    val range = avatarSpeechText.substring(
+                        start.coerceIn(0, avatarSpeechText.length),
+                        end.coerceIn(start.coerceIn(0, avatarSpeechText.length), avatarSpeechText.length)
+                    ).lowercase(Locale.ROOT)
+                    val strength = when {
+                        range.any { it in "аояэaо" } -> 0.95f
+                        range.any { it in "уёеыиюuoie" } -> 0.60f
+                        range.any { it in "мбпmbp" } -> 0.20f
+                        else -> 0.40f
+                    }
+                    hologram?.setViseme(strength)
+                }
+            }
+            override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                runOnUiThread {
+                    finishAvatarSpeech(utteranceId)
+                    if (utteranceId != null && continuousActive && pendingUtteranceId == utteranceId) {
+                        pendingUtteranceId = null
+                        continuousRecognizer?.resumeAfterAnswer()
+                    }
+                }
+            }
             override fun onDone(utteranceId: String?) {
                 runOnUiThread {
+                    finishAvatarSpeech(utteranceId)
                     if (continuousActive && pendingUtteranceId == utteranceId) {
                         pendingUtteranceId = null
                         continuousRecognizer?.resumeAfterAnswer()
@@ -298,6 +422,7 @@ class MainActivity : ComponentActivity() {
             @Deprecated("Deprecated in Android SDK")
             override fun onError(utteranceId: String?) {
                 runOnUiThread {
+                    finishAvatarSpeech(utteranceId)
                     if (continuousActive && pendingUtteranceId == utteranceId) {
                         pendingUtteranceId = null
                         voiceStatus.append("\nНе удалось озвучить ответ. Снова слушаю.")
@@ -310,6 +435,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (hologramOpen) hologram?.setActive(true)
         if (::micStatus.isInitialized) refreshMicStatus()
         if (::serverAddress.isInitialized &&
             ServerReachability.address(this).isNotBlank()) {
@@ -335,7 +461,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startContinuousConversation() {
         if (continuousActive) return
-        if (voiceBusy) {
+        if (voiceBusy || avatarSpeechId != null) {
             voiceStatus.text = "Дождитесь текущего ответа, затем включите разговор."
             return
         }
@@ -375,6 +501,7 @@ class MainActivity : ComponentActivity() {
         // Старый фоновый PCM-сервис не должен одновременно занимать микрофон.
         if (ListeningService.isListening) stopListening()
         continuousActive = true
+        avatarState("listening")
         // Предотвращаем автоматическое засыпание экрана во время открытого разговора.
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val epoch = ++continuousEpoch
@@ -382,7 +509,10 @@ class MainActivity : ComponentActivity() {
         val recognizer = ContinuousSpeechRecognizer(
             this,
             onState = { state ->
-                if (continuousActive && epoch == continuousEpoch) voiceStatus.text = state
+                if (continuousActive && epoch == continuousEpoch) {
+                    voiceStatus.text = state
+                    if (!voiceBusy && avatarSpeechId == null) avatarState("listening")
+                }
             },
             onUtterance = { phrase ->
                 if (continuousActive && epoch == continuousEpoch) submitVoiceQuestion(phrase)
@@ -402,7 +532,7 @@ class MainActivity : ComponentActivity() {
     private fun stopContinuousConversation(message: String) {
         if (!continuousActive && continuousRecognizer == null) return
         continuousActive = false
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (!hologramOpen) window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         continuousEpoch++
         ++voiceRequestEpoch
         activeVoiceRequest?.cancel()
@@ -410,8 +540,11 @@ class MainActivity : ComponentActivity() {
         continuousRecognizer?.stop()
         continuousRecognizer = null
         pendingUtteranceId = null
+        avatarSpeechId = null
+        avatarSpeechText = ""
         speaker?.stop()
         voiceBusy = false
+        avatarState("idle")
         dialogueButton.text = "Начать разговор с Лешим"
         voiceStatus.text = message
     }
@@ -437,7 +570,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun submitVoiceQuestion(raw: String) {
-        if (voiceBusy) {
+        if (voiceBusy || avatarSpeechId != null) {
             voiceStatus.text = "Дождитесь текущего ответа Лешего."
             return
         }
@@ -461,6 +594,7 @@ class MainActivity : ComponentActivity() {
         val handle = AndroidVoiceApi.RequestHandle()
         activeVoiceRequest = handle
         voiceBusy = true
+        avatarState("thinking")
         voiceStatus.text = "Вы: " + question + "\nЛеший думает..."
         val sid = voiceSession
         voiceExecutor.execute {
@@ -479,15 +613,21 @@ class MainActivity : ComponentActivity() {
                     if (speakerReady) {
                         val speechId = "leshy-$requestId-$activeEpoch"
                         if (wasContinuous) pendingUtteranceId = speechId
+                        avatarSpeechId = speechId
+                        avatarSpeechText = result.text.take(TextToSpeech.getMaxSpeechInputLength() - 1)
                         val started = speaker?.speak(
-                            result.text.take(TextToSpeech.getMaxSpeechInputLength() - 1),
+                            avatarSpeechText,
                             TextToSpeech.QUEUE_FLUSH, null, speechId
                         ) ?: TextToSpeech.ERROR
-                        if (started == TextToSpeech.ERROR && wasContinuous) {
-                            pendingUtteranceId = null
-                            continuousRecognizer?.resumeAfterAnswer()
+                        if (started == TextToSpeech.ERROR) {
+                            finishAvatarSpeech(speechId)
+                            if (wasContinuous) {
+                                pendingUtteranceId = null
+                                continuousRecognizer?.resumeAfterAnswer()
+                            }
                         }
                     } else {
+                        avatarState(if (wasContinuous) "listening" else "idle")
                         voiceStatus.append("\nОзвучка TTS недоступна; ответ показан текстом.")
                         if (wasContinuous) continuousRecognizer?.resumeAfterAnswer()
                     }
@@ -496,6 +636,7 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     if (!isDestroyed && requestId == voiceRequestEpoch &&
                         (!wasContinuous || (continuousActive && activeEpoch == continuousEpoch))) {
+                        avatarState(if (wasContinuous) "listening" else "idle")
                         voiceStatus.text = "Не удалось получить ответ: " +
                             (e.message ?: e.javaClass.simpleName)
                         if (wasContinuous) continuousRecognizer?.resumeAfterAnswer()
@@ -613,6 +754,7 @@ class MainActivity : ComponentActivity() {
     private fun startCamera() {
         cameraPreview.visibility = View.VISIBLE
         cameraEnabled = true
+        refreshHologramStatus()
         cameraButton.text = "Выключить камеру"
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
@@ -633,13 +775,17 @@ class MainActivity : ComponentActivity() {
                         return@setAnalyzer
                     }
                     try {
-                        val input = InputImage.fromMediaImage(
-                            image, frame.imageInfo.rotationDegrees
-                        )
+                        val rotation = frame.imageInfo.rotationDegrees
+                        val inputWidth = if (rotation % 180 == 0) frame.width else frame.height
+                        val input = InputImage.fromMediaImage(image, rotation)
                         detector.process(input)
                             .addOnSuccessListener { faces ->
                                 runOnUiThread {
                                     if (cameraEnabled) {
+                                        val face = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+                                        avatarGaze = if (face == null || inputWidth <= 0) 0f else
+                                            ((0.5f - face.boundingBox.exactCenterX() / inputWidth) * 1.2f).coerceIn(-0.6f, 0.6f)
+                                        if (hologramOpen) hologram?.setGaze(avatarGaze)
                                         faceStatus.text = "Лиц в кадре: ${faces.size}. " +
                                             "Идентификация пользователей ещё не подключена."
                                     }
@@ -666,6 +812,9 @@ class MainActivity : ComponentActivity() {
 
     private fun stopCamera() {
         cameraEnabled = false
+        refreshHologramStatus()
+        avatarGaze = 0f
+        hologram?.setGaze(0f)
         cameraProvider?.unbindAll()
         cameraPreview.visibility = View.GONE
         cameraButton.text = "Включить камеру и обнаружение лиц"
@@ -677,12 +826,15 @@ class MainActivity : ComponentActivity() {
         if (continuousActive) {
             stopContinuousConversation("Разговор остановлен: приложение свернуто или экран заблокирован.")
         }
+        hologram?.setActive(false)
         super.onStop()
     }
 
     override fun onDestroy() {
         if (continuousActive) stopContinuousConversation("Разговор завершён.")
         stopCamera()
+        hologram?.dispose()
+        hologram = null
         detector.close()
         cameraExecutor.shutdown()
         serverExecutor.shutdownNow()
