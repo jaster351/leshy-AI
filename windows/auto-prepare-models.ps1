@@ -159,6 +159,56 @@ try {
             Write-Warning ('INKLING_DEPS_FAILED: '+$_.Exception.Message)
         }
     }
+    # Stage an officially tested GGUF MoE for actual local NVMe expert streaming.
+    # This does not touch Inkling original or activate the experimental backend.
+    # Before staging ~22 GiB of GGUF, keep sufficient room for HF Xet cache and
+    # for the running Qwen installation.
+    if (-not (Is-RecentFailure 'moe')) {
+        try {
+            $env:PYTHONPATH = Join-Path $repo 'src'
+            $env:LESHY_VERSION_FILE = Join-Path $repo 'VERSION'
+            if (-not (Test-Path -LiteralPath $venvPy -PathType Leaf)) {
+                $prep = Join-Path $PSScriptRoot 'Prepare-InklingOriginal.ps1'
+                & $prep -BrainDir $brain
+                if (-not $?) { throw 'Isolated Python environment setup failed' }
+            }
+            $existing = & $venvPy -m leshy.moe_model_download status --brain-dir $brain
+            if ($LASTEXITCODE -ne 0) { throw 'MoE GGUF status command failed' }
+            $moe = (($existing | Out-String) | ConvertFrom-Json)
+            if ([string]$moe.state -eq 'downloaded') {
+                Write-Host ('INFERSSD_MOE_PRESENT: ' + $moe.file)
+            } else {
+                $moeDirectory = Join-Path $brain 'models\InferSSD-Qwen3.6-35B-A3B'
+                if ($env:LESHY_INFERSSD_MODEL_DIR) {
+                    $moeDirectory = $env:LESHY_INFERSSD_MODEL_DIR
+                }
+                New-Item -ItemType Directory -Force -Path $moeDirectory | Out-Null
+                $moeDrive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot((Resolve-Path -LiteralPath $moeDirectory).Path))
+                $freeMoEGiB = [math]::Floor($moeDrive.AvailableFreeSpace / 1GB)
+                if ($freeMoEGiB -lt 45) {
+                    Save-State 'moe' 'failed' ("Only $freeMoEGiB GiB free: need at least 45 GiB for GGUF and cache.")
+                    Write-Warning ('INFERSSD_MOE_NO_SPACE: '+$freeMoEGiB+' GiB')
+                } else {
+                    Save-State 'moe' 'running' 'Downloading tested Qwen3.6-35B-A3B UD-Q4_K_XL GGUF locally.'
+                    $env:PIP_DEFAULT_TIMEOUT = '60'
+                    $env:PIP_RETRIES = '3'
+                    $env:HF_HOME = Join-Path $brain 'cache\huggingface'
+                    $env:LESHY_HF_PROXY_URL = if ($env:LESHY_HF_PROXY_URL) { $env:LESHY_HF_PROXY_URL } else { 'http://vpn.nidr.cyberhost.biz:7777' }
+                    & $venvPy -m leshy.moe_model_download download --brain-dir $brain
+                    if ($LASTEXITCODE -ne 0) { throw ('InferSSD GGUF download exited with code '+$LASTEXITCODE) }
+                    $after = & $venvPy -m leshy.moe_model_download status --brain-dir $brain
+                    if ($LASTEXITCODE -ne 0) { throw 'Failed to confirm downloaded GGUF' }
+                    $moe = (($after | Out-String) | ConvertFrom-Json)
+                    if ([string]$moe.state -ne 'downloaded') { throw 'Downloaded MoE checkpoint failed manifest validation' }
+                    Save-State 'moe' 'downloaded' ('Tested GGUF staged on local NVMe: '+$moe.file)
+                    Write-Host ('INFERSSD_MOE_DOWNLOADED: '+$moe.file)
+                }
+            }
+        } catch {
+            Save-State 'moe' 'failed' ([string]$_.Exception.Message)
+            Write-Warning ('INFERSSD_MOE_DOWNLOAD_FAILED: '+$_.Exception.Message)
+        }
+    }
     Write-Host 'AUTO_MODEL_PREPARE_END'
 } catch {
     Write-Warning ('AUTO_MODEL_PREPARE_ERROR: '+$_.Exception.Message)
