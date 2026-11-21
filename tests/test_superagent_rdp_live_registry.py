@@ -163,3 +163,30 @@ def test_superagent_registry_initialization_does_not_require_llm_lock(monkeypatc
     second = SuperAgentService._rdp_controls(service)
     assert isinstance(first, controls.RDPLiveRegistry)
     assert first is second
+
+
+def test_real_factory_does_not_create_unverified_view_on_registration_failure(monkeypatch):
+    from leshy.superagent import SuperAgentService
+    from leshy.superagent_rdp_cognitive_runtime import SuperAgentRDPCognitiveSession
+    import leshy.superagent_rdp_cognitive_runtime as runtime
+
+    # This test does not invoke a real transport or create Web approval.
+    # Session constructor is mocked solely to cover cleanup on registry denial.
+    class NewSession:
+        stopped = False
+        def stop(self):
+            self.stopped = True
+    new = NewSession()
+    monkeypatch.setattr(runtime, "SuperAgentRDPCognitiveSession", lambda *a, **kw: new)
+
+    class Registry:
+        def register(self, *args):
+            raise PermissionError("registry rejected")
+    instance = object.__new__(SuperAgentService)
+    instance._rdp_controls = lambda: Registry()
+    with pytest.raises(PermissionError):
+        instance.create_rdp_cognitive_session(
+            "SA-1", actor=actor(), node_id="10.0.0.5",
+            observed_fingerprint="pin",
+        )
+    assert new.stopped

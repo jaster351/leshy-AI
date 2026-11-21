@@ -388,7 +388,15 @@ class SuperAgentService:
             self, ticket_id=ticket_id, actor=actor, node_id=node_id,
             observed_fingerprint=observed_fingerprint,
         )
-        self._rdp_controls().register(actor, ticket_id, session)
+        # Only a real SuperAgent service can publish a live Web control
+        # record. Direct unbound use in isolated tests has no authenticated
+        # provider-backed service and must not create such a record.
+        if isinstance(self, SuperAgentService):
+            try:
+                self._rdp_controls().register(actor, ticket_id, session)
+            except BaseException:
+                session.stop()
+                raise
         return session
 
     def rdp_live_status(self, actor, ticket_id: str) -> dict[str, Any]:
@@ -409,6 +417,9 @@ class SuperAgentService:
     def stop_ticket(self, ticket_id: str, owner_id: str) -> dict[str, Any]:
         ticket = self.get(ticket_id, owner_id=owner_id)
         if ticket["state"] in {"ready", "stopped"}:
+            registry = getattr(self, "_rdp_live_registry", None)
+            if registry is not None:
+                registry.stop_ticket(owner_id, ticket_id)
             return ticket
         now = utcnow()
         with self.storage.connection() as conn:
