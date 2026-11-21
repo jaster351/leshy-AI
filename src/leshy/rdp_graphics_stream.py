@@ -110,6 +110,8 @@ def read_graphics_tpkt(
     if stopped():
         raise RDPGraphicsStopped("RDP graphics stopped by owner")
     reauthorize()
+    if time.monotonic() >= deadline:
+        raise RDPGraphicsTimeout("RDP graphics receive timed out")
     return packet
 
 
