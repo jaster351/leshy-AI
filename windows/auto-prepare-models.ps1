@@ -167,6 +167,14 @@ try {
         try {
             $env:PYTHONPATH = Join-Path $repo 'src'
             $env:LESHY_VERSION_FILE = Join-Path $repo 'VERSION'
+            # In a fresh environment, pip must reach PyPI through the user's
+            # confirmed proxy before the local GGUF installer is prepared.
+            if (-not $env:LESHY_HF_PROXY_URL) {
+                $env:LESHY_HF_PROXY_URL = 'http://vpn.nidr.cyberhost.biz:7777'
+            }
+            $env:HTTP_PROXY = $env:LESHY_HF_PROXY_URL
+            $env:HTTPS_PROXY = $env:LESHY_HF_PROXY_URL
+            $env:PIP_DEFAULT_TIMEOUT = '60'
             if (-not (Test-Path -LiteralPath $venvPy -PathType Leaf)) {
                 $prep = Join-Path $PSScriptRoot 'Prepare-InklingOriginal.ps1'
                 & $prep -BrainDir $brain
@@ -192,8 +200,10 @@ try {
                     Save-State 'moe' 'running' 'Downloading tested Qwen3.6-35B-A3B UD-Q4_K_XL GGUF locally.'
                     $env:PIP_DEFAULT_TIMEOUT = '60'
                     $env:PIP_RETRIES = '3'
-                    $env:HF_HOME = Join-Path $brain 'cache\huggingface'
-                    $env:LESHY_HF_PROXY_URL = if ($env:LESHY_HF_PROXY_URL) { $env:LESHY_HF_PROXY_URL } else { 'http://vpn.nidr.cyberhost.biz:7777' }
+                    # Store Xet staging cache on the SAME NVMe as the GGUF,
+                    # including when this node uses a separate local model disk.
+                    $env:HF_HOME = Join-Path $moeDirectory 'cache\huggingface'
+                    New-Item -ItemType Directory -Force -Path $env:HF_HOME | Out-Null
                     & $venvPy -m leshy.moe_model_download download --brain-dir $brain
                     if ($LASTEXITCODE -ne 0) { throw ('InferSSD GGUF download exited with code '+$LASTEXITCODE) }
                     $after = & $venvPy -m leshy.moe_model_download status --brain-dir $brain
