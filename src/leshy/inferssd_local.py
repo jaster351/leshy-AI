@@ -17,6 +17,7 @@ import time
 from urllib import request, error, parse
 
 from .llm import LLMUnavailable, finalize_model_output
+from .inferssd_observations import infer_home, native_streaming_status
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -62,6 +63,11 @@ class InferSSDLocalLLM:
         if configured:
             candidates.append(configured)
         else:
+            # The official Windows installer creates a current junction inside
+            # INFERSSD_HOME, which may be customized per node/NVMe.
+            candidates.append(str(infer_home() / "current" / "bin" / "inferssd.exe")) if os.name == "nt" else None
+            if os.name != "nt":
+                candidates.append(str(Path.home() / ".local" / "bin" / "inferssd"))
             # Official Windows install exposes inferssd.cmd to the shell, while
             # its actual executable lives in current/bin/inferssd.exe.
             if os.name == "nt":
@@ -109,10 +115,25 @@ class InferSSDLocalLLM:
             exe, "serve", "-m", str(self.model_path.resolve()),
             "--host", "127.0.0.1", "--port", str(port),
         ]
+        # The upstream Windows installer publishes a .cmd wrapper that sets
+        # INFERSSD_HOME and INFERSSD_RESOURCES. We launch its *native* executable
+        # directly to avoid cmd.exe argument interpretation: supply exactly the
+        # same resource descriptor to this local subprocess only.
+        child_env = os.environ.copy()
+        if os.name == "nt":
+            home = infer_home()
+            native = (home / "current" / "bin" / "inferssd.exe").resolve()
+            if Path(exe).resolve() == native:
+                resources = home / "current" / "engine-resources.json"
+                if not resources.is_file():
+                    logfile.close()
+                    raise LLMUnavailable("Native InferSSD resource descriptor missing after installation")
+                child_env["INFERSSD_HOME"] = str(home)
+                child_env["INFERSSD_RESOURCES"] = str(resources.resolve())
         try:
             process = subprocess.Popen(
                 command, stdin=subprocess.DEVNULL, stdout=logfile, stderr=subprocess.STDOUT,
-                creationflags=CREATE_NO_WINDOW, close_fds=True,
+                creationflags=CREATE_NO_WINDOW, close_fds=True, env=child_env,
             )
         except Exception:
             logfile.close()
@@ -127,9 +148,11 @@ class InferSSDLocalLLM:
                 with _local_call(port, "/v1/models", timeout=2) as response:
                     data = json.loads(response.read(512 * 1024).decode("utf-8"))
                 models = data.get("data", [])
-                if models and models[0].get("id"):
-                    self._model_id = str(models[0]["id"])
-                return
+                if isinstance(models, list) and models and isinstance(models[0], dict):
+                    model_id = models[0].get("id")
+                    if isinstance(model_id, str) and model_id.strip():
+                        self._model_id = model_id
+                        return
             except (OSError, TimeoutError, ValueError, json.JSONDecodeError):
                 time.sleep(1)
         self.close()
@@ -162,13 +185,15 @@ class InferSSDLocalLLM:
                 raise LLMUnavailable(f"Ошибка локального InferSSD: {type(exc).__name__}: {exc}") from exc
 
     def resident_status(self):
+        # Read only owned native run observations. An API response/loaded process
+        # never counts as verified expert offloading.
+        evidence = native_streaming_status(self.model_path)
         return {
             "loaded": self._process is not None and self._process.poll() is None,
             "backend": "inferssd-local",
             "ssd_streaming_requested": True,
-            # We cannot infer verified expert streaming merely from a running
-            # process: dense GGUF models use the ordinary RAM loader.
-            "ssd_streaming_verified": False,
+            "ssd_streaming_verified": evidence["ssd_streaming_verified"],
+            "ssd_streaming_evidence": evidence,
             "model": str(self.model_path.resolve()),
             "model_exists": self.model_path.is_file(),
             "remote_gpu": False,
