@@ -12,8 +12,12 @@ exec 9>"$LOCK"
 flock -n 9 || exit 0
 exec >>"$LOG" 2>&1
 printf 'AUTO_MODEL_PROVISION_LINUX start=%s brain=%s\n' "$(date -Is)" "$BRAIN"
-if [[ -f "$STATE" ]] && [[ "$(cat "$STATE")" == complete* ]]; then
-  echo "PREVIOUS_INSTALL_COMPLETE"
+# Versioned completion marker prevents an older Linux update from silently
+# skipping the newly added MoE GGUF stage. Both manifests must remain present.
+if [[ -f "$STATE" ]] && [[ "$(cat "$STATE")" == complete-v2* ]] &&
+   [[ -f "$BRAIN/models/Inkling-2-Mini-original/.leshy-original.json" ]] &&
+   [[ -f "$BRAIN/models/InferSSD-Qwen3.6-35B-A3B/.leshy-moe-gguf.json" ]]; then
+  echo "PREVIOUS_MODEL_PROVISION_COMPLETE"
   exit 0
 fi
 # Avoid repeated attempts on every build if HF or GitHub is unavailable.
@@ -76,6 +80,43 @@ if [[ ! -f "$MODEL/.leshy-original.json" ]]; then
     status=failed
   fi
 fi
+# Independently provision an officially tested GGUF MoE (22 GiB) on this
+# node's local NVMe. The original Inkling weights remain a separate format.
+# No backend switch is made until successful native inference on that node.
+export PYTHONPATH="$ROOT/src"
+export LESHY_VERSION_FILE="$ROOT/VERSION"
+export LESHY_BRAIN_DIR="$BRAIN"
+export HF_HOME="$BRAIN/cache/huggingface"
+export PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=3
+mkdir -p "$HF_HOME"
+# Legacy machines might already have original checkpoint files without the
+# Python environment; create the isolated venv for GGUF staging as well.
+if [[ ! -x "$VENV/bin/python" ]] && command -v python3 >/dev/null 2>&1; then
+  python3 -m venv "$VENV" || status=failed
+fi
+MOE_ROOT="${LESHY_INFERSSD_MODEL_DIR:-$BRAIN/models/InferSSD-Qwen3.6-35B-A3B}"
+mkdir -p "$MOE_ROOT"
+# Do not demand another 45 GiB if the selected GGUF is already complete.
+if [[ -x "$VENV/bin/python" ]] &&
+   "$VENV/bin/python" -m leshy.moe_model_download status --brain-dir "$BRAIN" |
+     grep -q '"state": "downloaded"'; then
+  echo "INFERSSD_MOE_PRESENT"
+else
+  avail_moe="$(df -Pk "$MOE_ROOT" | awk 'NR==2 {print $4}')"
+  if [[ ! "$avail_moe" =~ ^[0-9]+$ ]] || (( avail_moe < 45*1024*1024 )); then
+    echo "INFERSSD_MOE_NO_SPACE: at least 45 GiB free required for model and HF cache"
+    status=failed
+  elif [[ -x "$VENV/bin/python" ]]; then
+    export HF_HOME="$MOE_ROOT/cache/huggingface"
+    mkdir -p "$HF_HOME"
+    "$VENV/bin/python" -m pip install 'huggingface_hub>=1.31,<2' 'hf_xet>=1.8,<2' &&
+      "$VENV/bin/python" -m leshy.moe_model_download download --brain-dir "$BRAIN" || status=failed
+  else
+    echo "INFERSSD_MOE_VENV_NOT_READY"
+    status=failed
+  fi
+fi
+if [[ "$status" == complete ]]; then status=complete-v2; fi
 echo "$status $(date -Is)" > "$STATE"
 printf 'AUTO_MODEL_PROVISION_LINUX finished=%s status=%s\n' "$(date -Is)" "$status"
 exit 0
