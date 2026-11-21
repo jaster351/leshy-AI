@@ -27,11 +27,15 @@ function Save-State([string]$Step,[string]$Outcome,[string]$Details) {
     $temp = Join-Path $root ([Guid]::NewGuid().ToString('N')+'.tmp')
     $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temp -Encoding UTF8
     Move-Item -LiteralPath $temp -Destination $statePath -Force
+    $stepFile = Join-Path $root ($Step+'.json')
+    $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temp -Encoding UTF8
+    Move-Item -LiteralPath $temp -Destination $stepFile -Force
 }
 function Is-RecentFailure([string]$Step) {
-    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { return $false }
+    $stepFile = Join-Path $root ($Step+'.json')
+    if (-not (Test-Path -LiteralPath $stepFile -PathType Leaf)) { return $false }
     try {
-        $prior = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $prior = Get-Content -LiteralPath $stepFile -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($prior.step -ne $Step -or $prior.outcome -ne 'failed') { return $false }
         $stamp = [DateTimeOffset]::Parse([string]$prior.updated_at)
         return (([DateTimeOffset]::UtcNow - $stamp.ToUniversalTime()).TotalHours -lt 4)
@@ -39,7 +43,25 @@ function Is-RecentFailure([string]$Step) {
 }
 function Has-OriginalCheckpoint {
     $model = Join-Path $brain 'models\Inkling-2-Mini-original'
-    return (Test-Path -LiteralPath (Join-Path $model '.leshy-original.json') -PathType Leaf)
+    $manifestPath = Join-Path $model '.leshy-original.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
+    if (-not (Test-Path -LiteralPath (Join-Path $model 'config.json') -PathType Leaf)) { return $false }
+    if (-not (Test-Path -LiteralPath (Join-Path $model 'tokenizer_config.json') -PathType Leaf)) { return $false }
+    if (@(Get-ChildItem -LiteralPath $model -Filter '*.safetensors' -File -ErrorAction SilentlyContinue).Count -eq 0) { return $false }
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ([string]$manifest.repository -ne 'thinkingmachines/Inkling-2-Mini') { return $false }
+        $files = @($manifest.files)
+        if ($files.Count -eq 0) { return $false }
+        $modelRoot = [IO.Path]::GetFullPath($model).TrimEnd('\') + '\'
+        foreach ($item in $files) {
+            $candidate = [IO.Path]::GetFullPath((Join-Path $model ([string]$item.path)))
+            if (-not $candidate.StartsWith($modelRoot,[StringComparison]::OrdinalIgnoreCase)) { return $false }
+            $entry = Get-Item -LiteralPath $candidate -ErrorAction Stop
+            if ([long]$entry.Length -ne [long]$item.bytes) { return $false }
+        }
+        return $true
+    } catch { return $false }
 }
 function Has-InferSSD {
     if ($env:LOCALAPPDATA -and (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'inferssd\current\bin\inferssd.exe') -PathType Leaf)) { return $true }
