@@ -14,6 +14,10 @@ if (-not $BrainDir) {
 New-Item -ItemType Directory -Force -Path $BrainDir | Out-Null
 $BrainDir = (Resolve-Path -LiteralPath $BrainDir).Path
 $env:LESHY_BRAIN_DIR = $BrainDir
+# Store HF's resumable Xet/cache data beside the installed Leshy, not in the
+# main Windows profile. Download interruption never deletes existing weights.
+$env:HF_HOME = Join-Path $BrainDir 'cache\huggingface'
+New-Item -ItemType Directory -Force -Path $env:HF_HOME | Out-Null
 
 # Install the HF downloader in its own Python environment. Never upgrade global
 # click/huggingface_hub: browser-use in the main Leshy installation pins click.
