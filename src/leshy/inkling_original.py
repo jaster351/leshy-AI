@@ -207,16 +207,9 @@ class InklingOriginalLLM:
             try:
                 values = self._processor.apply_chat_template(
                     conversation, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt",
-                    reasoning_effort="low",
                 )
                 # Accelerate dispatches tensors/layers; inputs go to the first execution device.
-                execution = next(
-                    (device for device in self._model.hf_device_map.values() if device != "disk"),
-                    "cpu",
-                )
-                if isinstance(execution, int):
-                    execution = f"cuda:{execution}"
-                values = values.to(execution)
+                values = values.to(self._model.device)
                 with self._torch.inference_mode():
                     generated = self._model.generate(**values, max_new_tokens=self.max_tokens)
                 prompt_len = values["input_ids"].shape[-1]
@@ -248,9 +241,65 @@ class InklingOriginalLLM:
             self._torch = None
 
 
+def serve_local(brain_dir: Path, port: int) -> int:
+    """Private local-only sidecar. Heavy ML dependencies live outside Leshy.exe."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    if not 1 <= int(port) <= 65535:
+        raise ValueError("An explicit valid local port is required")
+    engine = InklingOriginalLLM(brain_dir)
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def _json(self, code, payload):
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            if self.path == "/health":
+                self._json(200, {"ready": True, "loaded": engine._model is not None})
+            else:
+                self._json(404, {"error": "not_found"})
+
+        def do_POST(self):
+            if self.path != "/v1/chat/completions":
+                return self._json(404, {"error": "not_found"})
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+                if length < 1 or length > 4 * 1024 * 1024:
+                    return self._json(413, {"error": "invalid_request_size"})
+                value = json.loads(self.rfile.read(length))
+                raw_messages = value.get("messages")
+                if not isinstance(raw_messages, list) or len(raw_messages) > 200:
+                    return self._json(400, {"error": "invalid_messages"})
+                messages = [
+                    ChatMessage(str(m["role"]), str(m["content"]))
+                    for m in raw_messages if isinstance(m, dict) and m.get("role") in {"system", "user", "assistant"}
+                ]
+                answer = engine.chat(messages)
+                self._json(200, {"choices": [{"message": {"role": "assistant", "content": answer}}]})
+            except Exception as exc:
+                self._json(503, {"error": f"{type(exc).__name__}: {str(exc)[:1200]}"})
+
+    # Never bind this endpoint to the LAN; only the local Leshy process uses it.
+    server = ThreadingHTTPServer(("127.0.0.1", int(port)), Handler)
+    try:
+        server.serve_forever(poll_interval=0.5)
+    finally:
+        server.server_close()
+        engine.close()
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Leshy: original Inkling 2 Mini and SSD offload")
-    parser.add_argument("action", choices=("download", "status", "ask"))
+    parser.add_argument("action", choices=("download", "status", "ask", "serve"))
+    parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--brain-dir", default=os.getenv("LESHY_BRAIN_DIR") or str(Path.cwd() / "LeshyBrain"))
     parser.add_argument("--question", default="Как Вас зовут?")
     args = parser.parse_args()
@@ -259,6 +308,8 @@ def main() -> int:
         result = download_checkpoint(brain)
     elif args.action == "status":
         result = checkpoint_status(brain)
+    elif args.action == "serve":
+        return serve_local(brain, args.port)
     else:
         engine = InklingOriginalLLM(brain)
         try:
