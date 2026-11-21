@@ -32,6 +32,10 @@ from .native_spnego import _check_target, new_native_spnego
 from .rdp_confirm_active import ConfirmActiveReceipt, build_confirm_active
 from .rdp_bitmap_update import RDPBitmapRectangle, parse_bitmap_update
 from .rdp_bitmap_compositor import RDPBitmapCompositor, RDPComposedFrame
+from .rdp_graphics_stream import (
+    GraphicsStreamPolicy, GraphicsStreamResult, RDPGraphicsStopped,
+    read_graphics_tpkt,
+)
 from .rdp_finalization import (
     RDPFinalizationError, RDPFinalizationStatus,
     client_finalization_packets, parse_server_finalization,
@@ -140,6 +144,8 @@ class PinnedRDPCredSSPChannel:
         self._bitmap_surface: RDPBitmapCompositor | None = None
         # TLS receives must never interleave between concurrent callers.
         self._bitmap_receive_lock = threading.Lock()
+        self._graphics_stop = threading.Event()
+        self._graphics_started = False
 
     def _check(self) -> None:
         if self._closed:
@@ -587,6 +593,117 @@ class PinnedRDPCredSSPChannel:
             except BaseException:
                 self.close()
                 raise
+
+    def stop_graphics_stream(self) -> None:
+        """Request a trusted, bounded stream stop; safe during TLS reads.
+
+        A stopping caller cannot grant input permissions. The receiver checks
+        the event at most 200 ms between socket read attempts and closes the
+        pinned TLS/GSS transport before it returns.
+        """
+        self._graphics_stop.set()
+
+    def _check_graphics_owner(self) -> None:
+        """Reauthorize without reusing the expired CredSSP handshake deadline."""
+        if self._closed:
+            raise RDPChannelError("RDP graphics channel closed")
+        if self._graphics_stop.is_set():
+            raise RDPGraphicsStopped("RDP graphics stream stopped")
+        try:
+            self._authorize_callback(self._ip, self._dns)
+        except BaseException:
+            self.close()
+            raise
+
+    def stream_bitmap_frames(
+        self,
+        on_frame: Callable[[RDPComposedFrame], None],
+        *,
+        policy: GraphicsStreamPolicy | None = None,
+    ) -> GraphicsStreamResult:
+        """Bounded, synchronous read-only graphics stream on SAME pinned TLS.
+
+        An owner-approved caller may run this method in its own thread and
+        invoke stop_graphics_stream() from another. No daemon is spawned.
+        Each packet gets a new idle deadline independent of the short
+        CredSSP handshake deadline; owner access is rechecked on EVERY TLS
+        fragment, before compositing and immediately before frame delivery.
+
+        Full RGB images are delivered only after complete pixel coverage.
+        Unsupported slow/fast-path messages close the session; this is not
+        a finished Windows interoperability layer or authorized RDP input.
+        """
+        if not callable(on_frame):
+            raise TypeError("Read-only RDP graphics requires a frame consumer")
+        if policy is None:
+            policy = GraphicsStreamPolicy()
+        if not isinstance(policy, GraphicsStreamPolicy):
+            raise TypeError("Invalid RDP graphics stream policy")
+        with self._bitmap_receive_lock:
+            if (self._closed or self._graphics_started
+                    or self._finalization_status is None
+                    or self._server_activation is None or self._mcs_joined is None
+                    or self._mcs_display is None or self._credssp is None
+                    or not self._credssp.credentials_delegated):
+                raise RDPChannelError("Graphics stream requires finalized owner-approved RDP")
+            self._graphics_started = True  # one stream per pinned TLS session
+            started = time.monotonic()
+            received = published = 0
+            last_published: float | None = None
+            reason = "update_limit"
+            try:
+                # One last check against the original handshake deadline
+                # before switching to separate, bounded post-handshake reads.
+                self._check()
+                self._bitmap_surface = RDPBitmapCompositor(
+                    self._mcs_display[0], self._mcs_display[1]
+                )
+                until = started + policy.max_duration
+                for _ in range(policy.max_updates):
+                    if self._graphics_stop.is_set():
+                        reason = "stopped"
+                        break
+                    if time.monotonic() >= until:
+                        reason = "duration_limit"
+                        break
+                    deadline = min(until, time.monotonic() + policy.idle_timeout)
+                    packet = read_graphics_tpkt(
+                        self._tls, deadline=deadline,
+                        reauthorize=self._check_graphics_owner,
+                        stopped=self._graphics_stop.is_set,
+                    )
+                    self._check_graphics_owner()
+                    patches = parse_bitmap_update(
+                        packet,
+                        share_id=self._server_activation.share_id,
+                        server_user_id=self._server_activation.server_mcs_user_id,
+                        io_channel_id=self._mcs_joined.io_channel_id,
+                        desktop_width=self._mcs_display[0],
+                        desktop_height=self._mcs_display[1],
+                    )
+                    self._check_graphics_owner()
+                    frame = self._bitmap_surface.apply(patches)
+                    received += 1
+                    self._check_graphics_owner()
+                    if frame is not None:
+                        now = time.monotonic()
+                        if (last_published is None
+                                or now - last_published >= policy.min_frame_interval):
+                            self._check_graphics_owner()
+                            on_frame(frame)
+                            published += 1
+                            last_published = time.monotonic()
+                return GraphicsStreamResult(
+                    received, published, reason, time.monotonic() - started
+                )
+            except RDPGraphicsStopped:
+                return GraphicsStreamResult(
+                    received, published, "stopped", time.monotonic() - started
+                )
+            finally:
+                # Even a successful max-updates exit ends this sensitive
+                # TLS/GSS session. A new connection needs fresh authorization.
+                self.close()
 
     def close(self) -> None:
         if self._closed:
