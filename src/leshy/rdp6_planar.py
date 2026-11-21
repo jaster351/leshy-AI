@@ -1,8 +1,8 @@
-"""Bounded RDP 6.0 lossless RGB(A) planar bitmap stream decoder.
+"""Bounded RDP 6.0 RGB(A) and AYCoCg planar bitmap stream decoder.
 
-MS-RDPEGDI 2.2.2.5.1 and 3.1.9.2.3. Only ARGB/RGB (CLL=0,
-CS=0) are supported; YCoCg/chroma subsampling are explicitly rejected.
-Neither this module nor its caller authorizes input or claims live RDP E2E.
+MS-RDPEGDI 2.2.2.5.1, 3.1.9.1.2-.4 and 3.1.9.2.3. Raw and RLE planes,
+CLL 0..7 and optional AYCoCg chroma subsampling are supported. No model
+input, login/session assertion, or keyboard/mouse transport is implemented.
 """
 from __future__ import annotations
 
@@ -57,9 +57,9 @@ def _decode_plane_rle(data: bytes, position: int, width: int, height: int) -> tu
 def decompress_rdp6_planar(data: bytes, width: int, height: int) -> bytes:
     """Decode a complete RDP6_BITMAP_STREAM as top-down, tightly packed RGB24.
 
-    Supports lossless RGB/ARGB planes, raw or RDP6 scanline RLE. If an
-    alpha plane is supplied, it must be opaque: blending and presentation of
-    translucent server pixels are not implemented. Unknown modes fail closed.
+    Supports lossless RGB/ARGB and lossy AYCoCg (CLL 1..7) with optional
+    2x2 chroma subsampling, raw or RDP6 scanline RLE. Alpha must be opaque:
+    compositing translucent pixels requires a separate overlay renderer.
     """
     if (type(width) is not int or type(height) is not int
             or not 1 <= width <= 4096 or not 1 <= height <= 4096
@@ -73,19 +73,28 @@ def decompress_rdp6_planar(data: bytes, width: int, height: int) -> bytes:
                                                header & 0xc0)
     if reserved:
         raise RDP6PlanarError("Reserved RDP6 format header bits")
-    if cll or chroma:
-        raise RDP6PlanarUnsupported("RDP6 YCoCg/color loss/subsampling is not implemented")
+    if chroma and not cll:
+        raise RDP6PlanarError("RDP6 RGB planes cannot use chroma subsampling")
     position = 1
     size = width * height
+    # Y and alpha are full-resolution; Co/Cg chroma planes optionally use
+    # ceil(width/2) by ceil(height/2), including odd-image edge pixels.
+    sub_width, sub_height = (width + 1) // 2, (height + 1) // 2
+    dimensions = ([(width, height)] if not no_alpha else []) + [
+        (width, height),
+        (sub_width, sub_height) if chroma else (width, height),
+        (sub_width, sub_height) if chroma else (width, height),
+    ]
     planes: list[bytes] = []
-    for _ in range(3 if no_alpha else 4):
+    for plane_width, plane_height in dimensions:
+        plane_size = plane_width * plane_height
         if use_rle:
-            plane, position = _decode_plane_rle(data, position, width, height)
+            plane, position = _decode_plane_rle(data, position, plane_width, plane_height)
         else:
-            if position + size > len(data):
+            if position + plane_size > len(data):
                 raise RDP6PlanarError("RDP6 raw color plane truncated")
-            plane = data[position:position + size]
-            position += size
+            plane = data[position:position + plane_size]
+            position += plane_size
         planes.append(plane)
     if use_rle:
         if position != len(data):
@@ -99,16 +108,41 @@ def decompress_rdp6_planar(data: bytes, width: int, height: int) -> bytes:
     else:
         red, green, blue = planes
     rgb = bytearray(size * 3)
-    # TS_BITMAP_DATA scanlines arrive bottom-first. For the top-down RGB
-    # consumer, flip only after every color plane has been validated.
+
+    def signed_chroma(value: int) -> int:
+        # The RDP6 chroma byte must be shifted BEFORE interpreting as int8.
+        # FreeRDP's reference: (int8_t)(value << (CLL - 1)).  The shift
+        # includes division by two from the inverse color transform.
+        shifted = (value << (cll - 1)) & 0xff
+        return shifted - 256 if shifted >= 128 else shifted
+
+    def clamp8(value: int) -> int:
+        return max(0, min(255, value))
+
+    # TS_BITMAP_DATA source scanlines arrive bottom-first. Flip only after
+    # fully validating all individual planes and their exact lengths.
     for y in range(height):
-        source_row = (height - 1 - y) * width
+        src_y = height - 1 - y
         for x in range(width):
-            source = source_row + x
+            source = src_y * width + x
             dest = (y * width + x) * 3
-            rgb[dest] = red[source]
-            rgb[dest + 1] = green[source]
-            rgb[dest + 2] = blue[source]
+            if cll:
+                chroma_index = ((src_y // 2) * sub_width + x // 2) if chroma else source
+                y_value = red[source]
+                co_value = signed_chroma(green[chroma_index])
+                cg_value = signed_chroma(blue[chroma_index])
+                t = y_value - cg_value
+                # MS-RDPEGDI YCoCg inverse in the 8-bit chroma format,
+                # consistent with FreeRDP prim_YCoCg.c. Note that source
+                # 24bpp B/R channel inversion is a separate server quirk:
+                # no metadata here establishes that it applies.
+                rgb[dest] = clamp8(t - co_value)
+                rgb[dest + 1] = clamp8(y_value + cg_value)
+                rgb[dest + 2] = clamp8(t + co_value)
+            else:
+                rgb[dest] = red[source]
+                rgb[dest + 1] = green[source]
+                rgb[dest + 2] = blue[source]
     return bytes(rgb)
 
 
