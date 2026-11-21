@@ -156,7 +156,13 @@ class LeshyApp:
             # even if LeshyBrain is on a different filesystem. No network GPU
             # or cross-node SSD path is inferred from cluster membership.
             moegguf = os.getenv("LESHY_INFERSSD_GGUF_PATH", "").strip()
-            local_model = Path(moegguf).expanduser() if moegguf else self.model_path
+            if moegguf:
+                local_model = Path(moegguf).expanduser()
+            else:
+                # Provisioned and locally validated GGUF is selected per node.
+                # Do not label the dense Qwen3 8B as an InferSSD MoE model.
+                from .moe_model_download import model_status, model_file
+                local_model = model_file(self.settings.brain_dir) if model_status(self.settings.brain_dir)["state"] == "downloaded" else self.model_path
             candidates.append((f"{engine_kind}-inferssd-local", InferSSDLocalLLM(self.settings.brain_dir, local_model)))
 
         if target_platform == "windows" and caps is not None and bool(getattr(caps, "gpu", False)):
