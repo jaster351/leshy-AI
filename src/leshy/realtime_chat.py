@@ -321,11 +321,11 @@ class RealtimeChatManager:
         )
         if tool_evidence:
             context.append(ChatMessage("system", tool_evidence))
-        memory_context = self.app._memory_context(owner_id)
+        search_query = (lookup_query or "").strip() or message
+        memory_context = self.app._memory_context(owner_id, query=search_query, capture_text=message)
         if memory_context:
             context.append(ChatMessage("system", "Долговременная память этого пользователя:\n" + memory_context))
 
-        search_query = lookup_query or message
         recall = getattr(self.app, "semantic_recall", None)
         if recall is not None:
             try:
