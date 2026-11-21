@@ -100,8 +100,66 @@
       await refresh(true);
     }
   }
+  function renderRdpLive(host, taskId) {
+    const panel = element('details', 'sa-setup');
+    panel.append(element('summary', '', 'RDP · наблюдение и Stop'));
+    const info = element('p', 'sa-remote-note',
+      'Показывается только действующая проверенная RDP-сессия. Экран и управление мышью пока не подключены к Web.');
+    const state = element('pre', 'sa-terminal-output', 'Откройте раздел, чтобы запросить состояние RDP.');
+    state.setAttribute('role', 'status');
+    const proposal = element('pre', 'sa-terminal-output');
+    const controls = element('div', 'sa-controls');
+    let busy = false;
+    const stop = makeButton('Остановить RDP-сессию', async () => {
+      if (busy || !window.confirm('Остановить только RDP-наблюдение этого задания?')) return;
+      busy = true;
+      stop.disabled = true;
+      try {
+        const result = await api('/v1/superagent/rdp/live/stop', {
+          method: 'POST', body: JSON.stringify({ticket_id: taskId, confirm: true})
+        });
+        state.textContent = result.stopped ? 'RDP-сессия остановлена.' : 'Активной RDP-сессии нет.';
+        proposal.textContent = '';
+      } catch (error) {
+        state.textContent = 'Остановку подтвердить не удалось: ' + error.message;
+      } finally { busy = false; await load(); }
+    }, true, 'sa-danger');
+    const refresh = makeButton('Обновить RDP', () => load());
+    async function load() {
+      if (busy) return;
+      busy = true;
+      refresh.disabled = true;
+      stop.disabled = true;
+      try {
+        const result = await api('/v1/superagent/rdp/live?ticket_id=' + encodeURIComponent(taskId));
+        if (!result.registered) {
+          state.textContent = 'RDP: нет активной сессии. Подключение не было подтверждено.';
+          proposal.textContent = '';
+        } else {
+          state.textContent = 'Узел: ' + String(result.node_id || 'неизвестен') + '\n' +
+            (result.graphics_active ? 'Нативный графический поток запущен.' : 'Ожидание нативного RDP-транспорта.') + '\n' +
+            'Изображение в Web: недоступно. Ввод мышью/клавиатурой: отключён.';
+          const p = result.proposal;
+          proposal.textContent = p
+            ? 'Предложение нейросети (НЕ выполнено): ' + String(p.kind) + '\n' +
+              String(p.reason || '') + (p.question ? '\nВопрос: ' + String(p.question) : '') +
+              (p.kind === 'propose_click' ? '\nКоординаты: ' + String(p.x) + ', ' + String(p.y) : '')
+            : 'Подтверждённых предложений по текущему кадру пока нет.';
+          stop.disabled = false;
+        }
+      } catch (error) {
+        state.textContent = 'RDP недоступен: ' + error.message;
+        proposal.textContent = '';
+      } finally { busy = false; refresh.disabled = false; }
+    }
+    controls.append(refresh, stop);
+    panel.append(info, state, proposal, controls);
+    panel.addEventListener('toggle', () => { if (panel.open) load(); });
+    host.append(panel);
+  }
   function renderDetails(host, detail, taskId) {
     host.replaceChildren();
+    if (detail.state === 'working' && !detail.archived) renderRdpLive(host, taskId);
     const dialogue = element('div', 'sa-dialog');
     (detail.conversation || []).forEach(message => dialogue.append(element('div', 'sa-message sa-user', message.text)));
     if (detail.state === 'waiting' && detail.attention) dialogue.append(element('div', 'sa-message sa-agent', detail.attention));

@@ -215,6 +215,32 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
                         "error": "Не удалось прочитать состояние SSH-плана"
                     })
+            if parsed.path == "/v1/superagent/rdp/live":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                policy, actor = context
+                service = getattr(app, "superagent", None)
+                if service is None or not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                        "error": "RDP-наблюдение не запущено или удалённое управление выключено"
+                    })
+                try:
+                    query = parse.parse_qs(parsed.query)
+                    if set(query) != {"ticket_id"} or len(query["ticket_id"]) != 1:
+                        raise ValueError("Выберите одно задание SuperAgent")
+                    return self._json(HTTPStatus.OK, service.rdp_live_status(
+                        actor, query["ticket_id"][0]
+                    ))
+                except (ValueError, KeyError, PermissionError):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Задание RDP не найдено или недостаточно прав"
+                    })
+                except Exception as exc:
+                    problem("superagent_rdp_live_status_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось получить состояние RDP"
+                    })
             if parsed.path == "/v1/superagent/remote-access":
                 context = self._remote_context()
                 if context is None:
@@ -276,6 +302,45 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_set_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить настройку"})
+            if path == "/v1/superagent/rdp/live/stop":
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Недопустимый источник RDP-запроса"
+                    })
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(self.headers.get("Host") or "").lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Чужой источник RDP-запроса"
+                    })
+                if not str(self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется JSON"})
+                service = getattr(app, "superagent", None)
+                if service is None:
+                    return self._json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                        "error": "SuperAgent не запущен"
+                    })
+                try:
+                    payload = self._body()
+                    if (not isinstance(payload, dict)
+                            or set(payload) != {"ticket_id", "confirm"}
+                            or payload.get("confirm") is not True):
+                        raise ValueError("Требуется явное подтверждение Stop")
+                    _policy, actor = context
+                    return self._json(HTTPStatus.OK, service.rdp_live_stop(
+                        actor, payload["ticket_id"]
+                    ))
+                except (ValueError, KeyError, PermissionError):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Нет прав на остановку RDP-сессии"
+                    })
+                except Exception as exc:
+                    problem("superagent_rdp_live_stop_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось остановить RDP-сессию"
+                    })
             if path in {
                 "/v1/superagent/ssh/plan/jobs/cancel",
                 "/v1/superagent/ssh/plan/jobs/review",
