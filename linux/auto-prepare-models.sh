@@ -26,7 +26,13 @@ if [[ -f "$STATE" ]] && [[ "$(cat "$STATE")" == failed* ]]; then
   if [[ -z "$since" ]]; then echo "BACKOFF_ACTIVE"; exit 0; fi
 fi
 status="complete"
-if ! command -v inferssd >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/inferssd" ]]; then
+# Each Linux node installs the upstream engine on its own local NVMe next to
+# LeshyBrain. Do not require administrator access or edit the user's shell.
+export INFERSSD_HOME="${INFERSSD_HOME:-$BRAIN/runtime/inferssd}"
+export INFERSSD_BIN_DIR="${INFERSSD_BIN_DIR:-$INFERSSD_HOME/bin}"
+if ! command -v inferssd >/dev/null 2>&1 &&
+   [[ ! -x "$HOME/.local/bin/inferssd" ]] &&
+   [[ ! -x "$INFERSSD_BIN_DIR/inferssd" ]]; then
   if command -v curl >/dev/null 2>&1; then
     installer="$BRAIN/runtime/model-provision/inferssd-install.sh"
     if curl -fLsS --max-time 120 \
@@ -117,6 +123,16 @@ else
   fi
 fi
 if [[ "$status" == complete ]]; then status=complete-v2; fi
+# Write the same read-only report as Windows, even when model downloads
+# are temporarily unavailable. No model is launched by this report.
+if [[ -x "$VENV/bin/python" ]]; then
+  export PYTHONPATH="$ROOT/src"
+  export LESHY_VERSION_FILE="$ROOT/VERSION"
+  "$VENV/bin/python" -m leshy.model_storage_health \
+      --brain-dir "$BRAIN" \
+      --output "$BRAIN/runtime/model-provision/storage-health.json" ||
+      echo "MODEL_STORAGE_HEALTH_UNAVAILABLE"
+fi
 echo "$status $(date -Is)" > "$STATE"
 printf 'AUTO_MODEL_PROVISION_LINUX finished=%s status=%s\n' "$(date -Is)" "$status"
 exit 0
