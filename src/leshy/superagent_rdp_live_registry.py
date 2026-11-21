@@ -62,7 +62,7 @@ class RDPLiveRegistry:
     @staticmethod
     def _disconnected() -> dict[str, Any]:
         return {
-            "connected": False, "graphics_active": False,
+            "registered": False, "connected": False, "graphics_active": False,
             "screen_available": False, "input_enabled": False,
             "reasoning_available": False, "proposal": None,
             "e2e_verified": False, "status": "no_live_session",
@@ -83,7 +83,8 @@ class RDPLiveRegistry:
             self.stop_ticket(actor.owner_id, ticket_id)
             return self._disconnected()
         view: dict[str, Any] = {
-            "connected": True,
+            "registered": True,
+            "connected": snapshot["graphics_active"] is True,
             "graphics_active": snapshot["graphics_active"] is True,
             "screen_available": False,  # No verified frame transfer to Web.
             "input_enabled": False,

@@ -31,3 +31,8 @@ Still outstanding: trusted in-process startup of a real pinned and
 finalized Windows RDP session, Web image transfer gated by actual framebuffer
 availability, owner-approved native input, full compatibility testing and
 merging all stacked PRs. This draft has no confirmed Windows RDP E2E.
+
+Registered session != connected RDP: status uses registered=true for an
+owner-bound in-process control record and connected=true only while the
+native graphics channel is currently active. The Web panel must not
+equate a registered ticket to a working desktop.

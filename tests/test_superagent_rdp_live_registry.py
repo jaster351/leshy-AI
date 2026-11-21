@@ -68,7 +68,7 @@ def test_no_live_session_does_not_fake_a_connected_rdp_desktop():
     service = Service()
     controls = RDPLiveRegistry(service)
     record = controls.status(actor(), "SA-1")
-    assert record["connected"] is False
+    assert record["registered"] is False and record["connected"] is False
     assert not record["screen_available"] and not record["input_enabled"]
     assert record["proposal"] is None
 
@@ -80,7 +80,7 @@ def test_register_live_session_reports_read_only_state():
     session = Session(user)
     controls.register(user, "SA-1", session)
     record = controls.status(user, "SA-1")
-    assert record["connected"] is True and record["graphics_active"] is True
+    assert record["registered"] is True and record["connected"] is True and record["graphics_active"] is True
     assert record["node_id"] == "10.0.0.5"
     assert record["screen_available"] is False and record["e2e_verified"] is False
     assert record["input_enabled"] is False
@@ -190,3 +190,20 @@ def test_real_factory_does_not_create_unverified_view_on_registration_failure(mo
             observed_fingerprint="pin",
         )
     assert new.stopped
+
+
+def test_registered_but_no_transport_does_not_claim_a_live_rdp_connection():
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    session.snapshot = lambda: {
+        "graphics_active": False, "node_id": "10.0.0.5",
+        "ticket_id": "SA-1", "stopped": False,
+    }
+    controls.register(user, "SA-1", session)
+    data = controls.status(user, "SA-1")
+    assert data["registered"] is True
+    assert data["connected"] is False
+    assert data["screen_available"] is False
+    assert data["status"] == "waiting_for_native_transport"
+    assert controls.stop(user, "SA-1")["stopped"] is True

@@ -132,7 +132,7 @@
       stop.disabled = true;
       try {
         const result = await api('/v1/superagent/rdp/live?ticket_id=' + encodeURIComponent(taskId));
-        if (!result.connected) {
+        if (!result.registered) {
           state.textContent = 'RDP: нет активной сессии. Подключение не было подтверждено.';
           proposal.textContent = '';
         } else {
