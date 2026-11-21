@@ -77,6 +77,8 @@ class SuperAgentRDPCognitiveSession:
         self._inbox = RDPObservationInbox()
         self._channel: PinnedRDPCredSSPChannel | None = None
         self._graphics_started = False
+        self._latest_frame_update = 0
+        self._last_proposal: RDPReadOnlyProposal | None = None
 
         # A currently working, owner-scoped SuperAgent task is mandatory.
         self._policy._check_actor(actor)
@@ -115,8 +117,11 @@ class SuperAgentRDPCognitiveSession:
     def accept_observation(self, observation: RDPVisualObservation) -> bool:
         """In-process producer method; no LLM inference in the callback."""
         self.reauthorize()
-        if not self._inbox.offer(observation):
-            raise PermissionError("RDP cognition is stopped")
+        with self._lock:
+            if not self._inbox.offer(observation):
+                raise PermissionError("RDP cognition is stopped")
+            self._latest_frame_update = observation.update_count
+            self._last_proposal = None
         return True
 
     def reason_once(self) -> RDPReadOnlyProposal | None:
@@ -127,7 +132,18 @@ class SuperAgentRDPCognitiveSession:
             reauthorize=self.reauthorize,
         )
         self.reauthorize()
+        with self._lock:
+            if (self._cancel.is_set() or result is None
+                    or result.update_count != self._latest_frame_update):
+                return None
+            self._last_proposal = result
         return result
+
+    def last_proposal(self) -> RDPReadOnlyProposal | None:
+        """Read-only review, revocable by Stop or a newer observation."""
+        self.reauthorize()
+        with self._lock:
+            return self._last_proposal
 
     def receive_graphics(
         self,
@@ -170,6 +186,7 @@ class SuperAgentRDPCognitiveSession:
         self._cancel.set()
         self._inbox.stop()
         with self._lock:
+            self._last_proposal = None
             channel = self._channel
         if channel is not None:
             channel.stop_graphics_stream()
@@ -185,6 +202,7 @@ class SuperAgentRDPCognitiveSession:
             "pending": state["pending"],
             "dropped": state["dropped"],
             "graphics_started": self._graphics_started,
+            "graphics_active": self._channel is not None,
             "input_enabled": False,
             "windows_rdp_e2e_verified": False,
         }

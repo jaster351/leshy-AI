@@ -291,6 +291,9 @@ class SuperAgentService:
 
     def stop(self) -> None:
         self._stop.set()
+        registry = getattr(self, "_rdp_live_registry", None)
+        if registry is not None:
+            registry.stop_all()
         self._wake.set()
         thread = self._thread
         if thread and thread.is_alive() and thread is not threading.current_thread():
@@ -362,16 +365,33 @@ class SuperAgentService:
         item["steps"] = self._journal.list_steps(str(item["id"]), limit=8)
         return item
 
+    def _rdp_controls(self):
+        from .superagent_rdp_live_registry import RDPLiveRegistry
+        with self._llm_lock:
+            registry = getattr(self, "_rdp_live_registry", None)
+            if registry is None:
+                registry = RDPLiveRegistry(self)
+                self._rdp_live_registry = registry
+            return registry
+
     def create_rdp_cognitive_session(
         self, ticket_id: str, *, actor, node_id: str,
         observed_fingerprint: str,
     ):
         """Internal owner-scoped read-only RDP cognition. No public endpoint."""
         from .superagent_rdp_cognitive_runtime import SuperAgentRDPCognitiveSession
-        return SuperAgentRDPCognitiveSession(
+        session = SuperAgentRDPCognitiveSession(
             self, ticket_id=ticket_id, actor=actor, node_id=node_id,
             observed_fingerprint=observed_fingerprint,
         )
+        self._rdp_controls().register(actor, ticket_id, session)
+        return session
+
+    def rdp_live_status(self, actor, ticket_id: str) -> dict[str, Any]:
+        return self._rdp_controls().status(actor, ticket_id)
+
+    def rdp_live_stop(self, actor, ticket_id: str) -> dict[str, Any]:
+        return self._rdp_controls().stop(actor, ticket_id)
 
     def list(self, owner_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
         with self.storage.connection() as conn:
@@ -398,6 +418,9 @@ class SuperAgentService:
             self.plans.control(ticket_id, owner_id, "cancel")
         except KeyError:
             pass  # Legacy tickets may not have a durable plan.
+        registry = getattr(self, "_rdp_live_registry", None)
+        if registry is not None:
+            registry.stop_ticket(owner_id, ticket_id)
         event("superagent_ticket_stopped", ticket_id=ticket_id)
         return self.get(ticket_id, owner_id=owner_id)
 
