@@ -64,7 +64,12 @@ function Has-OriginalCheckpoint {
     } catch { return $false }
 }
 function Has-InferSSD {
-    if ($env:LOCALAPPDATA -and (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'inferssd\current\bin\inferssd.exe') -PathType Leaf)) { return $true }
+    $homes = @((Join-Path $brain 'runtime\inferssd'))
+    if ($env:INFERSSD_HOME) { $homes += $env:INFERSSD_HOME }
+    if ($env:LOCALAPPDATA) { $homes += (Join-Path $env:LOCALAPPDATA 'inferssd') }
+    foreach ($home in $homes) {
+        if (Test-Path -LiteralPath (Join-Path $home 'current\bin\inferssd.exe') -PathType Leaf) { return $true }
+    }
     return [bool](Get-Command 'inferssd.exe' -ErrorAction SilentlyContinue)
 }
 try {
@@ -88,6 +93,10 @@ try {
             Invoke-WebRequest -Uri $uri -UseBasicParsing -OutFile $installer -TimeoutSec 120
             if ((Get-Item -LiteralPath $installer).Length -lt 500) { throw 'Upstream installer response too short' }
             $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            # Persist the official engine beside Leshy.exe. Environment
+            # overrides are scoped to this task, never user-wide.
+            $env:INFERSSD_HOME = Join-Path $brain 'runtime\inferssd'
+            $env:INFERSSD_BIN_DIR = Join-Path $env:INFERSSD_HOME 'bin'
             & $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installer
             if ($LASTEXITCODE -ne 0) { throw ('Official InferSSD installer returned '+$LASTEXITCODE) }
             if (-not (Has-InferSSD)) { throw 'InferSSD executable not found after installation' }
