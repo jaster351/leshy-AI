@@ -26,7 +26,13 @@ if [[ -f "$STATE" ]] && [[ "$(cat "$STATE")" == failed* ]]; then
   if [[ -z "$since" ]]; then echo "BACKOFF_ACTIVE"; exit 0; fi
 fi
 status="complete"
-if ! command -v inferssd >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/inferssd" ]]; then
+# Each Linux node installs the upstream engine on its own local NVMe next to
+# LeshyBrain. Do not require administrator access or edit the user's shell.
+export INFERSSD_HOME="${INFERSSD_HOME:-$BRAIN/runtime/inferssd}"
+export INFERSSD_BIN_DIR="${INFERSSD_BIN_DIR:-$INFERSSD_HOME/bin}"
+if ! command -v inferssd >/dev/null 2>&1 &&
+   [[ ! -x "$HOME/.local/bin/inferssd" ]] &&
+   [[ ! -x "$INFERSSD_BIN_DIR/inferssd" ]]; then
   if command -v curl >/dev/null 2>&1; then
     installer="$BRAIN/runtime/model-provision/inferssd-install.sh"
     if curl -fLsS --max-time 120 \
