@@ -48,13 +48,15 @@ class InklingOriginalSidecarLLM:
         self._port: int | None = None
         self._log = None
 
-    @staticmethod
-    def _python_command():
+    def _python_command(self):
         override = os.environ.get("LESHY_INKLING_PYTHON", "").strip()
         if override:
             if not Path(override).is_file():
                 raise LLMUnavailable(f"Python для оригинала не найден: {override}")
             return [override]
+        isolated = self.brain_dir / "runtime" / "inkling-original-venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if isolated.is_file():
+            return [str(isolated.resolve())]
         if getattr(sys, "frozen", False) and os.name == "nt":
             launcher = shutil.which("py")
             if launcher:

@@ -6,50 +6,68 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+
 if (-not $BrainDir) {
   $packaged = Join-Path $repo 'dist\Leshy\LeshyBrain'
   $BrainDir = if (Test-Path -LiteralPath $packaged -PathType Container) { $packaged } else { Join-Path $repo 'LeshyBrain' }
 }
 New-Item -ItemType Directory -Force -Path $BrainDir | Out-Null
-$BrainDir = (Resolve-Path $BrainDir).Path
+$BrainDir = (Resolve-Path -LiteralPath $BrainDir).Path
 $env:LESHY_BRAIN_DIR = $BrainDir
-$env:PYTHONPATH = (Join-Path $repo 'src') + [IO.Path]::PathSeparator + $env:PYTHONPATH
 
-# Keep all model assets alongside the installed Leshy.exe in its persistent LeshyBrain.
-# Overwrite legacy user-level external SSD paths so the standalone Python sidecar and
-# the packaged Leshy process resolve to the same original checkpoint.
+# Install the HF downloader in its own Python environment. Never upgrade global
+# click/huggingface_hub: browser-use in the main Leshy installation pins click.
+$venv = Join-Path $BrainDir 'runtime\inkling-original-venv'
+$python = Join-Path $venv 'Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+  Write-Host ('Creating isolated Inkling Python environment: ' + $venv)
+  & py -3.11 -m venv $venv
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $python -PathType Leaf)) {
+    throw 'Cannot create isolated Inkling Python 3.11 environment'
+  }
+}
+
+# Original model and disk offload are stored next to the installed Leshy.exe.
 $env:LESHY_INKLING_MODEL_DIR = Join-Path $BrainDir 'models\Inkling-2-Mini-original'
 $env:LESHY_SSD_OFFLOAD_DIR = Join-Path $BrainDir 'offload\Inkling-2-Mini'
 [Environment]::SetEnvironmentVariable('LESHY_INKLING_MODEL_DIR', $env:LESHY_INKLING_MODEL_DIR, 'User')
 [Environment]::SetEnvironmentVariable('LESHY_SSD_OFFLOAD_DIR', $env:LESHY_SSD_OFFLOAD_DIR, 'User')
+# The frozen Leshy sidecar will reuse exactly this isolated environment.
+$env:LESHY_INKLING_PYTHON = $python
+[Environment]::SetEnvironmentVariable('LESHY_INKLING_PYTHON', $python, 'User')
+
 Write-Host ('Original model directory: ' + $env:LESHY_INKLING_MODEL_DIR)
 Write-Host ('SSD offload directory: ' + $env:LESHY_SSD_OFFLOAD_DIR)
+Write-Host ('Isolated Python: ' + $python)
 
-& py -3.11 -m pip install --upgrade 'huggingface_hub>=0.36,<2' 'hf_xet>=1.1,<2'
-if ($LASTEXITCODE -ne 0) { throw 'Hugging Face dependencies installation failed' }
-# The frozen Windows Leshy.exe uses this isolated Python runtime for original weights.
-& py -3.11 -m pip install --no-deps -e $repo
-if ($LASTEXITCODE -ne 0) { throw 'Could not install the Leshy original checkpoint sidecar' }
+& $python -m pip install 'huggingface_hub>=1.31,<2' 'hf_xet>=1.8,<2'
+if ($LASTEXITCODE -ne 0) { throw 'Hugging Face dependencies installation failed in isolated Python' }
+& $python -m pip install --no-deps -e $repo
+if ($LASTEXITCODE -ne 0) { throw 'Could not install Leshy Python sidecar into isolated environment' }
 
 if ($InstallInference) {
-  & py -3.11 -m pip install --upgrade 'transformers>=5' 'accelerate>=1' 'torch'
+  & $python -m pip install 'transformers>=5,<6' 'accelerate>=1,<2' 'torch>=2.5'
   if ($LASTEXITCODE -ne 0) { throw 'Optional Transformers inference dependencies installation failed' }
 }
+
+# The Python downloader tries DIRECT first and falls back to previously configured
+# cyberhost HTTP CONNECT proxies only for external HF model downloads.
+# Set LESHY_HF_PROXY_URL to override the first proxy candidate.
 if ($Download) {
-  & py -3.11 -m leshy.inkling_original download --brain-dir $BrainDir
+  & $python -m leshy.inkling_original download --brain-dir $BrainDir
 } else {
-  & py -3.11 -m leshy.inkling_original status --brain-dir $BrainDir
+  & $python -m leshy.inkling_original status --brain-dir $BrainDir
 }
-if ($LASTEXITCODE -ne 0) { throw 'Inkling original checkpoint preparation failed' }
+if ($LASTEXITCODE -ne 0) { throw 'Inkling original checkpoint preparation failed (see download errors above)' }
 
 if ($Activate) {
-  $stateText = & py -3.11 -m leshy.inkling_original status --brain-dir $BrainDir
+  $stateText = & $python -m leshy.inkling_original status --brain-dir $BrainDir
   if ($LASTEXITCODE -ne 0) { throw 'Cannot verify checkpoint before activation' }
   $state = ($stateText | Out-String | ConvertFrom-Json)
   if ($state.state -ne 'downloaded') { throw 'Cannot activate original Inkling: checkpoint download is incomplete' }
   [Environment]::SetEnvironmentVariable('LESHY_LLM_BACKEND', 'inkling-original', 'User')
-  Write-Host 'Opt-in backend configured for the next Leshy launch. Existing GGUF fallback is preserved.'
-  Write-Warning 'Activation alone does not guarantee the original model runs on the RTX 3070 Laptop.'
+  Write-Host 'Original backend configured for next launch. Existing GGUF fallback remains available.'
+  Write-Warning 'Activation does not guarantee original NVFP4/MXFP8 inference on RTX 3070 Laptop.'
 } else {
-  Write-Host 'Existing active model not changed.'
+  Write-Host 'Current active Qwen and its reasoning settings have not been changed.'
 }
