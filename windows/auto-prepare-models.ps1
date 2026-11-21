@@ -228,6 +228,20 @@ try {
             Write-Warning ('INFERSSD_MOE_DOWNLOAD_FAILED: '+$_.Exception.Message)
         }
     }
+    # Publish a copyable, read-only health snapshot even when optional
+    # downloads fail. No large model is loaded and Qwen is not touched.
+    try {
+        if (Test-Path -LiteralPath $venvPy -PathType Leaf) {
+            $env:PYTHONPATH = Join-Path $repo 'src'
+            $env:LESHY_VERSION_FILE = Join-Path $repo 'VERSION'
+            $healthFile = Join-Path $root 'storage-health.json'
+            & $venvPy -m leshy.model_storage_health --brain-dir $brain --output $healthFile
+            if ($LASTEXITCODE -ne 0) { throw 'Local model health reporter failed' }
+            Write-Host ('MODEL_STORAGE_HEALTH: ' + $healthFile)
+        }
+    } catch {
+        Write-Warning ('MODEL_STORAGE_HEALTH_FAILED: ' + $_.Exception.Message)
+    }
     Write-Host 'AUTO_MODEL_PREPARE_END'
 } catch {
     Write-Warning ('AUTO_MODEL_PREPARE_ERROR: '+$_.Exception.Message)
