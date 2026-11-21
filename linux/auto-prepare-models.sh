@@ -65,6 +65,8 @@ if [[ ! -f "$MODEL/.leshy-original.json" ]]; then
       export LESHY_BRAIN_DIR="$BRAIN"
       export LESHY_INKLING_MODEL_DIR="$MODEL"
       export LESHY_SSD_OFFLOAD_DIR="$OFFLOAD"
+      export HF_HOME="$BRAIN/cache/huggingface"
+      mkdir -p "$HF_HOME"
       export PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=3
       "$VENV/bin/python" -m pip install 'huggingface_hub>=1.31,<2' 'hf_xet>=1.8,<2' &&
         "$VENV/bin/python" -m leshy.inkling_original download --brain-dir "$BRAIN" || status=failed
