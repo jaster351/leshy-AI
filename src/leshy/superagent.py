@@ -28,6 +28,8 @@ from .diagnostics import event, problem
 from .llm import ChatMessage
 from .storage import utcnow
 
+_RDP_REGISTRY_INIT_LOCK = threading.Lock()
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS superagent_tickets(
@@ -367,7 +369,9 @@ class SuperAgentService:
 
     def _rdp_controls(self):
         from .superagent_rdp_live_registry import RDPLiveRegistry
-        with self._llm_lock:
+        # Never hold the LLM inference mutex while opening a UI control view.
+        # The global init mutex also supports legacy/test service instances.
+        with _RDP_REGISTRY_INIT_LOCK:
             registry = getattr(self, "_rdp_live_registry", None)
             if registry is None:
                 registry = RDPLiveRegistry(self)

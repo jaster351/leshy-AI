@@ -136,14 +136,14 @@
           state.textContent = 'RDP: нет активной сессии. Подключение не было подтверждено.';
           proposal.textContent = '';
         } else {
-          state.textContent = 'Узел: ' + String(result.node_id || 'неизвестен') + '\\n' +
-            (result.graphics_active ? 'Нативный графический поток запущен.' : 'Ожидание нативного RDP-транспорта.') + '\\n' +
+          state.textContent = 'Узел: ' + String(result.node_id || 'неизвестен') + '\n' +
+            (result.graphics_active ? 'Нативный графический поток запущен.' : 'Ожидание нативного RDP-транспорта.') + '\n' +
             'Изображение в Web: недоступно. Ввод мышью/клавиатурой: отключён.';
           const p = result.proposal;
           proposal.textContent = p
-            ? 'Предложение нейросети (НЕ выполнено): ' + String(p.kind) + '\\n' +
-              String(p.reason || '') + (p.question ? '\\nВопрос: ' + String(p.question) : '') +
-              (p.kind === 'propose_click' ? '\\nКоординаты: ' + String(p.x) + ', ' + String(p.y) : '')
+            ? 'Предложение нейросети (НЕ выполнено): ' + String(p.kind) + '\n' +
+              String(p.reason || '') + (p.question ? '\nВопрос: ' + String(p.question) : '') +
+              (p.kind === 'propose_click' ? '\nКоординаты: ' + String(p.x) + ', ' + String(p.y) : '')
             : 'Подтверждённых предложений по текущему кадру пока нет.';
           stop.disabled = false;
         }

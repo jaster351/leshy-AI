@@ -150,3 +150,16 @@ def test_web_route_contract_no_start_and_strict_stop():
     assert "Изображение в Web: недоступно" in panel
     assert "НЕ выполнено" in panel
     assert "window.confirm(" in panel
+
+
+def test_superagent_registry_initialization_does_not_require_llm_lock(monkeypatch):
+    from leshy.superagent import SuperAgentService
+    import leshy.superagent_rdp_live_registry as controls
+
+    # The internal factory is also used by small service mocks without the
+    # inference lock: creating UI controls must never acquire the model lock.
+    service = Service()
+    first = SuperAgentService._rdp_controls(service)
+    second = SuperAgentService._rdp_controls(service)
+    assert isinstance(first, controls.RDPLiveRegistry)
+    assert first is second
