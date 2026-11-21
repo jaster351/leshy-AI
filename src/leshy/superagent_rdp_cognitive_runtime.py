@@ -77,6 +77,8 @@ class SuperAgentRDPCognitiveSession:
         self._inbox = RDPObservationInbox()
         self._channel: PinnedRDPCredSSPChannel | None = None
         self._graphics_started = False
+        self._latest_frame_update = 0
+        self._last_proposal: RDPReadOnlyProposal | None = None
 
         # A currently working, owner-scoped SuperAgent task is mandatory.
         self._policy._check_actor(actor)
@@ -100,6 +102,14 @@ class SuperAgentRDPCognitiveSession:
         """Live authenticated session + node grant + ticket Stop at each call."""
         if self._cancel.is_set():
             raise PermissionError("RDP cognition stopped")
+        # Runtime remote-admin kill switch is independent of the node grant.
+        # Real SuperAgent instances always provide storage. Legacy isolated
+        # service mocks may not have one and never expose a public endpoint.
+        storage = getattr(self._service, "storage", None)
+        if storage is not None:
+            from .module_settings import module_enabled
+            if not module_enabled(storage, "remote-admin"):
+                raise PermissionError("Remote administration disabled")
         stop = getattr(self._service, "_stop", None)
         if isinstance(stop, threading.Event) and stop.is_set():
             raise PermissionError("SuperAgent worker stopped")
@@ -115,8 +125,11 @@ class SuperAgentRDPCognitiveSession:
     def accept_observation(self, observation: RDPVisualObservation) -> bool:
         """In-process producer method; no LLM inference in the callback."""
         self.reauthorize()
-        if not self._inbox.offer(observation):
-            raise PermissionError("RDP cognition is stopped")
+        with self._lock:
+            if not self._inbox.offer(observation):
+                raise PermissionError("RDP cognition is stopped")
+            self._latest_frame_update = observation.update_count
+            self._last_proposal = None
         return True
 
     def reason_once(self) -> RDPReadOnlyProposal | None:
@@ -127,7 +140,18 @@ class SuperAgentRDPCognitiveSession:
             reauthorize=self.reauthorize,
         )
         self.reauthorize()
+        with self._lock:
+            if (self._cancel.is_set() or result is None
+                    or result.update_count != self._latest_frame_update):
+                return None
+            self._last_proposal = result
         return result
+
+    def last_proposal(self) -> RDPReadOnlyProposal | None:
+        """Read-only review, revocable by Stop or a newer observation."""
+        self.reauthorize()
+        with self._lock:
+            return self._last_proposal
 
     def receive_graphics(
         self,
@@ -170,6 +194,7 @@ class SuperAgentRDPCognitiveSession:
         self._cancel.set()
         self._inbox.stop()
         with self._lock:
+            self._last_proposal = None
             channel = self._channel
         if channel is not None:
             channel.stop_graphics_stream()
@@ -185,6 +210,7 @@ class SuperAgentRDPCognitiveSession:
             "pending": state["pending"],
             "dropped": state["dropped"],
             "graphics_started": self._graphics_started,
+            "graphics_active": self._channel is not None,
             "input_enabled": False,
             "windows_rdp_e2e_verified": False,
         }

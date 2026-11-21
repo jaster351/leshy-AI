@@ -106,6 +106,13 @@ MODULE_SETTINGS: tuple[ModuleSettingDefinition, ...] = (
         title="SuperAgent",
         description="Автономные фоновые задания по схеме Trigger → Mandate → Ticket → Assignment → Report: состояние переживает перезапуск, временные ошибки повторяются, а к человеку возвращаются только результат или один блокирующий вопрос.",
     ),
+    ModuleSettingDefinition(
+        name="remote-admin",
+        title="Удалённое управление SSH/RDP",
+        description="Разрешает подключение к ранее зарегистрированным компьютерам через SuperAgent при действующих правах владельца. Отдельные действия требуют подтверждения. По умолчанию выключено.",
+        default_enabled=False,
+        dependencies=("superagent",),
+    ),
 )
 
 
