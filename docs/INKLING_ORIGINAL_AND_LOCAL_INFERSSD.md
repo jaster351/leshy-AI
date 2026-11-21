@@ -37,7 +37,7 @@ $env:PYTHONPATH = (Join-Path (Get-Location) 'src')
 py -3.11 -m leshy.inkling_original ask --question 'Как Вас зовут?'
 ```
 
-Проверка не гарантирует успешное размещение mixed NVFP4/MXFP8 оригинала на 8 ГБ VRAM; при нехватке памяти или неподдерживаемом формате должна выводиться реальная ошибка. Только после успешного вывода можно пробовать LESHY_LLM_BACKEND=inkling-original. В сборке PyInstaller дополнительные torch/transformers не включены: до интеграции внешнего Python-процесса использовать данный backend в сборке нельзя. Исходная ветка GGUF не меняется.
+Проверка не гарантирует успешное размещение mixed NVFP4/MXFP8 оригинала на 8 ГБ VRAM; при нехватке памяти или неподдерживаемом формате должна выводиться реальная ошибка. После успешного вывода можно включить экспериментальный backend: `.\\windows\\Prepare-InklingOriginal.ps1 -SsdRoot 'D:\\AI-SSD' -Activate` (путь записан здесь с двойными обратными слешами для Markdown, в PowerShell вводить по одному). Windows-сборка запускает отдельный локальный Python sidecar: torch/transformers не требуется в самом PyInstaller EXE. Препаратор ставит только Python-модуль Лешего в внешний Python 3.11; зависимости ML устанавливаются флагом -InstallInference. При отказе оригинала fallback GGUF остаётся. Работа на RTX 3070 не подтверждена.
 
 ## 3. Реальный InferSSD для поддерживаемых GGUF MoE
 
