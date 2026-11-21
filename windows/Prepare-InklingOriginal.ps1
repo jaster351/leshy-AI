@@ -29,6 +29,9 @@ Write-Host ('SSD offload directory: ' + $env:LESHY_SSD_OFFLOAD_DIR)
 
 & py -3.11 -m pip install --upgrade 'huggingface_hub>=0.36,<2' 'hf_xet>=1.1,<2'
 if ($LASTEXITCODE -ne 0) { throw 'Hugging Face dependencies installation failed' }
+# The frozen Windows Leshy.exe uses this isolated Python runtime for original weights.
+& py -3.11 -m pip install --no-deps -e $repo
+if ($LASTEXITCODE -ne 0) { throw 'Could not install the Leshy original checkpoint sidecar' }
 
 if ($InstallInference) {
   & py -3.11 -m pip install --upgrade 'transformers>=5' 'accelerate>=1' 'torch'
@@ -42,6 +45,10 @@ if ($Download) {
 if ($LASTEXITCODE -ne 0) { throw 'Inkling original checkpoint preparation failed' }
 
 if ($Activate) {
+  $stateText = & py -3.11 -m leshy.inkling_original status --brain-dir $BrainDir
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot verify checkpoint before activation' }
+  $state = ($stateText | Out-String | ConvertFrom-Json)
+  if ($state.state -ne 'downloaded') { throw 'Cannot activate original Inkling: checkpoint download is incomplete' }
   [Environment]::SetEnvironmentVariable('LESHY_LLM_BACKEND', 'inkling-original', 'User')
   Write-Host 'Opt-in backend configured for the next Leshy launch. Existing GGUF fallback is preserved.'
   Write-Warning 'Activation alone does not guarantee the original model runs on the RTX 3070 Laptop.'
