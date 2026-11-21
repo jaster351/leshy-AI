@@ -123,6 +123,16 @@ else
   fi
 fi
 if [[ "$status" == complete ]]; then status=complete-v2; fi
+# Write the same read-only report as Windows, even when model downloads
+# are temporarily unavailable. No model is launched by this report.
+if [[ -x "$VENV/bin/python" ]]; then
+  export PYTHONPATH="$ROOT/src"
+  export LESHY_VERSION_FILE="$ROOT/VERSION"
+  "$VENV/bin/python" -m leshy.model_storage_health \
+      --brain-dir "$BRAIN" \
+      --output "$BRAIN/runtime/model-provision/storage-health.json" ||
+      echo "MODEL_STORAGE_HEALTH_UNAVAILABLE"
+fi
 echo "$status $(date -Is)" > "$STATE"
 printf 'AUTO_MODEL_PROVISION_LINUX finished=%s status=%s\n' "$(date -Is)" "$status"
 exit 0
