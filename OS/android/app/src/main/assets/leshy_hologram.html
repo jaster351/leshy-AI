@@ -1,0 +1,60 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><style>html,body,canvas{margin:0;width:100%;height:100%;display:block;background:#000;overflow:hidden}#err{color:#fff;position:absolute;top:10px;left:10px;font:16px sans-serif}</style><canvas id="c"></canvas><div id="err"></div><script>
+'use strict';
+const canvas=document.getElementById('c'),gl=canvas.getContext('webgl',{alpha:false,antialias:true});
+const error=document.getElementById('err');
+if(!gl){error.textContent='Голограмма: WebGL недоступен';throw Error('WebGL unavailable');}
+const vert=`attribute vec3 p,n;attribute vec3 color;attribute float part;uniform float time,yaw,roll,mirror,blink,mouth,look,nod,gesture;varying vec3 rgb,normal;
+void main(){vec3 q=p;vec3 nn=n;
+if(part>3.5&&part<4.5){q.z=2.54+(q.z-2.54)*blink;}
+if(part>4.5&&part<5.5){q.z=2.05+(q.z-2.05)*(0.25+mouth*2.6);}
+if(part>5.5&&part<6.5){q.z-=mouth*0.075;}
+if(part>0.5&&part<1.5){float a=gesture;vec2 r=q.xz-vec2(-0.47,1.7);q.xz=vec2(r.x*cos(a)-r.y*sin(a),r.x*sin(a)+r.y*cos(a))+vec2(-0.47,1.7);}
+if(part>2.5){float a=look;vec2 r=q.xy-vec2(0.,-0.12);q.xy=vec2(r.x*cos(a)-r.y*sin(a),r.x*sin(a)+r.y*cos(a))+vec2(0.,-0.12);float b=nod;vec2 h=q.yz-vec2(-0.12,2.16);q.yz=vec2(h.x*cos(b)-h.y*sin(b),h.x*sin(b)+h.y*cos(b))+vec2(-0.12,2.16);}
+q.z+=0.015*sin(time*1.8)*(q.z/3.8);q.x+=0.018*sin(time*0.65)*q.z;
+float cs=cos(yaw),sn=sin(yaw);q.xy=vec2(q.x*cs-q.y*sn,q.x*sn+q.y*cs);nn.xy=vec2(nn.x*cs-nn.y*sn,nn.x*sn+nn.y*cs);
+vec2 v=vec2(q.x,(q.z-1.91)*0.99)*0.49;float cr=cos(roll),sr=sin(roll);v=vec2(v.x*cr-v.y*sr,v.x*sr+v.y*cr);v.x*=mirror;gl_Position=vec4(v,q.y*0.25,1.);normal=nn;rgb=color;}`;
+const frag=`precision mediump float;varying vec3 rgb,normal;void main(){float d=max(dot(normalize(normal),normalize(vec3(-0.4,-0.8,0.7))),0.);gl_FragColor=vec4(rgb*(0.54+0.54*d),1.);}`;
+function shader(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){error.textContent=gl.getShaderInfoLog(s);throw Error(error.textContent)}return s}
+const prog=gl.createProgram();gl.attachShader(prog,shader(gl.VERTEX_SHADER,vert));gl.attachShader(prog,shader(gl.FRAGMENT_SHADER,frag));gl.linkProgram(prog);if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){error.textContent='Ошибка рендера 3D';throw Error(gl.getProgramInfoLog(prog))}gl.useProgram(prog);
+const data=[];let seed=41;const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
+const palette={wood:[.46,.32,.18],dark:[.25,.18,.11],light:[.75,.57,.35],skin:[.84,.68,.43],moss:[.27,.49,.19],leaf:[.48,.72,.24],gold:[.84,.67,.22],beard:[.67,.72,.38],cream:[.86,.83,.54],white:[.99,.93,.7],iris:[.32,.50,.19],black:[.05,.04,.025],red:[.85,.36,.15]};
+const sub=(a,b)=>a.map((v,i)=>v-b[i]),add=(a,b)=>a.map((v,i)=>v+b[i]),mul=(a,k)=>a.map(v=>v*k),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],norm=a=>mul(a,1/(Math.hypot(...a)||1));
+function tri(a,b,c,col,part){const n=norm(cross(sub(b,a),sub(c,a)));for(const v of [a,b,c])data.push(...v,...n,...col,part)}
+function ball(p,s,col,part=0,steps=12){function pt(i,j){const t=Math.PI*i/steps,a=2*Math.PI*j/(steps*2);return add(p,[s[0]*Math.sin(t)*Math.cos(a),s[1]*Math.sin(t)*Math.sin(a),s[2]*Math.cos(t)])}for(let i=0;i<steps;i++)for(let j=0;j<steps*2;j++){let a=pt(i,j),b=pt(i+1,j),c=pt(i+1,j+1),d=pt(i,j+1);if(i<steps-1)tri(a,b,c,col,part);if(i>0)tri(a,c,d,col,part)}}
+function limb(a,b,r1,r2,col,part=0){const w=norm(sub(b,a)),u=norm(cross(w,Math.abs(w[2])>.9?[1,0,0]:[0,0,1])),v=cross(w,u);function ring(p,r,i){let f=i*Math.PI/4;return add(p,add(mul(u,r*Math.cos(f)),mul(v,r*Math.sin(f))))}for(let i=0;i<8;i++){let A=ring(a,r1,i),B=ring(a,r1,i+1),C=ring(b,r2,i+1),D=ring(b,r2,i);tri(A,B,C,col,part);tri(A,C,D,col,part);tri(a,B,A,col,part);tri(b,D,C,col,part)}}
+function branch(points,r,col,part=0){for(let i=1;i<points.length;i++)limb(points[i-1],points[i],r*(1-.85*(i-1)/(points.length-1)),r*(1-.85*i/(points.length-1)),col,part)}
+const P=palette;
+ball([0,0,.18],[.65,.45,.18],P.dark);limb([0,0,.22],[0,0,1.67],.52,.48,P.wood);ball([0,0,1.65],[.72,.48,.27],P.moss);
+for(let i=0;i<18;i++){let a=i*Math.PI/9,x=Math.cos(a),y=Math.sin(a);branch([[x*.48,y*.43,.19],[x*.59,y*.45,.8],[x*.56,y*.47,1.43]],.055,i%3?P.wood:P.dark);if(i%2===0)branch([[x*.34,y*.26,.5],[x*.57,y*.43,.19],[x*.74,y*.55,.07]],.09,P.dark)}
+for(let i=0;i<52;i++){let a=rand()*6.28,z=.95+rand()*.85;ball([Math.cos(a)*.52,Math.sin(a)*.42,z],[.07+rand()*.07,.035,.07+rand()*.055],i%4?P.moss:P.leaf,0,5)}
+branch([[-.42,0,1.73],[-.73,-.13,1.53],[-.93,-.43,1.52],[-1.04,-.72,1.57]],.18,P.wood,1);ball([-1.04,-.75,1.58],[.23,.15,.085],P.skin,1);for(let i=0;i<5;i++)branch([[-1.22+i*.083,-.75,1.58],[-1.25+i*.09,-.88,1.65],[-1.26+i*.09,-.95,1.68]],.038,P.skin,1);
+branch([[.42,0,1.73],[.73,-.10,1.48],[.77,-.34,1.28]],.19,P.wood);ball([.77,-.35,1.27],[.14,.13,.17],P.skin);
+ball([0,-.12,2.27],[.49,.41,.51],P.light,3,20);ball([0,-.27,2.34],[.42,.30,.40],P.skin,3,16);
+for(const s of [-1,1]){ball([s*.22,-.53,2.32],[.15,.11,.10],P.skin,3);ball([s*.20,-.55,2.54],[.115,.045,.089],P.white,4);ball([s*.2,-.59,2.54],[.06,.037,.062],P.iris,4);ball([s*.2,-.619,2.54],[.029,.02,.043],P.black,4);ball([s*.20-.015,-.635,2.56],[.013,.009,.014],P.white,4,6);branch([[s*.10,-.55,2.66],[s*.19,-.58,2.69],[s*.30,-.55,2.66]],.042,P.dark,3)}
+ball([0,-.62,2.39],[.107,.15,.15],P.light,3);ball([0,-.69,2.33],[.09,.07,.065],P.skin,3);
+ball([0,-.55,2.05],[.18,.075,.080],P.black,5,16);branch([[-.18,-.56,2.10],[0,-.62,2.12],[.18,-.56,2.10]],.025,P.dark,3);
+for(const s of [-1,1])for(let j=0;j<4;j++)branch([[s*(.04+j*.022),-.70,2.17-j*.006],[s*(.18+j*.01),-.68,2.15-j*.026],[s*(.33+j*.015),-.58,2.25-j*.02]],.035,j%2?P.cream:P.beard,3);
+for(let i=0;i<23;i++){let t=(i-11)/11,x=t*.37,y=-.51+.08*Math.abs(t);branch([[x,y,2.03],[x*1.08,y-.17,1.71],[x*.85+t*.08,y-.10,1.37],[x*.52+t*.10,y+.09,1.02+Math.abs(t)*.25+rand()*.14]],.047+rand()*.014,i%4===0?P.cream:P.beard,6);}
+ball([0,-.03,2.72],[.55,.42,.22],P.moss,3);for(let i=0;i<22;i++){let a=i*6.28/22;ball([Math.cos(a)*.42,Math.sin(a)*.31,2.76+rand()*.08],[.13,.11,.12],i%2?P.leaf:P.moss,3,7)}
+for(const s of [-1,1]){const main=[[s*.32,.04,2.79],[s*.44,.06,3.05],[s*.58,.12,3.30],[s*.73,.08,3.48],[s*.84,0,3.62]];branch(main,.09,P.wood,3);for(let j=1;j<4;j++){let a=main[j],b=add(a,[s*.16,-.05,.17]),c=add(b,[s*.10,-.06,.12]);branch([a,b,c],.042,P.wood,3);for(let k=0;k<4;k++)ball(add(k<2?b:c,[(rand()-.5)*.15,(rand()-.5)*.13,(rand()-.5)*.16]),[.10,.04,.065],k%3?P.leaf:P.gold,3,6)}}
+for(const x of [-.55,.50]){limb([x,0,1.78],[x,-.12,1.92],.035,.025,P.cream);ball([x,-.12,1.93],[.13,.10,.055],P.red);for(let i=0;i<4;i++)ball([x+(rand()-.5)*.15,-.12+(rand()-.5)*.1,1.975],[.018,.018,.009],P.white,0,5)}
+ball([0,-.56,1.28],[.13,.042,.15],P.gold);
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data),gl.STATIC_DRAW);
+for(const [name,size,offset] of [['p',3,0],['n',3,3],['color',3,6],['part',1,9]]){const loc=gl.getAttribLocation(prog,name);gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,size,gl.FLOAT,false,40,offset*4)}
+const U={};for(const k of ['time','yaw','roll','mirror','blink','mouth','look','nod','gesture'])U[k]=gl.getUniformLocation(prog,k);
+gl.enable(gl.DEPTH_TEST);gl.clearColor(0,0,0,1);
+let mode=1,reflected=true,phase='idle',viseme=.55,visemeAt=-100,target=0,look=0,jaw=0,nextBlink=2,blinkStart=-5,paused=false;
+window.leshyMode=(m,r)=>{mode=m;reflected=r};
+window.leshyState=s=>{phase=s;if(s!=='speaking'){viseme=.55;visemeAt=-100;}};
+window.leshyViseme=v=>{viseme=Math.max(0,Math.min(1,v));visemeAt=performance.now()/1000;};
+window.leshyLook=v=>{target=Math.max(-.6,Math.min(.6,v));};
+window.leshyPause=v=>{paused=v;};
+function draw(ms){requestAnimationFrame(draw);if(paused)return;const t=ms/1000,W=Math.min(1800,Math.max(1,Math.round(canvas.clientWidth*devicePixelRatio))),H=Math.min(1800,Math.max(1,Math.round(canvas.clientHeight*devicePixelRatio)));if(canvas.width!==W||canvas.height!==H){canvas.width=W;canvas.height=H}
+if(t>nextBlink){blinkStart=t;nextBlink=t+2+rand()*4.5}const elapsed=t-blinkStart,blink=elapsed<.19?Math.max(.07,1-Math.sin(Math.PI*elapsed/.19)):1;
+const talking=phase==='speaking',listening=phase==='listening',thinking=phase==='thinking';look+=(target-look)*.07;const wanted=talking?(.12+.83*(t-visemeAt<.8?viseme:.55)*Math.abs(Math.sin(t*17))):0;jaw+=(wanted-jaw)*.32;
+const idleGesture=.055*Math.sin(t*.9)+.11*Math.pow(Math.max(0,Math.sin(t*.23)),12);const nod=thinking?-.10+.035*Math.sin(t*1.7):listening?.06+.04*Math.sin(t*2.3):.025*Math.sin(t*1.1);
+gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.uniform1f(U.time,t);gl.uniform1f(U.blink,blink);gl.uniform1f(U.mouth,jaw);gl.uniform1f(U.look,look+(thinking?.09*Math.sin(t*.65):.07*Math.sin(t*.45)));gl.uniform1f(U.nod,nod);gl.uniform1f(U.gesture,idleGesture+(talking?.10*Math.sin(t*3.4):0));gl.uniform1f(U.mirror,reflected?-1:1);
+function view(x,y,s,yaw,roll){gl.viewport(Math.round(x-s/2),Math.round(y-s/2),Math.round(s),Math.round(s));gl.uniform1f(U.yaw,yaw);gl.uniform1f(U.roll,roll);gl.drawArrays(gl.TRIANGLES,0,data.length/10)}
+const d=Math.min(W,H);if(mode===4){const s=d*.37,k=d*.30;view(W/2,H/2+k,s,0,Math.PI);view(W/2+k,H/2,s,-Math.PI/2,-Math.PI/2);view(W/2,H/2-k,s,Math.PI,0);view(W/2-k,H/2,s,Math.PI/2,Math.PI/2)}else view(W/2,H/2,d*.95,0,0);
+}requestAnimationFrame(draw);
+</script></html>
