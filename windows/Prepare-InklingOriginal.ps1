@@ -44,6 +44,12 @@ Write-Host ('Original model directory: ' + $env:LESHY_INKLING_MODEL_DIR)
 Write-Host ('SSD offload directory: ' + $env:LESHY_SSD_OFFLOAD_DIR)
 Write-Host ('Isolated Python: ' + $python)
 
+# Earlier releases installed the entire leshy-ai distribution in this model-only
+# venv. Remove *only that isolated editable-package metadata* to avoid the large
+# set of false missing-dependency warnings during the next pip operation.
+& $python -m pip uninstall --yes leshy-ai
+if ($LASTEXITCODE -ne 0) { throw 'Could not remove old leshy-ai metadata from isolated model venv' }
+
 # This runs inside the isolated venv; pip proxy is inherited from the
 # model-provisioning worker rather than applied to the user's global session.
 & $python -m pip install 'huggingface_hub>=1.31,<2' 'hf_xet>=1.8,<2'
