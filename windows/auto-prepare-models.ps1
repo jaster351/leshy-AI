@@ -106,8 +106,8 @@ try {
     } elseif (-not (Is-RecentFailure 'inkling')) {
         $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($brain))
         $freeGiB = [math]::Floor($drive.AvailableFreeSpace / 1GB)
-        if ($freeGiB -lt 35) {
-            Save-State 'inkling' 'failed' ("Insufficient free space: $freeGiB GiB, need >=35 GiB before download.")
+        if ($freeGiB -lt 45) {
+            Save-State 'inkling' 'failed' ("Insufficient free space: $freeGiB GiB, need >=45 GiB before download.")
             Write-Warning ("INKLING_NO_SPACE: $freeGiB GiB; no download started.")
         } else {
             try {
