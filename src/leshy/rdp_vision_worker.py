@@ -209,12 +209,20 @@ def stream_native_rdp_with_local_vision(
     )
     try:
         worker.start()
+        def submit_or_fail(frame: RDPVisionPNG) -> None:
+            if not worker.submit(frame):
+                raise RuntimeError("RDP vision worker stopped accepting frames")
+
         graphics = stream_native_rdp_png(
-            channel, worker.submit, reauthorize=reauthorize,
+            channel, submit_or_fail, reauthorize=reauthorize,
             policy=policy, max_png_frames=max_png_frames,
         )
         drained = worker.drain(timeout=drain_timeout)
-        return RDPVisionStreamReport(graphics, worker.status(), drained)
+        worker.stop()
+        state = worker.status()
+        if state.failure_type:
+            raise RuntimeError("RDP vision inference failed; no automatic retry")
+        return RDPVisionStreamReport(graphics, state, drained)
     finally:
         worker.stop()
         # If starting the worker fails, the graphics bridge never ran and

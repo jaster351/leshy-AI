@@ -178,3 +178,53 @@ def test_invalid_drain_timeout(invalid):
     with pytest.raises(ValueError):
         worker.drain(timeout=invalid)
     worker.stop()
+
+
+def test_coordinator_rejects_failure_to_enqueue_without_silent_success(monkeypatch):
+    import leshy.rdp_vision_worker as module
+    from leshy.rdp_vision_bridge import RDPVisionResult
+    from leshy.rdp_graphics_stream import GraphicsStreamResult
+
+    class Channel:
+        def __init__(self):
+            self.closed = False
+        def close(self):
+            self.closed = True
+
+    channel = Channel()
+    monkeypatch.setattr(module.RDPVisionWorker, "submit", lambda self, image: False)
+
+    def fake_stream(native_channel, callback, **kwargs):
+        callback(frame(1))
+        return RDPVisionResult(
+            GraphicsStreamResult(1, 1, "update_limit", 0.01), 1, 0
+        )
+
+    monkeypatch.setattr(module, "stream_native_rdp_png", fake_stream)
+    with pytest.raises(RuntimeError, match="stopped accepting frames"):
+        module.stream_native_rdp_with_local_vision(
+            channel, reauthorize=lambda: None, on_observation=lambda _: None,
+        )
+    assert channel.closed
+
+
+def test_coordinator_reports_worker_stopped_after_success(monkeypatch):
+    import leshy.rdp_vision_worker as module
+    from leshy.rdp_vision_bridge import RDPVisionResult
+    from leshy.rdp_graphics_stream import GraphicsStreamResult
+
+    class Channel:
+        def __init__(self):
+            self.closed = False
+        def close(self):
+            self.closed = True
+
+    channel = Channel()
+    monkeypatch.setattr(module, "stream_native_rdp_png", lambda *args, **kwargs: (
+        RDPVisionResult(GraphicsStreamResult(0, 0, "update_limit", 0.01), 0, 0)
+    ))
+    result = module.stream_native_rdp_with_local_vision(
+        channel, reauthorize=lambda: None, on_observation=lambda _: None,
+    )
+    assert result.drained and result.worker.stopped
+    assert channel.closed

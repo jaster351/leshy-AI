@@ -19,6 +19,7 @@ exposing any HTTP/Telegram/LLM routes or enabling remote keyboard and mouse.
 - Stop clears the pending image and suppresses publication after stop
   completes. A running 45-second local model request cannot be forcibly
   interrupted, but it cannot publish a late result.
+- An enqueue refusal propagates as a stream failure rather than pretending that an image was delivered. Inference failure raises a safe error without automatic retry.
 - The explicit synchronous coordinator
   stream_native_rdp_with_local_vision() connects the pieces and optionally
   drains the worker after the graphics socket closes. It MUST NOT execute
