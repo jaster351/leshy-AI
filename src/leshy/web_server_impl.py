@@ -211,6 +211,9 @@ def make_handler(app: LeshyApp, telegram: TelegramBridge, settings: Settings, mo
             if path == "/v1/status": return self._json(HTTPStatus.OK, app.status())
             if path == "/v1/hardware": return self._json(HTTPStatus.OK, hardware_status(settings.brain_dir))
             if path == "/v1/overview": return self._json(HTTPStatus.OK, dashboard.overview(self._arg(args, "owner_id", "web:local")))
+            if path == "/v1/model/provision":
+                from .model_provision_status import model_provision_status
+                return self._json(HTTPStatus.OK, model_provision_status(settings.brain_dir))
             if path == "/v1/model/status": return self._json(HTTPStatus.OK, app.model_downloader.status())
             if path == "/v1/models": return self._json(HTTPStatus.OK, model_catalog.status(active_path=app.model_path))
             if path == "/v1/model-library": return self._json(HTTPStatus.OK, model_library.status())
