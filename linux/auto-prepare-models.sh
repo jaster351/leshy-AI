@@ -12,6 +12,29 @@ exec 9>"$LOCK"
 flock -n 9 || exit 0
 exec >>"$LOG" 2>&1
 printf 'AUTO_MODEL_PROVISION_LINUX start=%s brain=%s\n' "$(date -Is)" "$BRAIN"
+# Publish stage snapshots compatible with Windows and the web UI.
+# Only local paths are written. A failed write is diagnostic, not a build failure.
+write_stage() {
+  local stage="$1" outcome="$2" details="$3"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$BRAIN" "$stage" "$outcome" "$details" <<'PY' || true
+import datetime, json, os, pathlib, sys, tempfile
+brain, step, outcome, details = sys.argv[1:]
+root = pathlib.Path(brain) / "runtime" / "model-provision"
+root.mkdir(parents=True, exist_ok=True)
+payload = {
+    "schema": 1, "step": step, "outcome": outcome,
+    "details": details[:700],
+    "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+}
+for name in ("state.json", step + ".json"):
+    temp = root / (name + ".tmp")
+    temp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    os.replace(temp, root / name)
+PY
+  fi
+}
+
 # Versioned completion marker prevents an older Linux update from silently
 # skipping the newly added MoE GGUF stage. Both manifests must remain present.
 if [[ -f "$STATE" ]] && [[ "$(cat "$STATE")" == complete-v2* ]] &&
@@ -26,6 +49,7 @@ if [[ -f "$STATE" ]] && [[ "$(cat "$STATE")" == failed* ]]; then
   if [[ -z "$since" ]]; then echo "BACKOFF_ACTIVE"; exit 0; fi
 fi
 status="complete"
+write_stage 'inferssd' 'running' 'Preparing native engine on the local server NVMe'
 # Each Linux node installs the upstream engine on its own local NVMe next to
 # LeshyBrain. Do not require administrator access or edit the user's shell.
 export INFERSSD_HOME="${INFERSSD_HOME:-$BRAIN/runtime/inferssd}"
@@ -49,6 +73,11 @@ if ! command -v inferssd >/dev/null 2>&1 &&
     status=failed
   fi
 fi
+if [[ "$status" == complete ]]; then
+  write_stage 'inferssd' 'installed' 'Native engine detected or successfully installed'
+else
+  write_stage 'inferssd' 'failed' 'Native engine installation failed, see local log'
+fi
 # Do not auto-download an unsupported giant GGUF. InferSSD uses a verified
 # local path only if one is selected for this particular server.
 if [[ -n "${LESHY_INFERSSD_GGUF_PATH:-}" ]]; then
@@ -62,6 +91,7 @@ MODEL="$BRAIN/models/Inkling-2-Mini-original"
 OFFLOAD="$BRAIN/offload/Inkling-2-Mini"
 VENV="$BRAIN/runtime/inkling-original-venv"
 mkdir -p "$MODEL" "$OFFLOAD"
+write_stage 'inkling' 'running' 'Preparing original Inkling checkpoint on local NVMe'
 if [[ ! -f "$MODEL/.leshy-original.json" ]]; then
   avail="$(df -Pk "$BRAIN" | awk 'NR==2 {print $4}')"
   if [[ ! "$avail" =~ ^[0-9]+$ ]] || (( avail < 45*1024*1024 )); then
@@ -86,6 +116,11 @@ if [[ ! -f "$MODEL/.leshy-original.json" ]]; then
     status=failed
   fi
 fi
+if [[ -f "$MODEL/.leshy-original.json" ]]; then
+  write_stage 'inkling' 'downloaded' 'Original checkpoint manifest is present; see model storage health for validation'
+else
+  write_stage 'inkling' 'failed' 'Original checkpoint missing or incomplete; see local log'
+fi
 # Independently provision an officially tested GGUF MoE (22 GiB) on this
 # node's local NVMe. The original Inkling weights remain a separate format.
 # No backend switch is made until successful native inference on that node.
@@ -100,6 +135,7 @@ mkdir -p "$HF_HOME"
 if [[ ! -x "$VENV/bin/python" ]] && command -v python3 >/dev/null 2>&1; then
   python3 -m venv "$VENV" || status=failed
 fi
+write_stage 'moe' 'running' 'Preparing tested local InferSSD MoE GGUF'
 MOE_ROOT="${LESHY_INFERSSD_MODEL_DIR:-$BRAIN/models/InferSSD-Qwen3.6-35B-A3B}"
 mkdir -p "$MOE_ROOT"
 # Do not demand another 45 GiB if the selected GGUF is already complete.
@@ -123,6 +159,11 @@ else
   fi
 fi
 if [[ "$status" == complete ]]; then status=complete-v2; fi
+if [[ -f "$MOE_ROOT/.leshy-moe-gguf.json" ]]; then
+  write_stage 'moe' 'downloaded' 'MoE GGUF manifest is present; see model storage health for validation'
+else
+  write_stage 'moe' 'failed' 'MoE GGUF missing or incomplete; see local log'
+fi
 # Write the same read-only report as Windows, even when model downloads
 # are temporarily unavailable. No model is launched by this report.
 if [[ -x "$VENV/bin/python" ]]; then
