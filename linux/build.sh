@@ -66,4 +66,10 @@ test -x "$BIN"
 "$BIN" --check-native-runtime
 restore_brain
 trap - EXIT
+# Provision local NVMe model caches independently after the preserved LeshyBrain
+# has been restored. No download or optional engine failure may block updates.
+if [[ -f "$ROOT/linux/auto-prepare-models.sh" ]]; then
+  nohup bash "$ROOT/linux/auto-prepare-models.sh" >/dev/null 2>&1 </dev/null &
+  printf 'Model provisioning launched separately; see %s\n' "$BRAIN/logs/model-auto-provision-linux.log"
+fi
 printf '\nСборка готова: %s\nЗапуск: %s --no-browser\n' "$BIN" "$BIN"
