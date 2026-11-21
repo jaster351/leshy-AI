@@ -55,6 +55,10 @@ def rdp_connection_profile(
         "redirectprinters:i:0",
         "redirectcomports:i:0",
         "redirectsmartcards:i:0",
+        "redirectwebauthn:i:0",
+        "redirectposdevices:i:0",
+        "redirectlocation:i:0",
+        "camerastoredirect:s:",
         "audiomode:i:2",
     ]
     return {
