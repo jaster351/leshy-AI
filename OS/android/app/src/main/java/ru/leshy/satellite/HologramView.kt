@@ -22,7 +22,8 @@ import org.json.JSONObject
 internal class HologramView(
     context: Context,
     private val onClose: () -> Unit,
-    private val onTalk: () -> Unit
+    private val onTalk: () -> Unit,
+    private val onCamera: () -> Unit
 ) : FrameLayout(context) {
     private val handler = Handler(Looper.getMainLooper())
     private val prefs = context.getSharedPreferences("leshy_hologram", Context.MODE_PRIVATE)
@@ -44,10 +45,12 @@ internal class HologramView(
     private val status = TextView(context).apply {
         setTextColor(Color.WHITE)
         textSize = 14f
+        maxLines = 3
     }
     private val talk = Button(context)
     private val optical = Button(context)
     private val mirror = Button(context)
+    private val camera = Button(context)
 
     init {
         setBackgroundColor(Color.BLACK)
@@ -96,6 +99,10 @@ internal class HologramView(
         addButton(optical)
         addButton(mirror)
         controls.addView(row)
+        camera.isAllCaps = false
+        camera.text = "Камера: выкл."
+        camera.setOnClickListener { onCamera(); reveal() }
+        controls.addView(camera)
         controls.addView(Button(context).apply {
             text = "Выйти из голограммы"
             isAllCaps = false
@@ -127,9 +134,11 @@ internal class HologramView(
         updateLabels()
     }
 
-    fun setStatus(message: String, conversation: Boolean) {
+    fun setStatus(message: String, conversation: Boolean, cameraEnabled: Boolean) {
         status.text = message
         talk.text = if (conversation) "Завершить" else "Говорить"
+        camera.text = if (cameraEnabled) "Камера: вкл." else "Камера: выкл."
+        if (message.startsWith("Не удалось") || message.startsWith("Нет доступа") || message.startsWith("Нужны сохранённые")) reveal()
     }
 
     fun setGaze(value: Float) {
