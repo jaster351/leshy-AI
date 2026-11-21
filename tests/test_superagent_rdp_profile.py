@@ -38,6 +38,9 @@ class RdpProfileTests(unittest.TestCase):
         self.assertIn("authentication level:i:2", profile["rdp"])
         self.assertIn("redirectclipboard:i:0", profile["rdp"])
         self.assertIn("redirectdrives:i:0", profile["rdp"])
+        for disabled in ("redirectwebauthn:i:0", "redirectposdevices:i:0",
+                         "redirectlocation:i:0", "camerastoredirect:s:"):
+            self.assertIn(disabled, profile["rdp"])
         self.assertFalse(profile["remote_desktop_control_by_agent"])
         self.assertTrue(profile["requires_user_login"])
         self.assertNotIn(PIN, json.dumps(profile))
