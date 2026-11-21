@@ -34,7 +34,7 @@ from .rdp_bitmap_update import RDPBitmapRectangle, parse_bitmap_update
 from .rdp_bitmap_compositor import RDPBitmapCompositor, RDPComposedFrame
 from .rdp_graphics_stream import (
     GraphicsStreamPolicy, GraphicsStreamResult, RDPGraphicsStopped,
-    read_graphics_tpkt,
+    RDPGraphicsTimeout, read_graphics_tpkt,
 )
 from .rdp_finalization import (
     RDPFinalizationError, RDPFinalizationStatus,
@@ -667,11 +667,17 @@ class PinnedRDPCredSSPChannel:
                         reason = "duration_limit"
                         break
                     deadline = min(until, time.monotonic() + policy.idle_timeout)
-                    packet = read_graphics_tpkt(
-                        self._tls, deadline=deadline,
-                        reauthorize=self._check_graphics_owner,
-                        stopped=self._graphics_stop.is_set,
-                    )
+                    try:
+                        packet = read_graphics_tpkt(
+                            self._tls, deadline=deadline,
+                            reauthorize=self._check_graphics_owner,
+                            stopped=self._graphics_stop.is_set,
+                        )
+                    except RDPGraphicsTimeout:
+                        if time.monotonic() >= until:
+                            reason = "duration_limit"
+                            break
+                        raise
                     self._check_graphics_owner()
                     patches = parse_bitmap_update(
                         packet,
@@ -685,14 +691,28 @@ class PinnedRDPCredSSPChannel:
                     frame = self._bitmap_surface.apply(patches)
                     received += 1
                     self._check_graphics_owner()
+                    now = time.monotonic()
+                    if now >= until:
+                        reason = "duration_limit"
+                        break
                     if frame is not None:
-                        now = time.monotonic()
                         if (last_published is None
                                 or now - last_published >= policy.min_frame_interval):
                             self._check_graphics_owner()
+                            if time.monotonic() >= until:
+                                reason = "duration_limit"
+                                break
                             on_frame(frame)
                             published += 1
                             last_published = time.monotonic()
+                            # Stop may be requested inside the consumer even
+                            # on the last permitted update. Report it accurately.
+                            if self._graphics_stop.is_set():
+                                reason = "stopped"
+                                break
+                            if last_published >= until:
+                                reason = "duration_limit"
+                                break
                 return GraphicsStreamResult(
                     received, published, reason, time.monotonic() - started
                 )

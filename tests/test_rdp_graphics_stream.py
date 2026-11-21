@@ -101,3 +101,19 @@ def test_invalid_policy_rejected(params):
 def test_policy_defaults_bound_and_status_safely():
     p=GraphicsStreamPolicy()
     assert p.max_duration==300 and p.max_updates<=10000
+
+
+def test_final_authorization_cannot_publish_expired_packet(monkeypatch):
+    import leshy.rdp_graphics_stream as stream
+    from types import SimpleNamespace
+    now = [100.0]
+    monkeypatch.setattr(stream, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    tls = TLS(chunk=16)
+
+    def authorize():
+        if not tls.buffer:
+            now[0] = 102.0
+
+    with pytest.raises(RDPGraphicsTimeout):
+        read(tls, authorized=authorize, deadline=101.0)
+    assert not tls.buffer

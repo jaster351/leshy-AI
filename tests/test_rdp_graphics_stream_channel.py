@@ -137,3 +137,42 @@ def test_invalid_callback_rejected_before_read():
         conn.stream_bitmap_frames(None,policy=policy())
     assert tls.reads==0
     conn.close()
+
+
+def test_stop_on_last_permitted_frame_reports_stopped():
+    conn, tls = channel()
+    frames = []
+
+    def sink(frame):
+        frames.append(frame)
+        conn.stop_graphics_stream()
+
+    result = conn.stream_bitmap_frames(sink, policy=policy(max_updates=2))
+    assert result.reason == "stopped"
+    assert result.published_frames == len(frames) == 1
+    assert tls.closed
+
+
+def test_decode_crossing_total_deadline_cannot_publish(monkeypatch):
+    import leshy.rdp_credssp_channel as channel_module
+    from types import SimpleNamespace
+    conn, tls = channel()
+    real_parse = channel_module.parse_bitmap_update
+    now = [time.monotonic()]
+    monkeypatch.setattr(channel_module, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    calls = [0]
+
+    def parse(*args, **kwargs):
+        result = real_parse(*args, **kwargs)
+        calls[0] += 1
+        if calls[0] == 2:
+            now[0] += 5.0
+        return result
+
+    monkeypatch.setattr(channel_module, "parse_bitmap_update", parse)
+    frames = []
+    result = conn.stream_bitmap_frames(frames.append, policy=policy(max_duration=4))
+    assert result.reason == "duration_limit"
+    assert result.received_updates == 2
+    assert result.published_frames == 0 and not frames
+    assert tls.closed and not conn._bitmap_surface.complete
