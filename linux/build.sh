@@ -81,14 +81,19 @@ mkdir -p "$LIVE" "$BACKUP"
 # The existing LeshyBrain is NEVER renamed, copied, removed or included in
 # rollback. Open model files and the running download keep their stable paths.
 published=0
+publish_phase=moving
 recover_live_program() {
   if (( published != 0 )); then return; fi
   echo "Linux publication failed: restoring previous program; LeshyBrain untouched." >&2
-  for entry in "$LIVE"/* "$LIVE"/.[!.]* "$LIVE"/..?*; do
-    [[ -e "$entry" || -L "$entry" ]] || continue
-    [[ "$(basename "$entry")" == "LeshyBrain" ]] && continue
-    rm -rf -- "$entry" || true
-  done
+  # If moving an old file failed, leave every unmoved original untouched.
+  # Remove new staged files only after the copy phase has actually begun.
+  if [[ "$publish_phase" == copying ]]; then
+    for entry in "$LIVE"/* "$LIVE"/.[!.]* "$LIVE"/..?*; do
+      [[ -e "$entry" || -L "$entry" ]] || continue
+      [[ "$(basename "$entry")" == "LeshyBrain" ]] && continue
+      rm -rf -- "$entry" || true
+    done
+  fi
   local restore_failed=0
   for entry in "$BACKUP"/* "$BACKUP"/.[!.]* "$BACKUP"/..?*; do
     [[ -e "$entry" || -L "$entry" ]] || continue
@@ -107,6 +112,7 @@ for entry in "$LIVE"/* "$LIVE"/.[!.]* "$LIVE"/..?*; do
   [[ "$(basename "$entry")" == "LeshyBrain" ]] && continue
   mv -- "$entry" "$BACKUP/"
 done
+publish_phase=copying
 cp -a "$PACKAGE"/. "$LIVE/"
 test -x "$LIVE/Leshy"
 published=1
