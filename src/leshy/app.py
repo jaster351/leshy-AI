@@ -152,7 +152,12 @@ class LeshyApp:
             # No Wi-Fi GPU, no external inference API; leave current GGUF backends as fallback.
             from .inferssd_local import InferSSDLocalLLM
             engine_kind = "gpu" if caps is not None and bool(getattr(caps, "gpu", False)) else "cpu"
-            candidates.append((f"{engine_kind}-inferssd-local", InferSSDLocalLLM(self.settings.brain_dir, self.model_path)))
+            # Each node may keep a supported MoE GGUF on its own local NVMe,
+            # even if LeshyBrain is on a different filesystem. No network GPU
+            # or cross-node SSD path is inferred from cluster membership.
+            moegguf = os.getenv("LESHY_INFERSSD_GGUF_PATH", "").strip()
+            local_model = Path(moegguf).expanduser() if moegguf else self.model_path
+            candidates.append((f"{engine_kind}-inferssd-local", InferSSDLocalLLM(self.settings.brain_dir, local_model)))
 
         if target_platform == "windows" and caps is not None and bool(getattr(caps, "gpu", False)):
             candidates.append((
