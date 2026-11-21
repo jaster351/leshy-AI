@@ -362,6 +362,17 @@ class SuperAgentService:
         item["steps"] = self._journal.list_steps(str(item["id"]), limit=8)
         return item
 
+    def create_rdp_cognitive_session(
+        self, ticket_id: str, *, actor, node_id: str,
+        observed_fingerprint: str,
+    ):
+        """Internal owner-scoped read-only RDP cognition. No public endpoint."""
+        from .superagent_rdp_cognitive_runtime import SuperAgentRDPCognitiveSession
+        return SuperAgentRDPCognitiveSession(
+            self, ticket_id=ticket_id, actor=actor, node_id=node_id,
+            observed_fingerprint=observed_fingerprint,
+        )
+
     def list(self, owner_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
         with self.storage.connection() as conn:
             rows = conn.execute(
