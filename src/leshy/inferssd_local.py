@@ -48,7 +48,7 @@ class InferSSDLocalLLM:
 
     def __init__(self, brain_dir: Path, gguf_path: Path):
         self.brain_dir = Path(brain_dir)
-        self.model_path = Path(gguf_path)
+        self.model_path = Path(gguf_path).expanduser()
         self.model = self.model_path.name
         self._lock = threading.RLock()
         self._process: subprocess.Popen | None = None
@@ -57,13 +57,37 @@ class InferSSDLocalLLM:
         self._model_id = self.model
 
     def _executable(self) -> str:
-        candidate = os.getenv("LESHY_INFERSSD_EXECUTABLE", "").strip() or shutil.which("inferssd")
-        if not candidate:
-            raise LLMUnavailable("InferSSD не установлен. См. https://github.com/wici-ai/inferssd")
-        exe = Path(candidate).expanduser()
-        if not exe.is_file():
-            raise LLMUnavailable(f"Исполняемый файл InferSSD недоступен: {candidate}")
-        return str(exe.resolve())
+        configured = os.getenv("LESHY_INFERSSD_EXECUTABLE", "").strip()
+        candidates: list[str] = []
+        if configured:
+            candidates.append(configured)
+        else:
+            # Official Windows install exposes inferssd.cmd to the shell, while
+            # its actual executable lives in current/bin/inferssd.exe.
+            if os.name == "nt":
+                localappdata = os.getenv("LOCALAPPDATA", "").strip()
+                if localappdata:
+                    candidates.append(str(Path(localappdata) / "inferssd" / "current" / "bin" / "inferssd.exe"))
+                for name in ("inferssd.exe", "inferssd"):
+                    value = shutil.which(name)
+                    if value:
+                        candidates.append(value)
+            else:
+                found = shutil.which("inferssd")
+                if found:
+                    candidates.append(found)
+        for candidate in candidates:
+            exe = Path(candidate).expanduser()
+            if not exe.is_file():
+                continue
+            if os.name == "nt" and exe.suffix.lower() in {".cmd", ".bat"}:
+                # Do not pass arbitrary model paths to cmd.exe.
+                continue
+            return str(exe.resolve())
+        raise LLMUnavailable(
+            "InferSSD не установлен или нативный executable не найден; "
+            "укажите LESHY_INFERSSD_EXECUTABLE. https://github.com/wici-ai/inferssd"
+        )
 
     def _validate_model(self):
         if not self.model_path.is_file() or self.model_path.suffix.lower() != ".gguf":
@@ -141,8 +165,12 @@ class InferSSDLocalLLM:
         return {
             "loaded": self._process is not None and self._process.poll() is None,
             "backend": "inferssd-local",
-            "ssd_streaming": True,
-            "model": str(self.model_path),
+            "ssd_streaming_requested": True,
+            # We cannot infer verified expert streaming merely from a running
+            # process: dense GGUF models use the ordinary RAM loader.
+            "ssd_streaming_verified": False,
+            "model": str(self.model_path.resolve()),
+            "model_exists": self.model_path.is_file(),
             "remote_gpu": False,
         }
 
