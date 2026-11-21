@@ -1,5 +1,4 @@
 param(
-  [string]$SsdRoot = "",
   [string]$BrainDir = "",
   [switch]$Download,
   [switch]$InstallInference,
@@ -16,14 +15,13 @@ $BrainDir = (Resolve-Path $BrainDir).Path
 $env:LESHY_BRAIN_DIR = $BrainDir
 $env:PYTHONPATH = (Join-Path $repo 'src') + [IO.Path]::PathSeparator + $env:PYTHONPATH
 
-if ($SsdRoot) {
-  New-Item -ItemType Directory -Force -Path $SsdRoot | Out-Null
-  $SsdRoot = (Resolve-Path $SsdRoot).Path
-  $env:LESHY_INKLING_MODEL_DIR = Join-Path $SsdRoot 'LeshyModels\Inkling-2-Mini-original'
-  $env:LESHY_SSD_OFFLOAD_DIR = Join-Path $SsdRoot 'LeshyOffload\Inkling-2-Mini'
-  [Environment]::SetEnvironmentVariable('LESHY_INKLING_MODEL_DIR', $env:LESHY_INKLING_MODEL_DIR, 'User')
-  [Environment]::SetEnvironmentVariable('LESHY_SSD_OFFLOAD_DIR', $env:LESHY_SSD_OFFLOAD_DIR, 'User')
-}
+# Keep all model assets alongside the installed Leshy.exe in its persistent LeshyBrain.
+# Overwrite legacy user-level external SSD paths so the standalone Python sidecar and
+# the packaged Leshy process resolve to the same original checkpoint.
+$env:LESHY_INKLING_MODEL_DIR = Join-Path $BrainDir 'models\Inkling-2-Mini-original'
+$env:LESHY_SSD_OFFLOAD_DIR = Join-Path $BrainDir 'offload\Inkling-2-Mini'
+[Environment]::SetEnvironmentVariable('LESHY_INKLING_MODEL_DIR', $env:LESHY_INKLING_MODEL_DIR, 'User')
+[Environment]::SetEnvironmentVariable('LESHY_SSD_OFFLOAD_DIR', $env:LESHY_SSD_OFFLOAD_DIR, 'User')
 Write-Host ('Original model directory: ' + $env:LESHY_INKLING_MODEL_DIR)
 Write-Host ('SSD offload directory: ' + $env:LESHY_SSD_OFFLOAD_DIR)
 
