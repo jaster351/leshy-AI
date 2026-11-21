@@ -57,16 +57,41 @@ class InferSSDLocalLLM:
         self._port: int | None = None
         self._model_id = self.model
 
+    def _candidate_homes(self) -> list[Path]:
+        result = []
+        chosen = os.environ.get("INFERSSD_HOME", "").strip()
+        for home in (
+            Path(chosen).expanduser() if chosen else None,
+            self.brain_dir / "runtime" / "inferssd",
+            infer_home(),
+        ):
+            if home is None:
+                continue
+            normalized = home.resolve()
+            if normalized not in result:
+                result.append(normalized)
+        return result
+
+    def _installed_home(self) -> Path:
+        if os.name == "nt":
+            for home in self._candidate_homes():
+                if (home / "current" / "bin" / "inferssd.exe").is_file():
+                    return home
+        return self._candidate_homes()[0]
+
     def _executable(self) -> str:
         configured = os.getenv("LESHY_INFERSSD_EXECUTABLE", "").strip()
         candidates: list[str] = []
         if configured:
             candidates.append(configured)
         else:
-            # The official Windows installer creates a current junction inside
-            # INFERSSD_HOME, which may be customized per node/NVMe.
-            candidates.append(str(infer_home() / "current" / "bin" / "inferssd.exe")) if os.name == "nt" else None
-            if os.name != "nt":
+            # Official release's native executable is under the "current"
+            # junction. Search the persistent LeshyBrain directory first,
+            # then any explicitly configured or legacy user-profile install.
+            if os.name == "nt":
+                for home in self._candidate_homes():
+                    candidates.append(str(home / "current" / "bin" / "inferssd.exe"))
+            else:
                 candidates.append(str(Path.home() / ".local" / "bin" / "inferssd"))
             # Official Windows install exposes inferssd.cmd to the shell, while
             # its actual executable lives in current/bin/inferssd.exe.
@@ -121,15 +146,16 @@ class InferSSDLocalLLM:
         # same resource descriptor to this local subprocess only.
         child_env = os.environ.copy()
         if os.name == "nt":
-            home = infer_home()
-            native = (home / "current" / "bin" / "inferssd.exe").resolve()
-            if Path(exe).resolve() == native:
-                resources = home / "current" / "engine-resources.json"
-                if not resources.is_file():
-                    logfile.close()
-                    raise LLMUnavailable("Native InferSSD resource descriptor missing after installation")
-                child_env["INFERSSD_HOME"] = str(home)
-                child_env["INFERSSD_RESOURCES"] = str(resources.resolve())
+            for home in self._candidate_homes():
+                native = home / "current" / "bin" / "inferssd.exe"
+                if native.is_file() and Path(exe).resolve() == native.resolve():
+                    resources = home / "current" / "engine-resources.json"
+                    if not resources.is_file():
+                        logfile.close()
+                        raise LLMUnavailable("Native InferSSD resource descriptor missing after installation")
+                    child_env["INFERSSD_HOME"] = str(home)
+                    child_env["INFERSSD_RESOURCES"] = str(resources.resolve())
+                    break
         try:
             process = subprocess.Popen(
                 command, stdin=subprocess.DEVNULL, stdout=logfile, stderr=subprocess.STDOUT,
@@ -187,7 +213,7 @@ class InferSSDLocalLLM:
     def resident_status(self):
         # Read only owned native run observations. An API response/loaded process
         # never counts as verified expert offloading.
-        evidence = native_streaming_status(self.model_path)
+        evidence = native_streaming_status(self.model_path, home=self._installed_home())
         return {
             "loaded": self._process is not None and self._process.poll() is None,
             "backend": "inferssd-local",
