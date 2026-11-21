@@ -1,0 +1,163 @@
+"""Local InferSSD backend: stream supported MoE experts from local NVMe.
+
+InferSSD is the open-source SSD expert streaming engine from WiCi (not a Wi-Fi
+GPU). It accepts GGUF, not original Safetensors; this provider is intentionally
+separate from inkling_original.InklingOriginalLLM.
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import subprocess
+import threading
+import time
+from urllib import request, error, parse
+
+from .llm import LLMUnavailable, finalize_model_output
+
+CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+
+class _NoRedirect(request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _local_call(port: int, route: str, *, data: bytes | None = None, timeout: float = 10):
+    if not (1 <= int(port) <= 65535) or not route.startswith("/") or route.startswith("//"):
+        raise ValueError("Unsafe InferSSD request")
+    url = f"http://127.0.0.1:{int(port)}{route}"
+    req = request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None else "GET")
+    # Never send user chat messages through an inherited system proxy or HTTP redirect.
+    return request.build_opener(request.ProxyHandler({}), _NoRedirect()).open(req, timeout=timeout)
+
+
+def _unused_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+class InferSSDLocalLLM:
+    """Optional on-demand local engine. No remote API, no wireless GPU."""
+    n_ctx = 4096
+    max_tokens = 1024
+
+    def __init__(self, brain_dir: Path, gguf_path: Path):
+        self.brain_dir = Path(brain_dir)
+        self.model_path = Path(gguf_path)
+        self.model = self.model_path.name
+        self._lock = threading.RLock()
+        self._process: subprocess.Popen | None = None
+        self._log = None
+        self._port: int | None = None
+        self._model_id = self.model
+
+    def _executable(self) -> str:
+        candidate = os.getenv("LESHY_INFERSSD_EXECUTABLE", "").strip() or shutil.which("inferssd")
+        if not candidate:
+            raise LLMUnavailable("InferSSD не установлен. См. https://github.com/wici-ai/inferssd")
+        exe = Path(candidate).expanduser()
+        if not exe.is_file():
+            raise LLMUnavailable(f"Исполняемый файл InferSSD недоступен: {candidate}")
+        return str(exe.resolve())
+
+    def _validate_model(self):
+        if not self.model_path.is_file() or self.model_path.suffix.lower() != ".gguf":
+            raise LLMUnavailable("InferSSD принимает только локальную GGUF-модель; оригинальный Safetensors не поддерживается")
+        with self.model_path.open("rb") as source:
+            if source.read(4) != b"GGUF":
+                raise LLMUnavailable("Выбранный файл не является GGUF")
+
+    def _ensure_server(self):
+        if self._process is not None and self._process.poll() is None:
+            return
+        self._validate_model()
+        exe = self._executable()
+        port = _unused_port()
+        log_path = self.brain_dir / "logs" / "inferssd-local.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        logfile = log_path.open("ab")
+        command = [
+            exe, "serve", "-m", str(self.model_path.resolve()),
+            "--host", "127.0.0.1", "--port", str(port),
+        ]
+        try:
+            process = subprocess.Popen(
+                command, stdin=subprocess.DEVNULL, stdout=logfile, stderr=subprocess.STDOUT,
+                creationflags=CREATE_NO_WINDOW, close_fds=True,
+            )
+        except Exception:
+            logfile.close()
+            raise
+        self._log, self._process, self._port = logfile, process, port
+        deadline = time.monotonic() + max(15, min(600, int(os.getenv("LESHY_INFERSSD_STARTUP_SECONDS", "180"))))
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                self.close()
+                raise LLMUnavailable("InferSSD завершился во время запуска; проверьте LeshyBrain/logs/inferssd-local.log")
+            try:
+                with _local_call(port, "/v1/models", timeout=2) as response:
+                    data = json.loads(response.read(512 * 1024).decode("utf-8"))
+                models = data.get("data", [])
+                if models and models[0].get("id"):
+                    self._model_id = str(models[0]["id"])
+                return
+            except (OSError, TimeoutError, ValueError, json.JSONDecodeError):
+                time.sleep(1)
+        self.close()
+        raise LLMUnavailable("InferSSD не поднял локальный API в отведённое время; проверьте журнал")
+
+    def chat(self, messages):
+        with self._lock:
+            self._ensure_server()
+            payload = {
+                "model": self._model_id,
+                "messages": [{"role": m.role, "content": str(m.content)} for m in messages],
+                "temperature": 0.3,
+                "max_tokens": self.max_tokens,
+                "stream": False,
+            }
+            try:
+                with _local_call(
+                    self._port, "/v1/chat/completions",
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    timeout=max(30, min(600, int(os.getenv("LESHY_INFERSSD_REQUEST_SECONDS", "180")))),
+                ) as response:
+                    data = json.loads(response.read(16 * 1024 * 1024).decode("utf-8"))
+                answer = finalize_model_output(data["choices"][0]["message"]["content"])
+                if not answer:
+                    raise LLMUnavailable("InferSSD вернул пустой ответ")
+                return answer
+            except LLMUnavailable:
+                raise
+            except (OSError, ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+                raise LLMUnavailable(f"Ошибка локального InferSSD: {type(exc).__name__}: {exc}") from exc
+
+    def resident_status(self):
+        return {
+            "loaded": self._process is not None and self._process.poll() is None,
+            "backend": "inferssd-local",
+            "ssd_streaming": True,
+            "model": str(self.model_path),
+            "remote_gpu": False,
+        }
+
+    def close(self):
+        with self._lock:
+            process = self._process
+            self._process = None
+            self._port = None
+            if process is not None and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            if self._log is not None:
+                self._log.close()
+                self._log = None

@@ -98,7 +98,7 @@ class LeshyApp:
             "app_ready",
             version=VERSION,
             backend=self.settings.llm_backend,
-            model=self.settings.native_chat_file if self.settings.llm_backend == "native" else self.settings.ollama_model,
+            model=("thinkingmachines/Inkling-2-Mini" if self.settings.llm_backend == "inkling-original" else (self.settings.native_chat_file if self.settings.llm_backend in {"native", "inferssd"} else self.settings.ollama_model)),
             brain_dir=self.settings.brain_dir,
             gpu_names=list(getattr(self.hardware, "gpu_names", ())),
             npu_names=list(getattr(self.hardware, "npu_names", ())),
@@ -124,7 +124,7 @@ class LeshyApp:
             return EchoLLM()
         if backend == "ollama":
             return OllamaLLM(self.settings.ollama_url, self.settings.ollama_model)
-        if backend != "native":
+        if backend not in {"native", "inkling-original", "inferssd"}:
             raise ValueError(f"Неизвестный LLM backend: {backend}")
 
         cpu_llm = NativeGGUFLLM(self.model_path, n_ctx=self.settings.native_context_size, n_gpu_layers=0, ensure_model=self._require_model, brain_dir=self.settings.brain_dir)
@@ -141,6 +141,18 @@ class LeshyApp:
         candidates: list[tuple[str, Any]] = []
         caps = self.hardware
         target_platform = runtime_platform()
+        if backend == "inkling-original":
+            # Separate original Safetensors/NVFP4 checkpoint; leave GGUF candidates as fallbacks.
+            # No weight download or large runtime imports occur during normal startup.
+            from .inkling_sidecar import InklingOriginalSidecarLLM
+            original_kind = "gpu" if caps is not None and bool(getattr(caps, "gpu", False)) else "cpu"
+            candidates.append((f"{original_kind}-inkling-original", InklingOriginalSidecarLLM(self.settings.brain_dir)))
+        if backend == "inferssd":
+            # The WiCi InferSSD engine streams supported GGUF MoE experts from LOCAL NVMe.
+            # No Wi-Fi GPU, no external inference API; leave current GGUF backends as fallback.
+            from .inferssd_local import InferSSDLocalLLM
+            engine_kind = "gpu" if caps is not None and bool(getattr(caps, "gpu", False)) else "cpu"
+            candidates.append((f"{engine_kind}-inferssd-local", InferSSDLocalLLM(self.settings.brain_dir, self.model_path)))
 
         if target_platform == "windows" and caps is not None and bool(getattr(caps, "gpu", False)):
             candidates.append((
