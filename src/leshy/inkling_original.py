@@ -11,6 +11,9 @@ import os
 from pathlib import Path
 import shutil
 import threading
+import subprocess
+import sys
+from urllib.parse import urlsplit
 
 from .llm import ChatMessage, LLMUnavailable, finalize_model_output
 
@@ -125,6 +128,125 @@ def download_checkpoint(brain_dir: Path) -> dict:
     os.replace(temp, manifest)
     return checkpoint_status(brain_dir)
 
+
+
+# HTTP CONNECT proxies from the user's existing Windows/PAC configuration.
+# These are for Hugging Face model downloads ONLY, never for local inference.
+DEFAULT_HF_PROXIES = (
+    "http://vpn.nidr.cyberhost.biz:7777",
+    "http://vpn.usa.cyberhost.biz:7777",
+)
+
+
+def _hf_proxy_candidates() -> list[str]:
+    result: list[str] = []
+    for candidate in (
+        os.getenv("LESHY_HF_PROXY_URL", ""),
+        os.getenv("HTTPS_PROXY", ""),
+        os.getenv("https_proxy", ""),
+        os.getenv("ALL_PROXY", ""),
+        os.getenv("all_proxy", ""),
+        *DEFAULT_HF_PROXIES,
+    ):
+        candidate = str(candidate).strip()
+        if not candidate:
+            continue
+        parsed = urlsplit(candidate)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            continue
+        try:
+            if parsed.port is None:
+                continue
+        except ValueError:
+            continue
+        if candidate not in result:
+            result.append(candidate)
+    return result
+
+
+def _hf_proxy_label(proxy: str) -> str:
+    """Never print a proxy password or access token."""
+    parsed = urlsplit(proxy)
+    return f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
+
+
+def _hf_retryable_error(output: str) -> bool:
+    lowered = output.lower()
+    if "not enough free" in lowered or "недостаточно свободного места" in lowered:
+        return False
+    if "401 unauthorized" in lowered or "repository is gated" in lowered:
+        return False
+    # Retry regional restrictions, failures reaching HF/Xet, and transient HTTP failures.
+    return any(term in lowered for term in (
+        "403 forbidden", "not available in your region", "httpstatuserror",
+        "connection", "connecterror", "proxyerror", "timeout",
+        "timed out", "502 bad gateway", "503 service unavailable",
+        "504 gateway timeout", "localentrynotfounderror", "ssl", "network",
+    ))
+
+
+def download_checkpoint_with_proxy_fallback(brain_dir: Path) -> dict:
+    """Try a truly direct connection first, then configured HF HTTP CONNECT proxies.
+
+    Each attempt runs in a fresh process. HF's httpx client and hf_xet Rust
+    transport read proxy environment at initialization, so mutating it after a
+    failed snapshot_download would not be reliable.
+    """
+    brain_dir = Path(brain_dir).expanduser().resolve()
+    candidates: list[str | None] = [None, *_hf_proxy_candidates()]
+    for index, proxy in enumerate(candidates):
+        mode = "прямое соединение" if proxy is None else f"прокси {_hf_proxy_label(proxy)}"
+        print(f"Inkling: загрузка через {mode}", flush=True)
+        child_env = os.environ.copy()
+        for key in list(child_env):
+            if key.lower() in {"http_proxy", "https_proxy", "all_proxy", "no_proxy"}:
+                child_env.pop(key, None)
+        if proxy is None:
+            child_env["NO_PROXY"] = "*"
+        else:
+            child_env["HTTP_PROXY"] = proxy
+            child_env["HTTPS_PROXY"] = proxy
+            child_env["NO_PROXY"] = "127.0.0.1,localhost,::1"
+        child_env["PYTHONUNBUFFERED"] = "1"
+        cmd = [
+            sys.executable, "-m", "leshy.inkling_original", "download-attempt",
+            "--brain-dir", str(brain_dir),
+        ]
+        lines: list[str] = []
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                encoding="utf-8", errors="replace", env=child_env,
+            )
+            assert proc.stdout is not None
+            with proc.stdout:
+                for line in proc.stdout:
+                    safe_line = line
+                    if proxy:
+                        safe_line = safe_line.replace(proxy, _hf_proxy_label(proxy))
+                    lines.append(safe_line)
+                    if len(lines) > 100:
+                        lines.pop(0)
+                    # Keep progress/errors visible even when the files are very large.
+                    print(safe_line, end="", flush=True)
+            code = proc.wait()
+        except (OSError, ValueError) as exc:
+            code = 1
+            lines = [f"{type(exc).__name__}: {exc}"]
+            print(lines[0], flush=True)
+        if code == 0:
+            return checkpoint_status(brain_dir)
+
+        output = "".join(lines)
+        if index == len(candidates) - 1 or not _hf_retryable_error(output):
+            raise RuntimeError(
+                "Скачать оригинал Inkling не удалось. Последняя попытка: "
+                f"{mode}. Ответ сервера или причина сбоя приведены выше. "
+                "Если все выходы имеют региональное ограничение, необходим "
+                "доступный в разрешённом регионе прокси; выбор модели Qwen не менялся."
+            )
+        print("Inkling: прямой маршрут или текущий прокси недоступен; пробую следующий.", flush=True)
+    raise RuntimeError("Не удалось загрузить оригинальный checkpoint")
 
 def memory_limits(torch) -> dict:
     """Bound the original Transformers/Accelerate device map before using disk."""
@@ -298,13 +420,15 @@ def serve_local(brain_dir: Path, port: int) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Leshy: original Inkling 2 Mini and SSD offload")
-    parser.add_argument("action", choices=("download", "status", "ask", "serve"))
+    parser.add_argument("action", choices=("download", "download-attempt", "status", "ask", "serve"))
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--brain-dir", default=os.getenv("LESHY_BRAIN_DIR") or str(Path.cwd() / "LeshyBrain"))
     parser.add_argument("--question", default="Как Вас зовут?")
     args = parser.parse_args()
     brain = Path(args.brain_dir)
     if args.action == "download":
+        result = download_checkpoint_with_proxy_fallback(brain)
+    elif args.action == "download-attempt":
         result = download_checkpoint(brain)
     elif args.action == "status":
         result = checkpoint_status(brain)
