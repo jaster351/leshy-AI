@@ -162,6 +162,36 @@ try {
         Write-Host ('DEPLOYED: ' + $sourceVersion + ' / ' + $sourceSha.Substring(0,10))
         Publish-UpdateStatus -State 'updated'
     }
+    # The long-running model installer/downloader must NOT block code builds.
+    # Register an independent one-shot task under the exact same trusted
+    # principal as this existing scheduled updater, then trigger it.
+    # Ignore duplicate starts while it runs and keep application update result
+    # independent of optional model download/network errors.
+    try {
+        $modelScript = Join-Path $PSScriptRoot 'auto-prepare-models.ps1'
+        if (Test-Path -LiteralPath $modelScript -PathType Leaf) {
+            $modelTaskName = 'Leshy AI - Model Provision (automatic)'
+            $modelTask = Get-ScheduledTask -TaskName $modelTaskName -ErrorAction SilentlyContinue
+            if (-not $modelTask) {
+                $mainTask = Get-ScheduledTask -TaskName 'Leshy AI - Git Build (15 min)' -ErrorAction Stop
+                $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+                $taskAction = New-ScheduledTaskAction -Execute $exe -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $modelScript + '"') -WorkingDirectory $RepoRoot
+                $taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 12) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+                $modelTask = Register-ScheduledTask -TaskName $modelTaskName -Action $taskAction -Principal $mainTask.Principal -Settings $taskSettings -Force -ErrorAction Stop
+                Write-Host ('MODEL_TASK_INSTALLED: ' + $modelTaskName)
+            }
+            if ([string]$modelTask.State -ne 'Running') {
+                Start-ScheduledTask -TaskName $modelTaskName -ErrorAction Stop
+                Write-Host ('MODEL_TASK_TRIGGERED: ' + $modelTaskName)
+            } else {
+                Write-Host 'MODEL_TASK_ALREADY_RUNNING'
+            }
+        }
+    } catch {
+        # Never turn a successful Leshy release into a failed update because
+        # optional model provisioning couldn't be scheduled.
+        Write-Warning ('MODEL_TASK_SCHEDULING_ERROR: ' + $_.Exception.Message)
+    }
     Write-Host ('SCHEDULED CHECK OK: ' + (Get-Date -Format o))
 } catch {
     $exitCode = 1

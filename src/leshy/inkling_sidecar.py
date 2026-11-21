@@ -84,10 +84,29 @@ class InklingOriginalSidecarLLM:
             *self._python_command(), "-m", "leshy.inkling_original",
             "serve", "--brain-dir", str(self.brain_dir), "--port", str(port),
         ]
+        # The dedicated model venv intentionally does not install the full
+        # leshy-ai distribution: import only the checked-out source modules.
+        # Keep PYTHONPATH scoped to this model subprocess, never to Leshy.exe.
+        child_env = os.environ.copy()
+        source = child_env.get("LESHY_INKLING_SOURCE_DIR", "").strip()
+        source_candidates = [Path(source)] if source else []
+        # Packaged Windows layout: <repo>/dist/Leshy/LeshyBrain.
+        # Works on the first app restart even if its old process environment
+        # did not inherit variables written by the model-provision task.
+        if len(self.brain_dir.parents) >= 3:
+            source_candidates.append(self.brain_dir.parents[2] / "src")
+        for source_dir in source_candidates:
+            if (source_dir / "leshy" / "inkling_original.py").is_file():
+                child_env["PYTHONPATH"] = str(source_dir)
+                version_file = source_dir.parent / "VERSION"
+                if version_file.is_file():
+                    child_env["LESHY_VERSION_FILE"] = str(version_file)
+                break
         try:
             self._proc = subprocess.Popen(
                 command, stdin=subprocess.DEVNULL, stdout=self._log,
                 stderr=subprocess.STDOUT, close_fds=True, creationflags=CREATE_NO_WINDOW,
+                env=child_env,
             )
         except Exception as exc:
             self.close()
