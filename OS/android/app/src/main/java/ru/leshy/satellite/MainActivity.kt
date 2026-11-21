@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshHologramStatus() {
         if (::voiceStatus.isInitialized) hologram?.setStatus(
-            voiceStatus.text.toString().take(200), continuousActive
+            voiceStatus.text.toString().take(200), continuousActive, cameraEnabled
         )
     }
 
@@ -87,6 +87,10 @@ class MainActivity : ComponentActivity() {
             if (continuousActive) stopContinuousConversation("Разговор завершён.")
             else startContinuousConversation()
             refreshHologramStatus()
+        }, {
+            if (cameraEnabled) stopCamera()
+            else if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
+            else cameraPermission.launch(Manifest.permission.CAMERA)
         }).also {
             hologram = it
             screen.addView(it, FrameLayout.LayoutParams(-1, -1))
@@ -398,7 +402,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
             override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                runOnUiThread { finishAvatarSpeech(utteranceId) }
+                runOnUiThread {
+                    finishAvatarSpeech(utteranceId)
+                    if (utteranceId != null && continuousActive && pendingUtteranceId == utteranceId) {
+                        pendingUtteranceId = null
+                        continuousRecognizer?.resumeAfterAnswer()
+                    }
+                }
             }
             override fun onDone(utteranceId: String?) {
                 runOnUiThread {
@@ -451,7 +461,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startContinuousConversation() {
         if (continuousActive) return
-        if (voiceBusy) {
+        if (voiceBusy || avatarSpeechId != null) {
             voiceStatus.text = "Дождитесь текущего ответа, затем включите разговор."
             return
         }
@@ -744,6 +754,7 @@ class MainActivity : ComponentActivity() {
     private fun startCamera() {
         cameraPreview.visibility = View.VISIBLE
         cameraEnabled = true
+        refreshHologramStatus()
         cameraButton.text = "Выключить камеру"
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
@@ -764,17 +775,16 @@ class MainActivity : ComponentActivity() {
                         return@setAnalyzer
                     }
                     try {
-                        val input = InputImage.fromMediaImage(
-                            image, frame.imageInfo.rotationDegrees
-                        )
+                        val rotation = frame.imageInfo.rotationDegrees
+                        val inputWidth = if (rotation % 180 == 0) frame.width else frame.height
+                        val input = InputImage.fromMediaImage(image, rotation)
                         detector.process(input)
                             .addOnSuccessListener { faces ->
                                 runOnUiThread {
                                     if (cameraEnabled) {
                                         val face = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
-                                        val width = if (frame.imageInfo.rotationDegrees % 180 == 0) frame.width else frame.height
-                                        avatarGaze = if (face == null || width <= 0) 0f else
-                                            ((face.boundingBox.exactCenterX() / width - 0.5f) * 1.2f).coerceIn(-0.6f, 0.6f)
+                                        avatarGaze = if (face == null || inputWidth <= 0) 0f else
+                                            ((0.5f - face.boundingBox.exactCenterX() / inputWidth) * 1.2f).coerceIn(-0.6f, 0.6f)
                                         if (hologramOpen) hologram?.setGaze(avatarGaze)
                                         faceStatus.text = "Лиц в кадре: ${faces.size}. " +
                                             "Идентификация пользователей ещё не подключена."
@@ -802,6 +812,7 @@ class MainActivity : ComponentActivity() {
 
     private fun stopCamera() {
         cameraEnabled = false
+        refreshHologramStatus()
         avatarGaze = 0f
         hologram?.setGaze(0f)
         cameraProvider?.unbindAll()
