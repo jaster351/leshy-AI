@@ -28,7 +28,7 @@ class CatalogStreamingRegressionTests(unittest.TestCase):
             knowledge=_NoKnowledge(),
             _catalog_matches=lambda *args: calls.append(args) or [candidate],
             _needs_live_search=lambda message: False,
-            _memory_context=lambda owner_id: "",
+            _memory_context=lambda owner_id, **kwargs: "",
             live_search=lambda *args, **kwargs: {"results": [], "error": "offline"},
             _last_internet_route={},
         )

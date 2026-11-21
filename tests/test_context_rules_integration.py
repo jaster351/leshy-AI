@@ -14,7 +14,7 @@ class _Intelligent:
     def latest_user_query(self, owner_id: str) -> str:
         return "Как прошёл тест, и какие правила общения действуют?"
 
-    def context(self, owner_id: str, query: str, *, limit: int) -> str:
+    def context(self, owner_id: str, query: str, *, limit: int, capture_text=None) -> str:
         return (
             "- Постоянно отвечай на Вы\n"
             "- Найдено релевантное знание о тестировании"
@@ -34,7 +34,7 @@ def test_permanent_rules_load_when_intelligent_memory_is_enabled():
         "2. Не выдумывай результаты инструментов"
     )
     with patch("leshy.advanced_modules_runtime.module_enabled", return_value=True):
-        prompt = _compose_memory_context(app, "owner:verified", permanent)
+        prompt = _compose_memory_context(app, "owner:verified", permanent, query="Какие правила общения действуют?")
     assert "Постоянно отвечай на Вы" in prompt
     assert "Не выдумывай результаты инструментов" in prompt
     assert "Дополнительная интеллектуальная память" in prompt

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, Iterator
 
 from .diagnostics import event, problem
 from .distributed_cluster import DistributedClusterRuntime
-from .intelligent_memory import IntelligentMemoryEngine
+from .intelligent_memory import IntelligentMemoryEngine, _canonical_memory
 from .knowledge_graph import KnowledgeGraph
 from .module_settings import module_enabled
 from .multi_agent_orchestrator import MultiAgentOrchestrator
@@ -194,22 +195,49 @@ def _handle_advanced(app, kind: str, payload: str, *, owner_id: str, session_id:
 
 
 
-def _compose_memory_context(app, owner_id: str, original: str) -> str:
+def _memory_items(text: str) -> list[str]:
+    """Целые элементы списка, включая строки продолжения, без заголовков."""
+    items: list[str] = []
+    current: list[str] = []
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:[-*•]\s+|\d+[.)]\s+)(.*)$", line)
+        if match or not line.strip():
+            if current:
+                items.append("\n".join(current).strip())
+                current = []
+            if match:
+                current = [match.group(1)]
+        elif current:
+            current.append(line.strip())
+    if current:
+        items.append("\n".join(current).strip())
+    return items
+
+
+def _compose_memory_context(app, owner_id: str, original: str, *,
+                            query: str | None = None, capture_text: str | None = None) -> str:
     """Всегда сохранять проверенные правила базового профиля поверх Mem0 и GraphRAG."""
-    query = app.intelligent_memory.latest_user_query(owner_id)
     blocks: list[str] = []
     if original:
         blocks.append(original)
+    # Нет текущего запроса — сохраняем профиль, но не угадываем тему по последнему
+    # сообщению владельца: оно может принадлежать параллельному другому чату.
+    if not isinstance(query, str) or not query.strip():
+        return "\n\n".join(blocks)
+    query = query.strip()
     if module_enabled(app.storage, "intelligent-memory"):
-        memory = app.intelligent_memory.context(owner_id, query, limit=8)
+        memory = app.intelligent_memory.context(
+            owner_id, query, limit=8, capture_text=capture_text if isinstance(capture_text, str) else "")
         if memory:
             # В исходном контексте уже есть постоянные правила и обычная память.
             # Снова найденные записи не должны расходовать токены повторно.
             extra = []
-            for line in memory.splitlines():
-                content = line.strip().removeprefix("- ").strip()
-                if content and (not original or content not in original):
-                    extra.append(line)
+            seen = {_canonical_memory(item) for item in _memory_items(original)}
+            for content in _memory_items(memory):
+                key = _canonical_memory(content)
+                if key and key not in seen:
+                    extra.append("- " + content)
+                    seen.add(key)
             if extra:
                 blocks.append("Дополнительная интеллектуальная память:\n" + "\n".join(extra))
     if module_enabled(app.storage, "knowledge-graph") and query:
@@ -232,10 +260,11 @@ def install_advanced_modules(app_class, app=None) -> None:
     _ORIGINAL_MEMORY_CONTEXT = app_class._memory_context
     _ORIGINAL_STOP_BACKGROUND = app_class.stop_background
 
-    def memory_context(self, owner_id: str) -> str:
+    def memory_context(self, owner_id: str, *, query: str | None = None,
+                       capture_text: str | None = None) -> str:
         _ensure_components(self)
-        original = _ORIGINAL_MEMORY_CONTEXT(self, owner_id)
-        return _compose_memory_context(self, owner_id, original)
+        original = _ORIGINAL_MEMORY_CONTEXT(self, owner_id, query=query, capture_text=capture_text)
+        return _compose_memory_context(self, owner_id, original, query=query, capture_text=capture_text)
 
     def chat(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None, **kwargs):
         _ensure_components(self)
