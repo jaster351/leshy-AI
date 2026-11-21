@@ -118,8 +118,10 @@ try {
                 # Only the child task inherits these values; do not change system/user proxy.
                 $proxy = [string]$env:LESHY_HF_PROXY_URL
                 if (-not $proxy) { $proxy = 'http://vpn.nidr.cyberhost.biz:7777' }
-                if (-not $env:HTTPS_PROXY) { $env:HTTPS_PROXY = $proxy }
-                if (-not $env:HTTP_PROXY) { $env:HTTP_PROXY = $proxy }
+                # The proxy has been checked by the owner. Override only
+                # this scheduled worker's process environment, never User/Machine.
+                $env:HTTPS_PROXY = $proxy
+                $env:HTTP_PROXY = $proxy
                 $env:LESHY_HF_PROXY_URL = $proxy
                 $env:PIP_NO_INPUT = '1'
                 $prep = Join-Path $PSScriptRoot 'Prepare-InklingOriginal.ps1'
