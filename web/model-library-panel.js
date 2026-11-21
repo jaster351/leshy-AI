@@ -34,6 +34,13 @@
       .model-library-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:auto}
       .model-library-actions .button{flex:1 1 130px}
       .model-library-vision{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--muted);width:100%}
+      #modelProvisionCard{border:1px solid var(--line);border-radius:9px;padding:10px;margin:10px 0;background:rgba(255,255,255,.02)}
+      #modelProvisionCard .provision-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px}
+      #modelProvisionCard .provision-heading strong{font-size:12px}
+      #modelProvisionState{font-size:11px;white-space:pre-wrap;line-height:1.6;word-break:break-word;color:var(--muted)}
+      #modelProvisionState .provision-good{color:#68d9a7}
+      #modelProvisionState .provision-failed{color:#f7ba7d}
+      #modelProvisionState .provision-running{color:#8ac7ff}
       #modelLibraryProgress{margin-top:10px;border:1px solid var(--line);border-radius:9px;padding:9px 10px;font-size:11px;color:var(--muted);white-space:pre-wrap}
       #modelLibraryProgress.active{color:#dce8f3;border-color:#31516f;background:rgba(74,155,232,.06)}
       #modelRepositorySearch{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
@@ -67,6 +74,13 @@
         </select>
         <div class="runtime-note" id="runtimeModeNote">Загрузка режима…</div>
       </div>
+      <section id="modelProvisionCard" aria-label="Автоматическая подготовка моделей">
+        <div class="provision-heading">
+          <strong>NVMe / SSD — автоматическая подготовка моделей</strong>
+          <button id="modelProvisionCopy" type="button" class="button secondary small">Копировать отчёт</button>
+        </div>
+        <div id="modelProvisionState" aria-live="polite">Проверяю автоматическую подготовку…</div>
+      </section>
       <div id="modelLibraryGrid"></div>
       <div id="modelLibraryProgress">Каталог загружается…</div>
       <section id="modelRepositorySearch">
@@ -92,6 +106,7 @@
     else pane.appendChild(card);
     $('runtimeMode').onchange=saveRuntimeMode;
     $('modelRepoSearchButton').onclick=searchRepositories;
+    $('modelProvisionCopy').onclick=copyProvisionReport;
     $('modelRepoName').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();searchRepositories();}};
     return card;
   }
@@ -286,15 +301,128 @@
     }catch(error){$('modelLibraryProgress').textContent='Ошибка каталога: '+error.message;return null;}
   }
 
+  const provisionStates = {
+    not_started:'ещё не запускалось',
+    running:'выполняется',
+    failed:'ошибка, автоматическая повторная попытка',
+    stale:'нет свежего подтверждения работы',
+    installed:'установлен',
+    downloaded:'скачан',
+    ready:'готов',
+    skipped:'пропущен',
+    unknown:'состояние неизвестно'
+  };
+  const provisionNames = {
+    inferssd:'Движок InferSSD',
+    inkling:'Оригинал Inkling 2 Mini',
+    'inference-dependencies':'Окружение Inkling',
+    moe:'MoE Qwen3.6 GGUF'
+  };
+  let latestProvision = null;
+
+  function provisionLine(box,label,value,kind=''){
+    const line=document.createElement('div');
+    const title=document.createElement('strong');
+    title.textContent=label+': ';
+    line.appendChild(title);
+    const detail=document.createElement('span');
+    detail.textContent=value;
+    if(kind) detail.className='provision-'+kind;
+    line.appendChild(detail);
+    box.appendChild(line);
+  }
+
+  async function loadProvision(){
+    const box=$('modelProvisionState');
+    if(!box) return;
+    try{
+      const data=await api('/v1/model/provision');
+      latestProvision=data;
+      box.replaceChildren();
+      for(const stage of (Array.isArray(data.stages)?data.stages:[])){
+        const outcome=String(stage.outcome||'unknown');
+        const label=provisionNames[stage.stage]||stage.stage;
+        let line=provisionStates[outcome]||outcome;
+        if(outcome==='failed'||outcome==='stale'){
+          if(stage.details) line+=' — '+String(stage.details).slice(0,160);
+        }
+        provisionLine(box,label,line,
+          ['downloaded','installed','ready'].includes(outcome)?'good'
+            : outcome==='running'?'running'
+            : ['failed','stale'].includes(outcome)?'failed':'');
+      }
+      const linux=data.linux||{};
+      if(linux.outcome&&linux.outcome!=='not_started'){
+        provisionLine(box,'Linux-узел (локальное состояние)',linux.outcome);
+      }
+      const health=data.health||{};
+      if(health.available){
+        provisionLine(box,'Файлы Inkling',String(health.inkling_state||'unknown'));
+        provisionLine(box,'MoE GGUF',String(health.moe_state||'unknown'));
+        provisionLine(box,'Реальная SSD-подгрузка',health.ssd_streaming_verified
+          ? 'подтверждена нативными событиями ('+Number(health.ssd_read_bytes_observed||0)+' байт)'
+          : 'пока не подтверждена',health.ssd_streaming_verified?'good':'');
+        const free=health.free||{};
+        if(free.brain&&Number.isFinite(Number(free.brain.free_gib))){
+          provisionLine(box,'Свободно в LeshyBrain',Number(free.brain.free_gib).toFixed(1)+' ГиБ');
+        }
+        if(free.inferssd_gguf&&free.inferssd_gguf.path){
+          const freeModel=Number(free.inferssd_gguf.free_gib);
+          if(Number.isFinite(freeModel)){
+            provisionLine(box,'Свободно на диске MoE',freeModel.toFixed(1)+' ГиБ');
+          }
+        }
+      }else{
+        provisionLine(box,'Диагностика','итоговый снимок ещё не сформирован');
+      }
+      const hint=document.createElement('div');
+      hint.className='model-library-note';
+      hint.textContent='Наличие весов не доказывает работу нейросети. Qwen3 не переключается без отдельной проверки.';
+      box.appendChild(hint);
+    }catch(error){
+      box.textContent='Не удалось получить статус установки: '+error.message;
+    }
+  }
+
+  async function copyProvisionReport(){
+    const button=$('modelProvisionCopy');
+    if(!button) return;
+    if(!latestProvision){await loadProvision();}
+    if(!latestProvision){return;}
+    const content=JSON.stringify(latestProvision,null,2);
+    const original=button.textContent;
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        await navigator.clipboard.writeText(content);
+      }else{
+        const field=document.createElement('textarea');
+        field.value=content;
+        field.style.position='fixed';
+        field.style.left='-99999px';
+        document.body.appendChild(field);
+        field.select();
+        const copied=document.execCommand('copy');
+        field.remove();
+        if(!copied)throw new Error('Копирование заблокировано браузером');
+      }
+      button.textContent='Отчёт скопирован';
+    }catch(error){
+      alert('Не удалось скопировать отчёт: '+error.message);
+    }finally{
+      setTimeout(()=>{button.textContent=original;},1800);
+    }
+  }
+
   async function loadAll(){
     ensure();
-    await Promise.all([loadRuntime(),loadLibrary()]);
+    await Promise.all([loadRuntime(),loadLibrary(),loadProvision()]);
   }
 
   function boot(){
     ensure();
     loadAll();
     setInterval(()=>{ if($('modelLibraryCard')) loadLibrary(); },2000);
+    setInterval(()=>{ if($('modelProvisionState')) loadProvision(); },5000);
   }
 
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot,{once:true});
