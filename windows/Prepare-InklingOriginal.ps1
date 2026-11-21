@@ -40,10 +40,21 @@ Write-Host ('Original model directory: ' + $env:LESHY_INKLING_MODEL_DIR)
 Write-Host ('SSD offload directory: ' + $env:LESHY_SSD_OFFLOAD_DIR)
 Write-Host ('Isolated Python: ' + $python)
 
+# This runs inside the isolated venv; pip proxy is inherited from the
+# model-provisioning worker rather than applied to the user's global session.
 & $python -m pip install 'huggingface_hub>=1.31,<2' 'hf_xet>=1.8,<2'
 if ($LASTEXITCODE -ne 0) { throw 'Hugging Face dependencies installation failed in isolated Python' }
-& $python -m pip install --no-deps -e $repo
-if ($LASTEXITCODE -ne 0) { throw 'Could not install Leshy Python sidecar into isolated environment' }
+# The sidecar needs only Leshy's source modules, not the entire leshy-ai package
+# (which would falsely declare all GUI/server dependencies missing in this venv).
+$sourceDir = Join-Path $repo 'src'
+$env:PYTHONPATH = $sourceDir
+$env:LESHY_INKLING_SOURCE_DIR = $sourceDir
+[Environment]::SetEnvironmentVariable('LESHY_INKLING_SOURCE_DIR', $sourceDir, 'User')
+if (-not (Test-Path -LiteralPath (Join-Path $sourceDir 'leshy\inkling_original.py') -PathType Leaf)) {
+  throw 'Leshy Inkling Python source missing'
+}
+# Use the project VERSION from the source tree without installing leshy-ai.
+$env:LESHY_VERSION_FILE = Join-Path $repo 'VERSION'
 
 if ($InstallInference) {
   & $python -m pip install 'transformers>=5,<6' 'accelerate>=1,<2' 'torch>=2.5'
