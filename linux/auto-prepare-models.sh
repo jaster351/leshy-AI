@@ -54,8 +54,8 @@ VENV="$BRAIN/runtime/inkling-original-venv"
 mkdir -p "$MODEL" "$OFFLOAD"
 if [[ ! -f "$MODEL/.leshy-original.json" ]]; then
   avail="$(df -Pk "$BRAIN" | awk 'NR==2 {print $4}')"
-  if [[ ! "$avail" =~ ^[0-9]+$ ]] || (( avail < 35*1024*1024 )); then
-    echo "INKLING_NO_SPACE: at least 35 GiB free required"
+  if [[ ! "$avail" =~ ^[0-9]+$ ]] || (( avail < 45*1024*1024 )); then
+    echo "INKLING_NO_SPACE: at least 45 GiB free required"
     status=failed
   elif command -v python3 >/dev/null 2>&1; then
     if [[ ! -x "$VENV/bin/python" ]]; then python3 -m venv "$VENV" || status=failed; fi
