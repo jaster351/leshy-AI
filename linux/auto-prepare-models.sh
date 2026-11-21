@@ -12,8 +12,12 @@ exec 9>"$LOCK"
 flock -n 9 || exit 0
 exec >>"$LOG" 2>&1
 printf 'AUTO_MODEL_PROVISION_LINUX start=%s brain=%s\n' "$(date -Is)" "$BRAIN"
-if [[ -f "$STATE" ]] && [[ "$(cat "$STATE")" == complete* ]]; then
-  echo "PREVIOUS_INSTALL_COMPLETE"
+# Versioned completion marker prevents an older Linux update from silently
+# skipping the newly added MoE GGUF stage. Both manifests must remain present.
+if [[ -f "$STATE" ]] && [[ "$(cat "$STATE")" == complete-v2* ]] &&
+   [[ -f "$BRAIN/models/Inkling-2-Mini-original/.leshy-original.json" ]] &&
+   [[ -f "$BRAIN/models/InferSSD-Qwen3.6-35B-A3B/.leshy-moe-gguf.json" ]]; then
+  echo "PREVIOUS_MODEL_PROVISION_COMPLETE"
   exit 0
 fi
 # Avoid repeated attempts on every build if HF or GitHub is unavailable.
@@ -85,6 +89,11 @@ export LESHY_BRAIN_DIR="$BRAIN"
 export HF_HOME="$BRAIN/cache/huggingface"
 export PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=3
 mkdir -p "$HF_HOME"
+# Legacy machines might already have original checkpoint files without the
+# Python environment; create the isolated venv for GGUF staging as well.
+if [[ ! -x "$VENV/bin/python" ]] && command -v python3 >/dev/null 2>&1; then
+  python3 -m venv "$VENV" || status=failed
+fi
 MOE_ROOT="${LESHY_INFERSSD_MODEL_DIR:-$BRAIN/models/InferSSD-Qwen3.6-35B-A3B}"
 mkdir -p "$MOE_ROOT"
 # Do not demand another 45 GiB if the selected GGUF is already complete.
@@ -107,6 +116,7 @@ else
     status=failed
   fi
 fi
+if [[ "$status" == complete ]]; then status=complete-v2; fi
 echo "$status $(date -Is)" > "$STATE"
 printf 'AUTO_MODEL_PROVISION_LINUX finished=%s status=%s\n' "$(date -Is)" "$status"
 exit 0
