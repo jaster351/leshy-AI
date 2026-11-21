@@ -1,0 +1,26 @@
+name: Generate realistic Leshy asset (free)
+on:
+  pull_request:
+    types: [opened]
+    paths: ['tools/avatar-generation/reference.jpg.b64']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  generate:
+    if: (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'asset/realistic-leshy-free-generation') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/asset/realistic-leshy-free-generation')
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install gradio_client pillow
+      - run: python tools/avatar-generation/generate_free.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Leshy-realistic-candidate
+          path: tools/avatar-generation/output/
+          retention-days: 1
+          if-no-files-found: error
