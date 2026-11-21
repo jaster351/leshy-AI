@@ -1,16 +1,16 @@
 name: Generate realistic Leshy asset (free)
 on:
-  push:
-    branches: [asset/realistic-leshy-free-generation]
+  pull_request:
+    types: [opened]
     paths: ['tools/avatar-generation/reference.jpg.b64']
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   generate:
-    if: github.ref == 'refs/heads/asset/realistic-leshy-free-generation'
+    if: (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'asset/realistic-leshy-free-generation') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/asset/realistic-leshy-free-generation')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
