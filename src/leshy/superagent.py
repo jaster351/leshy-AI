@@ -428,14 +428,16 @@ class SuperAgentService:
                 "UPDATE superagent_assignments SET state='ended',ended_at=?,outcome='stopped' WHERE ticket_id=? AND state='running'",
                 (now, ticket_id),
             )
+        # Revoke the sensitive RDP stream immediately after the ticket's
+        # durable Stop, before any optional plan cleanup can fail or block.
+        registry = getattr(self, "_rdp_live_registry", None)
+        if registry is not None:
+            registry.stop_ticket(owner_id, ticket_id)
         # Keep a linked durable plan from scheduling steps after Stop.
         try:
             self.plans.control(ticket_id, owner_id, "cancel")
         except KeyError:
             pass  # Legacy tickets may not have a durable plan.
-        registry = getattr(self, "_rdp_live_registry", None)
-        if registry is not None:
-            registry.stop_ticket(owner_id, ticket_id)
         event("superagent_ticket_stopped", ticket_id=ticket_id)
         return self.get(ticket_id, owner_id=owner_id)
 
