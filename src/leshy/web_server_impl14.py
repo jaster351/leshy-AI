@@ -215,6 +215,68 @@ def make_handler(app, telegram, settings, model_catalog):
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
                         "error": "Не удалось прочитать состояние SSH-плана"
                     })
+            if parsed.path == "/v1/superagent/rdp/frame":
+                # Never make this a bare <img> URL: require the same-origin
+                # authenticated fetch header plus the provider-backed cookie.
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "RDP изображение доступно только авторизованной панели"
+                    })
+                context = self._remote_context()
+                if context is None:
+                    return None
+                service = getattr(app, "superagent", None)
+                if service is None or not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                        "error": "RDP наблюдение выключено"
+                    })
+                try:
+                    query = parse.parse_qs(parsed.query)
+                    if set(query) != {"ticket_id"} or len(query["ticket_id"]) != 1:
+                        raise ValueError("Требуется одно задание владельца")
+                    _policy, actor = context
+
+                    def deliver(image: bytes, update: int) -> None:
+                        # A finite write deadline prevents a slow Web browser
+                        # from holding the RDP Stop serialization lock forever.
+                        previous_timeout = self.connection.gettimeout()
+                        self.connection.settimeout(3.0)
+                        try:
+                            self.send_response(HTTPStatus.OK)
+                            self.send_header("Content-Type", "image/png")
+                            self.send_header("Content-Length", str(len(image)))
+                            self.send_header("Cache-Control", "private, no-store, max-age=0")
+                            self.send_header("Pragma", "no-cache")
+                            self.send_header("X-Content-Type-Options", "nosniff")
+                            self.send_header("Content-Security-Policy", "default-src 'none'")
+                            self.send_header("X-Leshy-RDP-Frame", str(update))
+                            self.end_headers()
+                            self.wfile.write(image)
+                        finally:
+                            self.connection.settimeout(previous_timeout)
+
+                    delivered = service._rdp_controls().transmit_png(
+                        actor, query["ticket_id"][0], deliver
+                    )
+                    if not delivered:
+                        self.send_response(HTTPStatus.NO_CONTENT)
+                        self.send_header("Cache-Control", "private, no-store, max-age=0")
+                        self.send_header("X-Content-Type-Options", "nosniff")
+                        self.end_headers()
+                    return None
+                except (PermissionError, ValueError, KeyError):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Недостаточно прав для просмотра RDP"
+                    })
+                except (BrokenPipeError, ConnectionError, TimeoutError, OSError):
+                    # Client disconnected after response headers: never
+                    # append JSON or leak raw screen contents into logs.
+                    return None
+                except Exception as exc:
+                    problem("superagent_rdp_png_delivery_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось получить RDP кадр"
+                    })
             if parsed.path == "/v1/superagent/rdp/live":
                 context = self._remote_context()
                 if context is None:

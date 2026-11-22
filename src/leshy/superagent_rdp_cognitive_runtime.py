@@ -7,7 +7,11 @@ No Web route, LLM-dispatched tool, permission grant, or RDP input is added.
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any
+
+from .rdp_vision_bridge import RDPVisionPNG
+from .rdp_local_vision import _validated_png
 
 from .planner import Planner
 from .rdp_cognitive_bridge import RDPObservationInbox, RDPReadOnlyProposal
@@ -79,6 +83,10 @@ class SuperAgentRDPCognitiveSession:
         self._graphics_started = False
         self._latest_frame_update = 0
         self._last_proposal: RDPReadOnlyProposal | None = None
+        # One real, decoded PNG only, never an HTTP input or a saved file.
+        self._web_png: RDPVisionPNG | None = None
+        self._web_png_at = 0.0
+        self._last_web_update = 0
 
         # A currently working, owner-scoped SuperAgent task is mandatory.
         self._policy._check_actor(actor)
@@ -153,6 +161,34 @@ class SuperAgentRDPCognitiveSession:
         with self._lock:
             return self._last_proposal
 
+    def accept_native_png(self, frame: RDPVisionPNG) -> None:
+        """Only called from real decoded native graphics; bounded memory.
+
+        No owner DB check, model call or network I/O in the graphics callback.
+        The native stream already rechecks owner permission immediately before
+        forwarding this image. Web consumers recheck independently.
+        """
+        _validated_png(frame)
+        with self._lock:
+            if self._cancel.is_set() or self._channel is None:
+                raise PermissionError("RDP graphics stream already stopped")
+            if frame.update_count <= self._last_web_update:
+                raise ValueError("Non-monotonic native RDP frame")
+            self._last_web_update = frame.update_count
+            self._web_png = frame
+            self._web_png_at = time.monotonic()
+
+    def current_native_png(self) -> RDPVisionPNG | None:
+        """Return latest fresh native frame, never an inferred/synthetic image."""
+        self.reauthorize()
+        with self._lock:
+            image = self._web_png
+            if (self._cancel.is_set() or self._channel is None
+                    or image is None or time.monotonic() - self._web_png_at > 8.0):
+                return None
+        self.reauthorize()
+        return image
+
     def receive_graphics(
         self,
         channel: PinnedRDPCredSSPChannel,
@@ -179,6 +215,7 @@ class SuperAgentRDPCognitiveSession:
             report = stream_native_rdp_with_local_vision(
                 channel, reauthorize=self.reauthorize,
                 on_observation=self.accept_observation,
+                on_png_frame=self.accept_native_png,
                 policy=policy, max_png_frames=max_png_frames,
                 drain_timeout=drain_timeout,
             )
@@ -187,6 +224,8 @@ class SuperAgentRDPCognitiveSession:
         finally:
             with self._lock:
                 self._channel = None
+                self._web_png = None
+                self._web_png_at = 0.0
             channel.close()
 
     def stop(self) -> None:
@@ -195,6 +234,8 @@ class SuperAgentRDPCognitiveSession:
         self._inbox.stop()
         with self._lock:
             self._last_proposal = None
+            self._web_png = None
+            self._web_png_at = 0.0
             channel = self._channel
         if channel is not None:
             channel.stop_graphics_stream()
@@ -210,7 +251,13 @@ class SuperAgentRDPCognitiveSession:
             "pending": state["pending"],
             "dropped": state["dropped"],
             "graphics_started": self._graphics_started,
-            "graphics_active": self._channel is not None,
+            "graphics_active": self._channel is not None and not self._cancel.is_set(),
+            "frame_available": (
+                self._channel is not None and not self._cancel.is_set()
+                and self._web_png is not None
+                and time.monotonic() - self._web_png_at <= 8.0
+            ),
+            "frame_update": self._last_web_update if self._web_png else 0,
             "input_enabled": False,
             "windows_rdp_e2e_verified": False,
         }
