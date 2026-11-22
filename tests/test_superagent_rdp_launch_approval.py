@@ -7,6 +7,8 @@ import pytest
 import leshy.superagent_rdp_launch_approval as approvals
 from leshy.superagent_remote_permissions import VerifiedActor
 
+_REAL_CREDENTIAL_IDENTITY = approvals._credential_identity
+
 
 class Policy:
     def _check_actor(self, actor):
@@ -31,6 +33,7 @@ class Service:
             "state": self.state, "id": ticket_id,
             "request_text": getattr(self, "request_text", "Проверь Windows RDP"),
             "created_at": "2026-11-22T10:00:00Z",
+            "mandate": {"remote_authorized_at_creation": True},
         }
 
     def start_authorized_native_rdp(self, *a, **kw):
@@ -42,6 +45,8 @@ def guard(monkeypatch):
     approvals._PENDING.clear()
     monkeypatch.setattr(approvals, "module_enabled", lambda *a: True)
     monkeypatch.setattr(approvals, "find_credential_file", lambda *a: object())
+    monkeypatch.setattr(approvals, "_credential_identity",
+                        lambda *a: ("dev", "ino", "1024", "mtime", "ctime"))
     monkeypatch.setattr(approvals, "_registered_pin", lambda *a: "a"*64)
 
 
@@ -197,3 +202,136 @@ def test_forbidden_at_creation_cannot_be_upgraded_by_new_login():
     s.get = get
     with pytest.raises(PermissionError):
         approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+
+def test_rdp_approval_fails_on_generic_owner_ticket():
+    s = Service()
+    s.request_text = "Подготовь прогноз погоды"
+    with pytest.raises(PermissionError, match="явно разрешить"):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+def test_rdp_approval_requires_creation_time_provider_identity():
+    s = Service()
+    original_get = s.get
+    def get(t, *, owner_id):
+        item = original_get(t, owner_id=owner_id)
+        item["mandate"] = {}
+        return item
+    s.get = get
+    with pytest.raises(PermissionError, match="явно разрешить"):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+def test_owner_tutorial_about_rdp_does_not_mint_credential_consent():
+    s = Service()
+    s.request_text = "Расскажи как настроить RDP на Windows"
+    with pytest.raises(PermissionError):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+def test_new_login_cannot_upgrade_explicitly_denied_rdp_ticket():
+    s = Service()
+    original_get = s.get
+    def get(t, *, owner_id):
+        item = original_get(t, owner_id=owner_id)
+        item["mandate"] = {"remote_authorized_at_creation": False}
+        return item
+    s.get = get
+    with pytest.raises(PermissionError):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+def test_approval_respects_source_creation_timestamp_change():
+    s = Service()
+    original_get = s.get
+    s.created_at = "2026-11-22T10:00:00Z"
+    def get(t, *, owner_id):
+        item = original_get(t, owner_id=owner_id)
+        item["created_at"] = s.created_at
+        return item
+    s.get = get
+    token = approvals.prepare_rdp_approval(Policy(), actor(), s, *params())["approval_token"]
+    s.created_at = "2026-11-22T11:00:00Z"
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(Policy(), actor(), s, token, *params())
+
+
+
+def test_file_replacement_after_prepare_burns_token(monkeypatch):
+    s, policy = Service(), Policy()
+    original = ("dev", "inode-A", "1024", "mtime", "ctime")
+    stamp = [original]
+    monkeypatch.setattr(approvals, "_credential_identity", lambda *a: stamp[0])
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    stamp[0] = ("dev", "inode-B", "1024", "mtime", "ctime")
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+    assert not approvals._PENDING
+
+
+def test_file_modified_after_consumption_revokes_delegation(monkeypatch):
+    s, policy = Service(), Policy()
+    stamp = [("dev", "inode-A", "1024", "mtime-1", "ctime")]
+    monkeypatch.setattr(approvals, "_credential_identity", lambda *a: stamp[0])
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    consent = approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+    stamp[0] = ("dev", "inode-A", "1024", "mtime-2", "ctime")
+    with pytest.raises(PermissionError):
+        consent("192.0.2.10", "rdp.example.org")
+
+
+def test_preparation_rejects_symlink_and_oversized_file(tmp_path, monkeypatch):
+    target = tmp_path / "data.json"
+    target.write_bytes(b"{}")
+    link = tmp_path / "shortcut.json"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation not permitted on this Windows host")
+    monkeypatch.setattr(approvals, "find_credential_file",
+                        lambda storage, owner, basename: link)
+    with pytest.raises(PermissionError):
+        _REAL_CREDENTIAL_IDENTITY(object(), "alice", "shortcut.json")
+    target.write_bytes(b"x" * 8193)
+    monkeypatch.setattr(approvals, "find_credential_file",
+                        lambda storage, owner, basename: target)
+    with pytest.raises(PermissionError):
+        _REAL_CREDENTIAL_IDENTITY(object(), "alice", "data.json")
+
+
+def test_preparation_never_reads_secret_contents(tmp_path, monkeypatch):
+    source = tmp_path / "rdp.json"
+    source.write_bytes(b'{"password":"not_for_web"}')
+    monkeypatch.setattr(approvals, "find_credential_file",
+                        lambda storage, owner, basename: source)
+    fingerprint = _REAL_CREDENTIAL_IDENTITY(object(), "alice", "rdp.json")
+    assert len(fingerprint) == 5
+    assert "not_for_web" not in str(fingerprint)
+
+
+
+def test_owner_can_revoke_prepared_rdp_token_before_tcp():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert approvals.cancel_rdp_approval(policy, actor(), token)
+    assert not approvals.cancel_rdp_approval(policy, actor(), token)
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_foreign_browser_cannot_revoke_owner_token():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert not approvals.cancel_rdp_approval(policy, actor("other-session"), token)
+    approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_cancelled_consent_never_issues_a_delegation_lease():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert approvals.cancel_rdp_approval(policy, actor(), token)
+    assert len(approvals._PENDING) == 0
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, token, *params())

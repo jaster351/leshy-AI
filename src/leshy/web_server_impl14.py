@@ -20,7 +20,7 @@ from .superagent_verified_ssh import inspect_remote_os
 from .superagent_ssh_enrollment import enroll_verified_ssh_node
 from .superagent_rdp_profile import rdp_connection_profile
 from .superagent_rdp_launch_approval import (
-    prepare_rdp_approval, consume_rdp_approval,
+    prepare_rdp_approval, consume_rdp_approval, cancel_rdp_approval,
 )
 from .superagent_ssh_terminal import run_ssh_terminal_command
 from .superagent_ssh_approvals import (
@@ -379,6 +379,7 @@ def make_handler(app, telegram, settings, model_catalog):
             if path in {
                 "/v1/superagent/rdp/start/prepare",
                 "/v1/superagent/rdp/start/execute",
+                "/v1/superagent/rdp/start/cancel",
             }:
                 # A session cookie alone never creates owner approval. The
                 # preparation returns a single-use token with exact identity,
@@ -417,10 +418,20 @@ def make_handler(app, telegram, settings, model_catalog):
                         "enrolled_rdp_tls_sha256", "credential_file",
                     }
                     executing = path.endswith("/execute")
-                    expected = common | ({"approval_token", "confirm"} if executing else set())
+                    cancelling = path.endswith("/cancel")
+                    expected = (
+                        {"approval_token"} if cancelling else
+                        common | ({"approval_token", "confirm"} if executing else set())
+                    )
                     if not isinstance(payload, dict) or set(payload) != expected:
                         raise ValueError("Укажите точную RDP-цель и выбранное задание")
                     policy, actor = context
+                    if cancelling:
+                        return self._json(HTTPStatus.OK, {
+                            "cancelled": cancel_rdp_approval(
+                                policy, actor, payload["approval_token"]
+                            ),
+                        })
                     args = (
                         payload["ticket_id"], payload["node_id"],
                         payload["service_dns_name"],

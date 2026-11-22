@@ -216,3 +216,92 @@ def test_remote_admin_toggle_is_explicit_and_off_by_default():
     assert "remote-admin" in options
     assert options["remote-admin"].default_enabled is False
     assert "superagent" in options["remote-admin"].dependencies
+
+
+
+def test_no_replacement_registration_while_previous_stop_is_in_flight():
+    import threading
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    original = Session(user)
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_stop():
+        entered.set()
+        assert release.wait(2)
+        original.stopped = True
+
+    original.stop = slow_stop
+    controls.register(user, "SA-1", original)
+    done = []
+    worker = threading.Thread(target=lambda: done.append(controls.stop(user, "SA-1")))
+    worker.start()
+    assert entered.wait(2)
+    with pytest.raises(RuntimeError, match="One live RDP"):
+        controls.register(user, "SA-1", Session(user))
+    release.set()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert done[0]["stopped"] is True
+    replacement = Session(user)
+    controls.register(user, "SA-1", replacement)
+    assert controls.status(user, "SA-1")["registered"] is True
+
+
+def test_failed_stop_fails_closed_for_same_task():
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    def fail_stop():
+        raise OSError("socket in uncertain state")
+    session.stop = fail_stop
+    controls.register(user, "SA-1", session)
+    with pytest.raises(OSError):
+        controls.stop(user, "SA-1")
+    with pytest.raises(RuntimeError):
+        controls.register(user, "SA-1", Session(user))
+
+
+def test_stop_ticket_serializes_with_new_registration():
+    import threading
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    entered, release = threading.Event(), threading.Event()
+    def slow_stop():
+        entered.set()
+        assert release.wait(2)
+        session.stopped = True
+    session.stop = slow_stop
+    controls.register(user, "SA-1", session)
+    thread = threading.Thread(target=lambda: controls.stop_ticket("alice", "SA-1"))
+    thread.start()
+    assert entered.wait(2)
+    with pytest.raises(RuntimeError):
+        controls.register(user, "SA-1", Session(user))
+    release.set()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+
+def test_stop_all_attempts_every_session_when_first_channel_close_fails():
+    class MultipleOwnerService(Service):
+        def get(self, ticket_id, *, owner_id):
+            if owner_id != "alice" or ticket_id not in {"SA-1", "SA-2"}:
+                raise PermissionError("foreign ticket")
+            return {"state": "working"}
+    controls = RDPLiveRegistry(MultipleOwnerService())
+    user = actor()
+    first, second = Session(user, "SA-1"), Session(user, "SA-2")
+    def fail_close():
+        raise OSError("first socket failed")
+    first.stop = fail_close
+    controls.register(user, "SA-1", first)
+    controls.register(user, "SA-2", second)
+    with pytest.raises(OSError):
+        controls.stop_all()
+    assert second.stopped
+    with pytest.raises(RuntimeError):
+        controls.register(user, "SA-1", Session(user, "SA-1"))
+    controls.register(user, "SA-2", Session(user, "SA-2"))

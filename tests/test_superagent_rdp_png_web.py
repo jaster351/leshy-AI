@@ -41,8 +41,15 @@ def image(num=1):
 
 
 class FakeChannel:
+    def __init__(self):
+        self.stop_requested = False
+        self.closed = False
+
     def stop_graphics_stream(self):
-        pass
+        self.stop_requested = True
+
+    def close(self):
+        self.closed = True
 
 
 def setup(monkeypatch):
@@ -55,6 +62,9 @@ def setup(monkeypatch):
     session._lock = threading.RLock()
     session._cancel = threading.Event()
     session._channel = FakeChannel()
+    session._handshake_channel = None
+    session._native_phase = "graphics"
+    session._native_error_type = ""
     session._graphics_started = True
     session._latest_frame_update = 0
     session._last_proposal = None
@@ -117,6 +127,8 @@ def test_stop_revokes_frame_and_suppresses_followup_delivery(monkeypatch):
     session.accept_native_png(image(1))
     assert registry.stop(actor(), "SA-1")["stopped"] is True
     assert session._web_png is None
+    assert session._channel.stop_requested
+    assert session._channel.closed
     assert not registry.transmit_png(actor(), "SA-1", lambda *_: None)
 
 
@@ -256,3 +268,21 @@ def test_png_stream_never_sends_json_after_headers_are_sent():
             "src/leshy/web_server_impl14.py").read_text(encoding="utf-8")
     assert "response_started = True" in code
     assert "if response_started:" in code
+
+
+
+def test_stop_closes_active_tls_transport_even_if_graceful_stop_throws(monkeypatch):
+    registry, session = setup(monkeypatch)
+    class ErrorChannel(FakeChannel):
+        def stop_graphics_stream(self):
+            self.stop_requested = True
+            raise OSError("socket receiver already torn down")
+    channel = ErrorChannel()
+    session._channel = channel
+    session.accept_native_png(image(1))
+    with pytest.raises(OSError):
+        registry.stop(actor(), "SA-1")
+    assert channel.closed
+    assert session._web_png is None
+    with pytest.raises(RuntimeError):
+        registry.register(actor(), "SA-1", session)

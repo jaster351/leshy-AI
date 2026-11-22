@@ -30,6 +30,30 @@ from .storage import utcnow
 
 _RDP_REGISTRY_INIT_LOCK = threading.Lock()
 
+_RDP_REMOTE_INTENT = re.compile(
+    r"(?iu)(?<!\w)(?:rdp|remote\s+desktop|терминальн\w*\s+стол|"
+    r"удал[её]нн\w*\s+(?:рабоч\w*\s+стол|экран))(?!\w)"
+)
+_RDP_OWNER_ACTION = re.compile(
+    r"(?iu)(?<!\w)(?:подключ\w*|откр\w*|посмотр\w*|покаж\w*|"
+    r"проверь\w*|провер\w*|зайди|управля\w*|connect|open|view|inspect|check)(?!\w)"
+)
+_RDP_NO_ACTION = re.compile(
+    r"(?iu)\b(?:не\s+(?:подключ\w*|откры\w*|открыв\w*|запуска\w*|"
+    r"управля\w*|rdp\b)|как\s+(?:подключ\w*|настро\w*|использ\w*|работа\w*)|"
+    r"что\s+такое|инструкци\w*|объясни|расскажи)\b"
+)
+
+
+def _rdp_explicit_task(request: str) -> bool:
+    """Only an explicit original remote-desktop action, not an RDP mention."""
+    value = str(request or "")[:12000]
+    return bool(
+        _RDP_REMOTE_INTENT.search(value)
+        and _RDP_OWNER_ACTION.search(value)
+        and not _RDP_NO_ACTION.search(value)
+    )
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS superagent_tickets(
@@ -294,8 +318,13 @@ class SuperAgentService:
     def stop(self) -> None:
         self._stop.set()
         registry = getattr(self, "_rdp_live_registry", None)
-        if registry is not None:
-            registry.stop_all()
+        try:
+            if registry is not None:
+                registry.stop_all()
+        except Exception as exc:
+            # Continue shutting down the service and releasing its lease;
+            # the registry keeps any failed RDP Stop reserved (fail closed).
+            problem("superagent_rdp_shutdown_failed", type(exc).__name__)
         self._wake.set()
         thread = self._thread
         if thread and thread.is_alive() and thread is not threading.current_thread():
@@ -323,8 +352,8 @@ class SuperAgentService:
             "created_at": now,
             "policy_version": 1,
         }
-        if maintenance_intent(request):
-            # Do not let an old anonymous ticket acquire SSH rights simply
+        if maintenance_intent(request) or _rdp_explicit_task(request):
+            # Do not let an old anonymous ticket acquire SSH/RDP rights simply
             # because the browser/Telegram identity is linked *later*.
             # Check an active server-side provider login AT CREATION TIME.
             try:

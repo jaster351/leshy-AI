@@ -111,8 +111,11 @@
     const setup = element('details', 'sa-setup');
     setup.append(element('summary', '', 'Подключить Windows RDP (с подтверждением)'));
     const warning = element('p', 'sa-remote-note',
-      'Перед запуском сверяйте SHA-256 сертификата RDP по доверенной консоли сервера. ' +
-      'Одноразовое подтверждение разрешит передачу пароля из локального JSON-файла. ' +
+      'Создайте отдельное задание с прямым поручением подключиться по RDP, ' +
+      'находясь в подтверждённой Web-сессии владельца. Старые и справочные задания ' +
+      'не дают разрешения на удалённый вход. Перед запуском сверяйте SHA-256 ' +
+      'сертификата RDP по доверенной консоли сервера. Одноразовое подтверждение ' +
+      'разрешит передачу пароля из локального JSON-файла. ' +
       'Пароль никогда не вводится в браузер. Автоповтора нет.');
     const nodeLabel = element('label', '', 'Зарегистрированный компьютер');
     const nodeSelect = element('select', 'sa-ssh-select');
@@ -163,7 +166,18 @@
           'владеете целевым компьютером и однократно разрешаете вход?\n' +
           'Windows RDP E2E ещё не подтверждён.';
         if (!window.confirm(text)) {
-          launchStatus.textContent = 'Вход отменён. Пароль не передавался.';
+          try {
+            const cancelled = await api('/v1/superagent/rdp/start/cancel', {
+              method: 'POST',
+              body: JSON.stringify({approval_token: approval.approval_token})
+            });
+            launchStatus.textContent = cancelled.cancelled
+              ? 'Разрешение отозвано до запуска. RDP не запускался.'
+              : 'Подтверждение уже использовано либо истекло. Проверьте состояние RDP и Stop.';
+          } catch (cancelError) {
+            launchStatus.textContent = 'Отзыв разрешения не подтверждён. Проверьте состояние RDP и Stop. ' +
+              'Не используйте токен повторно, срок его действия 90 секунд.';
+          }
           return;
         }
         launchStatus.textContent = 'Одноразовое подтверждение принято; запускаю нативное RDP…';

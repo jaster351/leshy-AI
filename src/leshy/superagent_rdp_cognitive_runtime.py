@@ -350,10 +350,18 @@ class SuperAgentRDPCognitiveSession:
             pending = self._handshake_channel
             self._handshake_channel = None
             self._native_phase = "stopped"
-        if channel is not None:
-            channel.stop_graphics_stream()
-        if pending is not None:
-            pending.close()
+        try:
+            if channel is not None:
+                try:
+                    channel.stop_graphics_stream()
+                finally:
+                    # Requesting Stop is not proof the pinned TLS socket has
+                    # closed. Close it before releasing the registry's ticket
+                    # reservation, even when the receiver is between reads.
+                    channel.close()
+        finally:
+            if pending is not None and pending is not channel:
+                pending.close()
 
     def snapshot(self) -> dict[str, Any]:
         """No screenshots, secrets or model replies in control-plane status."""

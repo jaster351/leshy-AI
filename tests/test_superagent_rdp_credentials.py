@@ -78,7 +78,10 @@ def test_symlink_source_is_rejected(tmp_path, monkeypatch):
     path = tmp_path / "rdp.json"
     target = tmp_path / "target.json"
     target.write_bytes(payload())
-    path.symlink_to(target)
+    try:
+        path.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation not permitted on this Windows host")
     monkeypatch.setattr(module, "find_credential_file", lambda *a: path)
     with pytest.raises((PermissionError, OSError)):
         load_owner_rdp_credentials(object(), "owner", HOST, "rdp.json")
@@ -91,3 +94,27 @@ def test_oversized_source_is_rejected_before_json_parse(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "find_credential_file", lambda *a: path)
     with pytest.raises(PermissionError):
         load_owner_rdp_credentials(object(), "owner", HOST, "large.json")
+
+
+
+def test_numeric_json_ip_is_not_a_literal_host():
+    # ipaddress.ip_address accepts an integer, but owner JSON must use an
+    # explicit string to prevent type ambiguity and accidental aliasing.
+    with pytest.raises(PermissionError):
+        parse_rdp_credential_document(payload(host=3221225994), HOST)
+
+
+@pytest.mark.parametrize("field", ["username", "password", "domain"])
+def test_lone_surrogate_does_not_reach_credssp(field):
+    doc = {"host": HOST, "username": "user", "password": "secret"}
+    doc[field] = "\ud800"
+    # A lone surrogate must arrive as a JSON escape, not be rejected by
+    # the UTF-8 test fixture encoder before the parser is invoked.
+    raw = json.dumps(doc, ensure_ascii=True).encode("ascii")
+    with pytest.raises(ValueError):
+        parse_rdp_credential_document(raw, HOST)
+
+
+def test_host_rejects_bool_json_value_even_when_pinned_node_is_known():
+    with pytest.raises(PermissionError):
+        parse_rdp_credential_document(payload(host=True), HOST)
