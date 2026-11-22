@@ -6,6 +6,7 @@ retries, persisted secrets, or remote mouse/keyboard output.
 """
 from __future__ import annotations
 
+import math
 import re
 import threading
 from typing import Any, Callable
@@ -13,12 +14,12 @@ from typing import Any, Callable
 from .rdp_credssp_channel import (
     PinnedRDPCredSSPChannel, connect_verified_rdp_credssp,
 )
-from .rdp_credssp_credentials import RDPCredentials
+from .superagent_rdp_credentials import load_owner_rdp_credentials
 from .native_spnego import _check_target
 from .rdp_graphics_stream import GraphicsStreamPolicy
 from .superagent_remote_permissions import RemotePermissionPolicy, VerifiedActor
 from .superagent_ssh_terminal import _registered_pin
-from .superagent_verified_ssh import _node_ip, _credential
+from .superagent_verified_ssh import _node_ip
 
 _PIN = re.compile(r"[0-9a-fA-F]{64}\Z")
 _FILE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_. -]{0,254}\Z")
@@ -55,7 +56,7 @@ def start_owner_authorized_native_rdp(
     if (type(credential_file) is not str or not _FILE.fullmatch(credential_file)
             or credential_file in {".", ".."} or not credential_file.lower().endswith(".json")):
         raise ValueError("Selected owner-local JSON credential filename required")
-    if type(timeout) not in (int, float) or not 1 <= timeout <= 30:
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 1 <= timeout <= 30:
         raise ValueError("Invalid bounded RDP handshake timeout")
     if type(max_png_frames) is not int or not 1 <= max_png_frames <= 256:
         raise ValueError("Invalid PNG frame budget")
@@ -97,6 +98,10 @@ def start_owner_authorized_native_rdp(
         connection: PinnedRDPCredSSPChannel | None = None
         try:
             session.set_native_phase("connecting")
+            # Revoke a consumed confirmation BEFORE opening any TCP socket.
+            # The same approval is checked again before reading secrets and
+            # inside CredSSP immediately before the single credential send.
+            approve(node, dns)
             connection = connect_verified_rdp_credssp(
                 node, dns, expected_pin,
                 authorize=check_target, timeout=timeout,
@@ -108,14 +113,15 @@ def start_owner_authorized_native_rdp(
 
             # Do not load secrets until independently approved server binding.
             approve(node, dns)
-            username, password = _credential(
+            credentials = load_owner_rdp_credentials(
                 service.storage, actor.owner_id, node, credential_file
             )
-            credentials = RDPCredentials(username=username, password=password)
-            connection.delegate_password_credentials(
-                credentials, authorize_delegation=approve
-            )
-            del username, password, credentials
+            try:
+                connection.delegate_password_credentials(
+                    credentials, authorize_delegation=approve
+                )
+            finally:
+                del credentials
             session.set_native_phase("credentials_sent")
 
             connection.exchange_mcs_basic_settings()

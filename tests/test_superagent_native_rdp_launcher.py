@@ -143,8 +143,9 @@ def test_complete_real_protocol_sequence_is_delegated_to_existing_channel(prepar
     monkeypatch.setattr(launch, "connect_verified_rdp_credssp",
                         lambda *a, **kw: channel)
     looked_up = []
-    monkeypatch.setattr(launch, "_credential",
-                        lambda *a: (looked_up.append(True) or ("user", "secret")))
+    from leshy.rdp_credssp_credentials import RDPCredentials
+    monkeypatch.setattr(launch, "load_owner_rdp_credentials",
+                        lambda *a: (looked_up.append(True) or RDPCredentials("user", "secret")))
     approvals = []
     result = start(prepared, approve=lambda ip, dns: approvals.append((ip, dns)))
     assert result["status"] == "starting"
@@ -163,10 +164,11 @@ def test_revoked_credential_approval_never_reads_secret(prepared, monkeypatch):
     monkeypatch.setattr(launch, "connect_verified_rdp_credssp",
                         lambda *a, **kw: channel)
     looked_up = []
-    monkeypatch.setattr(launch, "_credential",
+    monkeypatch.setattr(launch, "load_owner_rdp_credentials",
                         lambda *a: looked_up.append(True))
     start(prepared, approve=lambda *a: (_ for _ in ()).throw(PermissionError("revoked")))
-    assert looked_up == [] and channel.events == ["binding"]
+    assert looked_up == [] and channel.events == []
+    assert prepared.session.fail == "PermissionError"
     assert prepared.session.fail == "PermissionError"
     assert channel.closed
 
@@ -202,3 +204,29 @@ def test_invalid_inputs_fail_before_connect(prepared, monkeypatch, bad):
     with pytest.raises((PermissionError, ValueError)):
         launch.start_owner_authorized_native_rdp(prepared, **kwargs)
     assert not tries
+
+
+
+@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), float("-inf"), True])
+def test_nonfinite_handshake_timeout_rejected_before_network(prepared, monkeypatch, timeout):
+    opened = []
+    monkeypatch.setattr(launch, "connect_verified_rdp_credssp",
+                        lambda *a, **kwargs: opened.append(1))
+    with pytest.raises(ValueError):
+        launch.start_owner_authorized_native_rdp(
+            prepared, ticket_id="SA-1",
+            actor=VerifiedActor("owner", "session-pin", "web"),
+            node_id="192.0.2.10", service_dns_name="rdp.example.org",
+            enrolled_rdp_tls_sha256="a" * 64, credential_file="rdp.json",
+            authorize_delegation=lambda *a: None, timeout=timeout,
+        )
+    assert opened == []
+
+
+def test_revoked_approval_prevents_tcp_connection(prepared, monkeypatch):
+    opened = []
+    monkeypatch.setattr(launch, "connect_verified_rdp_credssp",
+                        lambda *a, **kw: opened.append(True))
+    start(prepared, approve=lambda *a: (_ for _ in ()).throw(PermissionError("revoked")))
+    assert opened == []
+    assert prepared.session.fail == "PermissionError"

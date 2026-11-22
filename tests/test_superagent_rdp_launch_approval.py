@@ -27,7 +27,11 @@ class Service:
     def get(self, ticket_id, *, owner_id):
         if (ticket_id, owner_id) != ("SA-1", "alice"):
             raise PermissionError("not owned")
-        return {"state": self.state}
+        return {
+            "state": self.state, "id": ticket_id,
+            "request_text": getattr(self, "request_text", "Проверь Windows RDP"),
+            "created_at": "2026-11-22T10:00:00Z",
+        }
 
     def start_authorized_native_rdp(self, *a, **kw):
         self.started = True
@@ -160,3 +164,36 @@ def test_lease_expiry_prevents_late_credential_delegation(monkeypatch):
     monkeypatch.setattr(approvals.time, "monotonic", lambda: base + 120.0)
     with pytest.raises(PermissionError, match="истекло"):
         callback("192.0.2.10", "rdp.example.org")
+
+
+
+def test_changed_task_burns_approval_even_if_returned_to_original():
+    s = Service()
+    token = approvals.prepare_rdp_approval(Policy(), actor(), s, *params())["approval_token"]
+    s.request_text = "Another task was substituted"
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(Policy(), actor(), s, token, *params())
+    s.request_text = "Проверь Windows RDP"
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(Policy(), actor(), s, token, *params())
+
+
+def test_changed_task_after_consent_blocks_password_lease():
+    s = Service()
+    token = approvals.prepare_rdp_approval(Policy(), actor(), s, *params())["approval_token"]
+    permit = approvals.consume_rdp_approval(Policy(), actor(), s, token, *params())
+    s.request_text = "Изменено после выдачи"
+    with pytest.raises(PermissionError):
+        permit("192.0.2.10", "rdp.example.org")
+
+
+def test_forbidden_at_creation_cannot_be_upgraded_by_new_login():
+    s = Service()
+    original_get = s.get
+    def get(t, *, owner_id):
+        item = original_get(t, owner_id=owner_id)
+        item["mandate"] = {"remote_authorized_at_creation": False}
+        return item
+    s.get = get
+    with pytest.raises(PermissionError):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
