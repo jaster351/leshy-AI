@@ -424,3 +424,83 @@ def test_expired_stopped_ticket_epoch_allows_only_new_short_lived_consent(monkey
     approvals._TICKET_EPOCHS[key] = (prior[0], -1.0)
     new = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
     approvals.consume_rdp_approval(policy, actor(), s, new, *params())
+
+
+
+def test_explicit_owner_ip_prevents_switch_to_another_registered_node():
+    s, policy = Service(), Policy()
+    s.request_text = "Подключись по RDP к 192.0.2.11 и проверь экран"
+    with pytest.raises(PermissionError, match="не совпадает"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_exact_explicit_owner_ip_is_allowed():
+    s, policy = Service(), Policy()
+    s.request_text = "Подключись по RDP к 192.0.2.10 и проверь экран"
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_ambiguous_multiple_explicit_ip_targets_are_denied():
+    s, policy = Service(), Policy()
+    s.request_text = "Подключись по RDP к 192.0.2.10 или 192.0.2.11"
+    with pytest.raises(PermissionError, match="не совпадает"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_invalid_literal_ip_cannot_be_silently_ignored():
+    s, policy = Service(), Policy()
+    s.request_text = "Открой RDP на 999.999.999.999"
+    with pytest.raises(PermissionError, match="неверный IP"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_conflicting_original_mandate_scope_fails_closed():
+    s, policy = Service(), Policy()
+    original = s.get
+    def get(t, *, owner_id):
+        data = original(t, owner_id=owner_id)
+        data["mandate"] = {
+            "remote_authorized_at_creation": True,
+            "scope": "Подключись к другому компьютеру",
+        }
+        return data
+    s.get = get
+    with pytest.raises(PermissionError, match="явно разрешить"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_other_owner_in_original_mandate_denied_even_if_ticket_lookup_passes():
+    s, policy = Service(), Policy()
+    original = s.get
+    def get(t, *, owner_id):
+        data = original(t, owner_id=owner_id)
+        data["mandate"] = {
+            "remote_authorized_at_creation": True, "owner_id": "other-owner",
+        }
+        return data
+    s.get = get
+    with pytest.raises(PermissionError):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_changed_original_creation_timestamp_in_mandate_denied():
+    s, policy = Service(), Policy()
+    original = s.get
+    def get(t, *, owner_id):
+        data = original(t, owner_id=owner_id)
+        data["mandate"] = {
+            "remote_authorized_at_creation": True,
+            "created_at": "2020-01-01T00:00:00Z",
+        }
+        return data
+    s.get = get
+    with pytest.raises(PermissionError):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_explicit_ipv6_node_mismatch_is_refused_before_file_read():
+    s, policy = Service(), Policy()
+    s.request_text = "Подключись по RDP к [2001:db8::7]"
+    with pytest.raises(PermissionError, match="не совпадает"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())

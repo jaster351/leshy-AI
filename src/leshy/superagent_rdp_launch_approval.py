@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import stat
 import re
@@ -27,6 +28,9 @@ from .superagent_verified_ssh import _node_ip
 _PIN = re.compile(r"[0-9a-fA-F]{64}\Z")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_. -]{0,254}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{30,128}\Z")
+_IP4_IN_TASK = re.compile(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")
+_IPV6_BRACKETED_IN_TASK = re.compile(r"\[([0-9a-fA-F:]+)\]")
+
 _LOCK = threading.RLock()
 _PENDING: dict[str, tuple[tuple[str, ...], float]] = {}
 _TTL = 90.0
@@ -148,6 +152,25 @@ def _validate(
     if (type(request_text) is not str or not 1 <= len(request_text) <= 1200
             or str(ticket.get("id", ticket_id)) != ticket_id):
         raise PermissionError("Нужна подтверждённая исходная задача владельца")
+    # If the owner named a literal target in the original task, do not
+    # silently allow the Web picker to redirect the approved credentials to
+    # another registered node. A task with multiple target IPs is ambiguous.
+    explicit_nodes: set[str] = set()
+    for match in _IP4_IN_TASK.finditer(request_text):
+        try:
+            explicit_nodes.add(str(ipaddress.ip_address(match.group(0))))
+        except ValueError:
+            raise PermissionError("RDP-поручение содержит неверный IP-адрес") from None
+    for match in _IPV6_BRACKETED_IN_TASK.finditer(request_text):
+        try:
+            addr = ipaddress.ip_address(match.group(1))
+            if not isinstance(addr, ipaddress.IPv6Address):
+                raise ValueError("Not IPv6")
+            explicit_nodes.add(str(addr))
+        except ValueError:
+            raise PermissionError("RDP-поручение содержит неверный IPv6-адрес") from None
+    if explicit_nodes and explicit_nodes != {node}:
+        raise PermissionError("IP в первоначальном RDP-поручении не совпадает с узлом")
     # A Web session becoming verified later must not retroactively upgrade
     # a maintenance ticket explicitly denied at creation.
     mandate = ticket.get("mandate", {})
@@ -156,7 +179,13 @@ def _validate(
     from .superagent import _rdp_explicit_task
     if (not _rdp_explicit_task(request_text)
             or not isinstance(mandate, dict)
-            or mandate.get("remote_authorized_at_creation") is not True):
+            or mandate.get("remote_authorized_at_creation") is not True
+            or (mandate.get("scope") is not None
+                and mandate["scope"] != request_text)
+            or (mandate.get("owner_id") is not None
+                and mandate["owner_id"] != actor.owner_id)
+            or (mandate.get("created_at") is not None
+                and mandate["created_at"] != ticket.get("created_at"))):
         raise PermissionError("RDP требуется явно разрешить при создании задания")
     source_hash = hashlib.sha256(
         (ticket_id + "\0" + request_text + "\0" +
