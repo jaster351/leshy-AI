@@ -294,7 +294,8 @@
       if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = ''; }
     };
     async function loadFrame(expectedUpdate) {
-      if (frameBusy || !panel.open || !panel.isConnected) return;
+      if (frameBusy || !panel.open || !panel.isConnected
+          || document.visibilityState !== 'visible') return;
       frameBusy = true;
       const current = serial;
       const controller = new AbortController();
@@ -305,7 +306,8 @@
           signal: controller.signal,
           headers: {'X-Leshy-UI': 'superagent'}
         });
-        if (!panel.isConnected || !panel.open || current !== serial) return;
+        if (!panel.isConnected || !panel.open || current !== serial
+            || document.visibilityState !== 'visible') return;
         if (response.status === 204) { clearScreen(); return; }
         if (!response.ok || response.headers.get('Content-Type')?.split(';')[0] !== 'image/png') {
           throw Error('RDP кадр недоступен');
@@ -317,7 +319,8 @@
           throw Error('Получен устаревший или повреждённый RDP кадр');
         }
         const blob = await response.blob();
-        if (!panel.isConnected || !panel.open || current !== serial) return;
+        if (!panel.isConnected || !panel.open || current !== serial
+            || document.visibilityState !== 'visible') return;
         if (blob.size !== expectedLength) throw Error('Размер RDP кадра не совпадает');
         const next = URL.createObjectURL(blob);
         const old = objectUrl;
@@ -365,6 +368,7 @@
           connect.disabled = true;
           setup.open = false;
           if (timer !== null) { window.clearInterval(timer); timer = null; }
+          document.removeEventListener('visibilitychange', onRdpVisibility);
         }
         state.textContent = result.ticket_stopped
           ? 'RDP и задание остановлены. Повторное подключение по этому заданию запрещено.'
@@ -377,6 +381,10 @@
     const refresh = makeButton('Обновить RDP', () => load());
     async function load() {
       if (busy || stopBusy || !panel.open || !panel.isConnected) return;
+      if (document.visibilityState !== 'visible') {
+        clearScreen();
+        return;
+      }
       if (taskTerminal) {
         clearScreen();
         stop.disabled = true;
@@ -389,7 +397,8 @@
       // Keep Stop clickable while a slow, read-only status poll is pending.
       try {
         const result = await api('/v1/superagent/rdp/live?ticket_id=' + encodeURIComponent(taskId));
-        if (!panel.isConnected || !panel.open || stopBusy || taskTerminal) return;
+        if (!panel.isConnected || !panel.open || stopBusy || taskTerminal
+            || document.visibilityState !== 'visible') return;
         liveRegistered = !!result.registered;
         connect.disabled = liveRegistered || stopRequested || taskTerminal || launching;
         if (!result.registered || !result.connected) {
@@ -440,13 +449,24 @@
     }
     controls.append(refresh, stop);
     panel.append(info, setup, state, screen, proposal, controls);
+    const onRdpVisibility = () => {
+      if (!panel.isConnected || !panel.open) {
+        document.removeEventListener('visibilitychange', onRdpVisibility);
+        clearScreen();
+        return;
+      }
+      if (document.visibilityState !== 'visible') clearScreen();
+      else load();
+    };
     panel.addEventListener('toggle', () => {
       if (panel.open) {
+        document.addEventListener('visibilitychange', onRdpVisibility);
         if (timer !== null) window.clearInterval(timer);
         load();
         timer = window.setInterval(() => {
           if (!panel.isConnected || !panel.open) {
             window.clearInterval(timer); timer = null;
+            document.removeEventListener('visibilitychange', onRdpVisibility);
             clearScreen();
             return;
           }
@@ -459,6 +479,7 @@
         }, 1800);
       } else {
         if (timer !== null) { window.clearInterval(timer); timer = null; }
+        document.removeEventListener('visibilitychange', onRdpVisibility);
         clearScreen();
       }
     });

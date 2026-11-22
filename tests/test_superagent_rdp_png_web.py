@@ -362,3 +362,31 @@ def test_native_failure_keeps_web_reporting_original_class_only(monkeypatch):
     assert status["status"] == "native_failed"
     assert status["frame_update"] == 0
     assert not status["connected"]
+
+
+
+def test_hidden_browser_aborts_png_fetch_before_and_after_network_response():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] /
+          "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "if (frameBusy || !panel.open || !panel.isConnected" in js
+    assert "|| document.visibilityState !== 'visible') return;" in js
+    assert "const blob = await response.blob()" in js
+
+
+def test_native_rdp_view_revokes_pixels_on_visibility_change_without_poll_delay():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] /
+          "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "const onRdpVisibility = () => {" in js
+    assert "document.addEventListener('visibilitychange', onRdpVisibility)" in js
+    assert "document.removeEventListener('visibilitychange', onRdpVisibility)" in js
+    assert "if (document.visibilityState !== 'visible') clearScreen()" in js
+
+
+def test_hidden_tab_suppresses_owner_rdp_status_and_does_not_reveal_stale_frame():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] /
+          "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "if (document.visibilityState !== 'visible') {\n        clearScreen();\n        return;\n      }" in js
+    assert "|| document.visibilityState !== 'visible') return;" in js
