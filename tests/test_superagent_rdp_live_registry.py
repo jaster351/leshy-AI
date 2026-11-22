@@ -430,3 +430,28 @@ def test_web_status_marks_finished_graphics_without_claiming_e2e():
     assert status["status"] == "stream_finished"
     assert not status["e2e_verified"]
     assert not status["screen_available"]
+
+
+
+def test_native_failure_never_reports_connected_during_tls_teardown():
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
+    before = session.snapshot
+    def failed_during_teardown():
+        snapshot = before()
+        snapshot.update({
+            "native_phase": "failed", "native_error_type": "TimeoutError",
+            "graphics_active": True, "frame_available": True,
+        })
+        return snapshot
+    session.snapshot = failed_during_teardown
+    status = controls.status(user, "SA-1")
+    assert status["registered"]
+    assert status["status"] == "native_failed"
+    assert not status["connected"]
+    assert not status["graphics_active"]
+    assert not status["screen_available"]
+    assert not status["e2e_verified"]
+    assert not status["input_enabled"]

@@ -99,12 +99,18 @@ class RDPLiveRegistry:
         except (PermissionError, ValueError, KeyError):
             self.stop_ticket(actor.owner_id, ticket_id)
             return self._disconnected()
+        # A native protocol failure revokes connected/screen claims even
+        # during the brief race before the graphics worker closes TLS.
+        healthy_graphics = (
+            snapshot["graphics_active"] is True
+            and snapshot.get("native_phase") != "failed"
+        )
         view: dict[str, Any] = {
             "registered": True,
-            "connected": snapshot["graphics_active"] is True,
-            "graphics_active": snapshot["graphics_active"] is True,
+            "connected": healthy_graphics,
+            "graphics_active": healthy_graphics,
             "screen_available": (
-                snapshot["graphics_active"] is True
+                healthy_graphics
                 and snapshot.get("frame_available") is True
             ),
             "frame_update": int(snapshot.get("frame_update", 0)),
