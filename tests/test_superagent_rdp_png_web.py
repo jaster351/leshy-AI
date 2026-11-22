@@ -286,3 +286,26 @@ def test_stop_closes_active_tls_transport_even_if_graceful_stop_throws(monkeypat
     assert session._web_png is None
     with pytest.raises(RuntimeError):
         registry.register(actor(), "SA-1", session)
+
+
+
+def test_web_frame_is_revoked_on_native_failure_without_ticket_stop(monkeypatch):
+    registry, session = setup(monkeypatch)
+    session.accept_native_png(image(1))
+    assert registry.status(actor(), "SA-1")["screen_available"]
+    session.native_failure("RDPChannelError")
+    status = registry.status(actor(), "SA-1")
+    assert status["native_phase"] == "failed"
+    assert status["native_error_type"] == "RDPChannelError"
+    assert not status["screen_available"]
+    assert status["frame_update"] == 0
+    assert not registry.transmit_png(actor(), "SA-1", lambda *_: None)
+
+
+def test_web_failure_hides_last_model_proposal(monkeypatch):
+    registry, session = setup(monkeypatch)
+    session.accept_native_png(image(1))
+    session._last_proposal = object()
+    session.native_failure("RDPChannelError")
+    assert session._last_proposal is None
+    assert registry.status(actor(), "SA-1")["reasoning_available"] is False

@@ -101,6 +101,8 @@ jobs:
         run: |
           $env:PYTHONPATH = "src"
           python -m pytest -q -ra `
+            tests/test_rdp_credssp_channel.py `
+            tests/test_rdp_credssp_channel_loopback.py `
             tests/test_rdp_vision_bridge.py `
             tests/test_rdp_local_vision.py `
             tests/test_rdp_vision_worker.py `

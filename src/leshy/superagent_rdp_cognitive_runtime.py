@@ -284,13 +284,28 @@ class SuperAgentRDPCognitiveSession:
             self._native_phase = phase
 
     def native_failure(self, exc_type: str) -> None:
-        """Never expose credentials, raw wire error or exception message."""
+        """Preserve first error class and immediately revoke cached pixels.
+
+        No exception message, TLS payload, user credentials or old model
+        proposal can escape into a post-failure Web status/image response.
+        """
         with self._lock:
-            if not self._cancel.is_set():
+            if self._cancel.is_set():
+                return
+            if self._native_phase != "failed":
                 self._native_phase = "failed"
-                self._native_error_type = (
-                    exc_type[:80] if isinstance(exc_type, str) else "Exception"
+                # Expose only a class-shaped identifier, never a message,
+                # path, newline, credential, URL or arbitrary protocol text.
+                safe = (
+                    exc_type if type(exc_type) is str and
+                    1 <= len(exc_type) <= 80 and exc_type.isascii() and
+                    exc_type.isidentifier() else "Exception"
                 )
+                self._native_error_type = safe
+            self._web_png = None
+            self._web_png_at = 0.0
+            self._last_web_update = 0
+            self._last_proposal = None
 
     def receive_graphics(
         self,

@@ -392,3 +392,66 @@ def test_web_terminal_stop_state_disables_reconnecting_in_same_panel():
     assert "connect.disabled = true;" in panel
     assert "Для нового входа создайте новое поручение" in panel
     assert "window.clearInterval(timer)" in panel
+
+
+
+def test_web_status_distinguishes_failed_native_transport_from_no_connection():
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
+    original_snapshot = session.snapshot
+    def failed_snapshot():
+        result = original_snapshot()
+        result.update({"native_phase": "failed", "native_error_type": "TimeoutError",
+                       "graphics_active": False, "frame_available": False})
+        return result
+    session.snapshot = failed_snapshot
+    status = controls.status(user, "SA-1")
+    assert status["status"] == "native_failed"
+    assert status["connected"] is False
+    assert status["screen_available"] is False
+    assert status["input_enabled"] is False
+
+
+def test_web_status_marks_finished_graphics_without_claiming_e2e():
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
+    original_snapshot = session.snapshot
+    def finished_snapshot():
+        result = original_snapshot()
+        result.update({"native_phase": "stream_finished", "graphics_active": False,
+                       "frame_available": False})
+        return result
+    session.snapshot = finished_snapshot
+    status = controls.status(user, "SA-1")
+    assert status["status"] == "stream_finished"
+    assert not status["e2e_verified"]
+    assert not status["screen_available"]
+
+
+
+def test_native_failure_never_reports_connected_during_tls_teardown():
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
+    before = session.snapshot
+    def failed_during_teardown():
+        snapshot = before()
+        snapshot.update({
+            "native_phase": "failed", "native_error_type": "TimeoutError",
+            "graphics_active": True, "frame_available": True,
+        })
+        return snapshot
+    session.snapshot = failed_during_teardown
+    status = controls.status(user, "SA-1")
+    assert status["registered"]
+    assert status["status"] == "native_failed"
+    assert not status["connected"]
+    assert not status["graphics_active"]
+    assert not status["screen_available"]
+    assert not status["e2e_verified"]
+    assert not status["input_enabled"]

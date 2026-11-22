@@ -232,3 +232,66 @@ def test_proposal_is_not_exposed_without_a_fresh_covered_frame():
     assert session.last_proposal() is proposal
     session._web_png_at -= 20
     assert session.last_proposal() is None
+
+
+
+def test_failure_purges_real_png_cache_and_untrusted_model_proposal():
+    import time
+    session = start()
+    session._channel = object()
+    session._native_phase = "graphics"
+    session._web_png = object()
+    session._web_png_at = time.monotonic()
+    session._last_web_update = 77
+    session._last_proposal = object()
+    session.native_failure("TimeoutError")
+    snap = session.snapshot()
+    assert snap["native_phase"] == "failed"
+    assert snap["native_error_type"] == "TimeoutError"
+    assert session._web_png is None
+    assert session._web_png_at == 0.0
+    assert session._last_web_update == 0
+    assert session.last_proposal() is None
+
+
+def test_failure_preserves_original_error_class_through_cleanup_failure():
+    session = start()
+    session.native_failure("CredSSPBindingError")
+    session.native_failure("RDPTransportCloseError")
+    assert session.snapshot()["native_phase"] == "failed"
+    assert session.snapshot()["native_error_type"] == "CredSSPBindingError"
+
+
+@pytest.mark.parametrize("bad", [None, 12, True, object()])
+def test_failure_class_never_serializes_exception_body(bad):
+    session = start()
+    session.native_failure(bad)
+    assert session.snapshot()["native_error_type"] == "Exception"
+
+
+def test_failure_status_cannot_resurrect_after_owner_stop():
+    session = start()
+    session.stop()
+    session.native_failure("RDPTransportCloseError")
+    assert session.snapshot()["native_phase"] == "stopped"
+    assert session.snapshot()["stopped"]
+
+
+@pytest.mark.parametrize("untrusted_error", [
+    "x" * 300, "Error: password", "TLS\r\nAuthorization: Bearer abc",
+    "/home/user/private.json", "Ошибка_пароля", "Failed Session",
+    "CredSSP\0Token", "https://example.org/?password=hidden",
+])
+def test_failure_error_type_rejects_messages_and_private_data(untrusted_error):
+    session = start()
+    session.native_failure(untrusted_error)
+    assert session.snapshot()["native_error_type"] == "Exception"
+
+
+@pytest.mark.parametrize("known_type", [
+    "TimeoutError", "SSLError", "CredSSPBindingError", "RDPTransportCloseError",
+])
+def test_failure_error_type_preserves_safe_class_names(known_type):
+    session = start()
+    session.native_failure(known_type)
+    assert session.snapshot()["native_error_type"] == known_type

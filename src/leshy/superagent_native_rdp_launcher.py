@@ -148,9 +148,15 @@ def start_owner_authorized_native_rdp(
             # No retry, no raw exception text, packets or secrets in status.
             session.native_failure(type(exc).__name__)
         finally:
-            if connection is not None:
-                connection.close()
-            session.clear_native_handshake(connection)
+            # An error while tearing down TLS must not skip bookkeeping,
+            # replace the original wire error, or expose secret exception text.
+            try:
+                if connection is not None:
+                    connection.close()
+            except BaseException:
+                session.native_failure("RDPTransportCloseError")
+            finally:
+                session.clear_native_handshake(connection)
 
     thread = threading.Thread(
         target=run, name="Leshy-RDP-native-" + ticket_id[:18],
