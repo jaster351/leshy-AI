@@ -105,6 +105,119 @@
     panel.append(element('summary', '', 'RDP · экран, наблюдение и Stop'));
     const info = element('p', 'sa-remote-note',
       'Только реальные кадры из подтверждённого RDP-потока. Управление мышью и клавиатурой отключено.');
+    // The target and credential file are selected from real owner-scoped
+    // server inventory. DNS and TLS pin must be checked independently by
+    // the owner; we never autofill a pin obtained from an untrusted socket.
+    const setup = element('details', 'sa-setup');
+    setup.append(element('summary', '', 'Подключить Windows RDP (с подтверждением)'));
+    const warning = element('p', 'sa-remote-note',
+      'Перед запуском сверяйте SHA-256 сертификата RDP по доверенной консоли сервера. ' +
+      'Одноразовое подтверждение разрешит передачу пароля из локального JSON-файла. ' +
+      'Пароль никогда не вводится в браузер. Автоповтора нет.');
+    const nodeLabel = element('label', '', 'Зарегистрированный компьютер');
+    const nodeSelect = element('select', 'sa-ssh-select');
+    nodeSelect.setAttribute('aria-label', 'Компьютер RDP');
+    const fileLabel = element('label', '', 'Локальный JSON-файл учётных данных');
+    const fileSelect = element('select', 'sa-ssh-select');
+    fileSelect.setAttribute('aria-label', 'Файл RDP доступа');
+    const dnsLabel = element('label', '', 'DNS-имя службы TERMSRV (не IP)');
+    const dnsInput = element('input');
+    dnsInput.placeholder = 'rdp.example.org'; dnsInput.maxLength = 253;
+    dnsInput.autocomplete = 'off';
+    const pinLabel = element('label', '', 'SHA-256 сертификата RDP, независимо проверенный');
+    const pinInput = element('input');
+    pinInput.placeholder = '64 шестнадцатеричных символа';
+    pinInput.maxLength = 64; pinInput.autocomplete = 'off';
+    const launchStatus = element('p', 'sa-remote-note');
+    launchStatus.setAttribute('role', 'status');
+    let launching = false;
+    const connect = makeButton('Подготовить RDP и подтвердить', async () => {
+      if (launching) return;
+      const args = {
+        ticket_id: taskId,
+        node_id: nodeSelect.value,
+        service_dns_name: dnsInput.value.trim(),
+        enrolled_rdp_tls_sha256: pinInput.value.trim(),
+        credential_file: fileSelect.value
+      };
+      if (!args.node_id || !args.credential_file || !/^[a-fA-F0-9]{64}$/.test(args.enrolled_rdp_tls_sha256) ||
+          !args.service_dns_name.includes('.')) {
+        launchStatus.textContent = 'Выберите компьютер, файл, DNS-имя и проверенный SHA-256.';
+        return;
+      }
+      launching = true; connect.disabled = true;
+      launchStatus.textContent = 'Проверяю владельца, узел и готовлю одноразовое подтверждение…';
+      try {
+        const response = await api('/v1/superagent/rdp/start/prepare', {
+          method: 'POST', body: JSON.stringify(args)
+        });
+        const approval = response.approval;
+        const text =
+          'ВНИМАНИЕ: это передаст пароль на сервер RDP после TLS/NLA проверки.\n\n' +
+          'Задание: ' + approval.ticket_id +
+          '\nКомпьютер: ' + approval.node_id +
+          '\nDNS TERMSRV: ' + approval.service_dns_name +
+          '\nSHA-256 TLS: ' + approval.rdp_tls_sha256 +
+          '\nЛокальный файл: ' + approval.credential_file +
+          '\n\nВы ЛИЧНО проверили сертификат вне этого подключения, ' +
+          'владеете целевым компьютером и однократно разрешаете вход?\n' +
+          'Windows RDP E2E ещё не подтверждён.';
+        if (!window.confirm(text)) {
+          launchStatus.textContent = 'Вход отменён. Пароль не передавался.';
+          return;
+        }
+        launchStatus.textContent = 'Одноразовое подтверждение принято; запускаю нативное RDP…';
+        const result = await api('/v1/superagent/rdp/start/execute', {
+          method: 'POST',
+          body: JSON.stringify({...args, approval_token: approval.approval_token, confirm: true})
+        });
+        launchStatus.textContent = result.native_rdp?.status === 'starting'
+          ? 'Нативная RDP-попытка запущена; проверяйте реальные этапы ниже. Автоповтора нет.'
+          : 'Состояние запуска неизвестно; не повторяйте вход без проверки.';
+        await load();
+      } catch (error) {
+        launchStatus.textContent = 'Статус входа не подтверждён: ' + error.message +
+          '. Если соединение оборвалось, не повторяйте пароль до проверки.';
+      } finally {
+        launching = false; connect.disabled = false;
+      }
+    });
+    const loadTargets = async () => {
+      connect.disabled = true;
+      try {
+        const [inventory, credentials] = await Promise.all([
+          api('/v1/superagent/remote-access'),
+          api('/v1/superagent/ssh/credentials')
+        ]);
+        nodeSelect.replaceChildren();
+        fileSelect.replaceChildren();
+        // Only registered nodes from the owner-scoped server inventory
+        // are selectable; the server rechecks actual RDP grants on POST.
+        (inventory.nodes || []).forEach(node => {
+          const option = element('option', '', String(node.node_id));
+          option.value = node.node_id; nodeSelect.append(option);
+        });
+        (credentials.files || []).forEach(filename => {
+          const raw = typeof filename === 'string' ? filename : filename.name;
+          if (!raw || !raw.toLowerCase().endsWith('.json')) return;
+          const option = element('option', '', raw); option.value = raw;
+          fileSelect.append(option);
+        });
+        if (!inventory.remote_admin_enabled) {
+          launchStatus.textContent = 'Включите модуль remote-admin в настройках Лешего.';
+        } else if (!nodeSelect.options.length || !fileSelect.options.length) {
+          launchStatus.textContent = 'Нет зарегистрированного узла или выбранных файлов доступа.';
+        } else {
+          launchStatus.textContent = 'Проверяйте SHA-256 сертификата RDP вне сети подключения.';
+          connect.disabled = false;
+        }
+      } catch (error) {
+        launchStatus.textContent = 'Нельзя подготовить RDP: ' + error.message;
+      }
+    };
+    setup.append(warning, nodeLabel, nodeSelect, fileLabel, fileSelect,
+      dnsLabel, dnsInput, pinLabel, pinInput, connect, launchStatus);
+    setup.addEventListener('toggle', () => { if (setup.open) loadTargets(); });
     const state = element('pre', 'sa-terminal-output', 'Откройте раздел для проверки RDP.');
     state.setAttribute('role', 'status');
     const screen = element('img', 'sa-rdp-screen');
@@ -226,7 +339,7 @@
       } finally { busy = false; refresh.disabled = false; }
     }
     controls.append(refresh, stop);
-    panel.append(info, state, screen, proposal, controls);
+    panel.append(info, setup, state, screen, proposal, controls);
     panel.addEventListener('toggle', () => {
       if (panel.open) {
         load();
