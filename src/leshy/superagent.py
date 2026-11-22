@@ -30,6 +30,28 @@ from .storage import utcnow
 
 _RDP_REGISTRY_INIT_LOCK = threading.Lock()
 
+_RDP_REMOTE_INTENT = re.compile(
+    r"(?iu)(?<![\\w])(?:rdp|remote\\s+desktop|терминальн\\w*\\s+стол|"
+    r"удал[её]нн\\w*\\s+(?:рабоч\\w*\\s+стол|экран)|"
+    r"подключ\\w*\\s+(?:к|через)\\s+rdp)(?![\\w])"
+)
+
+def _rdp_explicit_task(request: str) -> bool:
+    """True only when the original mandate actually concerns an RDP desktop."""
+    value = str(request or "")[:12000]
+    if not _RDP_REMOTE_INTENT.search(value):
+        return False
+    # Descriptive questions and explicit prohibitions are not an
+    # authorization to open an OS session or delegate credentials.
+    if re.search(
+        r"(?iu)\\b(?:не\\s+(?:подключай|подключать|запускай|открывай)|"
+        r"как\\s+(?:подключиться|настроить)|"
+        r"инструкци\\w*|объясни|расскажи)\\b", value
+    ):
+        return False
+    return True
+
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS superagent_tickets(
@@ -323,8 +345,8 @@ class SuperAgentService:
             "created_at": now,
             "policy_version": 1,
         }
-        if maintenance_intent(request):
-            # Do not let an old anonymous ticket acquire SSH rights simply
+        if maintenance_intent(request) or _rdp_explicit_task(request):
+            # Do not let an old anonymous ticket acquire SSH/RDP rights simply
             # because the browser/Telegram identity is linked *later*.
             # Check an active server-side provider login AT CREATION TIME.
             try:
