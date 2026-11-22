@@ -21,6 +21,7 @@ from .superagent_ssh_enrollment import enroll_verified_ssh_node
 from .superagent_rdp_profile import rdp_connection_profile
 from .superagent_rdp_launch_approval import (
     prepare_rdp_approval, consume_rdp_approval, cancel_rdp_approval,
+    invalidate_rdp_ticket_approvals,
 )
 from .superagent_ssh_terminal import run_ssh_terminal_command
 from .superagent_ssh_approvals import (
@@ -502,9 +503,16 @@ def make_handler(app, telegram, settings, model_catalog):
                             or payload.get("confirm") is not True):
                         raise ValueError("Требуется явное подтверждение Stop")
                     _policy, actor = context
-                    return self._json(HTTPStatus.OK, service.rdp_live_stop(
-                        actor, payload["ticket_id"]
-                    ))
+                    # Even without a registered native channel, Stop must
+                    # revoke prepared/consumed credentials consent first.
+                    service.get(payload["ticket_id"], owner_id=actor.owner_id)
+                    revoked = invalidate_rdp_ticket_approvals(
+                        actor.owner_id, payload["ticket_id"]
+                    )
+                    stopped = service.rdp_live_stop(actor, payload["ticket_id"])
+                    return self._json(HTTPStatus.OK, {
+                        **stopped, "approvals_revoked": revoked,
+                    })
                 except (ValueError, KeyError, PermissionError):
                     return self._json(HTTPStatus.FORBIDDEN, {
                         "error": "Нет прав на остановку RDP-сессии"

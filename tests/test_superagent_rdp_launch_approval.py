@@ -43,6 +43,7 @@ class Service:
 @pytest.fixture(autouse=True)
 def guard(monkeypatch):
     approvals._PENDING.clear()
+    approvals._TICKET_EPOCHS.clear()
     monkeypatch.setattr(approvals, "module_enabled", lambda *a: True)
     monkeypatch.setattr(approvals, "find_credential_file", lambda *a: object())
     monkeypatch.setattr(approvals, "_credential_identity",
@@ -335,3 +336,192 @@ def test_cancelled_consent_never_issues_a_delegation_lease():
     assert len(approvals._PENDING) == 0
     with pytest.raises(PermissionError):
         approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+
+def test_stop_invalidates_unconsumed_token_before_native_registration():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert approvals.invalidate_rdp_ticket_approvals("alice", "SA-1") == 1
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_stop_invalidates_already_consumed_credential_delegation_lease():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    consent = approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-1")
+    with pytest.raises(PermissionError, match="revoked"):
+        consent("192.0.2.10", "rdp.example.org")
+
+
+def test_new_owner_approval_after_stop_can_be_reviewed_afresh():
+    s, policy = Service(), Policy()
+    old = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-1")
+    new = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert new != old
+    consent = approvals.consume_rdp_approval(policy, actor(), s, new, *params())
+    consent("192.0.2.10", "rdp.example.org")
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, old, *params())
+
+
+def test_new_prepare_burns_previous_unconsumed_token_for_same_browser_ticket():
+    s, policy = Service(), Policy()
+    old = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    new = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, old, *params())
+    approvals.consume_rdp_approval(policy, actor(), s, new, *params())
+
+
+def test_global_superagent_shutdown_revokes_consumed_lease():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    consent = approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+    approvals.invalidate_all_rdp_approvals()
+    with pytest.raises(PermissionError, match="revoked"):
+        consent("192.0.2.10", "rdp.example.org")
+
+
+def test_pending_approval_count_is_bounded_per_owner(monkeypatch):
+    s, policy = Service(), Policy()
+    monkeypatch.setattr(approvals, "_MAX_PENDING_PER_OWNER", 2)
+    # One verified owner, three different live browser sessions. The token
+    # rotation rule is per-session, so separate sessions consume capacity.
+    for session in ("web-1", "web-2"):
+        approvals.prepare_rdp_approval(policy, actor(session), s, *params())
+    with pytest.raises(PermissionError, match="лимит"):
+        approvals.prepare_rdp_approval(policy, actor("web-3"), s, *params())
+
+
+def test_owner_stop_epoch_is_scoped_to_ticket(monkeypatch):
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-OTHER")
+    approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_ticket_stop_invalidates_most_recent_review_nonce():
+    s, policy = Service(), Policy()
+    old = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    latest = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert latest != old
+    assert approvals.invalidate_rdp_ticket_approvals("alice", "SA-1") == 1
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, latest, *params())
+
+
+def test_expired_stopped_ticket_epoch_allows_only_new_short_lived_consent(monkeypatch):
+    # Simulate expiry only after all already issued tokens and leases would
+    # have independently expired. A brand-new preparation is allowed.
+    s, policy = Service(), Policy()
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-1")
+    key = ("alice", "SA-1")
+    prior = approvals._TICKET_EPOCHS[key]
+    approvals._TICKET_EPOCHS[key] = (prior[0], -1.0)
+    new = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    approvals.consume_rdp_approval(policy, actor(), s, new, *params())
+
+
+
+def test_explicit_owner_ip_prevents_switch_to_another_registered_node():
+    s, policy = Service(), Policy()
+    s.request_text = "Подключись по RDP к 192.0.2.11 и проверь экран"
+    with pytest.raises(PermissionError, match="не совпадает"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_exact_explicit_owner_ip_is_allowed():
+    s, policy = Service(), Policy()
+    s.request_text = "Подключись по RDP к 192.0.2.10 и проверь экран"
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_ambiguous_multiple_explicit_ip_targets_are_denied():
+    s, policy = Service(), Policy()
+    s.request_text = "Подключись по RDP к 192.0.2.10 или 192.0.2.11"
+    with pytest.raises(PermissionError, match="не совпадает"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_invalid_literal_ip_cannot_be_silently_ignored():
+    s, policy = Service(), Policy()
+    s.request_text = "Открой RDP на 999.999.999.999"
+    with pytest.raises(PermissionError, match="неверный IP"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_conflicting_original_mandate_scope_fails_closed():
+    s, policy = Service(), Policy()
+    original = s.get
+    def get(t, *, owner_id):
+        data = original(t, owner_id=owner_id)
+        data["mandate"] = {
+            "remote_authorized_at_creation": True,
+            "scope": "Подключись к другому компьютеру",
+        }
+        return data
+    s.get = get
+    with pytest.raises(PermissionError, match="явно разрешить"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_other_owner_in_original_mandate_denied_even_if_ticket_lookup_passes():
+    s, policy = Service(), Policy()
+    original = s.get
+    def get(t, *, owner_id):
+        data = original(t, owner_id=owner_id)
+        data["mandate"] = {
+            "remote_authorized_at_creation": True, "owner_id": "other-owner",
+        }
+        return data
+    s.get = get
+    with pytest.raises(PermissionError):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_changed_original_creation_timestamp_in_mandate_denied():
+    s, policy = Service(), Policy()
+    original = s.get
+    def get(t, *, owner_id):
+        data = original(t, owner_id=owner_id)
+        data["mandate"] = {
+            "remote_authorized_at_creation": True,
+            "created_at": "2020-01-01T00:00:00Z",
+        }
+        return data
+    s.get = get
+    with pytest.raises(PermissionError):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+def test_explicit_ipv6_node_mismatch_is_refused_before_file_read():
+    s, policy = Service(), Policy()
+    s.request_text = "Подключись по RDP к [2001:db8::7]"
+    with pytest.raises(PermissionError, match="не совпадает"):
+        approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+
+def test_recent_stop_epoch_survives_new_valid_lease(monkeypatch):
+    s, policy = Service(), Policy()
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-1")
+    key = ("alice", "SA-1")
+    original_deadline = approvals._TICKET_EPOCHS[key][1]
+    base = approvals.time.monotonic()
+    # Prepare a fresh consent near the original epoch expiry.
+    monkeypatch.setattr(approvals.time, "monotonic", lambda: base + 140)
+    token = approvals.prepare_rdp_approval(
+        policy, actor(), s, *params()
+    )["approval_token"]
+    renewed_deadline = approvals._TICKET_EPOCHS[key][1]
+    assert renewed_deadline > original_deadline
+    consent = approvals.consume_rdp_approval(
+        policy, actor(), s, token, *params()
+    )
+    consent("192.0.2.10", "rdp.example.org")
+    assert approvals._TICKET_EPOCHS[key][1] >= renewed_deadline

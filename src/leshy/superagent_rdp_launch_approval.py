@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import stat
 import re
@@ -27,11 +28,84 @@ from .superagent_verified_ssh import _node_ip
 _PIN = re.compile(r"[0-9a-fA-F]{64}\Z")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_. -]{0,254}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{30,128}\Z")
+_IP4_IN_TASK = re.compile(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")
+_IPV6_BRACKETED_IN_TASK = re.compile(r"\[([0-9a-fA-F:]+)\]")
+
 _LOCK = threading.RLock()
 _PENDING: dict[str, tuple[tuple[str, ...], float]] = {}
 _TTL = 90.0
 _LEASE_SECONDS = 75.0
 _MAX_PENDING = 128
+_MAX_PENDING_PER_OWNER = 8
+# Ticket stop generations expire only after every 90s token and 75s
+# in-flight delegation lease is necessarily expired.
+_TICKET_EPOCH_TTL = 180.0
+_TICKET_EPOCHS: dict[tuple[str, str], tuple[int, float]] = {}
+_GLOBAL_EPOCH = 0
+
+
+def _epoch_unlocked(owner_id: str, ticket_id: str) -> int:
+    entry = _TICKET_EPOCHS.get((owner_id, ticket_id))
+    return entry[0] if entry is not None else 0
+
+
+def _refresh_epoch_unlocked(owner_id: str, ticket_id: str, now: float) -> None:
+    """Keep generation available while newer consents may still be valid.
+
+    Must be called with _LOCK; removing it early only denies legitimate
+    recent owner approvals, never grants stale access.
+    """
+    key = (owner_id, ticket_id)
+    row = _TICKET_EPOCHS.get(key)
+    if row is not None:
+        _TICKET_EPOCHS[key] = (
+            row[0], max(row[1], now + _TICKET_EPOCH_TTL),
+        )
+
+
+def invalidate_rdp_ticket_approvals(owner_id: str, ticket_id: str) -> int:
+    """Server-internal Stop barrier: revoke pending AND consumed leases."""
+    if (type(owner_id) is not str or not owner_id
+            or type(ticket_id) is not str or not ticket_id.startswith("SA-")):
+        raise ValueError("Invalid owner-scoped RDP ticket")
+    key = (owner_id, ticket_id)
+    with _LOCK:
+        now = time.monotonic()
+        for old, (_generation, until) in tuple(_TICKET_EPOCHS.items()):
+            if until <= now:
+                del _TICKET_EPOCHS[old]
+        # If an unusually large number of tickets were stopped recently,
+        # revoke ALL previous leases to keep the registry bounded.
+        global _GLOBAL_EPOCH
+        if len(_TICKET_EPOCHS) >= 2048 and key not in _TICKET_EPOCHS:
+            _GLOBAL_EPOCH += 1
+            _TICKET_EPOCHS.clear()
+            _PENDING.clear()
+        epoch = _epoch_unlocked(*key) + 1
+        _TICKET_EPOCHS[key] = (epoch, now + _TICKET_EPOCH_TTL)
+        removed = 0
+        for token_hash, (identity, _expires) in tuple(_PENDING.items()):
+            if identity[0] == owner_id and identity[2] == ticket_id:
+                del _PENDING[token_hash]
+                removed += 1
+        return removed
+
+
+def invalidate_all_rdp_approvals() -> None:
+    """Invalidate even already-consumed leases on SuperAgent shutdown."""
+    global _GLOBAL_EPOCH
+    with _LOCK:
+        _GLOBAL_EPOCH += 1
+        _PENDING.clear()
+        _TICKET_EPOCHS.clear()
+
+
+def _check_epoch(owner_id: str, ticket_id: str, ticket_epoch: int, global_epoch: int) -> None:
+    with _LOCK:
+        if (_GLOBAL_EPOCH != global_epoch
+                or _epoch_unlocked(owner_id, ticket_id) != ticket_epoch):
+            raise PermissionError("RDP confirmation was revoked by owner Stop")
+
 
 
 def _credential_identity(storage: Any, owner_id: str, filename: str) -> tuple[str, ...]:
@@ -92,6 +166,25 @@ def _validate(
     if (type(request_text) is not str or not 1 <= len(request_text) <= 1200
             or str(ticket.get("id", ticket_id)) != ticket_id):
         raise PermissionError("Нужна подтверждённая исходная задача владельца")
+    # If the owner named a literal target in the original task, do not
+    # silently allow the Web picker to redirect the approved credentials to
+    # another registered node. A task with multiple target IPs is ambiguous.
+    explicit_nodes: set[str] = set()
+    for match in _IP4_IN_TASK.finditer(request_text):
+        try:
+            explicit_nodes.add(str(ipaddress.ip_address(match.group(0))))
+        except ValueError:
+            raise PermissionError("RDP-поручение содержит неверный IP-адрес") from None
+    for match in _IPV6_BRACKETED_IN_TASK.finditer(request_text):
+        try:
+            addr = ipaddress.ip_address(match.group(1))
+            if not isinstance(addr, ipaddress.IPv6Address):
+                raise ValueError("Not IPv6")
+            explicit_nodes.add(str(addr))
+        except ValueError:
+            raise PermissionError("RDP-поручение содержит неверный IPv6-адрес") from None
+    if explicit_nodes and explicit_nodes != {node}:
+        raise PermissionError("IP в первоначальном RDP-поручении не совпадает с узлом")
     # A Web session becoming verified later must not retroactively upgrade
     # a maintenance ticket explicitly denied at creation.
     mandate = ticket.get("mandate", {})
@@ -100,7 +193,13 @@ def _validate(
     from .superagent import _rdp_explicit_task
     if (not _rdp_explicit_task(request_text)
             or not isinstance(mandate, dict)
-            or mandate.get("remote_authorized_at_creation") is not True):
+            or mandate.get("remote_authorized_at_creation") is not True
+            or (mandate.get("scope") is not None
+                and mandate["scope"] != request_text)
+            or (mandate.get("owner_id") is not None
+                and mandate["owner_id"] != actor.owner_id)
+            or (mandate.get("created_at") is not None
+                and mandate["created_at"] != ticket.get("created_at"))):
         raise PermissionError("RDP требуется явно разрешить при создании задания")
     source_hash = hashlib.sha256(
         (ticket_id + "\0" + request_text + "\0" +
@@ -146,8 +245,27 @@ def prepare_rdp_approval(
         for old, item in tuple(_PENDING.items()):
             if item[1] <= now:
                 del _PENDING[old]
+        for old, (_gen, expires) in tuple(_TICKET_EPOCHS.items()):
+            if expires <= now:
+                del _TICKET_EPOCHS[old]
+        # Reopening preparation supersedes ONLY an unconsumed token for
+        # the same browser and ticket; it never reuses its bearer secret.
+        for old, (identity, _expires) in tuple(_PENDING.items()):
+            if (identity[0] == actor.owner_id
+                    and identity[1] == actor.session_fingerprint
+                    and identity[2] == scope[0]):
+                del _PENDING[old]
+        owner_pending = sum(
+            1 for identity, _expires in _PENDING.values()
+            if identity[0] == actor.owner_id
+        )
+        if owner_pending >= _MAX_PENDING_PER_OWNER:
+            raise PermissionError("Превышен лимит RDP-подтверждений владельца")
         if len(_PENDING) >= _MAX_PENDING:
             raise PermissionError("Превышен лимит неподтверждённых подключений")
+        _refresh_epoch_unlocked(actor.owner_id, scope[0], now)
+        row = (*row, str(_GLOBAL_EPOCH),
+               str(_epoch_unlocked(actor.owner_id, scope[0])))
         _PENDING[key] = (row, now + _TTL)
     return {
         "approval_token": token,
@@ -179,13 +297,17 @@ def consume_rdp_approval(
     key = hashlib.sha256(token.encode("ascii")).hexdigest()
     with _LOCK:
         row = _PENDING.pop(key, None)
+        if row is not None:
+            _refresh_epoch_unlocked(actor.owner_id, scope[0], time.monotonic())
+        global_epoch = _GLOBAL_EPOCH
+        ticket_epoch = _epoch_unlocked(actor.owner_id, scope[0])
     if row is None or row[1] <= time.monotonic():
         raise PermissionError("Одноразовое подтверждение истекло или использовано")
     source_hash = _validate(policy, actor, service, scope, check_file=False)
     current_stamp = _credential_identity(service.storage, actor.owner_id, scope[4])
     expected = (
         actor.owner_id, actor.session_fingerprint, *scope, source_hash,
-        *current_stamp,
+        *current_stamp, str(global_epoch), str(ticket_epoch),
     )
     if len(row[0]) != len(expected) or not all(
         hmac.compare_digest(a, b) for a, b in zip(row[0], expected)
@@ -194,6 +316,7 @@ def consume_rdp_approval(
     lease_expires = time.monotonic() + _LEASE_SECONDS
 
     def recheck_credential_delegation(ip: str, dns: str) -> None:
+        _check_epoch(actor.owner_id, scope[0], ticket_epoch, global_epoch)
         if time.monotonic() > lease_expires:
             raise PermissionError("Время подтверждения передачи RDP-пароля истекло")
         if ip != scope[1] or dns != scope[2]:
@@ -233,4 +356,7 @@ def cancel_rdp_approval(
         return True
 
 
-__all__ = ["prepare_rdp_approval", "consume_rdp_approval", "cancel_rdp_approval"]
+__all__ = [
+    "prepare_rdp_approval", "consume_rdp_approval", "cancel_rdp_approval",
+    "invalidate_rdp_ticket_approvals", "invalidate_all_rdp_approvals",
+]

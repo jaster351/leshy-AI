@@ -4,6 +4,12 @@ name: Native RDP Windows security checks
 
 on:
   workflow_dispatch:
+    inputs:
+      include_owner_rdp_tests:
+        description: 'Run owner RDP regressions with full app test dependencies'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,3 +72,43 @@ jobs:
             tests/test_rdp_tls_probe.py `
             tests/test_rdp_frame_codec.py `
             tests/test_superagent_rdp_session.py
+
+  owner-rdp:
+    if: ${{ inputs.include_owner_rdp_tests == true }}
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Leshy and owner RDP test dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Reject malformed sources
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python -m compileall -q src/leshy tests
+          python -c "from pathlib import Path; paths=list(Path('src/leshy').rglob('*.py'))+list(Path('tests').rglob('*.py')); bad=[str(p) for p in paths if b'\x00' in p.read_bytes()]; assert not bad, f'Python source contains NUL: {bad}'"
+          node --check web/superagent-dashboard.js
+      - name: Verify SuperAgent RDP owner and Stop regressions
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python -m pytest -q -ra `
+            tests/test_rdp_vision_bridge.py `
+            tests/test_rdp_local_vision.py `
+            tests/test_rdp_vision_worker.py `
+            tests/test_rdp_cognitive_bridge.py `
+            tests/test_superagent_rdp_cognitive_runtime.py `
+            tests/test_superagent_rdp_live_registry.py `
+            tests/test_superagent_rdp_png_web.py `
+            tests/test_superagent_native_rdp_launcher.py `
+            tests/test_superagent_rdp_launch_approval.py `
+            tests/test_superagent_rdp_credentials.py `
+            tests/test_superagent_rdp_intent.py

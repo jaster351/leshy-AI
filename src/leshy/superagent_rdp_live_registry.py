@@ -24,6 +24,7 @@ class RDPLiveRegistry:
         # Failed Stop remains reserved, rather than creating overlapping
         # sessions with uncertain remote state.
         self._closing: set[tuple[str, str]] = set()
+        self._failed_closes: set[tuple[str, str]] = set()
         self._limit = max_sessions
 
     def _verify_owner(self, actor: VerifiedActor, ticket_id: str) -> None:
@@ -78,6 +79,16 @@ class RDPLiveRegistry:
         self._verify_owner(actor, ticket_id)
         with self._lock:
             session = self._lookup(actor, ticket_id)
+            if session is None:
+                key = (actor.owner_id, ticket_id)
+                if key in self._closing:
+                    failed = key in self._failed_closes
+                    return {
+                        **self._disconnected(),
+                        "registered": True, "stopped": True,
+                        "status": "stop_failed_locked" if failed else "stop_in_progress",
+                        "native_phase": "stop_failed" if failed else "stopping",
+                    }
         if session is None:
             return self._disconnected()
         try:
@@ -156,9 +167,16 @@ class RDPLiveRegistry:
         On Stop exception, keep the reservation for safety. A new connection
         can start only after a process-level reset, not after uncertain Stop.
         """
-        session.stop()
-        with self._lock:
-            self._closing.discard(key)
+        try:
+            session.stop()
+        except BaseException:
+            with self._lock:
+                self._failed_closes.add(key)
+            raise
+        else:
+            with self._lock:
+                self._closing.discard(key)
+                self._failed_closes.discard(key)
 
     def stop(self, actor: VerifiedActor, ticket_id: str) -> dict[str, Any]:
         """Owner Stop, independent of whether the RDP grant still exists."""
@@ -167,7 +185,14 @@ class RDPLiveRegistry:
         with self._lock:
             session = self._lookup(actor, ticket_id)
             if session is None:
-                return {"stopped": False, "status": "no_live_session"}
+                return {
+                    "stopped": False,
+                    "status": (
+                        "stop_failed_locked" if key in self._failed_closes
+                        else "stop_in_progress" if key in self._closing
+                        else "no_live_session"
+                    ),
+                }
             del self._sessions[key]
             self._closing.add(key)
         self._stop_reserved(key, session)
