@@ -85,19 +85,23 @@ def parse_rdp_credential_document(raw: bytes, node_id: str) -> RDPCredentials:
 def load_owner_rdp_credentials(
     storage: Any, owner_id: str, node_id: str, filename: str,
 ) -> RDPCredentials:
-    """Race-aware bounded read of the owner-scoped exact local JSON file."""
+    """Read one stable, bounded, owner-chosen JSON file; wipe mutable copy.
+
+    Every successful and failed read closes the descriptor and clears the
+    temporary bytearray. A read error never bypasses the final wipe.
+    """
     path = find_credential_file(storage, owner_id, filename)
     before = os.lstat(path)
-    if not stat.S_ISREG(before.st_mode) or before.st_size > _MAX_BYTES:
+    if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= _MAX_BYTES:
         raise PermissionError("RDP credential file must be a small regular file")
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags)
+    chunks = bytearray()
     try:
         after = os.fstat(fd)
         if (not stat.S_ISREG(after.st_mode) or after.st_size > _MAX_BYTES
                 or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)):
             raise PermissionError("RDP credential file changed before open")
-        chunks = bytearray()
         while len(chunks) <= _MAX_BYTES:
             part = os.read(fd, min(4096, _MAX_BYTES + 1 - len(chunks)))
             if not part:
@@ -105,13 +109,33 @@ def load_owner_rdp_credentials(
             chunks.extend(part)
         if not chunks or len(chunks) > _MAX_BYTES:
             raise PermissionError("RDP credential file exceeds size policy")
-    finally:
-        os.close(fd)
-    try:
+
+        # Validate descriptor and directory-entry identity after reading.
+        # A file rewritten or swapped between initial stat and final parse
+        # cannot silently change which owner-selected secret is delegated.
+        completed = os.fstat(fd)
+        final_path = os.lstat(path)
+        def stamp(info):
+            return (
+                info.st_dev, info.st_ino, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns,
+            )
+        if (not stat.S_ISREG(completed.st_mode)
+                or not stat.S_ISREG(final_path.st_mode)
+                or stamp(before) != stamp(after)
+                or stamp(after) != stamp(completed)
+                or stamp(completed) != stamp(final_path)
+                or len(chunks) != completed.st_size):
+            raise PermissionError("RDP credential file changed during read")
+
         return parse_rdp_credential_document(bytes(chunks), node_id)
     finally:
-        # Mutable buffer can be cleared; Python also holds immutable copies.
-        chunks[:] = b"\0" * len(chunks)
+        # Close before clearing the mutable read buffer; do both even if
+        # close itself raises. Immutable Python copies cannot be erased.
+        try:
+            os.close(fd)
+        finally:
+            chunks[:] = b"\0" * len(chunks)
 
 
 __all__ = ["parse_rdp_credential_document", "load_owner_rdp_credentials"]

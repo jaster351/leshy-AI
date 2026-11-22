@@ -118,3 +118,107 @@ def test_lone_surrogate_does_not_reach_credssp(field):
 def test_host_rejects_bool_json_value_even_when_pinned_node_is_known():
     with pytest.raises(PermissionError):
         parse_rdp_credential_document(payload(host=True), HOST)
+
+
+
+def test_modified_file_during_read_is_rejected(tmp_path, monkeypatch):
+    import os
+    import leshy.superagent_rdp_credentials as module
+    path = tmp_path / "owner.json"
+    path.write_bytes(payload())
+    monkeypatch.setattr(module, "find_credential_file", lambda *_: path)
+    read = module.os.read
+    happened = []
+
+    def mutate_after_first_read(fd, count):
+        value = read(fd, count)
+        if value and not happened:
+            happened.append(True)
+            path.write_bytes(payload(password="other-secret"))
+        return value
+
+    monkeypatch.setattr(module.os, "read", mutate_after_first_read)
+    with pytest.raises(PermissionError, match="changed during read"):
+        module.load_owner_rdp_credentials(object(), "owner", HOST, "owner.json")
+    assert happened
+
+
+def test_replaced_file_during_read_is_rejected(tmp_path, monkeypatch):
+    import os
+    import leshy.superagent_rdp_credentials as module
+    path = tmp_path / "owner.json"
+    path.write_bytes(payload())
+    alternate = tmp_path / "replacement.json"
+    alternate.write_bytes(payload(password="a-changed-secret"))
+    monkeypatch.setattr(module, "find_credential_file", lambda *_: path)
+    read = module.os.read
+    happened = []
+
+    def swap_entry_during_read(fd, count):
+        value = read(fd, count)
+        if value and not happened:
+            happened.append(True)
+            try:
+                os.replace(alternate, path)
+            except PermissionError:
+                pytest.skip("Windows does not permit replacing an open credential file")
+        return value
+
+    monkeypatch.setattr(module.os, "read", swap_entry_during_read)
+    with pytest.raises(PermissionError, match="changed during read"):
+        module.load_owner_rdp_credentials(object(), "owner", HOST, "owner.json")
+    assert happened
+
+
+def test_file_size_grows_during_read_and_never_returns_secrets(tmp_path, monkeypatch):
+    import leshy.superagent_rdp_credentials as module
+    path = tmp_path / "owner.json"
+    path.write_bytes(payload())
+    monkeypatch.setattr(module, "find_credential_file", lambda *_: path)
+    read = module.os.read
+    def extend_file(fd, count):
+        value = read(fd, count)
+        with path.open("ab") as output:
+            output.write(b" " * 128)
+        return value
+    monkeypatch.setattr(module.os, "read", extend_file)
+    with pytest.raises(PermissionError):
+        module.load_owner_rdp_credentials(object(), "owner", HOST, "owner.json")
+
+
+
+def test_read_error_after_partial_secret_does_not_skip_descriptor_cleanup(
+    tmp_path, monkeypatch,
+):
+    import leshy.superagent_rdp_credentials as module
+    path = tmp_path / "owner.json"
+    path.write_bytes(payload(password="a-temporary-password"))
+    monkeypatch.setattr(module, "find_credential_file", lambda *_: path)
+    real_read, real_close = module.os.read, module.os.close
+    reads, closed = [], []
+
+    def fail_after_first_chunk(fd, count):
+        reads.append(True)
+        if len(reads) == 1:
+            return real_read(fd, 1)
+        raise OSError("synthetic filesystem read failure")
+
+    def track_close(fd):
+        closed.append(True)
+        return real_close(fd)
+
+    monkeypatch.setattr(module.os, "read", fail_after_first_chunk)
+    monkeypatch.setattr(module.os, "close", track_close)
+    with pytest.raises(OSError, match="synthetic"):
+        module.load_owner_rdp_credentials(object(), "owner", HOST, "owner.json")
+    assert len(reads) == 2
+    assert len(closed) == 1
+
+
+def test_owner_secret_file_must_not_be_empty(tmp_path, monkeypatch):
+    import leshy.superagent_rdp_credentials as module
+    path = tmp_path / "owner.json"
+    path.write_bytes(b"")
+    monkeypatch.setattr(module, "find_credential_file", lambda *_: path)
+    with pytest.raises(PermissionError, match="small regular file"):
+        module.load_owner_rdp_credentials(object(), "owner", HOST, "owner.json")
