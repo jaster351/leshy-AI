@@ -167,10 +167,11 @@ def test_revoked_credential_approval_never_reads_secret(prepared, monkeypatch):
     monkeypatch.setattr(launch, "load_owner_rdp_credentials",
                         lambda *a: looked_up.append(True))
     start(prepared, approve=lambda *a: (_ for _ in ()).throw(PermissionError("revoked")))
+    # Consent was revoked before TCP creation; the fake channel must
+    # never have been opened or closed by the runner.
     assert looked_up == [] and channel.events == []
     assert prepared.session.fail == "PermissionError"
-    assert prepared.session.fail == "PermissionError"
-    assert channel.closed
+    assert not channel.closed
 
 
 def test_partial_failure_is_not_retried(prepared, monkeypatch):
