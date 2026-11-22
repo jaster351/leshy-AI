@@ -21,7 +21,6 @@ from .superagent_ssh_enrollment import enroll_verified_ssh_node
 from .superagent_rdp_profile import rdp_connection_profile
 from .superagent_rdp_launch_approval import (
     prepare_rdp_approval, consume_rdp_approval, cancel_rdp_approval,
-    invalidate_rdp_ticket_approvals,
 )
 from .superagent_ssh_terminal import run_ssh_terminal_command
 from .superagent_ssh_approvals import (
@@ -503,15 +502,26 @@ def make_handler(app, telegram, settings, model_catalog):
                             or payload.get("confirm") is not True):
                         raise ValueError("Требуется явное подтверждение Stop")
                     _policy, actor = context
-                    # Even without a registered native channel, Stop must
-                    # revoke prepared/consumed credentials consent first.
-                    service.get(payload["ticket_id"], owner_id=actor.owner_id)
-                    revoked = invalidate_rdp_ticket_approvals(
-                        actor.owner_id, payload["ticket_id"]
+                    # Stop is a TERMINAL owner-scoped RDP task transition:
+                    # it prevents a new launch with the same old mandate.
+                    # The durable service Stop revokes consent first and then
+                    # closes its registered native channel.
+                    ticket = service.get(
+                        payload["ticket_id"], owner_id=actor.owner_id,
                     )
-                    stopped = service.rdp_live_stop(actor, payload["ticket_id"])
+                    from .superagent import _rdp_explicit_task
+                    if not _rdp_explicit_task(str(ticket.get("request_text") or "")):
+                        raise PermissionError("This ticket was not an RDP mandate")
+                    stopped = service.stop_ticket(
+                        payload["ticket_id"], actor.owner_id,
+                    )
                     return self._json(HTTPStatus.OK, {
-                        **stopped, "approvals_revoked": revoked,
+                        "stopped": stopped["state"] == "stopped",
+                        "ticket_stopped": stopped["state"] == "stopped",
+                        "ticket_state": stopped["state"],
+                        "status": "ticket_stopped" if stopped["state"] == "stopped"
+                                  else "not_stoppable",
+                        "input_enabled": False,
                     })
                 except (ValueError, KeyError, PermissionError):
                     return self._json(HTTPStatus.FORBIDDEN, {

@@ -308,7 +308,10 @@
       }
     }
     const stop = makeButton('Остановить RDP-сессию', async () => {
-      if (busy || !window.confirm('Остановить RDP-наблюдение этого задания?')) return;
+      if (busy || !window.confirm(
+        'Остановить RDP и окончательно закрыть это задание? ' +
+        'Для нового входа потребуется новое подтверждённое поручение.'
+      )) return;
       clearScreen();
       busy = true;
       stop.disabled = true;
@@ -316,7 +319,9 @@
         const result = await api('/v1/superagent/rdp/live/stop', {
           method: 'POST', body: JSON.stringify({ticket_id: taskId, confirm: true})
         });
-        state.textContent = result.stopped ? 'RDP-сессия остановлена.' : 'Активной RDP-сессии нет.';
+        state.textContent = result.ticket_stopped
+          ? 'RDP и задание остановлены. Повторное подключение по этому заданию запрещено.'
+          : 'RDP Stop не подтверждён: проверьте состояние задания.';
         proposal.textContent = '';
       } catch (error) {
         state.textContent = 'Остановку подтвердить не удалось: ' + error.message;

@@ -349,3 +349,31 @@ def test_failed_tls_close_reports_locked_and_never_allows_reconnect():
     assert controls.stop(user, "SA-1")["status"] == "stop_failed_locked"
     with pytest.raises(RuntimeError):
         controls.register(user, "SA-1", Session(user))
+
+
+
+def test_web_rdp_stop_uses_durable_owner_ticket_transition():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    code = (root / "src/leshy/web_server_impl14.py").read_text(encoding="utf-8")
+    ui = (root / "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    start = code.index('if path == "/v1/superagent/rdp/live/stop"')
+    end = code.index('if path in {', start)
+    route = code[start:end]
+    assert "service.stop_ticket(" in route
+    assert "service.get(" in route
+    assert "_rdp_explicit_task(" in route
+    assert "ticket_stopped" in route
+    assert "service.rdp_live_stop(" not in route
+    assert "окончательно закрыть это задание" in ui
+    assert "Для нового входа потребуется новое" in ui
+
+
+def test_stop_requires_correct_own_rdp_ticket_not_an_unrelated_ssh_task():
+    from pathlib import Path
+    code = (Path(__file__).resolve().parents[1] /
+            "src/leshy/web_server_impl14.py").read_text(encoding="utf-8")
+    route = code.split('if path == "/v1/superagent/rdp/live/stop":', 1)[1]
+    route = route.split('if path in {', 1)[0]
+    assert 'if not _rdp_explicit_task(str(ticket.get("request_text") or ""))' in route
+    assert 'service.stop_ticket(' in route
