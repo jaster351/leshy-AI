@@ -192,7 +192,11 @@
         if (!result.registered || !result.connected) {
           clearScreen();
           state.textContent = result.registered
-            ? 'Ожидание реального нативного RDP-потока.'
+            ? 'Нативный RDP: ' + String(result.native_phase || 'not_started') +
+              (result.native_error_type ? ' (' + String(result.native_error_type) + ')' : '') +
+              '\n' + (result.native_phase === 'failed'
+                ? 'Подключение не выполнено. Автоматический повтор запрещён.'
+                : 'Ожидание реального нативного RDP-потока.')
             : 'RDP: нет активной сессии. Подключение не подтверждено.';
           proposal.textContent = '';
           stop.disabled = !result.registered;
