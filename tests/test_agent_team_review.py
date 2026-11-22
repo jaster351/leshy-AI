@@ -33,7 +33,8 @@ class TeamEvidenceReviewTests(unittest.TestCase):
     def test_partial_results_are_not_implicitly_confirmed(self):
         _, review = assemble_team_review("Проверь", "", [report(ROLES[0])], ROLES)
         self.assertFalse(review.complete)
-        self.assertEqual(review.failed, ROLES[1:])
+        self.assertEqual(review.missing, ROLES[1:])
+        self.assertEqual(review.failed, ())
 
     def test_failed_model_reply_is_not_sent_to_synthesizer(self):
         payload, review = assemble_team_review(
@@ -41,6 +42,8 @@ class TeamEvidenceReviewTests(unittest.TestCase):
         )
         self.assertNotIn("private", payload)
         self.assertFalse(review.complete)
+        self.assertEqual(review.failed, ("Исследователь",))
+        self.assertNotIn("private", json.loads(payload)["agent_reports_untrusted"])
 
     def test_unknown_role_cannot_inject_new_system_instruction(self):
         payload, review = assemble_team_review(
@@ -142,3 +145,32 @@ class IntegratedTeamEvidenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _test_context_loaded_once_without_copying_untrusted_overflow(self):
+    agent, scheduler, llm = self._agent("Разбери архитектуру")
+    calls = []
+    long_context = "X" * (MAX_CONTEXT_CHARS + 20)
+    agent._shared_context = lambda owner, task: (
+        calls.append((owner, task)) or long_context
+    )
+    original_run_roles = agent._run_roles
+    role_context = []
+    agent._run_roles = lambda task, **kwargs: (
+        role_context.append(kwargs["shared_context"]) or [
+            report(x) for x in ROLES
+        ]
+    )
+    with patch("leshy.multi_agent_orchestrator.get_inference_scheduler", return_value=scheduler):
+        result = agent.run(
+            "Разбери архитектуру", owner_id="owner", session_id="session"
+        )
+    assert calls == [("owner", "Разбери архитектуру")]
+    assert role_context == [long_context]
+    assert result["review"]["context_truncated"] is True
+    assert result["review"]["state"] == "partial_reports"
+
+
+IntegratedTeamEvidenceTests.test_context_loaded_once_without_copying_untrusted_overflow = (
+    _test_context_loaded_once_without_copying_untrusted_overflow
+)

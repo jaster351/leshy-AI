@@ -10,7 +10,7 @@ from .cluster_orchestrator import ClusterTask
 from .diagnostics import event, problem
 from .inference_scheduler import get_inference_scheduler
 from .llm import ChatMessage
-from .agent_team_review import MAX_TASK_CHARS, assemble_team_review
+from .agent_team_review import MAX_TASK_CHARS, MAX_CONTEXT_CHARS, assemble_team_review
 from .cognitive_core import requires_external_action
 
 
@@ -185,8 +185,11 @@ class MultiAgentOrchestrator:
         session_id: str,
         request_id: str,
         priority: int,
+        shared_context: str | None = None,
     ) -> list[AgentReport]:
-        context = self._shared_context(owner_id, task)
+        context = self._shared_context(owner_id, task) if shared_context is None else shared_context
+        # Bound the material fed to EACH subagent, not just final synthesis.
+        context = context[:MAX_CONTEXT_CHARS]
         cluster = getattr(self.app, "distributed_cluster", None)
         nodes = []
         if cluster is not None:
@@ -275,12 +278,14 @@ class MultiAgentOrchestrator:
             raise ValueError("Задача слишком велика для безопасного контекста команды агентов")
         rid = str(request_id or uuid.uuid4())
         event("multi_agent_started", request_id=rid, owner_id=owner_id, session_id=session_id)
+        shared_context = self._shared_context(owner_id, task)
         reports = self._run_roles(
             task,
             owner_id=owner_id,
             session_id=session_id,
             request_id=rid,
             priority=priority,
+            shared_context=shared_context,
         )
         usable = [report for report in reports if report.ok and report.answer]
         if not usable:
@@ -288,7 +293,7 @@ class MultiAgentOrchestrator:
             raise RuntimeError("Команда агентов не смогла выполнить задачу: " + details)
 
         synthesis_prompt, review = assemble_team_review(
-            task, self._shared_context(owner_id, task), reports,
+            task, shared_context, reports,
             tuple(role.name for role in self.roles),
         )
         synthesis_system = (
@@ -314,8 +319,9 @@ class MultiAgentOrchestrator:
             answer = "Не удалось сформировать итоговый ответ команды агентов."
         if not review.complete:
             answer += (
-                "\n\nОграничение проверки: не все роли предоставили независимый рабочий отчёт; "
-                "их выводы нельзя считать подтверждёнными."
+                "\n\nОграничение проверки: некоторые роли не ответили или их материалы "
+                "были сокращены. Это лишь анализ моделей, а не независимая "
+                "проверка фактов или исполнения."
             )
         if requires_external_action(task):
             answer += (

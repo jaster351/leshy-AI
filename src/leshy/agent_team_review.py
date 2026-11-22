@@ -21,6 +21,7 @@ class TeamReview:
     """Structural coverage only; never evidence that actions succeeded."""
     expected: tuple[str, ...]
     usable: tuple[str, ...]
+    missing: tuple[str, ...]
     failed: tuple[str, ...]
     truncated: tuple[str, ...]
     context_truncated: bool
@@ -28,7 +29,11 @@ class TeamReview:
 
     @property
     def complete(self) -> bool:
-        return bool(self.expected) and self.usable == self.expected and not self.duplicate_roles
+        return (
+            bool(self.expected) and self.usable == self.expected
+            and not self.missing and not self.failed and not self.duplicate_roles
+            and not self.truncated and not self.context_truncated
+        )
 
     def public(self) -> dict[str, Any]:
         return {
@@ -36,6 +41,7 @@ class TeamReview:
             "state": "all_roles_reported" if self.complete else "partial_reports",
             "expected_roles": list(self.expected),
             "usable_roles": list(self.usable),
+            "missing_roles": list(self.missing),
             "failed_roles": list(self.failed),
             "truncated_roles": list(self.truncated),
             "duplicate_roles": list(self.duplicate_roles),
@@ -94,9 +100,10 @@ def assemble_team_review(
         accepted[role] = {"role": role, "node": safe_node, "analysis": text}
 
     used = tuple(role for role in roles if role in accepted)
-    missing = tuple(role for role in roles if role not in accepted)
+    missing = tuple(role for role in roles if role not in accepted and role not in failed)
+    broken = tuple(role for role in roles if role in failed)
     review = TeamReview(
-        expected=roles, usable=used, failed=missing,
+        expected=roles, usable=used, missing=missing, failed=broken,
         truncated=tuple(role for role in roles if role in trimmed),
         context_truncated=len(context) > MAX_CONTEXT_CHARS,
         duplicate_roles=tuple(role for role in roles if role in duplicates),
