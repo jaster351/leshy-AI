@@ -31,22 +31,21 @@ from .storage import utcnow
 _RDP_REGISTRY_INIT_LOCK = threading.Lock()
 
 _RDP_REMOTE_INTENT = re.compile(
-    r"(?iu)(?<![\\w])(?:rdp|remote\\s+desktop|терминальн\\w*\\s+стол|"
-    r"удал[её]нн\\w*\\s+(?:рабоч\\w*\\s+стол|экран)|"
-    r"подключ\\w*\\s+(?:к|через)\\s+rdp)(?![\\w])"
+    r"(?iu)(?<!\w)(?:rdp|remote\s+desktop|терминальн\w*\s+стол|"
+    r"удал[её]нн\w*\s+(?:рабоч\w*\s+стол|экран)|"
+    r"подключ\w*\s+(?:к|через)\s+rdp)(?!\w)"
 )
 
 def _rdp_explicit_task(request: str) -> bool:
-    """True only when the original mandate actually concerns an RDP desktop."""
+    """Detect an original mandate to connect to an RDP desktop."""
     value = str(request or "")[:12000]
     if not _RDP_REMOTE_INTENT.search(value):
         return False
-    # Descriptive questions and explicit prohibitions are not an
-    # authorization to open an OS session or delegate credentials.
+    # Tutorials, questions and negative instructions aren't consent.
     if re.search(
-        r"(?iu)\\b(?:не\\s+(?:подключай|подключать|запускай|открывай)|"
-        r"как\\s+(?:подключиться|настроить)|"
-        r"инструкци\\w*|объясни|расскажи)\\b", value
+        r"(?iu)\b(?:не\s+(?:подключай|подключать|запускай|открывай|rdp)|"
+        r"как\s+(?:подключиться|настроить)|"
+        r"инструкци\w*|объясни|расскажи)\b", value
     ):
         return False
     return True
