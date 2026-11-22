@@ -134,8 +134,9 @@
     const launchStatus = element('p', 'sa-remote-note');
     launchStatus.setAttribute('role', 'status');
     let launching = false;
+    let taskTerminal = false;
     const connect = makeButton('Подготовить RDP и подтвердить', async () => {
-      if (launching) return;
+      if (launching || taskTerminal) return;
       const args = {
         ticket_id: taskId,
         node_id: nodeSelect.value,
@@ -198,6 +199,7 @@
     });
     const loadTargets = async () => {
       connect.disabled = true;
+      if (taskTerminal) return;
       try {
         const [inventory, credentials] = await Promise.all([
           api('/v1/superagent/remote-access'),
@@ -217,6 +219,10 @@
           const option = element('option', '', raw); option.value = raw;
           fileSelect.append(option);
         });
+        if (taskTerminal) {
+          launchStatus.textContent = 'Задание RDP закрыто. Создайте новое поручение для другого входа.';
+          return;
+        }
         if (!inventory.remote_admin_enabled) {
           launchStatus.textContent = 'Включите модуль remote-admin в настройках Лешего.';
         } else if (!nodeSelect.options.length || !fileSelect.options.length) {
@@ -308,7 +314,10 @@
       }
     }
     const stop = makeButton('Остановить RDP-сессию', async () => {
-      if (busy || !window.confirm('Остановить RDP-наблюдение этого задания?')) return;
+      if (busy || taskTerminal || !window.confirm(
+        'Остановить RDP и окончательно закрыть это задание? ' +
+        'Для нового входа потребуется новое подтверждённое поручение.'
+      )) return;
       clearScreen();
       busy = true;
       stop.disabled = true;
@@ -316,7 +325,15 @@
         const result = await api('/v1/superagent/rdp/live/stop', {
           method: 'POST', body: JSON.stringify({ticket_id: taskId, confirm: true})
         });
-        state.textContent = result.stopped ? 'RDP-сессия остановлена.' : 'Активной RDP-сессии нет.';
+        if (result.ticket_stopped) {
+          taskTerminal = true;
+          connect.disabled = true;
+          setup.open = false;
+          if (timer !== null) { window.clearInterval(timer); timer = null; }
+        }
+        state.textContent = result.ticket_stopped
+          ? 'RDP и задание остановлены. Повторное подключение по этому заданию запрещено.'
+          : 'RDP Stop не подтверждён: проверьте состояние задания.';
         proposal.textContent = '';
       } catch (error) {
         state.textContent = 'Остановку подтвердить не удалось: ' + error.message;
@@ -325,6 +342,13 @@
     const refresh = makeButton('Обновить RDP', () => load());
     async function load() {
       if (busy || !panel.open || !panel.isConnected) return;
+      if (taskTerminal) {
+        clearScreen();
+        stop.disabled = true;
+        connect.disabled = true;
+        state.textContent = 'RDP-задание остановлено. Для нового входа создайте новое поручение.';
+        return;
+      }
       busy = true;
       refresh.disabled = true;
       stop.disabled = true;

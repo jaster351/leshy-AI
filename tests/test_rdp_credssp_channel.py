@@ -223,3 +223,76 @@ def test_credential_bearing_tsrequest_is_never_accepted():
     packet = bytes.fromhex("3009a003020106a2020400")
     with pytest.raises(ValueError, match="Credential delegation"):
         chan.read_tsrequest(Stream(packet), deadline=time.monotonic() + 5)
+
+
+
+@pytest.mark.parametrize("bad_timeout", [
+    float("nan"), float("inf"), float("-inf"), True, False,
+    None, "10", 0, -1, 31, 100000000,
+])
+def test_native_rdp_rejects_bad_timeout_before_owner_or_tcp(bad_timeout):
+    approvals = []
+    with patch.object(chan.socket, "create_connection") as connect:
+        with pytest.raises(ValueError, match="timeout"):
+            chan.connect_verified_rdp_credssp(
+                "192.0.2.2", "rdp.example.org", "a" * 64,
+                authorize=lambda *a: approvals.append(a),
+                timeout=bad_timeout,
+            )
+        connect.assert_not_called()
+    assert approvals == []
+
+
+@pytest.mark.parametrize("bad_address", [
+    3221225986, True, False, None, b"192.0.2.2", "",
+    "192.0.2.2\r\n", "999.999.999.999", "host.example.org",
+    "192.0.2.2" * 20,
+])
+def test_native_rdp_requires_exact_literal_ip_not_alias(bad_address):
+    approvals = []
+    with patch.object(chan.socket, "create_connection") as connect:
+        with pytest.raises(ValueError, match="IP"):
+            chan.connect_verified_rdp_credssp(
+                bad_address, "rdp.example.org", "a" * 64,
+                authorize=lambda *a: approvals.append(a),
+            )
+        connect.assert_not_called()
+    assert approvals == []
+
+
+@pytest.mark.parametrize("invalid_port", [
+    None, True, False, "3389", 0, -1, 65536, 99999, 3389.0,
+])
+def test_native_rdp_rejects_invalid_port_without_network(invalid_port):
+    with patch.object(chan.socket, "create_connection") as connect:
+        with pytest.raises(ValueError, match="port"):
+            chan.connect_verified_rdp_credssp(
+                "192.0.2.2", "rdp.example.org", "a" * 64,
+                authorize=lambda *a: None, port=invalid_port,
+            )
+        connect.assert_not_called()
+
+
+@pytest.mark.parametrize("bad_pin", [
+    None, True, b"a" * 64, "", "a" * 63, "a" * 65, "z" * 64,
+])
+def test_native_rdp_rejects_unenrolled_certificate_pin(bad_pin):
+    with patch.object(chan.socket, "create_connection") as connect:
+        with pytest.raises(PermissionError):
+            chan.connect_verified_rdp_credssp(
+                "192.0.2.2", "rdp.example.org", bad_pin,
+                authorize=lambda *a: None,
+            )
+        connect.assert_not_called()
+
+
+def test_native_rdp_owner_denial_happens_before_tcp_connect():
+    with patch.object(chan.socket, "create_connection") as connect:
+        with pytest.raises(PermissionError):
+            chan.connect_verified_rdp_credssp(
+                "192.0.2.2", "rdp.example.org", "a" * 64,
+                authorize=lambda *a: (_ for _ in ()).throw(
+                    PermissionError("revoked owner")
+                ),
+            )
+        connect.assert_not_called()
