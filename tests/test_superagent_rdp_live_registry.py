@@ -455,3 +455,103 @@ def test_native_failure_never_reports_connected_during_tls_teardown():
     assert not status["screen_available"]
     assert not status["e2e_verified"]
     assert not status["input_enabled"]
+
+
+
+def test_failed_phase_masks_stale_proposal_and_frame_metadata():
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
+    class Proposal:
+        kind = "propose_click"
+        reason = "stale"
+        question = ""
+        x = 12
+        y = 12
+        update_count = 7
+    session.proposal = Proposal()
+    initial = session.snapshot
+    def failed():
+        data = initial()
+        data.update({
+            "native_phase": "failed", "native_error_type": "TimeoutError",
+            "graphics_active": True, "frame_available": True, "frame_update": 7,
+        })
+        return data
+    session.snapshot = failed
+    status = controls.status(user, "SA-1")
+    assert status["registered"]
+    assert status["status"] == "native_failed"
+    assert status["frame_update"] == 0
+    assert not status["reasoning_available"]
+    assert status["proposal"] is None
+    assert not status["connected"]
+    assert not status["screen_available"]
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_ended_or_failed_native_transport_cannot_claim_active_graphics(terminal):
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
+    initial = session.snapshot
+    def terminal_snapshot():
+        data = initial()
+        data.update({
+            "native_phase": terminal, "graphics_active": True,
+            "frame_available": True, "frame_update": 100,
+        })
+        return data
+    session.snapshot = terminal_snapshot
+    state = controls.status(user, "SA-1")
+    assert state["frame_update"] == 0
+    assert not state["connected"]
+    assert not state["graphics_active"]
+    assert not state["screen_available"]
+    assert state["input_enabled"] is False
+    assert state["e2e_verified"] is False
+
+
+
+def test_web_stop_remains_available_during_slow_read_only_poll():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] /
+          "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "let stopBusy = false" in js
+    assert "if (stopBusy || taskTerminal || !window.confirm(" in js
+    assert "if (busy || stopBusy || !panel.open || !panel.isConnected) return" in js
+    assert "// Keep Stop clickable while a slow, read-only status poll is pending." in js
+
+
+def test_web_blocks_connect_during_registered_or_stopping_session():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] /
+          "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "let liveRegistered = false" in js
+    assert "let stopRequested = false" in js
+    assert "if (liveRegistered || stopRequested) return" in js
+    assert "connect.disabled = liveRegistered || stopRequested || taskTerminal || launching" in js
+    assert "stopRequested = true;" in js
+    assert "connect.disabled = taskTerminal || stopRequested || liveRegistered" in js
+
+
+def test_web_disallows_execute_for_prepared_token_when_stop_races():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] /
+          "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "if (taskTerminal || stopRequested)" in js
+    assert "Stop has already invalidated this token" in js
+    assert "Новый вход запрещён" in js
+
+
+
+def test_web_late_rdp_execute_response_cannot_overwrite_owner_stop():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] /
+              "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "// Stop may finish while this POST is still in flight." in source
+    assert "if (taskTerminal || stopRequested) {" in source
+    assert "liveRegistered = false;" in source
+    assert "RDP Stop уже запрошен. Повторное подключение запрещено." in source

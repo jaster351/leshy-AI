@@ -143,6 +143,8 @@ class SuperAgentRDPCognitiveSession:
         """In-process producer method; no LLM inference in the callback."""
         self.reauthorize()
         with self._lock:
+            if self._native_phase in {"failed", "stream_finished", "stopped"}:
+                raise PermissionError("Native RDP stream is terminal")
             if not self._inbox.offer(observation):
                 raise PermissionError("RDP cognition is stopped")
             self._latest_frame_update = observation.update_count
@@ -153,6 +155,9 @@ class SuperAgentRDPCognitiveSession:
     def reason_once(self) -> RDPReadOnlyProposal | None:
         """Use the existing SuperAgent LLM; never execute model's proposal."""
         self.reauthorize()
+        with self._lock:
+            if self._native_phase in {"failed", "stream_finished", "stopped"}:
+                return None
         result = self._inbox.reason_once(
             self._planner, owner_task=self._task,
             reauthorize=self.reauthorize,
@@ -160,6 +165,7 @@ class SuperAgentRDPCognitiveSession:
         self.reauthorize()
         with self._lock:
             if (self._cancel.is_set() or result is None
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}
                     or result.update_count != self._latest_frame_update):
                 return None
             self._last_proposal = result
@@ -169,7 +175,8 @@ class SuperAgentRDPCognitiveSession:
         """Begin ONE supervised Planner LLM consumer; no remote actions."""
         self.reauthorize()
         with self._lock:
-            if self._cancel.is_set() or self._cognitive_thread is not None:
+            if (self._cancel.is_set() or self._cognitive_thread is not None
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}):
                 raise PermissionError("Native RDP cognitive worker unavailable")
             thread = threading.Thread(
                 target=self._cognitive_loop,
@@ -197,11 +204,15 @@ class SuperAgentRDPCognitiveSession:
             self._cognitive_wake.clear()
             if self._cancel.is_set():
                 break
+            with self._lock:
+                if self._native_phase in {"failed", "stream_finished", "stopped"}:
+                    break
             try:
                 proposal = self.reason_once()
                 if proposal is not None:
                     with self._lock:
-                        if not self._cancel.is_set():
+                        if (not self._cancel.is_set()
+                                and self._native_phase not in {"failed", "stream_finished", "stopped"}):
                             self._cognitive_completed += 1
             except Exception as exc:
                 with self._lock:
@@ -216,6 +227,7 @@ class SuperAgentRDPCognitiveSession:
         self.reauthorize()
         with self._lock:
             if (self._cancel.is_set() or self._channel is None
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}
                     or self._web_png is None
                     or time.monotonic() - self._web_png_at > 8.0):
                 return None
@@ -231,10 +243,16 @@ class SuperAgentRDPCognitiveSession:
         The native stream already rechecks owner permission immediately before
         forwarding this image. Web consumers recheck independently.
         """
+        # Reject post-failure callbacks before expensive PNG validation.
+        with self._lock:
+            if (self._cancel.is_set() or self._channel is None
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}):
+                raise PermissionError("Native RDP graphics stream is terminal")
         _validated_png(frame)
         with self._lock:
-            if self._cancel.is_set() or self._channel is None:
-                raise PermissionError("RDP graphics stream already stopped")
+            if (self._cancel.is_set() or self._channel is None
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}):
+                raise PermissionError("Native RDP graphics stream is terminal")
             if frame.update_count <= self._last_web_update:
                 raise ValueError("Non-monotonic native RDP frame")
             self._last_web_update = frame.update_count
@@ -247,10 +265,18 @@ class SuperAgentRDPCognitiveSession:
         with self._lock:
             image = self._web_png
             if (self._cancel.is_set() or self._channel is None
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}
                     or image is None or time.monotonic() - self._web_png_at > 8.0):
                 return None
         self.reauthorize()
-        return image
+        # Native failure can race the authorization recheck. Revalidate
+        # under the session lock before returning a frame to the Web writer.
+        with self._lock:
+            if (self._cancel.is_set() or self._native_phase in {"failed", "stream_finished", "stopped"}
+                    or self._channel is None or self._web_png is not image
+                    or time.monotonic() - self._web_png_at > 8.0):
+                return None
+            return image
 
     def attach_native_handshake(self, channel: PinnedRDPCredSSPChannel) -> None:
         """Permit Stop to close a half-completed owner-approved handshake."""
@@ -259,7 +285,8 @@ class SuperAgentRDPCognitiveSession:
         self.reauthorize()
         with self._lock:
             if (self._cancel.is_set() or self._handshake_channel is not None
-                    or self._channel is not None or self._graphics_started):
+                    or self._channel is not None or self._graphics_started
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}):
                 raise PermissionError("Native RDP launch no longer allowed")
             self._handshake_channel = channel
 
@@ -279,9 +306,18 @@ class SuperAgentRDPCognitiveSession:
             raise ValueError("Unknown native RDP phase")
         self.reauthorize()
         with self._lock:
-            if self._cancel.is_set():
-                raise PermissionError("Native RDP was stopped")
+            if (self._cancel.is_set()
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}):
+                raise PermissionError("Native RDP phase is terminal")
             self._native_phase = phase
+            if phase == "stream_finished":
+                self._web_png = None
+                self._web_png_at = 0.0
+                self._last_web_update = 0
+                self._last_proposal = None
+                wake = getattr(self, "_cognitive_wake", None)
+                if wake is not None:
+                    wake.set()
 
     def native_failure(self, exc_type: str) -> None:
         """Preserve first error class and immediately revoke cached pixels.
@@ -306,6 +342,9 @@ class SuperAgentRDPCognitiveSession:
             self._web_png_at = 0.0
             self._last_web_update = 0
             self._last_proposal = None
+        wake = getattr(self, "_cognitive_wake", None)
+        if wake is not None:
+            wake.set()
 
     def receive_graphics(
         self,
@@ -325,7 +364,8 @@ class SuperAgentRDPCognitiveSession:
             raise TypeError("Verified native RDP transport required")
         self.reauthorize()
         with self._lock:
-            if self._cancel.is_set() or self._graphics_started:
+            if (self._cancel.is_set() or self._graphics_started
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}):
                 raise PermissionError("Native RDP graphics session unavailable")
             self._graphics_started = True
             if self._handshake_channel is channel:
@@ -397,13 +437,21 @@ class SuperAgentRDPCognitiveSession:
             ),
             "cognitive_completed": getattr(self, "_cognitive_completed", 0),
             "cognitive_error_type": getattr(self, "_cognitive_error_type", ""),
-            "graphics_active": self._channel is not None and not self._cancel.is_set(),
+            "graphics_active": (
+                self._channel is not None and not self._cancel.is_set()
+                and self._native_phase not in {"failed", "stream_finished", "stopped"}
+            ),
             "frame_available": (
                 self._channel is not None and not self._cancel.is_set()
+                and self._native_phase not in {"failed", "stream_finished", "stopped"}
                 and self._web_png is not None
                 and time.monotonic() - self._web_png_at <= 8.0
             ),
-            "frame_update": self._last_web_update if self._web_png else 0,
+            "frame_update": (
+                self._last_web_update if self._web_png is not None
+                and self._native_phase not in {"failed", "stream_finished", "stopped"}
+                else 0
+            ),
             "input_enabled": False,
             "windows_rdp_e2e_verified": False,
         }

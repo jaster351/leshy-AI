@@ -295,3 +295,168 @@ def test_failure_error_type_preserves_safe_class_names(known_type):
     session = start()
     session.native_failure(known_type)
     assert session.snapshot()["native_error_type"] == known_type
+
+
+
+def _native_frame(update=1):
+    from leshy.rdp_frame_codec import encode_frame_png
+    from leshy.rdp_vision_bridge import RDPVisionPNG
+    pixels = bytes.fromhex("010203040506")
+    return RDPVisionPNG(2, 1, encode_frame_png(2, 1, pixels), "a" * 64, update)
+
+
+def test_failed_phase_drops_late_real_png_instead_of_resurrecting_screen():
+    session = start()
+    session._channel = object()
+    session._native_phase = "graphics"
+    session.accept_native_png(_native_frame())
+    assert session.snapshot()["frame_available"]
+    session.native_failure("TimeoutError")
+    assert session.current_native_png() is None
+    with pytest.raises(PermissionError, match="terminal"):
+        session.accept_native_png(_native_frame(2))
+    status = session.snapshot()
+    assert status["native_phase"] == "failed"
+    assert not status["graphics_active"]
+    assert not status["frame_available"]
+    assert status["frame_update"] == 0
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_terminal_native_phase_rejects_new_vision_observation(terminal):
+    session = start()
+    session._native_phase = terminal
+    with pytest.raises(PermissionError, match="terminal"):
+        session.accept_observation(observation())
+    assert session._inbox.snapshot()["pending"] is False
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_terminal_native_phase_prevents_new_model_inference(terminal):
+    service = FakeService()
+    session = start(service)
+    session._native_phase = terminal
+    assert session.reason_once() is None
+    assert service.model_calls == 0
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished"])
+def test_terminal_phase_cannot_revert_to_graphics_or_send_fake_completion(terminal):
+    session = start()
+    session._native_phase = terminal
+    with pytest.raises(PermissionError, match="terminal"):
+        session.set_native_phase("graphics")
+    with pytest.raises(PermissionError, match="terminal"):
+        session.set_native_phase("stream_finished")
+    assert session.snapshot()["native_phase"] == terminal
+
+
+def test_finished_stream_revokes_last_real_frame_and_planner_proposal():
+    session = start()
+    session._native_phase = "graphics"
+    session._channel = object()
+    frame = _native_frame(1)
+    session.accept_native_png(frame)
+    session._last_proposal = object()
+    session.set_native_phase("stream_finished")
+    assert session.snapshot()["native_phase"] == "stream_finished"
+    assert session._web_png is None
+    assert session._last_proposal is None
+    assert session.current_native_png() is None
+    assert not session.snapshot()["frame_available"]
+    with pytest.raises(PermissionError, match="terminal"):
+        session.accept_native_png(_native_frame(2))
+
+
+def test_native_failure_wakes_and_retires_idle_cognitive_worker_without_model_calls():
+    import time
+    service = FakeService()
+    session = start(service)
+    session.start_cognitive_worker()
+    worker = session._cognitive_thread
+    assert worker is not None
+    session.native_failure("TimeoutError")
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert service.model_calls == 0
+    assert session.snapshot()["cognitive_completed"] == 0
+
+
+def test_native_failure_mid_model_call_drops_late_reasoning_output():
+    import time
+    service = FakeService()
+    entered, release = threading.Event(), threading.Event()
+    original = service._chat_inference
+
+    def slow_inference(ticket, messages):
+        entered.set()
+        assert release.wait(timeout=2)
+        return original(ticket, messages)
+
+    service._chat_inference = slow_inference
+    session = start(service)
+    session._native_phase = "graphics"
+    session.start_cognitive_worker()
+    try:
+        session.accept_observation(observation())
+        assert entered.wait(timeout=2)
+        session.native_failure("TimeoutError")
+    finally:
+        release.set()
+    worker = session._cognitive_thread
+    assert worker is not None
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert service.model_calls == 1
+    assert session.snapshot()["cognitive_completed"] == 0
+    assert session._last_proposal is None
+
+
+def test_native_failure_after_stream_finish_does_not_republish_frame():
+    session = start()
+    session._native_phase = "graphics"
+    session._channel = object()
+    session.accept_native_png(_native_frame())
+    session.set_native_phase("stream_finished")
+    session.native_failure("RDPTransportCloseError")
+    assert session.snapshot()["native_phase"] == "failed"
+    assert session.current_native_png() is None
+    with pytest.raises(PermissionError):
+        session.accept_observation(observation())
+
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_terminal_phase_refuses_new_cognitive_worker(terminal):
+    session = start()
+    session._native_phase = terminal
+    with pytest.raises(PermissionError, match="unavailable"):
+        session.start_cognitive_worker()
+    assert session._cognitive_thread is None
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_terminal_phase_refuses_new_verified_handshake(terminal, monkeypatch):
+    import leshy.superagent_rdp_cognitive_runtime as module
+    class FakeVerifiedChannel:
+        pass
+    monkeypatch.setattr(module, "PinnedRDPCredSSPChannel", FakeVerifiedChannel)
+    session = start()
+    session._native_phase = terminal
+    with pytest.raises(PermissionError, match="no longer allowed"):
+        session.attach_native_handshake(FakeVerifiedChannel())
+    assert session._handshake_channel is None
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_terminal_phase_cannot_start_second_graphics_stream(terminal, monkeypatch):
+    import leshy.superagent_rdp_cognitive_runtime as module
+    class FakeVerifiedChannel:
+        pass
+    monkeypatch.setattr(module, "PinnedRDPCredSSPChannel", FakeVerifiedChannel)
+    session = start()
+    session._native_phase = terminal
+    with pytest.raises(PermissionError, match="unavailable"):
+        session.receive_graphics(FakeVerifiedChannel())
+    assert session._channel is None
+    assert session._graphics_started is False

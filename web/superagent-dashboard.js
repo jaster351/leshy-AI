@@ -135,8 +135,12 @@
     launchStatus.setAttribute('role', 'status');
     let launching = false;
     let taskTerminal = false;
+    let liveRegistered = false;
+    let stopRequested = false;
+    let stopBusy = false;
     const connect = makeButton('Подготовить RDP и подтвердить', async () => {
       if (launching || taskTerminal) return;
+      if (liveRegistered || stopRequested) return;
       const args = {
         ticket_id: taskId,
         node_id: nodeSelect.value,
@@ -156,6 +160,12 @@
           method: 'POST', body: JSON.stringify(args)
         });
         const approval = response.approval;
+        if (taskTerminal || stopRequested) {
+          // Stop has already invalidated this token. Never execute it,
+          // even if the prepare HTTP response arrived after the Stop.
+          launchStatus.textContent = 'RDP Stop уже запрошен. Повторный запуск запрещён.';
+          return;
+        }
         const text =
           'ВНИМАНИЕ: это передаст пароль на сервер RDP после TLS/NLA проверки.\n\n' +
           'Задание: ' + approval.ticket_id +
@@ -181,12 +191,28 @@
           }
           return;
         }
+        if (taskTerminal || stopRequested) {
+          launchStatus.textContent = 'RDP Stop уже запрошен. Новый вход запрещён.';
+          return;
+        }
         launchStatus.textContent = 'Одноразовое подтверждение принято; запускаю нативное RDP…';
         const result = await api('/v1/superagent/rdp/start/execute', {
           method: 'POST',
           body: JSON.stringify({...args, approval_token: approval.approval_token, confirm: true})
         });
-        launchStatus.textContent = result.native_rdp?.status === 'starting'
+        // Stop may finish while this POST is still in flight. A late
+        // HTTP 202 never overrides the already confirmed terminal state.
+        if (taskTerminal || stopRequested) {
+          liveRegistered = false;
+          connect.disabled = true;
+          setup.open = false;
+          launchStatus.textContent = 'RDP Stop уже запрошен. Повторное подключение запрещено.';
+          return;
+        }
+        liveRegistered = result.native_rdp?.status === 'starting';
+        connect.disabled = true;
+        setup.open = false;
+        launchStatus.textContent = liveRegistered
           ? 'Нативная RDP-попытка запущена; проверяйте реальные этапы ниже. Автоповтора нет.'
           : 'Состояние запуска неизвестно; не повторяйте вход без проверки.';
         await load();
@@ -194,12 +220,14 @@
         launchStatus.textContent = 'Статус входа не подтверждён: ' + error.message +
           '. Если соединение оборвалось, не повторяйте пароль до проверки.';
       } finally {
-        launching = false; connect.disabled = false;
+        launching = false;
+        connect.disabled = taskTerminal || stopRequested || liveRegistered;
       }
     });
     const loadTargets = async () => {
       connect.disabled = true;
       if (taskTerminal) return;
+      if (liveRegistered || stopRequested) return;
       try {
         const [inventory, credentials] = await Promise.all([
           api('/v1/superagent/remote-access'),
@@ -221,6 +249,10 @@
         });
         if (taskTerminal) {
           launchStatus.textContent = 'Задание RDP закрыто. Создайте новое поручение для другого входа.';
+          return;
+        }
+        if (stopRequested || liveRegistered) {
+          launchStatus.textContent = 'RDP уже запускается либо останавливается. Повтор запрещён.';
           return;
         }
         if (!inventory.remote_admin_enabled) {
@@ -262,7 +294,8 @@
       if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = ''; }
     };
     async function loadFrame(expectedUpdate) {
-      if (frameBusy || !panel.open || !panel.isConnected) return;
+      if (frameBusy || !panel.open || !panel.isConnected
+          || document.visibilityState !== 'visible') return;
       frameBusy = true;
       const current = serial;
       const controller = new AbortController();
@@ -273,7 +306,8 @@
           signal: controller.signal,
           headers: {'X-Leshy-UI': 'superagent'}
         });
-        if (!panel.isConnected || !panel.open || current !== serial) return;
+        if (!panel.isConnected || !panel.open || current !== serial
+            || document.visibilityState !== 'visible') return;
         if (response.status === 204) { clearScreen(); return; }
         if (!response.ok || response.headers.get('Content-Type')?.split(';')[0] !== 'image/png') {
           throw Error('RDP кадр недоступен');
@@ -285,7 +319,8 @@
           throw Error('Получен устаревший или повреждённый RDP кадр');
         }
         const blob = await response.blob();
-        if (!panel.isConnected || !panel.open || current !== serial) return;
+        if (!panel.isConnected || !panel.open || current !== serial
+            || document.visibilityState !== 'visible') return;
         if (blob.size !== expectedLength) throw Error('Размер RDP кадра не совпадает');
         const next = URL.createObjectURL(blob);
         const old = objectUrl;
@@ -314,12 +349,14 @@
       }
     }
     const stop = makeButton('Остановить RDP-сессию', async () => {
-      if (busy || taskTerminal || !window.confirm(
+      if (stopBusy || taskTerminal || !window.confirm(
         'Остановить RDP и окончательно закрыть это задание? ' +
         'Для нового входа потребуется новое подтверждённое поручение.'
       )) return;
+      stopRequested = true;
       clearScreen();
-      busy = true;
+      connect.disabled = true;
+      stopBusy = true;
       stop.disabled = true;
       try {
         const result = await api('/v1/superagent/rdp/live/stop', {
@@ -327,9 +364,11 @@
         });
         if (result.ticket_stopped) {
           taskTerminal = true;
+          liveRegistered = false;
           connect.disabled = true;
           setup.open = false;
           if (timer !== null) { window.clearInterval(timer); timer = null; }
+          document.removeEventListener('visibilitychange', onRdpVisibility);
         }
         state.textContent = result.ticket_stopped
           ? 'RDP и задание остановлены. Повторное подключение по этому заданию запрещено.'
@@ -337,11 +376,15 @@
         proposal.textContent = '';
       } catch (error) {
         state.textContent = 'Остановку подтвердить не удалось: ' + error.message;
-      } finally { busy = false; await load(); }
+      } finally { stopBusy = false; await load(); }
     }, true, 'sa-danger');
     const refresh = makeButton('Обновить RDP', () => load());
     async function load() {
-      if (busy || !panel.open || !panel.isConnected) return;
+      if (busy || stopBusy || !panel.open || !panel.isConnected) return;
+      if (document.visibilityState !== 'visible') {
+        clearScreen();
+        return;
+      }
       if (taskTerminal) {
         clearScreen();
         stop.disabled = true;
@@ -351,10 +394,13 @@
       }
       busy = true;
       refresh.disabled = true;
-      stop.disabled = true;
+      // Keep Stop clickable while a slow, read-only status poll is pending.
       try {
         const result = await api('/v1/superagent/rdp/live?ticket_id=' + encodeURIComponent(taskId));
-        if (!panel.isConnected || !panel.open) return;
+        if (!panel.isConnected || !panel.open || stopBusy || taskTerminal
+            || document.visibilityState !== 'visible') return;
+        liveRegistered = !!result.registered;
+        connect.disabled = liveRegistered || stopRequested || taskTerminal || launching;
         if (!result.registered || !result.connected) {
           clearScreen();
           state.textContent = result.registered
@@ -403,13 +449,24 @@
     }
     controls.append(refresh, stop);
     panel.append(info, setup, state, screen, proposal, controls);
+    const onRdpVisibility = () => {
+      if (!panel.isConnected || !panel.open) {
+        document.removeEventListener('visibilitychange', onRdpVisibility);
+        clearScreen();
+        return;
+      }
+      if (document.visibilityState !== 'visible') clearScreen();
+      else load();
+    };
     panel.addEventListener('toggle', () => {
       if (panel.open) {
+        document.addEventListener('visibilitychange', onRdpVisibility);
         if (timer !== null) window.clearInterval(timer);
         load();
         timer = window.setInterval(() => {
           if (!panel.isConnected || !panel.open) {
             window.clearInterval(timer); timer = null;
+            document.removeEventListener('visibilitychange', onRdpVisibility);
             clearScreen();
             return;
           }
@@ -422,6 +479,7 @@
         }, 1800);
       } else {
         if (timer !== null) { window.clearInterval(timer); timer = null; }
+        document.removeEventListener('visibilitychange', onRdpVisibility);
         clearScreen();
       }
     });

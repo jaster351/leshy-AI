@@ -103,7 +103,8 @@ class RDPLiveRegistry:
         # during the brief race before the graphics worker closes TLS.
         healthy_graphics = (
             snapshot["graphics_active"] is True
-            and snapshot.get("native_phase") != "failed"
+            and snapshot.get("native_phase") not in {"failed", "stream_finished", "stopped"}
+            and snapshot.get("stopped") is not True
         )
         view: dict[str, Any] = {
             "registered": True,
@@ -113,14 +114,14 @@ class RDPLiveRegistry:
                 healthy_graphics
                 and snapshot.get("frame_available") is True
             ),
-            "frame_update": int(snapshot.get("frame_update", 0)),
+            "frame_update": int(snapshot.get("frame_update", 0)) if healthy_graphics else 0,
             "input_enabled": False,
             "e2e_verified": False,
-            "reasoning_available": bool(proposal),
+            "reasoning_available": healthy_graphics and bool(proposal),
             "status": (
                 "native_failed" if snapshot.get("native_phase") == "failed"
                 else "stream_finished" if snapshot.get("native_phase") == "stream_finished"
-                else "graphics_receiving" if snapshot["graphics_active"]
+                else "graphics_receiving" if healthy_graphics
                 else "waiting_for_native_transport"
             ),
             "native_phase": snapshot.get("native_phase", "not_started"),
@@ -133,7 +134,7 @@ class RDPLiveRegistry:
             "stopped": bool(snapshot["stopped"]),
             "proposal": None,
         }
-        if proposal is not None:
+        if proposal is not None and healthy_graphics:
             view["proposal"] = {
                 "kind": proposal.kind,
                 "reason": proposal.reason[:600],
@@ -164,11 +165,16 @@ class RDPLiveRegistry:
             if session is None:
                 return False
             session.reauthorize()
+            if session.snapshot().get("native_phase") in {"failed", "stream_finished", "stopped"}:
+                return False
             image = session.current_native_png()
             if image is None:
                 return False
-            # Authorization must still hold at the exact output boundary.
+            # Fail closed if the native worker reported a failure between
+            # frame capture and the actual binary response write.
             session.reauthorize()
+            if session.snapshot().get("native_phase") in {"failed", "stream_finished", "stopped"}:
+                return False
             deliver(image.png, image.update_count)
             return True
 
