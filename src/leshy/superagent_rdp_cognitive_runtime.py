@@ -313,7 +313,9 @@ class SuperAgentRDPCognitiveSession:
                 self._web_png_at = 0.0
                 self._last_web_update = 0
                 self._last_proposal = None
-                self._cognitive_wake.set()
+                wake = getattr(self, "_cognitive_wake", None)
+                if wake is not None:
+                    wake.set()
 
     def native_failure(self, exc_type: str) -> None:
         """Preserve first error class and immediately revoke cached pixels.

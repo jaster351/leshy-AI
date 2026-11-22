@@ -200,6 +200,15 @@
           method: 'POST',
           body: JSON.stringify({...args, approval_token: approval.approval_token, confirm: true})
         });
+        // Stop may finish while this POST is still in flight. A late
+        // HTTP 202 never overrides the already confirmed terminal state.
+        if (taskTerminal || stopRequested) {
+          liveRegistered = false;
+          connect.disabled = true;
+          setup.open = false;
+          launchStatus.textContent = 'RDP Stop уже запрошен. Повторное подключение запрещено.';
+          return;
+        }
         liveRegistered = result.native_rdp?.status === 'starting';
         connect.disabled = true;
         setup.open = false;

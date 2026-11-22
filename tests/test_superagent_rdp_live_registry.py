@@ -544,3 +544,14 @@ def test_web_disallows_execute_for_prepared_token_when_stop_races():
     assert "if (taskTerminal || stopRequested)" in js
     assert "Stop has already invalidated this token" in js
     assert "Новый вход запрещён" in js
+
+
+
+def test_web_late_rdp_execute_response_cannot_overwrite_owner_stop():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] /
+              "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "// Stop may finish while this POST is still in flight." in source
+    assert "if (taskTerminal || stopRequested) {" in source
+    assert "liveRegistered = false;" in source
+    assert "RDP Stop уже запрошен. Повторное подключение запрещено." in source
