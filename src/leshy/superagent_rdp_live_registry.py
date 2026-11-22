@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hmac
 import threading
-from typing import Any
+from typing import Any, Callable
 
 from .superagent_remote_permissions import RemotePermissionPolicy, VerifiedActor
 
@@ -63,7 +63,8 @@ class RDPLiveRegistry:
     def _disconnected() -> dict[str, Any]:
         return {
             "registered": False, "connected": False, "graphics_active": False,
-            "screen_available": False, "input_enabled": False,
+            "screen_available": False, "frame_update": 0,
+            "input_enabled": False,
             "reasoning_available": False, "proposal": None,
             "e2e_verified": False, "status": "no_live_session",
         }
@@ -86,7 +87,11 @@ class RDPLiveRegistry:
             "registered": True,
             "connected": snapshot["graphics_active"] is True,
             "graphics_active": snapshot["graphics_active"] is True,
-            "screen_available": False,  # No verified frame transfer to Web.
+            "screen_available": (
+                snapshot["graphics_active"] is True
+                and snapshot.get("frame_available") is True
+            ),
+            "frame_update": int(snapshot.get("frame_update", 0)),
             "input_enabled": False,
             "e2e_verified": False,
             "reasoning_available": bool(proposal),
@@ -108,6 +113,32 @@ class RDPLiveRegistry:
                 "owner_approval_issued": False,
             }
         return view
+
+    def transmit_png(
+        self, actor: VerifiedActor, ticket_id: str,
+        deliver: Callable[[bytes, int], None],
+    ) -> bool:
+        """Serialize an actual PNG response with Stop of the same session.
+
+        The Web handler must bound socket I/O by a short timeout. While the
+        image is written Stop waits at this lock. Once Stop completes,
+        no new response can begin. Never hold this lock for model inference.
+        """
+        if not callable(deliver):
+            raise TypeError("Trusted binary Web writer is required")
+        self._verify_owner(actor, ticket_id)
+        with self._lock:
+            session = self._lookup(actor, ticket_id)
+            if session is None:
+                return False
+            session.reauthorize()
+            image = session.current_native_png()
+            if image is None:
+                return False
+            # Authorization must still hold at the exact output boundary.
+            session.reauthorize()
+            deliver(image.png, image.update_count)
+            return True
 
     def stop(self, actor: VerifiedActor, ticket_id: str) -> dict[str, Any]:
         """Web Stop needs a live verified owner, but not a still-valid RDP grant.

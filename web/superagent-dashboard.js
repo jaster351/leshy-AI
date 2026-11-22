@@ -102,16 +102,72 @@
   }
   function renderRdpLive(host, taskId) {
     const panel = element('details', 'sa-setup');
-    panel.append(element('summary', '', 'RDP · наблюдение и Stop'));
+    panel.append(element('summary', '', 'RDP · экран, наблюдение и Stop'));
     const info = element('p', 'sa-remote-note',
-      'Показывается только действующая проверенная RDP-сессия. Экран и управление мышью пока не подключены к Web.');
-    const state = element('pre', 'sa-terminal-output', 'Откройте раздел, чтобы запросить состояние RDP.');
+      'Только реальные кадры из подтверждённого RDP-потока. Управление мышью и клавиатурой отключено.');
+    const state = element('pre', 'sa-terminal-output', 'Откройте раздел для проверки RDP.');
     state.setAttribute('role', 'status');
+    const screen = element('img', 'sa-rdp-screen');
+    screen.alt = 'Настоящий кадр удалённого рабочего стола RDP (только просмотр)';
+    screen.hidden = true;
+    screen.style.cssText = 'max-width:100%;height:auto;max-height:65vh;object-fit:contain;background:#07110d;border:1px solid var(--line);border-radius:8px;margin:8px 0';
     const proposal = element('pre', 'sa-terminal-output');
     const controls = element('div', 'sa-controls');
     let busy = false;
+    let frameBusy = false;
+    let displayedUpdate = 0;
+    let serial = 0;
+    let objectUrl = '';
+    let timer = null;
+    const clearScreen = () => {
+      serial++;
+      displayedUpdate = 0;
+      screen.hidden = true;
+      screen.removeAttribute('src');
+      if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = ''; }
+    };
+    async function loadFrame(expectedUpdate) {
+      if (frameBusy || !panel.open || !panel.isConnected) return;
+      frameBusy = true;
+      const current = serial;
+      try {
+        const response = await fetch('/v1/superagent/rdp/frame?ticket_id=' + encodeURIComponent(taskId), {
+          credentials: 'same-origin', cache: 'no-store',
+          headers: {'X-Leshy-UI': 'superagent'}
+        });
+        if (!panel.isConnected || !panel.open || current !== serial) return;
+        if (response.status === 204) { clearScreen(); return; }
+        if (!response.ok || response.headers.get('Content-Type')?.split(';')[0] !== 'image/png') {
+          throw Error('RDP кадр недоступен');
+        }
+        const frameUpdate = Number(response.headers.get('X-Leshy-RDP-Frame'));
+        const expectedLength = Number(response.headers.get('Content-Length'));
+        if (!Number.isSafeInteger(frameUpdate) || frameUpdate !== expectedUpdate ||
+            !Number.isSafeInteger(expectedLength) || expectedLength < 45 || expectedLength > 8 * 1024 * 1024) {
+          throw Error('Получен устаревший или повреждённый RDP кадр');
+        }
+        const blob = await response.blob();
+        if (!panel.isConnected || !panel.open || current !== serial) return;
+        if (blob.size !== expectedLength) throw Error('Размер RDP кадра не совпадает');
+        const next = URL.createObjectURL(blob);
+        const old = objectUrl;
+        objectUrl = next;
+        screen.onload = () => {
+          if (old) URL.revokeObjectURL(old);
+          if (objectUrl === next) { URL.revokeObjectURL(next); objectUrl = ''; }
+        };
+        screen.onerror = () => { clearScreen(); state.textContent = 'Ошибка декодирования RDP изображения'; };
+        screen.src = next;
+        screen.hidden = false;
+        displayedUpdate = frameUpdate;
+      } catch (error) {
+        clearScreen();
+        state.textContent = 'Изображение RDP недоступно: ' + error.message;
+      } finally { frameBusy = false; }
+    }
     const stop = makeButton('Остановить RDP-сессию', async () => {
-      if (busy || !window.confirm('Остановить только RDP-наблюдение этого задания?')) return;
+      if (busy || !window.confirm('Остановить RDP-наблюдение этого задания?')) return;
+      clearScreen();
       busy = true;
       stop.disabled = true;
       try {
@@ -126,35 +182,61 @@
     }, true, 'sa-danger');
     const refresh = makeButton('Обновить RDP', () => load());
     async function load() {
-      if (busy) return;
+      if (busy || !panel.open || !panel.isConnected) return;
       busy = true;
       refresh.disabled = true;
       stop.disabled = true;
       try {
         const result = await api('/v1/superagent/rdp/live?ticket_id=' + encodeURIComponent(taskId));
-        if (!result.registered) {
-          state.textContent = 'RDP: нет активной сессии. Подключение не было подтверждено.';
+        if (!panel.isConnected || !panel.open) return;
+        if (!result.registered || !result.connected) {
+          clearScreen();
+          state.textContent = result.registered
+            ? 'Ожидание реального нативного RDP-потока.'
+            : 'RDP: нет активной сессии. Подключение не подтверждено.';
           proposal.textContent = '';
+          stop.disabled = !result.registered;
         } else {
           state.textContent = 'Узел: ' + String(result.node_id || 'неизвестен') + '\n' +
-            (result.graphics_active ? 'Нативный графический поток запущен.' : 'Ожидание нативного RDP-транспорта.') + '\n' +
-            'Изображение в Web: недоступно. Ввод мышью/клавиатурой: отключён.';
+            (result.screen_available ? 'Настоящий RDP кадр доступен.' : 'Ожидание свежего RDP кадра.') +
+            '\nУправление мышью/клавиатурой: отключено.';
           const p = result.proposal;
           proposal.textContent = p
             ? 'Предложение нейросети (НЕ выполнено): ' + String(p.kind) + '\n' +
               String(p.reason || '') + (p.question ? '\nВопрос: ' + String(p.question) : '') +
               (p.kind === 'propose_click' ? '\nКоординаты: ' + String(p.x) + ', ' + String(p.y) : '')
-            : 'Подтверждённых предложений по текущему кадру пока нет.';
+            : 'Предложений по актуальному кадру пока нет.';
           stop.disabled = false;
+          if (!result.screen_available) clearScreen();
+          else if (Number.isSafeInteger(result.frame_update) &&
+                   result.frame_update > 0 && result.frame_update !== displayedUpdate) {
+            await loadFrame(result.frame_update);
+          }
         }
       } catch (error) {
+        clearScreen();
         state.textContent = 'RDP недоступен: ' + error.message;
         proposal.textContent = '';
       } finally { busy = false; refresh.disabled = false; }
     }
     controls.append(refresh, stop);
-    panel.append(info, state, proposal, controls);
-    panel.addEventListener('toggle', () => { if (panel.open) load(); });
+    panel.append(info, state, screen, proposal, controls);
+    panel.addEventListener('toggle', () => {
+      if (panel.open) {
+        load();
+        timer = window.setInterval(() => {
+          if (!panel.isConnected || !panel.open) {
+            window.clearInterval(timer); timer = null;
+            clearScreen();
+            return;
+          }
+          if (document.visibilityState === 'visible') load();
+        }, 1800);
+      } else {
+        if (timer !== null) { window.clearInterval(timer); timer = null; }
+        clearScreen();
+      }
+    });
     host.append(panel);
   }
   function renderDetails(host, detail, taskId) {

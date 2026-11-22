@@ -194,6 +194,7 @@ def stream_native_rdp_with_local_vision(
     channel: PinnedRDPCredSSPChannel,
     *, reauthorize: Callable[[], None],
     on_observation: Callable[[RDPVisualObservation], None],
+    on_png_frame: Callable[[RDPVisionPNG], None] | None = None,
     policy: GraphicsStreamPolicy | None = None,
     max_png_frames: int = 32,
     drain_timeout: float = 45.0,
@@ -204,6 +205,8 @@ def stream_native_rdp_with_local_vision(
     run this on a Web request thread. The underlying RDP stream itself is not
     blocked by the model. On any error the pending inference is cancelled.
     """
+    if on_png_frame is not None and not callable(on_png_frame):
+        raise TypeError("Trusted in-process PNG callback must be callable")
     worker = RDPVisionWorker(
         reauthorize=reauthorize, on_observation=on_observation,
     )
@@ -212,6 +215,11 @@ def stream_native_rdp_with_local_vision(
         def submit_or_fail(frame: RDPVisionPNG) -> None:
             if not worker.submit(frame):
                 raise RuntimeError("RDP vision worker stopped accepting frames")
+            # Frame is decoded and bounded by the real native bridge and
+            # worker. Only a fast in-process memory sink is permitted here.
+            # This callback must not run HTTP I/O, authentication or a model.
+            if on_png_frame is not None:
+                on_png_frame(frame)
 
         graphics = stream_native_rdp_png(
             channel, submit_or_fail, reauthorize=reauthorize,

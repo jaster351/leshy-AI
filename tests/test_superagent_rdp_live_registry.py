@@ -147,7 +147,8 @@ def test_web_route_contract_no_start_and_strict_stop():
     assert 'path == "/v1/superagent/rdp/live/stop"' in server
     assert "authorized_remote_context(" in server
     assert 'payload.get("confirm") is not True' in server
-    assert "Изображение в Web: недоступно" in panel
+    assert "Настоящий RDP кадр доступен." in panel
+    assert "Управление мышью/клавиатурой: отключено." in panel
     assert "НЕ выполнено" in panel
     assert "window.confirm(" in panel
 
