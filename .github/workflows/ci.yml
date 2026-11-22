@@ -86,6 +86,27 @@ jobs:
             tests/test_rdp6_ycocg.py \
             tests/test_rdp_graphics_stream.py \
             tests/test_rdp_graphics_stream_channel.py
+      - name: Проверить собственный RDP/SuperAgent lifecycle, Web, approvals и защиту секретов
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for path in (*Path('src/leshy').rglob('*.py'), *Path('tests').rglob('*.py')):
+              assert b'\x00' not in path.read_bytes(), f"Python source contains NUL: {path}"
+          PY
+          python -m pytest -q -ra \
+            tests/test_rdp_vision_bridge.py \
+            tests/test_rdp_local_vision.py \
+            tests/test_rdp_vision_worker.py \
+            tests/test_rdp_cognitive_bridge.py \
+            tests/test_superagent_rdp_cognitive_runtime.py \
+            tests/test_superagent_rdp_live_registry.py \
+            tests/test_superagent_rdp_png_web.py \
+            tests/test_superagent_native_rdp_launcher.py \
+            tests/test_superagent_rdp_launch_approval.py \
+            tests/test_superagent_rdp_credentials.py \
+            tests/test_superagent_rdp_intent.py
+      - name: Проверить синтаксис RDP панели SuperAgent
+        run: node --check web/superagent-dashboard.js
       - name: Проверить реальный Browser E2E
         run: |
           BROWSER="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
