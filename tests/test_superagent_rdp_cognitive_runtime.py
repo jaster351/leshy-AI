@@ -199,3 +199,36 @@ def test_native_cognition_stops_on_untrusted_llm_action():
     assert session.snapshot()["stopped"] is True
     assert session.snapshot()["cognitive_error_type"] == "RDPCognitiveError"
     assert service.model_calls == 1
+
+
+
+def test_cognitive_consumer_exits_after_native_graphics_finishes():
+    import time
+    session = start()
+    session._graphics_started = True
+    session._channel = object()
+    session.start_cognitive_worker()
+    worker = session._cognitive_thread
+    assert worker is not None
+    session._channel = None
+    session._cognitive_wake.set()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+
+
+def test_proposal_is_not_exposed_without_a_fresh_covered_frame():
+    import time
+    session = start()
+    session.accept_observation(observation(1))
+    proposal = session.reason_once()
+    assert proposal is not None
+    # No real decoded native framebuffer has arrived: model text may exist,
+    # but cannot be shown as verified actionable desktop evidence.
+    assert session.last_proposal() is None
+    session._channel = object()
+    session._web_png = object()
+    session._web_png_at = time.monotonic()
+    session._last_web_update = 1
+    assert session.last_proposal() is proposal
+    session._web_png_at -= 20
+    assert session.last_proposal() is None
