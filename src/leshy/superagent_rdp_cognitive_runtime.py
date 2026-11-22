@@ -175,7 +175,8 @@ class SuperAgentRDPCognitiveSession:
         """Begin ONE supervised Planner LLM consumer; no remote actions."""
         self.reauthorize()
         with self._lock:
-            if self._cancel.is_set() or self._cognitive_thread is not None:
+            if (self._cancel.is_set() or self._cognitive_thread is not None
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}):
                 raise PermissionError("Native RDP cognitive worker unavailable")
             thread = threading.Thread(
                 target=self._cognitive_loop,
@@ -284,7 +285,8 @@ class SuperAgentRDPCognitiveSession:
         self.reauthorize()
         with self._lock:
             if (self._cancel.is_set() or self._handshake_channel is not None
-                    or self._channel is not None or self._graphics_started):
+                    or self._channel is not None or self._graphics_started
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}):
                 raise PermissionError("Native RDP launch no longer allowed")
             self._handshake_channel = channel
 
@@ -362,7 +364,8 @@ class SuperAgentRDPCognitiveSession:
             raise TypeError("Verified native RDP transport required")
         self.reauthorize()
         with self._lock:
-            if self._cancel.is_set() or self._graphics_started:
+            if (self._cancel.is_set() or self._graphics_started
+                    or self._native_phase in {"failed", "stream_finished", "stopped"}):
                 raise PermissionError("Native RDP graphics session unavailable")
             self._graphics_started = True
             if self._handshake_channel is channel:

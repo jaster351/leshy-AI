@@ -423,3 +423,40 @@ def test_native_failure_after_stream_finish_does_not_republish_frame():
     assert session.current_native_png() is None
     with pytest.raises(PermissionError):
         session.accept_observation(observation())
+
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_terminal_phase_refuses_new_cognitive_worker(terminal):
+    session = start()
+    session._native_phase = terminal
+    with pytest.raises(PermissionError, match="unavailable"):
+        session.start_cognitive_worker()
+    assert session._cognitive_thread is None
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_terminal_phase_refuses_new_verified_handshake(terminal, monkeypatch):
+    import leshy.superagent_rdp_cognitive_runtime as module
+    class FakeVerifiedChannel:
+        pass
+    monkeypatch.setattr(module, "PinnedRDPCredSSPChannel", FakeVerifiedChannel)
+    session = start()
+    session._native_phase = terminal
+    with pytest.raises(PermissionError, match="no longer allowed"):
+        session.attach_native_handshake(FakeVerifiedChannel())
+    assert session._handshake_channel is None
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_terminal_phase_cannot_start_second_graphics_stream(terminal, monkeypatch):
+    import leshy.superagent_rdp_cognitive_runtime as module
+    class FakeVerifiedChannel:
+        pass
+    monkeypatch.setattr(module, "PinnedRDPCredSSPChannel", FakeVerifiedChannel)
+    session = start()
+    session._native_phase = terminal
+    with pytest.raises(PermissionError, match="unavailable"):
+        session.receive_graphics(FakeVerifiedChannel())
+    assert session._channel is None
+    assert session._graphics_started is False
