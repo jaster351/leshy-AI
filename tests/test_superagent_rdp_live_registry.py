@@ -455,3 +455,60 @@ def test_native_failure_never_reports_connected_during_tls_teardown():
     assert not status["screen_available"]
     assert not status["e2e_verified"]
     assert not status["input_enabled"]
+
+
+
+def test_failed_phase_masks_stale_proposal_and_frame_metadata():
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
+    class Proposal:
+        kind = "propose_click"
+        reason = "stale"
+        question = ""
+        x = 12
+        y = 12
+        update_count = 7
+    session.proposal = Proposal()
+    initial = session.snapshot
+    def failed():
+        data = initial()
+        data.update({
+            "native_phase": "failed", "native_error_type": "TimeoutError",
+            "graphics_active": True, "frame_available": True, "frame_update": 7,
+        })
+        return data
+    session.snapshot = failed
+    status = controls.status(user, "SA-1")
+    assert status["registered"]
+    assert status["status"] == "native_failed"
+    assert status["frame_update"] == 0
+    assert not status["reasoning_available"]
+    assert status["proposal"] is None
+    assert not status["connected"]
+    assert not status["screen_available"]
+
+
+@pytest.mark.parametrize("terminal", ["failed", "stream_finished", "stopped"])
+def test_ended_or_failed_native_transport_cannot_claim_active_graphics(terminal):
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
+    initial = session.snapshot
+    def terminal_snapshot():
+        data = initial()
+        data.update({
+            "native_phase": terminal, "graphics_active": True,
+            "frame_available": True, "frame_update": 100,
+        })
+        return data
+    session.snapshot = terminal_snapshot
+    state = controls.status(user, "SA-1")
+    assert state["frame_update"] == 0
+    assert not state["connected"]
+    assert not state["graphics_active"]
+    assert not state["screen_available"]
+    assert state["input_enabled"] is False
+    assert state["e2e_verified"] is False

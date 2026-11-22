@@ -309,3 +309,56 @@ def test_web_failure_hides_last_model_proposal(monkeypatch):
     session.native_failure("RDPChannelError")
     assert session._last_proposal is None
     assert registry.status(actor(), "SA-1")["reasoning_available"] is False
+
+
+
+def test_native_failure_rejects_late_web_png_callback(monkeypatch):
+    registry, session = setup(monkeypatch)
+    session.accept_native_png(image(1))
+    session.native_failure("TimeoutError")
+    with pytest.raises(PermissionError, match="terminal"):
+        session.accept_native_png(image(2))
+    assert session._web_png is None
+    seen = []
+    assert not registry.transmit_png(actor(), "SA-1", lambda *_: seen.append(1))
+    assert seen == []
+
+
+def test_native_finished_phase_rejects_new_png_and_blanks_browser(monkeypatch):
+    registry, session = setup(monkeypatch)
+    session.accept_native_png(image(1))
+    session.set_native_phase("stream_finished")
+    with pytest.raises(PermissionError, match="terminal"):
+        session.accept_native_png(image(2))
+    assert session.current_native_png() is None
+    status = registry.status(actor(), "SA-1")
+    assert status["native_phase"] == "stream_finished"
+    assert not status["screen_available"]
+    assert status["frame_update"] == 0
+
+
+def test_stale_png_is_never_transmitted_when_error_arrives_between_checks(monkeypatch):
+    registry, session = setup(monkeypatch)
+    session.accept_native_png(image(1))
+    original = session.current_native_png
+    def fail_while_reading():
+        frame = original()
+        session.native_failure("RDPChannelError")
+        return frame
+    session.current_native_png = fail_while_reading
+    delivered = []
+    assert not registry.transmit_png(actor(), "SA-1", lambda *_: delivered.append(1))
+    assert delivered == []
+    assert registry.status(actor(), "SA-1")["status"] == "native_failed"
+
+
+def test_native_failure_keeps_web_reporting_original_class_only(monkeypatch):
+    registry, session = setup(monkeypatch)
+    session.accept_native_png(image(1))
+    session.native_failure("TimeoutError")
+    session.native_failure("RDPTransportCloseError")
+    status = registry.status(actor(), "SA-1")
+    assert status["native_error_type"] == "TimeoutError"
+    assert status["status"] == "native_failed"
+    assert status["frame_update"] == 0
+    assert not status["connected"]
