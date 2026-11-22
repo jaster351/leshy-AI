@@ -163,7 +163,18 @@
           'владеете целевым компьютером и однократно разрешаете вход?\n' +
           'Windows RDP E2E ещё не подтверждён.';
         if (!window.confirm(text)) {
-          launchStatus.textContent = 'Вход отменён. Пароль не передавался.';
+          try {
+            const cancelled = await api('/v1/superagent/rdp/start/cancel', {
+              method: 'POST',
+              body: JSON.stringify({approval_token: approval.approval_token})
+            });
+            launchStatus.textContent = cancelled.cancelled
+              ? 'Разрешение отозвано. RDP не запускался.'
+              : 'Вход не запускался. Разрешение уже использовано либо истекло.';
+          } catch (cancelError) {
+            launchStatus.textContent = 'RDP не запускался; отзыв разрешения не подтверждён. ' +
+              'Не используйте токен повторно, срок его действия 90 секунд.';
+          }
           return;
         }
         launchStatus.textContent = 'Одноразовое подтверждение принято; запускаю нативное RDP…';

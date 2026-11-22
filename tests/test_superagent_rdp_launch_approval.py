@@ -304,3 +304,29 @@ def test_preparation_never_reads_secret_contents(tmp_path, monkeypatch):
     fingerprint = approvals._credential_identity(object(), "alice", "rdp.json")
     assert len(fingerprint) == 5
     assert "not_for_web" not in str(fingerprint)
+
+
+
+def test_owner_can_revoke_prepared_rdp_token_before_tcp():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert approvals.cancel_rdp_approval(policy, actor(), token)
+    assert not approvals.cancel_rdp_approval(policy, actor(), token)
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_foreign_browser_cannot_revoke_owner_token():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert not approvals.cancel_rdp_approval(policy, actor("other-session"), token)
+    approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_cancelled_consent_never_issues_a_delegation_lease():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert approvals.cancel_rdp_approval(policy, actor(), token)
+    assert len(approvals._PENDING) == 0
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, token, *params())

@@ -206,4 +206,31 @@ def consume_rdp_approval(
     return recheck_credential_delegation
 
 
-__all__ = ["prepare_rdp_approval", "consume_rdp_approval"]
+def cancel_rdp_approval(
+    policy: RemotePermissionPolicy, actor: VerifiedActor, token: str,
+) -> bool:
+    """Cancel an unconsumed Web approval without remote side effects.
+
+    Only the *same verified owner and browser session* can revoke this
+    token; cross-owner attempts cannot burn somebody else's consent.
+    A token already consumed for a running native session is not a Stop.
+    """
+    if not isinstance(actor, VerifiedActor) or actor.method != "web":
+        raise PermissionError("Нужна подтверждённая Web-сессия")
+    policy._check_actor(actor)
+    if type(token) is not str or not _TOKEN.fullmatch(token):
+        raise PermissionError("Некорректное одноразовое подтверждение")
+    key = hashlib.sha256(token.encode("ascii")).hexdigest()
+    with _LOCK:
+        row = _PENDING.get(key)
+        if row is None:
+            return False
+        identity = row[0]
+        if (not hmac.compare_digest(identity[0], actor.owner_id)
+                or not hmac.compare_digest(identity[1], actor.session_fingerprint)):
+            return False
+        del _PENDING[key]
+        return True
+
+
+__all__ = ["prepare_rdp_approval", "consume_rdp_approval", "cancel_rdp_approval"]
