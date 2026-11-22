@@ -20,6 +20,10 @@ class RDPLiveRegistry:
         self._service = service
         self._lock = threading.RLock()
         self._sessions: dict[tuple[str, str], tuple[str, Any]] = {}
+        # A ticket cannot reopen until its preceding socket Stop finishes.
+        # Failed Stop remains reserved, rather than creating overlapping
+        # sessions with uncertain remote state.
+        self._closing: set[tuple[str, str]] = set()
         self._limit = max_sessions
 
     def _verify_owner(self, actor: VerifiedActor, ticket_id: str) -> None:
@@ -43,7 +47,8 @@ class RDPLiveRegistry:
             raise PermissionError("RDP session owner or ticket mismatch")
         key = (actor.owner_id, ticket_id)
         with self._lock:
-            if key in self._sessions or len(self._sessions) >= self._limit:
+            if (key in self._sessions or key in self._closing
+                    or len(self._sessions) + len(self._closing) >= self._limit):
                 raise RuntimeError("One live RDP view per task; capacity reached")
             # Serialize registration with Stop of this exact ticket.
             session.reauthorize()
@@ -145,33 +150,46 @@ class RDPLiveRegistry:
             deliver(image.png, image.update_count)
             return True
 
-    def stop(self, actor: VerifiedActor, ticket_id: str) -> dict[str, Any]:
-        """Web Stop needs a live verified owner, but not a still-valid RDP grant.
+    def _stop_reserved(self, key: tuple[str, str], session: Any) -> None:
+        """Do not release same-task capacity until Stop actually finishes.
 
-        Stop must still work if the remote permission was just revoked.
+        On Stop exception, keep the reservation for safety. A new connection
+        can start only after a process-level reset, not after uncertain Stop.
         """
+        session.stop()
+        with self._lock:
+            self._closing.discard(key)
+
+    def stop(self, actor: VerifiedActor, ticket_id: str) -> dict[str, Any]:
+        """Owner Stop, independent of whether the RDP grant still exists."""
         self._verify_owner(actor, ticket_id)
+        key = (actor.owner_id, ticket_id)
         with self._lock:
             session = self._lookup(actor, ticket_id)
             if session is None:
                 return {"stopped": False, "status": "no_live_session"}
-            del self._sessions[(actor.owner_id, ticket_id)]
-        session.stop()
+            del self._sessions[key]
+            self._closing.add(key)
+        self._stop_reserved(key, session)
         return {"stopped": True, "status": "stopped"}
 
     def stop_ticket(self, owner_id: str, ticket_id: str) -> None:
-        """Internal ticket Stop, not a public owner-id based API."""
+        """Internal SuperAgent ticket Stop with no bearer authority."""
+        key = (owner_id, ticket_id)
         with self._lock:
-            row = self._sessions.pop((owner_id, ticket_id), None)
+            row = self._sessions.pop(key, None)
+            if row is not None:
+                self._closing.add(key)
         if row is not None:
-            row[1].stop()
+            self._stop_reserved(key, row[1])
 
     def stop_all(self) -> None:
         with self._lock:
-            items = list(self._sessions.values())
+            items = list(self._sessions.items())
+            self._closing.update(key for key, _ in items)
             self._sessions.clear()
-        for _, session in items:
-            session.stop()
+        for key, (_cookie, session) in items:
+            self._stop_reserved(key, session)
 
 
 __all__ = ["RDPLiveRegistry"]
