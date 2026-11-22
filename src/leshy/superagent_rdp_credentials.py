@@ -105,6 +105,23 @@ def load_owner_rdp_credentials(
             chunks.extend(part)
         if not chunks or len(chunks) > _MAX_BYTES:
             raise PermissionError("RDP credential file exceeds size policy")
+        # An owner-scoped JSON file can be rewritten while being read.
+        # Check the original open descriptor AND the current directory
+        # entry after consuming all bytes, before parsing any credential.
+        completed = os.fstat(fd)
+        final_path = os.lstat(path)
+        def identity(info):
+            return (
+                info.st_dev, info.st_ino, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns,
+            )
+        if (not stat.S_ISREG(completed.st_mode)
+                or not stat.S_ISREG(final_path.st_mode)
+                or identity(before) != identity(after)
+                or identity(after) != identity(completed)
+                or identity(completed) != identity(final_path)
+                or len(chunks) != completed.st_size):
+            raise PermissionError("RDP credential file changed during read")
     finally:
         os.close(fd)
     try:
