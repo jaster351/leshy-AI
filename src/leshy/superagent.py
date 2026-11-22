@@ -329,6 +329,8 @@ class SuperAgentService:
 
     def stop(self) -> None:
         self._stop.set()
+        from .superagent_rdp_launch_approval import invalidate_all_rdp_approvals
+        invalidate_all_rdp_approvals()
         registry = getattr(self, "_rdp_live_registry", None)
         try:
             if registry is not None:
@@ -472,6 +474,8 @@ class SuperAgentService:
 
     def stop_ticket(self, ticket_id: str, owner_id: str) -> dict[str, Any]:
         ticket = self.get(ticket_id, owner_id=owner_id)
+        from .superagent_rdp_launch_approval import invalidate_rdp_ticket_approvals
+        invalidate_rdp_ticket_approvals(owner_id, ticket_id)
         if ticket["state"] in {"ready", "stopped"}:
             registry = getattr(self, "_rdp_live_registry", None)
             if registry is not None:

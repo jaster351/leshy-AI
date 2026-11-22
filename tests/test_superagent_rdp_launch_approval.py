@@ -43,6 +43,7 @@ class Service:
 @pytest.fixture(autouse=True)
 def guard(monkeypatch):
     approvals._PENDING.clear()
+    approvals._TICKET_EPOCHS.clear()
     monkeypatch.setattr(approvals, "module_enabled", lambda *a: True)
     monkeypatch.setattr(approvals, "find_credential_file", lambda *a: object())
     monkeypatch.setattr(approvals, "_credential_identity",
@@ -335,3 +336,69 @@ def test_cancelled_consent_never_issues_a_delegation_lease():
     assert len(approvals._PENDING) == 0
     with pytest.raises(PermissionError):
         approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+
+def test_stop_invalidates_unconsumed_token_before_native_registration():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert approvals.invalidate_rdp_ticket_approvals("alice", "SA-1") == 1
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_stop_invalidates_already_consumed_credential_delegation_lease():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    consent = approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-1")
+    with pytest.raises(PermissionError, match="revoked"):
+        consent("192.0.2.10", "rdp.example.org")
+
+
+def test_new_owner_approval_after_stop_can_be_reviewed_afresh():
+    s, policy = Service(), Policy()
+    old = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-1")
+    new = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert new != old
+    consent = approvals.consume_rdp_approval(policy, actor(), s, new, *params())
+    consent("192.0.2.10", "rdp.example.org")
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, old, *params())
+
+
+def test_new_prepare_burns_previous_unconsumed_token_for_same_browser_ticket():
+    s, policy = Service(), Policy()
+    old = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    new = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, old, *params())
+    approvals.consume_rdp_approval(policy, actor(), s, new, *params())
+
+
+def test_global_superagent_shutdown_revokes_consumed_lease():
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    consent = approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+    approvals.invalidate_all_rdp_approvals()
+    with pytest.raises(PermissionError, match="revoked"):
+        consent("192.0.2.10", "rdp.example.org")
+
+
+def test_pending_approval_count_is_bounded_per_owner(monkeypatch):
+    s, policy = Service(), Policy()
+    monkeypatch.setattr(approvals, "_MAX_PENDING_PER_OWNER", 2)
+    for ticket in ("SA-1", "SA-2"):
+        original = params()
+        args = (ticket,) + original[1:]
+        getter = s.get
+        s.get = lambda tid, *, owner_id, _getter=getter: (
+            _getter("SA-1", owner_id=owner_id)
+            if tid in ("SA-1", "SA-2") else _getter(tid, owner_id=owner_id)
+        )
+        approvals.prepare_rdp_approval(policy, actor(), s, *args)
+    with pytest.raises(PermissionError, match="лимит"):
+        approvals.prepare_rdp_approval(
+            policy, actor(), s, "SA-3", *params()[1:]
+        )
