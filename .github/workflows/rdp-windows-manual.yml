@@ -113,5 +113,5 @@ jobs:
             tests/test_superagent_native_rdp_launcher.py `
             tests/test_superagent_rdp_launch_approval.py `
             tests/test_superagent_rdp_credentials.py `
-            tests/test_superagent_rdp_security_matrix.py ``
+            tests/test_superagent_rdp_security_matrix.py `
             tests/test_superagent_rdp_intent.py
