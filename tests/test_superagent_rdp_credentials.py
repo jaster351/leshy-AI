@@ -106,7 +106,11 @@ def test_numeric_json_ip_is_not_a_literal_host():
 
 @pytest.mark.parametrize("field", ["username", "password", "domain"])
 def test_lone_surrogate_does_not_reach_credssp(field):
-    raw = payload(**{field: "\ud800"})
+    doc = {"host": HOST, "username": "user", "password": "secret"}
+    doc[field] = "\ud800"
+    # A lone surrogate must arrive as a JSON escape, not be rejected by
+    # the UTF-8 test fixture encoder before the parser is invoked.
+    raw = json.dumps(doc, ensure_ascii=True).encode("ascii")
     with pytest.raises(ValueError):
         parse_rdp_credential_document(raw, HOST)
 

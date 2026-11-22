@@ -7,6 +7,8 @@ import pytest
 import leshy.superagent_rdp_launch_approval as approvals
 from leshy.superagent_remote_permissions import VerifiedActor
 
+_REAL_CREDENTIAL_IDENTITY = approvals._credential_identity
+
 
 class Policy:
     def _check_actor(self, actor):
@@ -291,12 +293,12 @@ def test_preparation_rejects_symlink_and_oversized_file(tmp_path, monkeypatch):
     monkeypatch.setattr(approvals, "find_credential_file",
                         lambda storage, owner, basename: link)
     with pytest.raises(PermissionError):
-        approvals._credential_identity(object(), "alice", "shortcut.json")
+        _REAL_CREDENTIAL_IDENTITY(object(), "alice", "shortcut.json")
     target.write_bytes(b"x" * 8193)
     monkeypatch.setattr(approvals, "find_credential_file",
                         lambda storage, owner, basename: target)
     with pytest.raises(PermissionError):
-        approvals._credential_identity(object(), "alice", "data.json")
+        _REAL_CREDENTIAL_IDENTITY(object(), "alice", "data.json")
 
 
 def test_preparation_never_reads_secret_contents(tmp_path, monkeypatch):
@@ -304,7 +306,7 @@ def test_preparation_never_reads_secret_contents(tmp_path, monkeypatch):
     source.write_bytes(b'{"password":"not_for_web"}')
     monkeypatch.setattr(approvals, "find_credential_file",
                         lambda storage, owner, basename: source)
-    fingerprint = approvals._credential_identity(object(), "alice", "rdp.json")
+    fingerprint = _REAL_CREDENTIAL_IDENTITY(object(), "alice", "rdp.json")
     assert len(fingerprint) == 5
     assert "not_for_web" not in str(fingerprint)
 
