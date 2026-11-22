@@ -80,6 +80,9 @@ class SuperAgentRDPCognitiveSession:
         self._lock = threading.RLock()
         self._inbox = RDPObservationInbox()
         self._channel: PinnedRDPCredSSPChannel | None = None
+        self._handshake_channel: PinnedRDPCredSSPChannel | None = None
+        self._native_phase = "not_started"
+        self._native_error_type = ""
         self._graphics_started = False
         self._latest_frame_update = 0
         self._last_proposal: RDPReadOnlyProposal | None = None
@@ -189,6 +192,46 @@ class SuperAgentRDPCognitiveSession:
         self.reauthorize()
         return image
 
+    def attach_native_handshake(self, channel: PinnedRDPCredSSPChannel) -> None:
+        """Permit Stop to close a half-completed owner-approved handshake."""
+        if not isinstance(channel, PinnedRDPCredSSPChannel):
+            raise TypeError("Actual verified RDP socket required")
+        self.reauthorize()
+        with self._lock:
+            if (self._cancel.is_set() or self._handshake_channel is not None
+                    or self._channel is not None or self._graphics_started):
+                raise PermissionError("Native RDP launch no longer allowed")
+            self._handshake_channel = channel
+
+    def clear_native_handshake(self, channel: PinnedRDPCredSSPChannel | None) -> None:
+        with self._lock:
+            if self._handshake_channel is channel:
+                self._handshake_channel = None
+
+    def set_native_phase(self, phase: str) -> None:
+        """Protocol checkpoints, never claims proof of a usable desktop."""
+        allowed = {
+            "connecting", "tls_pinned", "credssp_bound", "credentials_sent",
+            "mcs_settings", "mcs_joined", "client_info", "server_activated",
+            "confirm_active", "finalized", "graphics", "stream_finished",
+        }
+        if phase not in allowed:
+            raise ValueError("Unknown native RDP phase")
+        self.reauthorize()
+        with self._lock:
+            if self._cancel.is_set():
+                raise PermissionError("Native RDP was stopped")
+            self._native_phase = phase
+
+    def native_failure(self, exc_type: str) -> None:
+        """Never expose credentials, raw wire error or exception message."""
+        with self._lock:
+            if not self._cancel.is_set():
+                self._native_phase = "failed"
+                self._native_error_type = (
+                    exc_type[:80] if isinstance(exc_type, str) else "Exception"
+                )
+
     def receive_graphics(
         self,
         channel: PinnedRDPCredSSPChannel,
@@ -210,6 +253,8 @@ class SuperAgentRDPCognitiveSession:
             if self._cancel.is_set() or self._graphics_started:
                 raise PermissionError("Native RDP graphics session unavailable")
             self._graphics_started = True
+            if self._handshake_channel is channel:
+                self._handshake_channel = None
             self._channel = channel
         try:
             report = stream_native_rdp_with_local_vision(
@@ -237,8 +282,13 @@ class SuperAgentRDPCognitiveSession:
             self._web_png = None
             self._web_png_at = 0.0
             channel = self._channel
+            pending = self._handshake_channel
+            self._handshake_channel = None
+            self._native_phase = "stopped"
         if channel is not None:
             channel.stop_graphics_stream()
+        if pending is not None:
+            pending.close()
 
     def snapshot(self) -> dict[str, Any]:
         """No screenshots, secrets or model replies in control-plane status."""
@@ -251,6 +301,8 @@ class SuperAgentRDPCognitiveSession:
             "pending": state["pending"],
             "dropped": state["dropped"],
             "graphics_started": self._graphics_started,
+            "native_phase": self._native_phase,
+            "native_error_type": self._native_error_type,
             "graphics_active": self._channel is not None and not self._cancel.is_set(),
             "frame_available": (
                 self._channel is not None and not self._cancel.is_set()

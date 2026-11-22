@@ -399,6 +399,21 @@ class SuperAgentService:
                 raise
         return session
 
+    def start_authorized_native_rdp(self, ticket_id: str, *, actor,
+                                    node_id: str, service_dns_name: str,
+                                    enrolled_rdp_tls_sha256: str,
+                                    credential_file: str,
+                                    authorize_delegation, **limits):
+        """Internal only: independently approved, pinned, owner-run RDP."""
+        from .superagent_native_rdp_launcher import start_owner_authorized_native_rdp
+        return start_owner_authorized_native_rdp(
+            self, ticket_id=ticket_id, actor=actor, node_id=node_id,
+            service_dns_name=service_dns_name,
+            enrolled_rdp_tls_sha256=enrolled_rdp_tls_sha256,
+            credential_file=credential_file,
+            authorize_delegation=authorize_delegation, **limits,
+        )
+
     def rdp_live_status(self, actor, ticket_id: str) -> dict[str, Any]:
         return self._rdp_controls().status(actor, ticket_id)
 

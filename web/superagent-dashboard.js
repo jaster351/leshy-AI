@@ -199,6 +199,8 @@
         } else {
           state.textContent = 'Узел: ' + String(result.node_id || 'неизвестен') + '\n' +
             (result.screen_available ? 'Настоящий RDP кадр доступен.' : 'Ожидание свежего RDP кадра.') +
+            '\nНативный RDP: ' + String(result.native_phase || 'not_started') +
+            (result.native_error_type ? ' (' + String(result.native_error_type) + ')' : '') +
             '\nУправление мышью/клавиатурой: отключено.';
           const p = result.proposal;
           proposal.textContent = p
