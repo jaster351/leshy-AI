@@ -504,3 +504,24 @@ def test_explicit_ipv6_node_mismatch_is_refused_before_file_read():
     s.request_text = "Подключись по RDP к [2001:db8::7]"
     with pytest.raises(PermissionError, match="не совпадает"):
         approvals.prepare_rdp_approval(policy, actor(), s, *params())
+
+
+
+def test_recent_stop_epoch_survives_new_valid_lease(monkeypatch):
+    s, policy = Service(), Policy()
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-1")
+    key = ("alice", "SA-1")
+    original_deadline = approvals._TICKET_EPOCHS[key][1]
+    base = approvals.time.monotonic()
+    # Prepare a fresh consent near the original epoch expiry.
+    monkeypatch.setattr(approvals.time, "monotonic", lambda: base + 140)
+    token = approvals.prepare_rdp_approval(
+        policy, actor(), s, *params()
+    )["approval_token"]
+    renewed_deadline = approvals._TICKET_EPOCHS[key][1]
+    assert renewed_deadline > original_deadline
+    consent = approvals.consume_rdp_approval(
+        policy, actor(), s, token, *params()
+    )
+    consent("192.0.2.10", "rdp.example.org")
+    assert approvals._TICKET_EPOCHS[key][1] >= renewed_deadline

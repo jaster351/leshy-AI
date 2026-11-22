@@ -49,6 +49,20 @@ def _epoch_unlocked(owner_id: str, ticket_id: str) -> int:
     return entry[0] if entry is not None else 0
 
 
+def _refresh_epoch_unlocked(owner_id: str, ticket_id: str, now: float) -> None:
+    """Keep generation available while newer consents may still be valid.
+
+    Must be called with _LOCK; removing it early only denies legitimate
+    recent owner approvals, never grants stale access.
+    """
+    key = (owner_id, ticket_id)
+    row = _TICKET_EPOCHS.get(key)
+    if row is not None:
+        _TICKET_EPOCHS[key] = (
+            row[0], max(row[1], now + _TICKET_EPOCH_TTL),
+        )
+
+
 def invalidate_rdp_ticket_approvals(owner_id: str, ticket_id: str) -> int:
     """Server-internal Stop barrier: revoke pending AND consumed leases."""
     if (type(owner_id) is not str or not owner_id
@@ -249,6 +263,7 @@ def prepare_rdp_approval(
             raise PermissionError("Превышен лимит RDP-подтверждений владельца")
         if len(_PENDING) >= _MAX_PENDING:
             raise PermissionError("Превышен лимит неподтверждённых подключений")
+        _refresh_epoch_unlocked(actor.owner_id, scope[0], now)
         row = (*row, str(_GLOBAL_EPOCH),
                str(_epoch_unlocked(actor.owner_id, scope[0])))
         _PENDING[key] = (row, now + _TTL)
@@ -282,6 +297,8 @@ def consume_rdp_approval(
     key = hashlib.sha256(token.encode("ascii")).hexdigest()
     with _LOCK:
         row = _PENDING.pop(key, None)
+        if row is not None:
+            _refresh_epoch_unlocked(actor.owner_id, scope[0], time.monotonic())
         global_epoch = _GLOBAL_EPOCH
         ticket_epoch = _epoch_unlocked(actor.owner_id, scope[0])
     if row is None or row[1] <= time.monotonic():
