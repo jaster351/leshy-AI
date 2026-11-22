@@ -256,3 +256,81 @@ SECURITY_INPUT_CASE_COUNT = (
     + len(_BAD_FILENAMES) + len(_BAD_DNS_NAMES)
 )
 assert SECURITY_INPUT_CASE_COUNT >= 300
+
+
+
+# Boundary acceptance (not just rejection): the hardening must preserve
+# everyday and advanced Windows login names, including UPN and Unicode.
+_VALID_USERNAMES = [
+    "a" * n for n in range(1, 65)
+] + [
+    "operator", "Administrator", "remote user", "user@example.com",
+    "диспетчер", "用户", "José", "a_b.c-d", "A" * 128,
+    "user.name", "name with spaces", "X", "Z9", "domain.account",
+]
+
+_VALID_DOMAINS = [
+    "", ".", "CORP", "CONTOSO", "corp.example", "A" * 128, "ДОМЕН",
+]
+
+_VALID_PASSWORDS = [
+    "a", " " * 3, "pass word", "!@#$%^&*()[]{}",
+    "Ñïçë", "пароль", "令牌", "🔒", "a" * 2048,
+    "UPPERlower123", "0", "pass:with\\backslash", "user@host",
+]
+
+
+@pytest.mark.parametrize("username", _VALID_USERNAMES)
+def test_valid_windows_usernames_remain_compatible(username):
+    out = parse_rdp_credential_document(
+        credential_bytes("username", username), HOST
+    )
+    assert out.username == username
+    assert out.password == "secret"
+
+
+@pytest.mark.parametrize("domain", _VALID_DOMAINS)
+def test_valid_windows_domain_field_remains_compatible(domain):
+    out = parse_rdp_credential_document(
+        credential_bytes("domain", domain), HOST
+    )
+    assert out.domain == domain
+
+
+@pytest.mark.parametrize("password", _VALID_PASSWORDS)
+def test_valid_windows_password_remains_compatible(password):
+    out = parse_rdp_credential_document(
+        credential_bytes("password", password), HOST
+    )
+    assert out.password == password
+    assert "secret" not in repr(out)
+    assert password not in repr(out)
+
+
+def test_owner_json_utf8_bom_remains_compatible():
+    body = credential_bytes("username", "operator")
+    result = parse_rdp_credential_document(b"\xef\xbb\xbf" + body, HOST)
+    assert result.username == "operator"
+
+
+def test_owner_json_ipv6_canonicalization_is_safe():
+    node = "2001:db8::10"
+    data = {"host": "2001:0db8:0000:0000:0000:0000:0000:0010",
+            "username": "operator", "password": "pass"}
+    raw = json.dumps(data).encode("utf-8")
+    out = parse_rdp_credential_document(raw, node)
+    assert out.password == "pass"
+
+
+def test_windows_domain_backslash_username_is_not_ambiguous():
+    data = credential_bytes("username", "CONTOSO\\admin")
+    out = parse_rdp_credential_document(data, HOST)
+    assert out.username == "admin"
+    assert out.domain == "CONTOSO"
+
+
+# The collection count is computed from actual pytest argument sequences,
+# not a hand-written claim. The principal request is for >=200 separate
+# boundary cases, achieved through the rejected input matrix alone.
+assert len(_BAD_FIELDS) >= 200
+assert SECURITY_INPUT_CASE_COUNT >= 300
