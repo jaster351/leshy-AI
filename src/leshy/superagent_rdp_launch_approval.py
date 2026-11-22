@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
+import stat
 import re
 import secrets
 import threading
@@ -30,6 +32,24 @@ _PENDING: dict[str, tuple[tuple[str, ...], float]] = {}
 _TTL = 90.0
 _LEASE_SECONDS = 75.0
 _MAX_PENDING = 128
+
+
+def _credential_identity(storage: Any, owner_id: str, filename: str) -> tuple[str, ...]:
+    """Bind consent to a specific small regular local file, not only its name.
+
+    No contents are read during preparation. File metadata is *not*
+    cryptographic content identity; the guarded reader still validates
+    symlinks/inode after open, and the consent callback rechecks this stamp
+    directly before the one-way CredSSP credential delegation.
+    """
+    path = find_credential_file(storage, owner_id, filename)
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 8192:
+        raise PermissionError("RDP credential file is not a small regular file")
+    return tuple(str(x) for x in (
+        info.st_dev, info.st_ino, info.st_size,
+        info.st_mtime_ns, info.st_ctime_ns,
+    ))
 
 
 def _scope(
@@ -91,7 +111,7 @@ def _validate(
     # Lookup verifies owner's configured credential directory and exact file,
     # but never opens or parses the secret in the approval phase.
     if check_file:
-        find_credential_file(service.storage, actor.owner_id, filename)
+        _credential_identity(service.storage, actor.owner_id, filename)
     # Stop or an existing RDP session may race after approval. The trusted
     # factory has its own exclusive registration and live ticket checks.
     if not callable(getattr(service, "start_authorized_native_rdp", None)):
@@ -108,7 +128,8 @@ def prepare_rdp_approval(
 ) -> dict[str, Any]:
     """Approve review data only; creates no socket and reads no password."""
     scope = _scope(ticket_id, node_id, service_dns_name, expected_tls_sha256, credential_file)
-    source_hash = _validate(policy, actor, service, scope)
+    source_hash = _validate(policy, actor, service, scope, check_file=False)
+    file_stamp = _credential_identity(service.storage, actor.owner_id, scope[4])
     existing_status = getattr(service, "rdp_live_status", None)
     if callable(existing_status) and existing_status(actor, scope[0]).get("registered"):
         raise PermissionError("Для задания уже зарегистрирована RDP-сессия; сначала Stop")
@@ -118,6 +139,7 @@ def prepare_rdp_approval(
         actor.owner_id, actor.session_fingerprint,
         *scope,
         source_hash,
+        *file_stamp,
     )
     with _LOCK:
         now = time.monotonic()
@@ -159,8 +181,12 @@ def consume_rdp_approval(
         row = _PENDING.pop(key, None)
     if row is None or row[1] <= time.monotonic():
         raise PermissionError("Одноразовое подтверждение истекло или использовано")
-    source_hash = _validate(policy, actor, service, scope)
-    expected = (actor.owner_id, actor.session_fingerprint, *scope, source_hash)
+    source_hash = _validate(policy, actor, service, scope, check_file=False)
+    current_stamp = _credential_identity(service.storage, actor.owner_id, scope[4])
+    expected = (
+        actor.owner_id, actor.session_fingerprint, *scope, source_hash,
+        *current_stamp,
+    )
     if len(row[0]) != len(expected) or not all(
         hmac.compare_digest(a, b) for a, b in zip(row[0], expected)
     ):
@@ -173,8 +199,10 @@ def consume_rdp_approval(
         if ip != scope[1] or dns != scope[2]:
             raise PermissionError("Попытка передачи пароля на другой RDP-сервер")
         fresh_hash = _validate(policy, actor, service, scope, check_file=False)
-        if not hmac.compare_digest(fresh_hash, source_hash):
-            raise PermissionError("Исходное задание SuperAgent изменилось")
+        fresh_stamp = _credential_identity(service.storage, actor.owner_id, scope[4])
+        if (not hmac.compare_digest(fresh_hash, source_hash)
+                or fresh_stamp != current_stamp):
+            raise PermissionError("Исходное RDP-задание или файл доступа изменились")
     return recheck_credential_delegation
 
 

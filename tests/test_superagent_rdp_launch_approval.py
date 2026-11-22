@@ -43,6 +43,8 @@ def guard(monkeypatch):
     approvals._PENDING.clear()
     monkeypatch.setattr(approvals, "module_enabled", lambda *a: True)
     monkeypatch.setattr(approvals, "find_credential_file", lambda *a: object())
+    monkeypatch.setattr(approvals, "_credential_identity",
+                        lambda *a: ("dev", "ino", "1024", "mtime", "ctime"))
     monkeypatch.setattr(approvals, "_registered_pin", lambda *a: "a"*64)
 
 
@@ -252,3 +254,53 @@ def test_approval_respects_source_creation_timestamp_change():
     s.created_at = "2026-11-22T11:00:00Z"
     with pytest.raises(PermissionError):
         approvals.consume_rdp_approval(Policy(), actor(), s, token, *params())
+
+
+
+def test_file_replacement_after_prepare_burns_token(monkeypatch):
+    s, policy = Service(), Policy()
+    original = ("dev", "inode-A", "1024", "mtime", "ctime")
+    stamp = [original]
+    monkeypatch.setattr(approvals, "_credential_identity", lambda *a: stamp[0])
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    stamp[0] = ("dev", "inode-B", "1024", "mtime", "ctime")
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+    assert not approvals._PENDING
+
+
+def test_file_modified_after_consumption_revokes_delegation(monkeypatch):
+    s, policy = Service(), Policy()
+    stamp = [("dev", "inode-A", "1024", "mtime-1", "ctime")]
+    monkeypatch.setattr(approvals, "_credential_identity", lambda *a: stamp[0])
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    consent = approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+    stamp[0] = ("dev", "inode-A", "1024", "mtime-2", "ctime")
+    with pytest.raises(PermissionError):
+        consent("192.0.2.10", "rdp.example.org")
+
+
+def test_preparation_rejects_symlink_and_oversized_file(tmp_path, monkeypatch):
+    target = tmp_path / "data.json"
+    target.write_bytes(b"{}")
+    link = tmp_path / "shortcut.json"
+    link.symlink_to(target)
+    monkeypatch.setattr(approvals, "find_credential_file",
+                        lambda storage, owner, basename: link)
+    with pytest.raises(PermissionError):
+        approvals._credential_identity(object(), "alice", "shortcut.json")
+    target.write_bytes(b"x" * 8193)
+    monkeypatch.setattr(approvals, "find_credential_file",
+                        lambda storage, owner, basename: target)
+    with pytest.raises(PermissionError):
+        approvals._credential_identity(object(), "alice", "data.json")
+
+
+def test_preparation_never_reads_secret_contents(tmp_path, monkeypatch):
+    source = tmp_path / "rdp.json"
+    source.write_bytes(b'{"password":"not_for_web"}')
+    monkeypatch.setattr(approvals, "find_credential_file",
+                        lambda storage, owner, basename: source)
+    fingerprint = approvals._credential_identity(object(), "alice", "rdp.json")
+    assert len(fingerprint) == 5
+    assert "not_for_web" not in str(fingerprint)
