@@ -166,3 +166,36 @@ def test_existing_superagent_service_exposes_internal_factory():
         node_id="10.0.0.2", observed_fingerprint="registered-host-pin",
     )
     assert isinstance(session, SuperAgentRDPCognitiveSession)
+
+
+
+def test_native_cognition_loop_uses_real_superagent_llm_without_rdp_actions():
+    import time
+    service = FakeService('{"kind":"report","reason":"По изображению видна ошибка"}')
+    session = start(service)
+    # Normal production starts the consumer from receive_graphics, after
+    # the pinned channel is attached. Mock the private thread gate here
+    # to verify genuine LLM consumption, rather than a fake plan.
+    session.start_cognitive_worker()
+    session.accept_observation(observation())
+    end = time.monotonic() + 2
+    while not session.snapshot()["cognitive_completed"] and time.monotonic() < end:
+        time.sleep(.01)
+    assert service.model_calls == 1
+    assert session.snapshot()["cognitive_completed"] == 1
+    assert session.snapshot()["cognitive_error_type"] == ""
+    session.stop()
+
+
+def test_native_cognition_stops_on_untrusted_llm_action():
+    import time
+    service = FakeService('{"kind":"shell","command":"format disk"}')
+    session = start(service)
+    session.start_cognitive_worker()
+    session.accept_observation(observation())
+    end = time.monotonic() + 2
+    while not session.snapshot()["stopped"] and time.monotonic() < end:
+        time.sleep(.01)
+    assert session.snapshot()["stopped"] is True
+    assert session.snapshot()["cognitive_error_type"] == "RDPCognitiveError"
+    assert service.model_calls == 1

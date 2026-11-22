@@ -32,7 +32,7 @@ def start_owner_authorized_native_rdp(
     authorize_delegation: Callable[[str, str], None],
     timeout: float = 30.0,
     graphics_policy: GraphicsStreamPolicy | None = None,
-    max_png_frames: int = 32,
+    max_png_frames: int = 256,
 ) -> dict[str, Any]:
     """Run one pinned TLS+NLA+MCS+read-only graphics attempt on a worker.
 

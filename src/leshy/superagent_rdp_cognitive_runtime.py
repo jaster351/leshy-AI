@@ -79,6 +79,12 @@ class SuperAgentRDPCognitiveSession:
         self._cancel = threading.Event()
         self._lock = threading.RLock()
         self._inbox = RDPObservationInbox()
+        # Exactly one bounded read-only LLM consumer per native stream.
+        # The RDP frame/TLS callback never blocks on this model.
+        self._cognitive_wake = threading.Event()
+        self._cognitive_thread: threading.Thread | None = None
+        self._cognitive_completed = 0
+        self._cognitive_error_type = ""
         self._channel: PinnedRDPCredSSPChannel | None = None
         self._handshake_channel: PinnedRDPCredSSPChannel | None = None
         self._native_phase = "not_started"
@@ -141,6 +147,7 @@ class SuperAgentRDPCognitiveSession:
                 raise PermissionError("RDP cognition is stopped")
             self._latest_frame_update = observation.update_count
             self._last_proposal = None
+        self._cognitive_wake.set()
         return True
 
     def reason_once(self) -> RDPReadOnlyProposal | None:
@@ -158,11 +165,58 @@ class SuperAgentRDPCognitiveSession:
             self._last_proposal = result
         return result
 
+    def start_cognitive_worker(self) -> None:
+        """Begin ONE supervised Planner LLM consumer; no remote actions."""
+        self.reauthorize()
+        with self._lock:
+            if self._cancel.is_set() or self._cognitive_thread is not None:
+                raise PermissionError("Native RDP cognitive worker unavailable")
+            thread = threading.Thread(
+                target=self._cognitive_loop,
+                name="Leshy-RDP-cognition",
+                daemon=True,
+            )
+            self._cognitive_thread = thread
+        try:
+            thread.start()
+        except BaseException:
+            self.stop()
+            raise
+
+    def _cognitive_loop(self) -> None:
+        """Wait for real VLM observations; stale results never execute tools."""
+        while not self._cancel.is_set():
+            if not self._cognitive_wake.wait(0.5):
+                continue
+            self._cognitive_wake.clear()
+            if self._cancel.is_set():
+                break
+            try:
+                proposal = self.reason_once()
+                if proposal is not None:
+                    with self._lock:
+                        if not self._cancel.is_set():
+                            self._cognitive_completed += 1
+            except Exception as exc:
+                with self._lock:
+                    self._cognitive_error_type = type(exc).__name__[:80]
+                # Fail closed on loss of owner rights or untrusted model
+                # output. The Web view may not keep serving stale pixels.
+                self.stop()
+                break
+
     def last_proposal(self) -> RDPReadOnlyProposal | None:
         """Read-only review, revocable by Stop or a newer observation."""
         self.reauthorize()
         with self._lock:
-            return self._last_proposal
+            if (self._cancel.is_set() or self._channel is None
+                    or self._web_png is None
+                    or time.monotonic() - self._web_png_at > 8.0):
+                return None
+            proposal = self._last_proposal
+            if proposal is not None and proposal.update_count != self._last_web_update:
+                return None
+            return proposal
 
     def accept_native_png(self, frame: RDPVisionPNG) -> None:
         """Only called from real decoded native graphics; bounded memory.
@@ -257,6 +311,7 @@ class SuperAgentRDPCognitiveSession:
                 self._handshake_channel = None
             self._channel = channel
         try:
+            self.start_cognitive_worker()
             report = stream_native_rdp_with_local_vision(
                 channel, reauthorize=self.reauthorize,
                 on_observation=self.accept_observation,
@@ -277,6 +332,9 @@ class SuperAgentRDPCognitiveSession:
         """Revoke future results immediately and request a bounded TLS Stop."""
         self._cancel.set()
         self._inbox.stop()
+        wake = getattr(self, "_cognitive_wake", None)
+        if wake is not None:
+            wake.set()
         with self._lock:
             self._last_proposal = None
             self._web_png = None
@@ -303,6 +361,12 @@ class SuperAgentRDPCognitiveSession:
             "graphics_started": self._graphics_started,
             "native_phase": self._native_phase,
             "native_error_type": self._native_error_type,
+            "cognitive_running": bool(
+                getattr(self, "_cognitive_thread", None)
+                and self._cognitive_thread.is_alive()
+            ),
+            "cognitive_completed": getattr(self, "_cognitive_completed", 0),
+            "cognitive_error_type": getattr(self, "_cognitive_error_type", ""),
             "graphics_active": self._channel is not None and not self._cancel.is_set(),
             "frame_available": (
                 self._channel is not None and not self._cancel.is_set()
