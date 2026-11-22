@@ -169,10 +169,10 @@
               body: JSON.stringify({approval_token: approval.approval_token})
             });
             launchStatus.textContent = cancelled.cancelled
-              ? 'Разрешение отозвано. RDP не запускался.'
-              : 'Вход не запускался. Разрешение уже использовано либо истекло.';
+              ? 'Разрешение отозвано до запуска. RDP не запускался.'
+              : 'Подтверждение уже использовано либо истекло. Проверьте состояние RDP и Stop.';
           } catch (cancelError) {
-            launchStatus.textContent = 'RDP не запускался; отзыв разрешения не подтверждён. ' +
+            launchStatus.textContent = 'Отзыв разрешения не подтверждён. Проверьте состояние RDP и Stop. ' +
               'Не используйте токен повторно, срок его действия 90 секунд.';
           }
           return;
