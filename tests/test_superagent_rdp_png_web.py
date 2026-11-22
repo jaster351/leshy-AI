@@ -236,3 +236,23 @@ def test_rejected_worker_frame_never_enters_web_cache(monkeypatch):
         )
     assert captured == []
     assert ch.closed
+
+
+
+def test_web_fetch_is_cancellable_and_hides_pixels_on_background_tabs():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] /
+          "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "new AbortController()" in js
+    assert "signal: controller.signal" in js
+    assert "frameAbort.abort()" in js
+    assert "document.visibilityState !== 'visible'" in js
+    assert "const releaseOld" in js
+
+
+def test_png_stream_never_sends_json_after_headers_are_sent():
+    from pathlib import Path
+    code = (Path(__file__).resolve().parents[1] /
+            "src/leshy/web_server_impl14.py").read_text(encoding="utf-8")
+    assert "response_started = True" in code
+    assert "if response_started:" in code

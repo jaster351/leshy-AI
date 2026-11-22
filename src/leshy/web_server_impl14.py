@@ -239,13 +239,17 @@ def make_handler(app, telegram, settings, model_catalog):
                         raise ValueError("Требуется одно задание владельца")
                     _policy, actor = context
 
+                    response_started = False
+
                     def deliver(image: bytes, update: int) -> None:
+                        nonlocal response_started
                         # A finite write deadline prevents a slow Web browser
                         # from holding the RDP Stop serialization lock forever.
                         previous_timeout = self.connection.gettimeout()
                         self.connection.settimeout(3.0)
                         try:
                             self.send_response(HTTPStatus.OK)
+                            response_started = True
                             self.send_header("Content-Type", "image/png")
                             self.send_header("Content-Length", str(len(image)))
                             self.send_header("Cache-Control", "private, no-store, max-age=0")
@@ -276,6 +280,11 @@ def make_handler(app, telegram, settings, model_catalog):
                     # append JSON or leak raw screen contents into logs.
                     return None
                 except Exception as exc:
+                    # If any PNG headers/bytes have already been transmitted,
+                    # an HTTP JSON error would corrupt the response and leak
+                    # non-image data into the canvas consumer.
+                    if response_started:
+                        return None
                     problem("superagent_rdp_png_delivery_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
                         "error": "Не удалось получить RDP кадр"

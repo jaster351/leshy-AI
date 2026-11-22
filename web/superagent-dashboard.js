@@ -231,10 +231,12 @@
     let displayedUpdate = 0;
     let serial = 0;
     let objectUrl = '';
+    let frameAbort = null;
     let timer = null;
     const clearScreen = () => {
       serial++;
       displayedUpdate = 0;
+      if (frameAbort) { frameAbort.abort(); frameAbort = null; }
       screen.hidden = true;
       screen.removeAttribute('src');
       if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = ''; }
@@ -243,9 +245,12 @@
       if (frameBusy || !panel.open || !panel.isConnected) return;
       frameBusy = true;
       const current = serial;
+      const controller = new AbortController();
+      frameAbort = controller;
       try {
         const response = await fetch('/v1/superagent/rdp/frame?ticket_id=' + encodeURIComponent(taskId), {
           credentials: 'same-origin', cache: 'no-store',
+          signal: controller.signal,
           headers: {'X-Leshy-UI': 'superagent'}
         });
         if (!panel.isConnected || !panel.open || current !== serial) return;
@@ -265,18 +270,28 @@
         const next = URL.createObjectURL(blob);
         const old = objectUrl;
         objectUrl = next;
+        const releaseOld = () => { if (old) URL.revokeObjectURL(old); };
         screen.onload = () => {
-          if (old) URL.revokeObjectURL(old);
+          releaseOld();
           if (objectUrl === next) { URL.revokeObjectURL(next); objectUrl = ''; }
         };
-        screen.onerror = () => { clearScreen(); state.textContent = 'Ошибка декодирования RDP изображения'; };
+        screen.onerror = () => {
+          releaseOld();
+          clearScreen();
+          state.textContent = 'Ошибка декодирования RDP изображения';
+        };
         screen.src = next;
         screen.hidden = false;
         displayedUpdate = frameUpdate;
       } catch (error) {
-        clearScreen();
-        state.textContent = 'Изображение RDP недоступно: ' + error.message;
-      } finally { frameBusy = false; }
+        if (error.name !== 'AbortError' && current === serial) {
+          clearScreen();
+          state.textContent = 'Изображение RDP недоступно: ' + error.message;
+        }
+      } finally {
+        if (frameAbort === controller) frameAbort = null;
+        frameBusy = false;
+      }
     }
     const stop = makeButton('Остановить RDP-сессию', async () => {
       if (busy || !window.confirm('Остановить RDP-наблюдение этого задания?')) return;
@@ -318,6 +333,10 @@
             (result.screen_available ? 'Настоящий RDP кадр доступен.' : 'Ожидание свежего RDP кадра.') +
             '\nНативный RDP: ' + String(result.native_phase || 'not_started') +
             (result.native_error_type ? ' (' + String(result.native_error_type) + ')' : '') +
+            '\nАнализ ИИ: ' + (result.cognitive_error_type
+              ? 'ошибка ' + String(result.cognitive_error_type)
+              : result.cognitive_running ? 'работает' : 'ещё не запущен') +
+            ' · предложений: ' + Number(result.cognitive_completed || 0) +
             '\nУправление мышью/клавиатурой: отключено.';
           const p = result.proposal;
           proposal.textContent = p
@@ -342,6 +361,7 @@
     panel.append(info, setup, state, screen, proposal, controls);
     panel.addEventListener('toggle', () => {
       if (panel.open) {
+        if (timer !== null) window.clearInterval(timer);
         load();
         timer = window.setInterval(() => {
           if (!panel.isConnected || !panel.open) {
@@ -349,7 +369,12 @@
             clearScreen();
             return;
           }
-          if (document.visibilityState === 'visible') load();
+          if (document.visibilityState !== 'visible') {
+            // A hidden browser must not retain a visible RDP screenshot.
+            clearScreen();
+            return;
+          }
+          load();
         }, 1800);
       } else {
         if (timer !== null) { window.clearInterval(timer); timer = null; }

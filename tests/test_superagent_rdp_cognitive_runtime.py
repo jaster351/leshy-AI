@@ -166,3 +166,69 @@ def test_existing_superagent_service_exposes_internal_factory():
         node_id="10.0.0.2", observed_fingerprint="registered-host-pin",
     )
     assert isinstance(session, SuperAgentRDPCognitiveSession)
+
+
+
+def test_native_cognition_loop_uses_real_superagent_llm_without_rdp_actions():
+    import time
+    service = FakeService('{"kind":"report","reason":"По изображению видна ошибка"}')
+    session = start(service)
+    # Normal production starts the consumer from receive_graphics, after
+    # the pinned channel is attached. Mock the private thread gate here
+    # to verify genuine LLM consumption, rather than a fake plan.
+    session.start_cognitive_worker()
+    session.accept_observation(observation())
+    end = time.monotonic() + 2
+    while not session.snapshot()["cognitive_completed"] and time.monotonic() < end:
+        time.sleep(.01)
+    assert service.model_calls == 1
+    assert session.snapshot()["cognitive_completed"] == 1
+    assert session.snapshot()["cognitive_error_type"] == ""
+    session.stop()
+
+
+def test_native_cognition_stops_on_untrusted_llm_action():
+    import time
+    service = FakeService('{"kind":"shell","command":"format disk"}')
+    session = start(service)
+    session.start_cognitive_worker()
+    session.accept_observation(observation())
+    end = time.monotonic() + 2
+    while not session.snapshot()["stopped"] and time.monotonic() < end:
+        time.sleep(.01)
+    assert session.snapshot()["stopped"] is True
+    assert session.snapshot()["cognitive_error_type"] == "RDPCognitiveError"
+    assert service.model_calls == 1
+
+
+
+def test_cognitive_consumer_exits_after_native_graphics_finishes():
+    import time
+    session = start()
+    session._graphics_started = True
+    session._channel = object()
+    session.start_cognitive_worker()
+    worker = session._cognitive_thread
+    assert worker is not None
+    session._channel = None
+    session._cognitive_wake.set()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+
+
+def test_proposal_is_not_exposed_without_a_fresh_covered_frame():
+    import time
+    session = start()
+    session.accept_observation(observation(1))
+    proposal = session.reason_once()
+    assert proposal is not None
+    # No real decoded native framebuffer has arrived: model text may exist,
+    # but cannot be shown as verified actionable desktop evidence.
+    assert session.last_proposal() is None
+    session._channel = object()
+    session._web_png = object()
+    session._web_png_at = time.monotonic()
+    session._last_web_update = 1
+    assert session.last_proposal() is proposal
+    session._web_png_at -= 20
+    assert session.last_proposal() is None
