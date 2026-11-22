@@ -294,9 +294,14 @@ class SuperAgentRDPCognitiveSession:
                 return
             if self._native_phase != "failed":
                 self._native_phase = "failed"
-                self._native_error_type = (
-                    exc_type[:80] if type(exc_type) is str else "Exception"
+                # Expose only a class-shaped identifier, never a message,
+                # path, newline, credential, URL or arbitrary protocol text.
+                safe = (
+                    exc_type if type(exc_type) is str and
+                    1 <= len(exc_type) <= 80 and exc_type.isascii() and
+                    exc_type.isidentifier() else "Exception"
                 )
+                self._native_error_type = safe
             self._web_png = None
             self._web_png_at = 0.0
             self._last_web_update = 0

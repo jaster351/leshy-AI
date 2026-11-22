@@ -277,7 +277,21 @@ def test_failure_status_cannot_resurrect_after_owner_stop():
     assert session.snapshot()["stopped"]
 
 
-def test_failure_error_type_is_bounded_and_never_contains_wire_message():
+@pytest.mark.parametrize("untrusted_error", [
+    "x" * 300, "Error: password", "TLS\r\nAuthorization: Bearer abc",
+    "/home/user/private.json", "Ошибка_пароля", "Failed Session",
+    "CredSSP\0Token", "https://example.org/?password=hidden",
+])
+def test_failure_error_type_rejects_messages_and_private_data(untrusted_error):
     session = start()
-    session.native_failure("x" * 300)
-    assert len(session.snapshot()["native_error_type"]) == 80
+    session.native_failure(untrusted_error)
+    assert session.snapshot()["native_error_type"] == "Exception"
+
+
+@pytest.mark.parametrize("known_type", [
+    "TimeoutError", "SSLError", "CredSSPBindingError", "RDPTransportCloseError",
+])
+def test_failure_error_type_preserves_safe_class_names(known_type):
+    session = start()
+    session.native_failure(known_type)
+    assert session.snapshot()["native_error_type"] == known_type
