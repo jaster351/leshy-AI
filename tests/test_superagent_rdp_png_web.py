@@ -148,3 +148,91 @@ def test_web_png_route_is_cookied_binary_and_disabled_for_img_tag():
     assert "URL.revokeObjectURL" in js
     assert "screen_available" in js
     assert "screen.addEventListener('click'" not in js
+
+
+
+def test_worker_forwards_only_accepted_native_frame(monkeypatch):
+    import leshy.rdp_vision_worker as module
+
+    class FakeWorker:
+        def __init__(self, **kwargs):
+            self._submit_ok = True
+
+        def start(self):
+            return None
+
+        def submit(self, frame):
+            return self._submit_ok
+
+        def drain(self, **kwargs):
+            return True
+
+        def stop(self):
+            return None
+
+        def status(self):
+            return SimpleNamespace(failure_type="")
+
+    class Channel:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    captured = []
+    orig_frame = image(1)
+
+    def fake_stream(channel, on_png, **kwargs):
+        on_png(orig_frame)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(module, "RDPVisionWorker", FakeWorker)
+    monkeypatch.setattr(module, "stream_native_rdp_png", fake_stream)
+    ch = Channel()
+    result = module.stream_native_rdp_with_local_vision(
+        ch, reauthorize=lambda: None,
+        on_observation=lambda _: None,
+        on_png_frame=captured.append,
+    )
+    assert result.drained
+    assert captured == [orig_frame]
+    assert ch.closed
+
+
+def test_rejected_worker_frame_never_enters_web_cache(monkeypatch):
+    import leshy.rdp_vision_worker as module
+
+    class RejectWorker:
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def submit(self, frame):
+            return False
+
+        def stop(self):
+            pass
+
+    class Channel:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    def fake_stream(channel, on_png, **kwargs):
+        on_png(image(1))
+
+    monkeypatch.setattr(module, "RDPVisionWorker", RejectWorker)
+    monkeypatch.setattr(module, "stream_native_rdp_png", fake_stream)
+    captured = []
+    ch = Channel()
+    with pytest.raises(RuntimeError, match="stopped accepting"):
+        module.stream_native_rdp_with_local_vision(
+            ch, reauthorize=lambda: None,
+            on_observation=lambda _: None,
+            on_png_frame=captured.append,
+        )
+    assert captured == []
+    assert ch.closed

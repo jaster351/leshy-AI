@@ -110,7 +110,7 @@
     const screen = element('img', 'sa-rdp-screen');
     screen.alt = 'Настоящий кадр удалённого рабочего стола RDP (только просмотр)';
     screen.hidden = true;
-    screen.style.cssText = 'display:block;max-width:100%;height:auto;max-height:65vh;object-fit:contain;background:#07110d;border:1px solid var(--line);border-radius:8px;margin:8px 0';
+    screen.style.cssText = 'max-width:100%;height:auto;max-height:65vh;object-fit:contain;background:#07110d;border:1px solid var(--line);border-radius:8px;margin:8px 0';
     const proposal = element('pre', 'sa-terminal-output');
     const controls = element('div', 'sa-controls');
     let busy = false;
