@@ -187,6 +187,12 @@ class SuperAgentRDPCognitiveSession:
         """Wait for real VLM observations; stale results never execute tools."""
         while not self._cancel.is_set():
             if not self._cognitive_wake.wait(0.5):
+                # A graphics stream may complete naturally without Stop.
+                # Do not leave a dormant daemon model thread per old session.
+                with self._lock:
+                    stream_finished = self._graphics_started and self._channel is None
+                if stream_finished:
+                    break
                 continue
             self._cognitive_wake.clear()
             if self._cancel.is_set():
@@ -326,6 +332,7 @@ class SuperAgentRDPCognitiveSession:
                 self._channel = None
                 self._web_png = None
                 self._web_png_at = 0.0
+            self._cognitive_wake.set()
             channel.close()
 
     def stop(self) -> None:
