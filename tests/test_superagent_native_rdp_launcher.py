@@ -231,3 +231,102 @@ def test_revoked_approval_prevents_tcp_connection(prepared, monkeypatch):
     start(prepared, approve=lambda *a: (_ for _ in ()).throw(PermissionError("revoked")))
     assert opened == []
     assert prepared.session.fail == "PermissionError"
+
+
+
+class FailingCloseChannel(Channel):
+    def close(self):
+        self.closed = True
+        raise OSError("sensitive password / credentials / private IP")
+
+
+def test_failing_close_does_not_skip_clearing_native_handshake(prepared, monkeypatch):
+    channel = FailingCloseChannel()
+    monkeypatch.setattr(launch, "connect_verified_rdp_credssp",
+                        lambda *a, **kw: channel)
+    from leshy.rdp_credssp_credentials import RDPCredentials
+    monkeypatch.setattr(launch, "load_owner_rdp_credentials",
+                        lambda *a: RDPCredentials("user", "secret"))
+    original_factory = prepared.create_rdp_cognitive_session
+
+    def factory(ticket_id, **kw):
+        session = original_factory(ticket_id, **kw)
+        session.clear_count = 0
+        session.failures = []
+        session.clear_native_handshake = lambda value: setattr(
+            session, "clear_count", session.clear_count + 1
+        )
+        session.native_failure = lambda error: session.failures.append(error)
+        return session
+    prepared.create_rdp_cognitive_session = factory
+    start(prepared, approve=lambda *a: None)
+    assert channel.closed
+    assert prepared.session.receive_count == 1
+    assert prepared.session.clear_count == 1
+    assert prepared.session.failures == ["RDPTransportCloseError"]
+    assert "sensitive" not in str(prepared.session.failures)
+
+
+def test_failing_close_preserves_first_protocol_error_status(prepared, monkeypatch):
+    class BrokenChannel(FailingCloseChannel):
+        def authenticate_server(self):
+            raise TimeoutError("password private-data")
+    channel = BrokenChannel()
+    monkeypatch.setattr(launch, "connect_verified_rdp_credssp",
+                        lambda *a, **kw: channel)
+    # Real session native_failure preserves first failure, so this fixture
+    # collects the order and verifies it only sends sanitized class names.
+    original = prepared.create_rdp_cognitive_session
+    def factory(ticket_id, **kw):
+        session = original(ticket_id, **kw)
+        session.errors = []
+        session.cleared = False
+        session.native_failure = session.errors.append
+        session.clear_native_handshake = lambda _: setattr(session, "cleared", True)
+        return session
+    prepared.create_rdp_cognitive_session = factory
+    start(prepared, approve=lambda *a: None)
+    assert prepared.session.errors == ["TimeoutError", "RDPTransportCloseError"]
+    assert prepared.session.cleared
+    assert channel.closed
+
+
+@pytest.mark.parametrize("bad_filename", [
+    "", "x", "user.txt", "../test.json", "foo/bar.json",
+    "foo\\bar.json", "..\\secrets.json", ".json",
+    "test.json\n", "test.json" + "a" * 260,
+])
+def test_bad_local_credential_basename_rejected_before_native_network(
+    prepared, monkeypatch, bad_filename,
+):
+    opened = []
+    monkeypatch.setattr(launch, "connect_verified_rdp_credssp",
+                        lambda *a, **kw: opened.append(True))
+    with pytest.raises((ValueError, PermissionError)):
+        launch.start_owner_authorized_native_rdp(
+            prepared, ticket_id="SA-1",
+            actor=VerifiedActor("owner", "cookie", "web"),
+            node_id="192.0.2.10", service_dns_name="rdp.example.org",
+            enrolled_rdp_tls_sha256="a" * 64, credential_file=bad_filename,
+            authorize_delegation=lambda *a: None,
+        )
+    assert not opened
+
+
+@pytest.mark.parametrize("frame_budget", [
+    -1, 0, 257, 10_000, True, False, 1.2, "32", None,
+])
+def test_bad_frame_limits_rejected_before_network(prepared, monkeypatch, frame_budget):
+    tries = []
+    monkeypatch.setattr(launch, "connect_verified_rdp_credssp",
+                        lambda *a, **kw: tries.append(1))
+    with pytest.raises(ValueError):
+        launch.start_owner_authorized_native_rdp(
+            prepared, ticket_id="SA-1",
+            actor=VerifiedActor("owner", "cookie", "web"),
+            node_id="192.0.2.10", service_dns_name="rdp.example.org",
+            enrolled_rdp_tls_sha256="a" * 64, credential_file="rdp.json",
+            authorize_delegation=lambda *a: None,
+            max_png_frames=frame_budget,
+        )
+    assert not tries

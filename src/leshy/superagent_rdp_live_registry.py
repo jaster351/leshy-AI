@@ -111,7 +111,12 @@ class RDPLiveRegistry:
             "input_enabled": False,
             "e2e_verified": False,
             "reasoning_available": bool(proposal),
-            "status": "graphics_receiving" if snapshot["graphics_active"] else "waiting_for_native_transport",
+            "status": (
+                "native_failed" if snapshot.get("native_phase") == "failed"
+                else "stream_finished" if snapshot.get("native_phase") == "stream_finished"
+                else "graphics_receiving" if snapshot["graphics_active"]
+                else "waiting_for_native_transport"
+            ),
             "native_phase": snapshot.get("native_phase", "not_started"),
             "native_error_type": snapshot.get("native_error_type", ""),
             "cognitive_running": bool(snapshot.get("cognitive_running", False)),
