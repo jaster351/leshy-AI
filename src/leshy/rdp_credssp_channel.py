@@ -157,6 +157,14 @@ class PinnedRDPCredSSPChannel:
             self.close()
             raise
 
+    def local_client_address(self) -> str:
+        """Literal local IPv4/IPv6 observed on the pinned TLS socket."""
+        self._check()
+        try:
+            return str(ipaddress.ip_address(self._tls.getsockname()[0]))
+        except (OSError, ValueError, IndexError, TypeError) as exc:
+            raise RDPChannelError("Cannot verify native RDP client address") from exc
+
     @property
     def server_bound(self) -> bool:
         return bool(not self._closed and self._credssp and self._credssp.server_bound)

@@ -192,13 +192,19 @@
         if (!result.registered || !result.connected) {
           clearScreen();
           state.textContent = result.registered
-            ? 'Ожидание реального нативного RDP-потока.'
+            ? 'Нативный RDP: ' + String(result.native_phase || 'not_started') +
+              (result.native_error_type ? ' (' + String(result.native_error_type) + ')' : '') +
+              '\n' + (result.native_phase === 'failed'
+                ? 'Подключение не выполнено. Автоматический повтор запрещён.'
+                : 'Ожидание реального нативного RDP-потока.')
             : 'RDP: нет активной сессии. Подключение не подтверждено.';
           proposal.textContent = '';
           stop.disabled = !result.registered;
         } else {
           state.textContent = 'Узел: ' + String(result.node_id || 'неизвестен') + '\n' +
             (result.screen_available ? 'Настоящий RDP кадр доступен.' : 'Ожидание свежего RDP кадра.') +
+            '\nНативный RDP: ' + String(result.native_phase || 'not_started') +
+            (result.native_error_type ? ' (' + String(result.native_error_type) + ')' : '') +
             '\nУправление мышью/клавиатурой: отключено.';
           const p = result.proposal;
           proposal.textContent = p

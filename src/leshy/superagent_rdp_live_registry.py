@@ -96,6 +96,8 @@ class RDPLiveRegistry:
             "e2e_verified": False,
             "reasoning_available": bool(proposal),
             "status": "graphics_receiving" if snapshot["graphics_active"] else "waiting_for_native_transport",
+            "native_phase": snapshot.get("native_phase", "not_started"),
+            "native_error_type": snapshot.get("native_error_type", ""),
             "node_id": snapshot["node_id"],
             "task_id": snapshot["ticket_id"],
             "stopped": bool(snapshot["stopped"]),
