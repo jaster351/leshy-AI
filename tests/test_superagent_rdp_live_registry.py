@@ -305,3 +305,47 @@ def test_stop_all_attempts_every_session_when_first_channel_close_fails():
     with pytest.raises(RuntimeError):
         controls.register(user, "SA-1", Session(user, "SA-1"))
     controls.register(user, "SA-2", Session(user, "SA-2"))
+
+
+
+def test_status_discloses_stop_in_progress_not_absent_session():
+    import threading
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    entered, release = threading.Event(), threading.Event()
+    def slow_stop():
+        entered.set()
+        assert release.wait(2)
+        session.stopped = True
+    session.stop = slow_stop
+    controls.register(user, "SA-1", session)
+    thread = threading.Thread(target=lambda: controls.stop(user, "SA-1"))
+    thread.start()
+    assert entered.wait(2)
+    status = controls.status(user, "SA-1")
+    assert status["registered"] and not status["connected"]
+    assert status["status"] == "stop_in_progress"
+    assert not status["screen_available"]
+    assert controls.stop(user, "SA-1")["status"] == "stop_in_progress"
+    release.set()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert not controls.status(user, "SA-1")["registered"]
+
+
+def test_failed_tls_close_reports_locked_and_never_allows_reconnect():
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    session.stop = lambda: (_ for _ in ()).throw(OSError("TLS close failed"))
+    controls.register(user, "SA-1", session)
+    with pytest.raises(OSError):
+        controls.stop(user, "SA-1")
+    status = controls.status(user, "SA-1")
+    assert status["status"] == "stop_failed_locked"
+    assert status["registered"] and not status["connected"]
+    assert not status["screen_available"]
+    assert controls.stop(user, "SA-1")["status"] == "stop_failed_locked"
+    with pytest.raises(RuntimeError):
+        controls.register(user, "SA-1", Session(user))

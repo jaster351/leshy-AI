@@ -334,14 +334,20 @@
         if (!result.registered || !result.connected) {
           clearScreen();
           state.textContent = result.registered
-            ? 'Нативный RDP: ' + String(result.native_phase || 'not_started') +
-              (result.native_error_type ? ' (' + String(result.native_error_type) + ')' : '') +
-              '\n' + (result.native_phase === 'failed'
-                ? 'Подключение не выполнено. Автоматический повтор запрещён.'
-                : 'Ожидание реального нативного RDP-потока.')
+            ? result.status === 'stop_in_progress'
+              ? 'RDP: закрывается защищённый канал. Повторное подключение запрещено.'
+              : result.status === 'stop_failed_locked'
+                ? 'RDP: закрытие завершилось ошибкой. Новый вход заблокирован до перезапуска.'
+                : 'Нативный RDP: ' + String(result.native_phase || 'not_started') +
+                  (result.native_error_type ? ' (' + String(result.native_error_type) + ')' : '') +
+                  '\n' + (result.native_phase === 'failed'
+                    ? 'Подключение не выполнено. Автоматический повтор запрещён.'
+                    : 'Ожидание реального нативного RDP-потока.')
             : 'RDP: нет активной сессии. Подключение не подтверждено.';
           proposal.textContent = '';
-          stop.disabled = !result.registered;
+          stop.disabled = !result.registered ||
+            result.status === 'stop_in_progress' ||
+            result.status === 'stop_failed_locked';
         } else {
           state.textContent = 'Узел: ' + String(result.node_id || 'неизвестен') + '\n' +
             (result.screen_available ? 'Настоящий RDP кадр доступен.' : 'Ожидание свежего RDP кадра.') +
