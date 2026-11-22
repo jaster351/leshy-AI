@@ -19,6 +19,9 @@ from .superagent_credential_settings import (
 from .superagent_verified_ssh import inspect_remote_os
 from .superagent_ssh_enrollment import enroll_verified_ssh_node
 from .superagent_rdp_profile import rdp_connection_profile
+from .superagent_rdp_launch_approval import (
+    prepare_rdp_approval, consume_rdp_approval,
+)
 from .superagent_ssh_terminal import run_ssh_terminal_command
 from .superagent_ssh_approvals import (
     prepare_ssh_command, consume_ssh_approval,
@@ -364,6 +367,94 @@ def make_handler(app, telegram, settings, model_catalog):
                 except Exception as exc:
                     problem("superagent_credential_folder_set_failed", type(exc).__name__)
                     return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось сохранить настройку"})
+            if path in {
+                "/v1/superagent/rdp/start/prepare",
+                "/v1/superagent/rdp/start/execute",
+            }:
+                # A session cookie alone never creates owner approval. The
+                # preparation returns a single-use token with exact identity,
+                # node, TLS fingerprint, credential basename and ticket scope.
+                context = self._remote_context()
+                if context is None:
+                    return None
+                if not module_enabled(app.storage, "remote-admin"):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Удалённое управление выключено"
+                    })
+                if self.headers.get("X-Leshy-UI") != "superagent":
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Требуется интерфейс SuperAgent"
+                    })
+                origin = str(self.headers.get("Origin") or "")
+                if origin and parse.urlsplit(origin).netloc.lower() != str(
+                    self.headers.get("Host") or ""
+                ).lower():
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "Чужой источник запроса"
+                    })
+                if not str(self.headers.get("Content-Type") or "").lower().startswith(
+                    "application/json"
+                ):
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": "Требуется JSON"})
+                service = getattr(app, "superagent", None)
+                if service is None:
+                    return self._json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                        "error": "SuperAgent не запущен"
+                    })
+                try:
+                    payload = self._body()
+                    common = {
+                        "ticket_id", "node_id", "service_dns_name",
+                        "enrolled_rdp_tls_sha256", "credential_file",
+                    }
+                    executing = path.endswith("/execute")
+                    expected = common | ({"approval_token", "confirm"} if executing else set())
+                    if not isinstance(payload, dict) or set(payload) != expected:
+                        raise ValueError("Укажите точную RDP-цель и выбранное задание")
+                    policy, actor = context
+                    args = (
+                        payload["ticket_id"], payload["node_id"],
+                        payload["service_dns_name"],
+                        payload["enrolled_rdp_tls_sha256"],
+                        payload["credential_file"],
+                    )
+                    if not executing:
+                        return self._json(HTTPStatus.OK, {
+                            "approval": prepare_rdp_approval(
+                                policy, actor, service, *args
+                            )
+                        })
+                    if payload.get("confirm") is not True:
+                        raise PermissionError("Не подтверждена передача RDP-пароля")
+                    consent = consume_rdp_approval(
+                        policy, actor, service, payload["approval_token"], *args
+                    )
+                    # Background launch is admitted only once, after token
+                    # consumption; on failure it MUST NOT replay credentials.
+                    result = service.start_authorized_native_rdp(
+                        args[0], actor=actor, node_id=args[1],
+                        service_dns_name=args[2],
+                        enrolled_rdp_tls_sha256=args[3],
+                        credential_file=args[4],
+                        authorize_delegation=consent,
+                    )
+                    return self._json(HTTPStatus.ACCEPTED, {
+                        "native_rdp": result
+                    })
+                except (ValueError, KeyError, PermissionError, FileNotFoundError):
+                    return self._json(HTTPStatus.FORBIDDEN, {
+                        "error": "RDP запуск не разрешён: проверьте права, сервер, файл и подтверждение"
+                    })
+                except (RuntimeError, OSError) as exc:
+                    problem("superagent_rdp_owner_launch_denied", type(exc).__name__)
+                    return self._json(HTTPStatus.CONFLICT, {
+                        "error": "RDP занят либо запуск недоступен; повторного входа не было"
+                    })
+                except Exception as exc:
+                    problem("superagent_rdp_owner_launch_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "error": "Не удалось запустить RDP. При неопределённом результате не повторяйте вход."
+                    })
             if path == "/v1/superagent/rdp/live/stop":
                 context = self._remote_context()
                 if context is None:
