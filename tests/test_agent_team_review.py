@@ -143,34 +143,26 @@ class IntegratedTeamEvidenceTests(unittest.TestCase):
         self.assertFalse(result["review"]["tool_execution_verified"])
 
 
+    def test_context_loaded_once_without_copying_untrusted_overflow(self):
+        agent, scheduler, llm = self._agent("Разбери архитектуру")
+        calls = []
+        long_context = "X" * (MAX_CONTEXT_CHARS + 20)
+        agent._shared_context = lambda owner, task: (
+            calls.append((owner, task)) or long_context
+        )
+        role_context = []
+        agent._run_roles = lambda task, **kwargs: (
+            role_context.append(kwargs["shared_context"]) or [
+                report(x) for x in ROLES
+            ]
+        )
+        with patch("leshy.multi_agent_orchestrator.get_inference_scheduler", return_value=scheduler):
+            result = agent.run("Разбери архитектуру", owner_id="owner", session_id="session")
+        self.assertEqual(calls, [("owner", "Разбери архитектуру")])
+        self.assertEqual(role_context, [long_context])
+        self.assertTrue(result["review"]["context_truncated"])
+        self.assertEqual(result["review"]["state"], "partial_reports")
+
 if __name__ == "__main__":
     unittest.main()
 
-
-def _test_context_loaded_once_without_copying_untrusted_overflow(self):
-    agent, scheduler, llm = self._agent("Разбери архитектуру")
-    calls = []
-    long_context = "X" * (MAX_CONTEXT_CHARS + 20)
-    agent._shared_context = lambda owner, task: (
-        calls.append((owner, task)) or long_context
-    )
-    original_run_roles = agent._run_roles
-    role_context = []
-    agent._run_roles = lambda task, **kwargs: (
-        role_context.append(kwargs["shared_context"]) or [
-            report(x) for x in ROLES
-        ]
-    )
-    with patch("leshy.multi_agent_orchestrator.get_inference_scheduler", return_value=scheduler):
-        result = agent.run(
-            "Разбери архитектуру", owner_id="owner", session_id="session"
-        )
-    assert calls == [("owner", "Разбери архитектуру")]
-    assert role_context == [long_context]
-    assert result["review"]["context_truncated"] is True
-    assert result["review"]["state"] == "partial_reports"
-
-
-IntegratedTeamEvidenceTests.test_context_loaded_once_without_copying_untrusted_overflow = (
-    _test_context_loaded_once_without_copying_untrusted_overflow
-)
