@@ -377,3 +377,18 @@ def test_stop_requires_correct_own_rdp_ticket_not_an_unrelated_ssh_task():
     route = route.split('if path in {', 1)[0]
     assert 'if not _rdp_explicit_task(str(ticket.get("request_text") or ""))' in route
     assert 'service.stop_ticket(' in route
+
+
+
+def test_web_terminal_stop_state_disables_reconnecting_in_same_panel():
+    from pathlib import Path
+    panel = (Path(__file__).resolve().parents[1] /
+             "web/superagent-dashboard.js").read_text(encoding="utf-8")
+    assert "let taskTerminal = false" in panel
+    assert "if (launching || taskTerminal) return" in panel
+    assert "if (taskTerminal) return;" in panel
+    assert "if (result.ticket_stopped)" in panel
+    assert "taskTerminal = true;" in panel
+    assert "connect.disabled = true;" in panel
+    assert "Для нового входа создайте новое поручение" in panel
+    assert "window.clearInterval(timer)" in panel
