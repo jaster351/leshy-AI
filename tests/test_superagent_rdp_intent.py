@@ -171,13 +171,13 @@ def test_real_sqlite_transition_keeps_rdp_ticket_working_for_web_consent(monkeyp
     class Service:
         _lease = SimpleNamespace(held=True)
         _stop = threading.Event()
-        storage = storage
 
         def _execute(self, ticket):
             return SuperAgentService._execute(self, ticket)
 
         def _deliver(self, ticket_id):
             pass
+    Service.storage = storage
     # No network, model or credential access: same production state update.
     SuperAgentService._run_ticket(Service(), task)
     row = conn.execute(
@@ -209,8 +209,8 @@ def test_real_sqlite_rdp_recovery_fails_closed_instead_of_requeueing():
         ("SA-DB-2-A1", "SA-DB-2", 1, "running", "start"),
     )
     class Service:
-        storage = storage
         max_attempts = 3
+    Service.storage = storage
     SuperAgentService._recover_interrupted(Service())
     row = conn.execute(
         "SELECT state,next_run_epoch,latest_report FROM superagent_tickets "
