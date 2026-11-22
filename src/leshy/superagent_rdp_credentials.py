@@ -44,6 +44,8 @@ def parse_rdp_credential_document(raw: bytes, node_id: str) -> RDPCredentials:
     ):
         raise ValueError("Unexpected RDP credential keys")
     try:
+        if type(doc["host"]) is not str or type(node_id) is not str:
+            raise ValueError("Host must be a literal IP string")
         actual_host = str(ipaddress.ip_address(doc["host"]))
         expected_host = str(ipaddress.ip_address(node_id))
     except (ValueError, TypeError):
@@ -70,6 +72,13 @@ def parse_rdp_credential_document(raw: bytes, node_id: str) -> RDPCredentials:
     if (username.strip() != username or "/" in username or "\\" in username
             or domain.strip() != domain or any(c in domain for c in "/\\:@")):
         raise ValueError("Invalid Windows RDP login fields")
+    try:
+        # Reject lone surrogate halves NOW, before the CredSSP wire encoder,
+        # so a corrupted owner JSON cannot reach the password-delegation step.
+        for value in (username, password, domain):
+            value.encode("utf-16-le", errors="strict")
+    except UnicodeError:
+        raise ValueError("Invalid Unicode in Windows RDP credential") from None
     return RDPCredentials(username=username, password=password, domain=domain)
 
 

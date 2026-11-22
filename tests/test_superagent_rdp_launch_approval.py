@@ -284,7 +284,10 @@ def test_preparation_rejects_symlink_and_oversized_file(tmp_path, monkeypatch):
     target = tmp_path / "data.json"
     target.write_bytes(b"{}")
     link = tmp_path / "shortcut.json"
-    link.symlink_to(target)
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation not permitted on this Windows host")
     monkeypatch.setattr(approvals, "find_credential_file",
                         lambda storage, owner, basename: link)
     with pytest.raises(PermissionError):
