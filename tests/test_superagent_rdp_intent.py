@@ -40,3 +40,77 @@ def test_approval_file_has_no_literal_nul_bytes():
     source = (Path(__file__).resolve().parents[1] /
               "src/leshy/superagent_rdp_launch_approval.py").read_bytes()
     assert b"\0" not in source
+
+
+
+def test_rdp_ticket_is_held_working_for_explicit_owner_web_approval(monkeypatch):
+    from types import SimpleNamespace
+    from leshy.superagent import SuperAgentService
+    import leshy.module_settings as settings
+
+    monkeypatch.setattr(settings, "module_enabled", lambda *args: True)
+    service = SimpleNamespace(storage=object())
+    ticket = {
+        "id": "SA-001",
+        "request_text": "Подключись к Windows через RDP и проверь рабочий стол",
+        "mandate_json": '{"remote_authorized_at_creation":true}',
+    }
+    result = SuperAgentService._execute(service, ticket)
+    assert result[0] == "working"
+    assert "Соединение ещё не установлено" in result[1]
+    assert result[2:] == ("", [])
+
+
+def test_rdp_ticket_without_identity_at_creation_is_blocked(monkeypatch):
+    from types import SimpleNamespace
+    from leshy.superagent import SuperAgentService
+    import leshy.module_settings as settings
+
+    monkeypatch.setattr(settings, "module_enabled", lambda *args: True)
+    service = SimpleNamespace(storage=object())
+    ticket = {
+        "id": "SA-002",
+        "request_text": "Открой удалённый рабочий стол",
+        "mandate_json": '{"remote_authorized_at_creation":false}',
+    }
+    result = SuperAgentService._execute(service, ticket)
+    assert result[0] == "blocked"
+    assert "не разрешён" in result[1]
+
+
+def test_rdp_ticket_cannot_wait_when_remote_admin_disabled(monkeypatch):
+    from types import SimpleNamespace
+    from leshy.superagent import SuperAgentService
+    import leshy.module_settings as settings
+
+    monkeypatch.setattr(
+        settings, "module_enabled",
+        lambda storage, name: name != "remote-admin"
+    )
+    ticket = {
+        "id": "SA-002",
+        "request_text": "Открой удалённый рабочий стол",
+        "mandate": {"remote_authorized_at_creation": True},
+    }
+    result = SuperAgentService._execute(
+        SimpleNamespace(storage=object()), ticket
+    )
+    assert result[0] == "blocked"
+
+
+def test_rdp_recovery_is_never_requeued_after_restart():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] /
+              "src/leshy/superagent.py").read_text(encoding="utf-8")
+    part = source.split("def _recover_interrupted", 1)[1].split("def start(", 1)[0]
+    assert 'if _rdp_explicit_task(str(row["request_text"] or ""))' in part
+    assert "state='blocked'" in part
+
+
+def test_rdp_retry_is_explicitly_denied_even_on_failed_ticket():
+    from leshy.superagent import SuperAgentService
+    class FakeService:
+        def get(self, ticket_id, *, owner_id):
+            return {"state": "failed", "request_text": "Подключись к Windows через RDP"}
+    with pytest.raises(PermissionError, match="нельзя автоматически повторить"):
+        SuperAgentService.retry(FakeService(), "SA-001", "owner")

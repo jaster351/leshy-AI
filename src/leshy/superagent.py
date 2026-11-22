@@ -263,7 +263,19 @@ class SuperAgentService:
                 ticket_id = str(row["id"])
                 # An apt transaction could have started before process death.
                 # Never replay a remote mutation automatically after restart.
-                if maintenance_intent(str(row["request_text"] or "")) == "apt_upgrade":
+                if _rdp_explicit_task(str(row["request_text"] or "")):
+                    # Native RDP may have delegated a password before the
+                    # process died. It must NEVER requeue/login automatically.
+                    conn.execute(
+                        "UPDATE superagent_tickets SET state='blocked',latest_report=?,"
+                        "attention='',next_run_epoch=0,delivered=0,updated_at=? "
+                        "WHERE id=? AND state='working'",
+                        ("RDP-сессия была прервана при перезапуске Лешего. "
+                         "Состояние удалённого рабочего стола неизвестно. "
+                         "Создайте новое явно разрешённое задание после проверки сервера.",
+                         now, ticket_id),
+                    )
+                elif maintenance_intent(str(row["request_text"] or "")) == "apt_upgrade":
                     conn.execute(
                         "UPDATE superagent_tickets SET state='blocked',latest_report=?,"
                         "attention='',next_run_epoch=0,delivered=0,updated_at=? "
@@ -487,6 +499,11 @@ class SuperAgentService:
 
     def retry(self, ticket_id: str, owner_id: str) -> dict[str, Any]:
         ticket = self.get(ticket_id, owner_id=owner_id)
+        if _rdp_explicit_task(str(ticket.get("request_text") or "")):
+            raise PermissionError(
+                "RDP нельзя автоматически повторить. Создайте новое "
+                "задание через подтверждённую Web-сессию владельца."
+            )
         legacy_question = ticket["state"] == "ready" and bool(str(ticket.get("attention") or "").strip())
         if ticket["state"] not in {"failed", "blocked", "waiting"} and not legacy_question:
             raise ValueError("Повтор доступен только для ожидающего, заблокированного или неудачного задания")
@@ -687,6 +704,34 @@ class SuperAgentService:
     def _execute(self, ticket: dict[str, Any]) -> tuple[str, str, str, list[dict[str, str]]]:
         ticket_id = str(ticket["id"])
         request = str(ticket["request_text"])
+        if _rdp_explicit_task(request):
+            # This ticket is a durable owner-reviewed RDP mandate. A generic
+            # LLM summary must NOT complete the ticket before the human can
+            # confirm the dedicated RDP launch in the existing Web panel.
+            mandate = ticket.get("mandate")
+            if not isinstance(mandate, dict):
+                try:
+                    mandate = json.loads(str(ticket.get("mandate_json") or "{}"))
+                except (TypeError, ValueError):
+                    mandate = {}
+            if (not isinstance(mandate, dict)
+                    or mandate.get("remote_authorized_at_creation") is not True):
+                return ("blocked",
+                        "RDP не разрешён при создании задания. "
+                        "Создайте новое поручение при подтверждённом входе владельца.",
+                        "", [])
+            from .module_settings import module_enabled
+            if (not module_enabled(self.storage, "superagent")
+                    or not module_enabled(self.storage, "remote-admin")):
+                return ("blocked",
+                        "Удалённое управление выключено. Включите SuperAgent "
+                        "и remote-admin, затем создайте новое RDP-задание.",
+                        "", [])
+            return ("working",
+                    "Ожидается отдельное подтверждение владельцем запуска "
+                    "нативной RDP-сессии в панели SuperAgent. "
+                    "Соединение ещё не установлено.",
+                    "", [])
         # A natural-language request to update an enrolled Debian/Ubuntu server
         # runs a typed SSH maintenance workflow, NOT an LLM-suggested shell
         # command. This path reports only actual remote receipts/verdicts.
@@ -1024,7 +1069,8 @@ class SuperAgentService:
             transient = self._transient(exc)
             # Never retry a mutation whose first attempt may have taken effect.
             retry = (transient and attempt < self.max_attempts
-                     and maintenance_intent(str(ticket.get("request_text") or "")) != "apt_upgrade")
+                     and maintenance_intent(str(ticket.get("request_text") or "")) != "apt_upgrade"
+                     and not _rdp_explicit_task(str(ticket.get("request_text") or "")))
             ended = utcnow()
             with self.storage.connection() as conn:
                 current = conn.execute(
@@ -1149,7 +1195,9 @@ def format_ticket(ticket: dict[str, Any]) -> str:
     text = f"{ticket_id}: {state_labels.get(state, state)} — {title}"
     if state == "waiting" and attention:
         text += f"\nНужен ответ: {attention}"
-    elif report and state in {"ready", "blocked", "failed"}:
+    elif report and (state in {"ready", "blocked", "failed"}
+                     or (state == "working"
+                         and _rdp_explicit_task(str(ticket.get("request_text") or "")))):
         text += f"\n{report}"
     steps = ticket.get("steps") or []
     if steps:
