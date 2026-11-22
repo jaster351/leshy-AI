@@ -303,8 +303,10 @@ def test_valid_windows_password_remains_compatible(password):
         credential_bytes("password", password), HOST
     )
     assert out.password == password
-    assert "secret" not in repr(out)
-    assert password not in repr(out)
+    # The dataclass must not show the password field in repr. A short
+    # password like "a" may coincidentally occur in a username and is not
+    # evidence of a secret being displayed.
+    assert "password=" not in repr(out)
 
 
 def test_owner_json_utf8_bom_remains_compatible():
