@@ -75,8 +75,13 @@ def _validate(
     # A Web session becoming verified later must not retroactively upgrade
     # a maintenance ticket explicitly denied at creation.
     mandate = ticket.get("mandate", {})
-    if isinstance(mandate, dict) and mandate.get("remote_authorized_at_creation") is False:
-        raise PermissionError("Удалённая операция была запрещена при создании задания")
+    # No privilege upgrade for an anonymous/old task that was verified only
+    # later; a generic task or tutorial does not authorize native RDP.
+    from .superagent import _rdp_explicit_task
+    if (not _rdp_explicit_task(request_text)
+            or not isinstance(mandate, dict)
+            or mandate.get("remote_authorized_at_creation") is not True):
+        raise PermissionError("RDP требуется явно разрешить при создании задания")
     source_hash = hashlib.sha256(
         (ticket_id + "\0" + request_text + "\0" +
          str(ticket.get("created_at", ""))).encode("utf-8")

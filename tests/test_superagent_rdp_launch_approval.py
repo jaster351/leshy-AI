@@ -31,6 +31,7 @@ class Service:
             "state": self.state, "id": ticket_id,
             "request_text": getattr(self, "request_text", "Проверь Windows RDP"),
             "created_at": "2026-11-22T10:00:00Z",
+            "mandate": {"remote_authorized_at_creation": True},
         }
 
     def start_authorized_native_rdp(self, *a, **kw):
@@ -197,3 +198,57 @@ def test_forbidden_at_creation_cannot_be_upgraded_by_new_login():
     s.get = get
     with pytest.raises(PermissionError):
         approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+
+def test_rdp_approval_fails_on_generic_owner_ticket():
+    s = Service()
+    s.request_text = "Подготовь прогноз погоды"
+    with pytest.raises(PermissionError, match="явно разрешить"):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+def test_rdp_approval_requires_creation_time_provider_identity():
+    s = Service()
+    original_get = s.get
+    def get(t, *, owner_id):
+        item = original_get(t, owner_id=owner_id)
+        item["mandate"] = {}
+        return item
+    s.get = get
+    with pytest.raises(PermissionError, match="явно разрешить"):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+def test_owner_tutorial_about_rdp_does_not_mint_credential_consent():
+    s = Service()
+    s.request_text = "Расскажи как настроить RDP на Windows"
+    with pytest.raises(PermissionError):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+def test_new_login_cannot_upgrade_explicitly_denied_rdp_ticket():
+    s = Service()
+    original_get = s.get
+    def get(t, *, owner_id):
+        item = original_get(t, owner_id=owner_id)
+        item["mandate"] = {"remote_authorized_at_creation": False}
+        return item
+    s.get = get
+    with pytest.raises(PermissionError):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+def test_approval_respects_source_creation_timestamp_change():
+    s = Service()
+    original_get = s.get
+    s.created_at = "2026-11-22T10:00:00Z"
+    def get(t, *, owner_id):
+        item = original_get(t, owner_id=owner_id)
+        item["created_at"] = s.created_at
+        return item
+    s.get = get
+    token = approvals.prepare_rdp_approval(Policy(), actor(), s, *params())["approval_token"]
+    s.created_at = "2026-11-22T11:00:00Z"
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(Policy(), actor(), s, token, *params())
