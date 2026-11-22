@@ -32,24 +32,27 @@ _RDP_REGISTRY_INIT_LOCK = threading.Lock()
 
 _RDP_REMOTE_INTENT = re.compile(
     r"(?iu)(?<!\w)(?:rdp|remote\s+desktop|терминальн\w*\s+стол|"
-    r"удал[её]нн\w*\s+(?:рабоч\w*\s+стол|экран)|"
-    r"подключ\w*\s+(?:к|через)\s+rdp)(?!\w)"
+    r"удал[её]нн\w*\s+(?:рабоч\w*\s+стол|экран))(?!\w)"
+)
+_RDP_OWNER_ACTION = re.compile(
+    r"(?iu)(?<!\w)(?:подключ\w*|откр\w*|посмотр\w*|покаж\w*|"
+    r"проверь\w*|провер\w*|зайди|управля\w*|connect|open|view|inspect|check)(?!\w)"
+)
+_RDP_NO_ACTION = re.compile(
+    r"(?iu)\b(?:не\s+(?:подключ\w*|откры\w*|открыв\w*|запуска\w*|"
+    r"управля\w*|rdp\b)|как\s+(?:подключ\w*|настро\w*|использ\w*|работа\w*)|"
+    r"что\s+такое|инструкци\w*|объясни|расскажи)\b"
 )
 
-def _rdp_explicit_task(request: str) -> bool:
-    """Detect an original mandate to connect to an RDP desktop."""
-    value = str(request or "")[:12000]
-    if not _RDP_REMOTE_INTENT.search(value):
-        return False
-    # Tutorials, questions and negative instructions aren't consent.
-    if re.search(
-        r"(?iu)\b(?:не\s+(?:подключай|подключать|запускай|открывай|rdp)|"
-        r"как\s+(?:подключиться|настроить)|"
-        r"инструкци\w*|объясни|расскажи)\b", value
-    ):
-        return False
-    return True
 
+def _rdp_explicit_task(request: str) -> bool:
+    """Only an explicit original remote-desktop action, not an RDP mention."""
+    value = str(request or "")[:12000]
+    return bool(
+        _RDP_REMOTE_INTENT.search(value)
+        and _RDP_OWNER_ACTION.search(value)
+        and not _RDP_NO_ACTION.search(value)
+    )
 
 
 _SCHEMA = """

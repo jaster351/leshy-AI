@@ -9,6 +9,8 @@ from leshy.superagent import _rdp_explicit_task
     "Открой удалённый рабочий стол на моём ПК",
     "Connect to remote desktop for read-only inspection",
     "Проверь RDP подключение к зарегистрированному компьютеру",
+    "Подключайся по RDP к моему зарегистрированному компьютеру",
+    "Inspect remote desktop and report any error",
 ])
 def test_explicit_rdp_intent(message):
     assert _rdp_explicit_task(message)
@@ -22,6 +24,12 @@ def test_explicit_rdp_intent(message):
     "Объясни RDP",
     "Не открывай удаленный рабочий стол",
     "Нужен SSH, не RDP",
+    "Не подключайся к RDP на сервере",
+    "Что такое RDP?",
+    "Покажи инструкцию по RDP подключению",
+    "RDP на Windows, помоги разобраться",
+    "Как использовать RDP?",
+    "Почему RDP не работает?",
 ])
 def test_non_authorizing_requests(message):
     assert not _rdp_explicit_task(message)
