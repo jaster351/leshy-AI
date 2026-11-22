@@ -151,15 +151,13 @@ class IntegratedTeamEvidenceTests(unittest.TestCase):
             calls.append((owner, task)) or long_context
         )
         role_context = []
-        agent._run_roles = lambda task, **kwargs: (
-            role_context.append(kwargs["shared_context"]) or [
-                report(x) for x in ROLES
-            ]
+        agent._local_role = lambda role, task, context, **kwargs: (
+            role_context.append(context) or report(role.name)
         )
         with patch("leshy.multi_agent_orchestrator.get_inference_scheduler", return_value=scheduler):
             result = agent.run("Разбери архитектуру", owner_id="owner", session_id="session")
         self.assertEqual(calls, [("owner", "Разбери архитектуру")])
-        self.assertEqual(role_context, [long_context])
+        self.assertEqual(role_context, [long_context[:MAX_CONTEXT_CHARS]] * len(ROLES))
         self.assertTrue(result["review"]["context_truncated"])
         self.assertEqual(result["review"]["state"], "partial_reports")
 
