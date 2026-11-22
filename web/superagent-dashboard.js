@@ -191,11 +191,8 @@
         ]);
         nodeSelect.replaceChildren();
         fileSelect.replaceChildren();
-        const allowed = new Set((inventory.active_grants || []).filter(
-          grant => grant.capability === 'rdp'
-        ).map(grant => grant.node_id));
-        // The node owner can also exercise RDP permission; the server's
-        // policy still rechecks enrollment and any grants on both POSTs.
+        // Only registered nodes from the owner-scoped server inventory
+        // are selectable; the server rechecks actual RDP grants on POST.
         (inventory.nodes || []).forEach(node => {
           const option = element('option', '', String(node.node_id));
           option.value = node.node_id; nodeSelect.append(option);

@@ -87,6 +87,9 @@ def prepare_rdp_approval(
     """Approve review data only; creates no socket and reads no password."""
     scope = _scope(ticket_id, node_id, service_dns_name, expected_tls_sha256, credential_file)
     _validate(policy, actor, service, scope)
+    existing_status = getattr(service, "rdp_live_status", None)
+    if callable(existing_status) and existing_status(actor, scope[0]).get("registered"):
+        raise PermissionError("Для задания уже зарегистрирована RDP-сессия; сначала Stop")
     token = secrets.token_urlsafe(32)
     key = hashlib.sha256(token.encode("ascii")).hexdigest()
     row = (

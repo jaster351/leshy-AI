@@ -125,3 +125,38 @@ def test_unknown_or_forbidden_fields_are_not_accepted_by_route():
     assert "window.confirm(text)" in ui
     assert "Пароль никогда не вводится в браузер" in ui
     assert "service.start_authorized_native_rdp(" in code
+
+
+
+def test_existing_registered_session_blocks_prepare(monkeypatch):
+    s = Service()
+    s.rdp_live_status = lambda actor, ticket: {"registered": True}
+    with pytest.raises(PermissionError, match="уже зарегистрирована"):
+        approvals.prepare_rdp_approval(Policy(), actor(), s, *params())
+
+
+def test_concurrent_consumption_admits_exactly_one_attempt():
+    from concurrent.futures import ThreadPoolExecutor
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+
+    def consume(_):
+        try:
+            approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+            return "accepted"
+        except PermissionError:
+            return "rejected"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(consume, (0, 1)))
+    assert sorted(results) == ["accepted", "rejected"]
+
+
+def test_lease_expiry_prevents_late_credential_delegation(monkeypatch):
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    callback = approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+    base = approvals.time.monotonic()
+    monkeypatch.setattr(approvals.time, "monotonic", lambda: base + 120.0)
+    with pytest.raises(PermissionError, match="истекло"):
+        callback("192.0.2.10", "rdp.example.org")
