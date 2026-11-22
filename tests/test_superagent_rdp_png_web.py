@@ -62,6 +62,9 @@ def setup(monkeypatch):
     session._lock = threading.RLock()
     session._cancel = threading.Event()
     session._channel = FakeChannel()
+    session._handshake_channel = None
+    session._native_phase = "graphics"
+    session._native_error_type = ""
     session._graphics_started = True
     session._latest_frame_update = 0
     session._last_proposal = None
