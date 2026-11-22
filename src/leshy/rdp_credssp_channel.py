@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import ipaddress
+import math
 import re
 import socket
 import ssl
@@ -748,14 +749,17 @@ def connect_verified_rdp_credssp(
     """
     if not callable(authorize):
         raise PermissionError("Verified owner authorization required")
+    if type(node_ip) is not str or not node_ip or len(node_ip) > 64:
+        raise ValueError("RDP target must be a bounded literal IP string")
     try:
         ip = str(ipaddress.ip_address(node_ip))
     except ValueError as exc:
         raise ValueError("RDP target must be a literal IP") from exc
     dns = _check_target(service_dns_name)
-    if not isinstance(enrolled_tls_sha256, str) or not _CERT_SHA256.fullmatch(enrolled_tls_sha256):
+    if type(enrolled_tls_sha256) is not str or not _CERT_SHA256.fullmatch(enrolled_tls_sha256):
         raise PermissionError("Independently enrolled RDP TLS certificate pin required")
-    if (type(timeout) not in (int, float) or not 1 <= timeout <= 30):
+    if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+            or not 1 <= timeout <= 30):
         raise ValueError("Invalid total RDP timeout")
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError("Invalid RDP TCP port")
