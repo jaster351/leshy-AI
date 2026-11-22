@@ -389,16 +389,38 @@ def test_global_superagent_shutdown_revokes_consumed_lease():
 def test_pending_approval_count_is_bounded_per_owner(monkeypatch):
     s, policy = Service(), Policy()
     monkeypatch.setattr(approvals, "_MAX_PENDING_PER_OWNER", 2)
-    for ticket in ("SA-1", "SA-2"):
-        original = params()
-        args = (ticket,) + original[1:]
-        getter = s.get
-        s.get = lambda tid, *, owner_id, _getter=getter: (
-            _getter("SA-1", owner_id=owner_id)
-            if tid in ("SA-1", "SA-2") else _getter(tid, owner_id=owner_id)
-        )
-        approvals.prepare_rdp_approval(policy, actor(), s, *args)
+    # One verified owner, three different live browser sessions. The token
+    # rotation rule is per-session, so separate sessions consume capacity.
+    for session in ("web-1", "web-2"):
+        approvals.prepare_rdp_approval(policy, actor(session), s, *params())
     with pytest.raises(PermissionError, match="лимит"):
-        approvals.prepare_rdp_approval(
-            policy, actor(), s, "SA-3", *params()[1:]
-        )
+        approvals.prepare_rdp_approval(policy, actor("web-3"), s, *params())
+
+
+def test_owner_stop_epoch_is_scoped_to_ticket(monkeypatch):
+    s, policy = Service(), Policy()
+    token = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-OTHER")
+    approvals.consume_rdp_approval(policy, actor(), s, token, *params())
+
+
+def test_ticket_stop_invalidates_most_recent_review_nonce():
+    s, policy = Service(), Policy()
+    old = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    latest = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    assert latest != old
+    assert approvals.invalidate_rdp_ticket_approvals("alice", "SA-1") == 1
+    with pytest.raises(PermissionError):
+        approvals.consume_rdp_approval(policy, actor(), s, latest, *params())
+
+
+def test_expired_stopped_ticket_epoch_allows_only_new_short_lived_consent(monkeypatch):
+    # Simulate expiry only after all already issued tokens and leases would
+    # have independently expired. A brand-new preparation is allowed.
+    s, policy = Service(), Policy()
+    approvals.invalidate_rdp_ticket_approvals("alice", "SA-1")
+    key = ("alice", "SA-1")
+    prior = approvals._TICKET_EPOCHS[key]
+    approvals._TICKET_EPOCHS[key] = (prior[0], -1.0)
+    new = approvals.prepare_rdp_approval(policy, actor(), s, *params())["approval_token"]
+    approvals.consume_rdp_approval(policy, actor(), s, new, *params())
