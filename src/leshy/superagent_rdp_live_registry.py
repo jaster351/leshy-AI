@@ -184,12 +184,22 @@ class RDPLiveRegistry:
             self._stop_reserved(key, row[1])
 
     def stop_all(self) -> None:
+        """Attempt Stop on EVERY RDP channel even if one TLS close fails."""
         with self._lock:
             items = list(self._sessions.items())
             self._closing.update(key for key, _ in items)
             self._sessions.clear()
+        first_failure: Exception | None = None
         for key, (_cookie, session) in items:
-            self._stop_reserved(key, session)
+            try:
+                self._stop_reserved(key, session)
+            except Exception as exc:
+                # Keep this key reserved until process teardown. Never
+                # let one broken channel prevent stopping other desktops.
+                if first_failure is None:
+                    first_failure = exc
+        if first_failure is not None:
+            raise first_failure
 
 
 __all__ = ["RDPLiveRegistry"]

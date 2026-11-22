@@ -282,3 +282,26 @@ def test_stop_ticket_serializes_with_new_registration():
     release.set()
     thread.join(timeout=2)
     assert not thread.is_alive()
+
+
+
+def test_stop_all_attempts_every_session_when_first_channel_close_fails():
+    class MultipleOwnerService(Service):
+        def get(self, ticket_id, *, owner_id):
+            if owner_id != "alice" or ticket_id not in {"SA-1", "SA-2"}:
+                raise PermissionError("foreign ticket")
+            return {"state": "working"}
+    controls = RDPLiveRegistry(MultipleOwnerService())
+    user = actor()
+    first, second = Session(user, "SA-1"), Session(user, "SA-2")
+    def fail_close():
+        raise OSError("first socket failed")
+    first.stop = fail_close
+    controls.register(user, "SA-1", first)
+    controls.register(user, "SA-2", second)
+    with pytest.raises(OSError):
+        controls.stop_all()
+    assert second.stopped
+    with pytest.raises(RuntimeError):
+        controls.register(user, "SA-1", Session(user, "SA-1"))
+    controls.register(user, "SA-2", Session(user, "SA-2"))
