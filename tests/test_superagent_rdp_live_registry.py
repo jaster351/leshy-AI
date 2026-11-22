@@ -396,7 +396,10 @@ def test_web_terminal_stop_state_disables_reconnecting_in_same_panel():
 
 
 def test_web_status_distinguishes_failed_native_transport_from_no_connection():
-    controls, user, session = setup()
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
     original_snapshot = session.snapshot
     def failed_snapshot():
         result = original_snapshot()
@@ -412,7 +415,10 @@ def test_web_status_distinguishes_failed_native_transport_from_no_connection():
 
 
 def test_web_status_marks_finished_graphics_without_claiming_e2e():
-    controls, user, session = setup()
+    controls = RDPLiveRegistry(Service())
+    user = actor()
+    session = Session(user)
+    controls.register(user, "SA-1", session)
     original_snapshot = session.snapshot
     def finished_snapshot():
         result = original_snapshot()
