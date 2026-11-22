@@ -158,7 +158,10 @@ def test_replaced_file_during_read_is_rejected(tmp_path, monkeypatch):
         value = read(fd, count)
         if value and not happened:
             happened.append(True)
-            os.replace(alternate, path)
+            try:
+                os.replace(alternate, path)
+            except PermissionError:
+                pytest.skip("Windows does not permit replacing an open credential file")
         return value
 
     monkeypatch.setattr(module.os, "read", swap_entry_during_read)
@@ -180,4 +183,42 @@ def test_file_size_grows_during_read_and_never_returns_secrets(tmp_path, monkeyp
         return value
     monkeypatch.setattr(module.os, "read", extend_file)
     with pytest.raises(PermissionError):
+        module.load_owner_rdp_credentials(object(), "owner", HOST, "owner.json")
+
+
+
+def test_read_error_after_partial_secret_does_not_skip_descriptor_cleanup(
+    tmp_path, monkeypatch,
+):
+    import leshy.superagent_rdp_credentials as module
+    path = tmp_path / "owner.json"
+    path.write_bytes(payload(password="a-temporary-password"))
+    monkeypatch.setattr(module, "find_credential_file", lambda *_: path)
+    real_read, real_close = module.os.read, module.os.close
+    reads, closed = [], []
+
+    def fail_after_first_chunk(fd, count):
+        reads.append(True)
+        if len(reads) == 1:
+            return real_read(fd, 1)
+        raise OSError("synthetic filesystem read failure")
+
+    def track_close(fd):
+        closed.append(True)
+        return real_close(fd)
+
+    monkeypatch.setattr(module.os, "read", fail_after_first_chunk)
+    monkeypatch.setattr(module.os, "close", track_close)
+    with pytest.raises(OSError, match="synthetic"):
+        module.load_owner_rdp_credentials(object(), "owner", HOST, "owner.json")
+    assert len(reads) == 2
+    assert len(closed) == 1
+
+
+def test_owner_secret_file_must_not_be_empty(tmp_path, monkeypatch):
+    import leshy.superagent_rdp_credentials as module
+    path = tmp_path / "owner.json"
+    path.write_bytes(b"")
+    monkeypatch.setattr(module, "find_credential_file", lambda *_: path)
+    with pytest.raises(PermissionError, match="small regular file"):
         module.load_owner_rdp_credentials(object(), "owner", HOST, "owner.json")
