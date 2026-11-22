@@ -255,7 +255,7 @@ SECURITY_INPUT_CASE_COUNT = (
     len(_BAD_FIELDS) + len(_wrong_shapes()) + len(_BAD_TLS_PINS)
     + len(_BAD_FILENAMES) + len(_BAD_DNS_NAMES)
 )
-assert SECURITY_INPUT_CASE_COUNT >= 300
+assert SECURITY_INPUT_CASE_COUNT == 405
 
 
 
@@ -336,3 +336,19 @@ def test_windows_domain_backslash_username_is_not_ambiguous():
 # boundary cases, achieved through the rejected input matrix alone.
 assert len(_BAD_FIELDS) >= 200
 assert SECURITY_INPUT_CASE_COUNT >= 300
+
+
+
+def test_security_matrix_case_counts_are_stable():
+    # An accidental refactor must not silently shrink the requested breadth.
+    assert len(_BAD_FIELDS) == 225
+    assert len(_wrong_shapes()) == 25
+    assert len(_BAD_TLS_PINS) == 74
+    assert len(_BAD_FILENAMES) == 59
+    assert len(_BAD_DNS_NAMES) == 22
+    assert SECURITY_INPUT_CASE_COUNT == 405
+    assert len(_VALID_USERNAMES) == 78
+    assert len(_VALID_DOMAINS) == 7
+    assert len(_VALID_PASSWORDS) == 13
+    # 405 invalid + 98 valid parametrized + 3 valid identity scenarios.
+    assert SECURITY_INPUT_CASE_COUNT + len(_VALID_USERNAMES) + len(_VALID_DOMAINS) + len(_VALID_PASSWORDS) + 3 == 506
