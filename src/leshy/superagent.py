@@ -315,8 +315,13 @@ class SuperAgentService:
     def stop(self) -> None:
         self._stop.set()
         registry = getattr(self, "_rdp_live_registry", None)
-        if registry is not None:
-            registry.stop_all()
+        try:
+            if registry is not None:
+                registry.stop_all()
+        except Exception as exc:
+            # Continue shutting down the service and releasing its lease;
+            # the registry keeps any failed RDP Stop reserved (fail closed).
+            problem("superagent_rdp_shutdown_failed", type(exc).__name__)
         self._wake.set()
         thread = self._thread
         if thread and thread.is_alive() and thread is not threading.current_thread():
