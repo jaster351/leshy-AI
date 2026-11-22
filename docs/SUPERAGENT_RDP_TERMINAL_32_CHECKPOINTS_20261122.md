@@ -1,7 +1,7 @@
 # SuperAgent native RDP: terminal-phase and Web race hardening
 
 Stack: PR #376 → #375 → #374 → #373 → #372 → #371 → #370 and earlier RDP prerequisites.
-This is a coordinated batch of **32 implementation and regression checkpoints**, not 32 separately benchmarked or released features.
+This is a coordinated batch of **35 implementation and regression checkpoints**, not 32 separately benchmarked or released features.
 
 ## Native RDP and cognitive boundary
 1. Reject late native PNG callbacks after a recorded TLS/NLA/MCS failure.
@@ -40,6 +40,11 @@ This is a coordinated batch of **32 implementation and regression checkpoints**,
 30. Revoke RDP pixels immediately when the browser tab becomes hidden.
 31. Prevent new frame or status requests in hidden tabs, and discard an in-flight hidden response.
 32. Remove visibility event listeners on close, Stop or detached panel.
+
+## Internal native-entry guardrails
+33. Reject a new local RDP cognitive worker after failure, finish or Stop.
+34. Refuse attaching a new pinned RDP handshake after a terminal phase.
+35. Refuse restarting native graphics after failure, finish or Stop.
 
 ## Evidence and constraints
 - Native source, all new regression source files and Web JS were read back from GitHub.
