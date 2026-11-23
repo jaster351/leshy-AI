@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 from typing import Any, Iterable
+from .thread_continuity import is_elliptical_followup
 
 
 @dataclass(frozen=True)
@@ -140,10 +141,13 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
     if any(cue in text for cue in _PERSONAL):
         return ConversationMode("personal", "personal_intent")
 
+    # Materialize once: callers may pass reverse iterators. The same
+    # owner-scoped history must be available for both mode and follow-up.
+    history_rows = list(rows)
     # History is bounded and same-session only; if recent user conversation
     # moved to unrelated topics, do not inherit support/work routing forever.
     previous: list[str] = []
-    for row in list(rows)[:14]:
+    for row in history_rows[:14]:
         role, content = _role_text(row)
         old = _norm(content)
         if role != "user" or not old or old == text:
@@ -151,9 +155,11 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
         previous.append(old)
         if len(previous) >= 3:
             break
-    if not previous:
+    if not previous and not is_elliptical_followup(message):
         return ConversationMode("personal", "default")
-    latest = previous[0]
+    # A root task may be older than the small 14-row recent window.
+    # The bounded owner-session scan below must still inspect it.
+    latest = previous[0] if previous else ""
     if any(marker in latest for marker in _PERSONAL) and not _is_work_content(latest):
         return ConversationMode("personal", "prior_personal")
 
@@ -166,6 +172,21 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
             if not _edit(old):
                 break
 
+    # The LLM still resolves the actual referent. Routing only inherits
+    # the last substantive same-session MODE, not the task content.
+    # A series of 100 brief continuations must not erase the mode.
+    if is_elliptical_followup(message):
+        for row in history_rows[:80]:
+            role, content = _role_text(row)
+            if role != "user" or _norm(content) == text:
+                continue
+            old = _norm(content)
+            if is_elliptical_followup(content):
+                continue
+            if _is_work_content(old):
+                return ConversationMode("work", "technical_elliptical_followup")
+            # A new personal/support topic is a hard boundary.
+            return ConversationMode("personal", "last_substantive_topic")
     # Short status/continuation messages can follow several technical turns.
     # A casual topic change stops inheriting that context.
     if len(text) <= 400 and any(cue in text for cue in _CONTINUATION):
@@ -177,14 +198,30 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
     return ConversationMode("personal", "default")
 
 
-def conversation_rows_for_mode(rows: Iterable[Any], kind: str) -> list[Any]:
+def conversation_rows_for_mode(rows: Iterable[Any], kind: str, *, 
+                               preserve_task_anchor: bool = False) -> list[Any]:
     """Keep only the most recent contiguous block of this mode for LLM chat.
 
     Never send an earlier customer ticket to an unrelated personal exchange.
     History is already filtered by session owner in the storage layer.
     Return rows in the original newest-first order.
     """
-    source = list(rows)[:24]
+    received = list(rows)
+    source = received[:24]
+    has_recent_topic = any(
+        _role_text(row)[0] == "user"
+        and not is_elliptical_followup(_role_text(row)[1])
+        and len(_role_text(row)[1].strip()) >= 12
+        for row in source
+    )
+    if preserve_task_anchor and not has_recent_topic and len(received) > 24:
+        # Keep only the most recent older topic when the immediate tail
+        # contains nothing but short references. Never leak other subjects.
+        for candidate in received[24:]:
+            role, content = _role_text(candidate)
+            if role == "user" and not is_elliptical_followup(content):
+                source.append(candidate)
+                break
     older: list[Any] = []
     block: list[Any] = []
     active = ""
