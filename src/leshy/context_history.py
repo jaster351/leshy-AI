@@ -45,9 +45,11 @@ def load_session_context(conn, session_id: str, current_message: str, settings) 
 
     boundary = min(int(row["id"]) for row in recent)
     ids = {int(row["id"]) for row in recent}
-    terms = _key_terms(current_message)
-    initial_question = bool(_INITIAL_TOPIC.search(str(current_message)))
     continuation = is_elliptical_followup(current_message)
+    # Pointers like "Дальше" are not topical search terms. Matching old
+    # copies of that same word floods the model with irrelevant history.
+    terms = () if continuation else _key_terms(current_message)
+    initial_question = bool(_INITIAL_TOPIC.search(str(current_message)))
     if not terms and not initial_question and not continuation:
         return recent
 

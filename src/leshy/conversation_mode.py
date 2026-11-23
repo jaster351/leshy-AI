@@ -203,9 +203,15 @@ def conversation_rows_for_mode(rows: Iterable[Any], kind: str, *,
     """
     received = list(rows)
     source = received[:24]
-    if preserve_task_anchor and len(received) > 24:
-        # Context retrieval adds at most one latest substantive old user
-        # anchor for an elliptical follow-up. Do not expose unrelated matches.
+    has_recent_topic = any(
+        _role_text(row)[0] == "user"
+        and not is_elliptical_followup(_role_text(row)[1])
+        and len(_role_text(row)[1].strip()) >= 12
+        for row in source
+    )
+    if preserve_task_anchor and not has_recent_topic and len(received) > 24:
+        # Keep only the most recent older topic when the immediate tail
+        # contains nothing but short references. Never leak other subjects.
         for candidate in received[24:]:
             role, content = _role_text(candidate)
             if role == "user" and not is_elliptical_followup(content):
