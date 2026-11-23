@@ -28,6 +28,9 @@ from .source_reading import read_supplied_source, supplied_public_url
 from .fact_recheck import is_factual_challenge, recent_user_source, recheck_instruction, grounded_release_from_context, source_dispute_requires_review, source_dispute_instruction, source_dispute_fallback
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
 from .context_history import load_session_context
+from .thread_continuity import (
+    is_elliptical_followup, continuation_llm_instruction, compact_restored_task,
+)
 
 
 def _local_learning_question(message: str) -> bool:
@@ -270,6 +273,8 @@ class RealtimeChatManager:
                     "Не обещай точную длительность, если текст короче.",
                 ))
         context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
+        if is_elliptical_followup(message):
+            context.append(ChatMessage("system", continuation_llm_instruction()))
         mode = resolve_conversation_mode(message, rows)
         interaction_instruction = mode_instruction(mode.kind)
         if interaction_instruction:
@@ -402,8 +407,14 @@ class RealtimeChatManager:
                 " При нехватке сведений честно обозначь неопределённость.",
             ))
 
-        isolated_rows = conversation_rows_for_mode(rows, mode.kind)
+        isolated_rows = conversation_rows_for_mode(
+            rows, mode.kind,
+            preserve_task_anchor=is_elliptical_followup(message),
+        )
         history = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
+        restored = compact_restored_task(isolated_rows, message)
+        if restored and history:
+            history.insert(len(history) - 1, ChatMessage("user", restored))
         if source_links:
             context.append(ChatMessage(
                 "system",
@@ -489,11 +500,17 @@ class RealtimeChatManager:
                         (session_id, owner_id),
                     ).fetchone()
                     if owner_session is not None:
-                        history = conn.execute(
-                            "SELECT role,content FROM messages WHERE session_id=? "
-                            "ORDER BY id DESC LIMIT 14",
-                            (session_id,),
-                        ).fetchall()
+                        context_settings = getattr(self.app, "context_settings", None)
+                        if context_settings is not None and is_elliptical_followup(message):
+                            history = load_session_context(
+                                conn, session_id, message, context_settings,
+                            )
+                        else:
+                            history = conn.execute(
+                                "SELECT role,content FROM messages WHERE session_id=? "
+                                "ORDER BY id DESC LIMIT 14",
+                                (session_id,),
+                            ).fetchall()
                         mode = resolve_conversation_mode(message, history)
             except Exception:
                 pass

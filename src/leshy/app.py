@@ -47,6 +47,9 @@ from .fact_recheck import is_factual_challenge, recent_user_source, recheck_inst
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
 from .context_settings import ContextSettingsStore
 from .context_history import load_session_context
+from .thread_continuity import (
+    is_elliptical_followup, continuation_llm_instruction, compact_restored_task,
+)
 from .semantic_recall import SemanticDialogueRecall
 
 
@@ -518,6 +521,10 @@ class LeshyApp:
                 "или об устаревших шаблонах. Напиши готовый текст локально.",
             )
         context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
+        if is_elliptical_followup(message):
+            # No magic answer or action trigger: context selection is
+            # deterministic, but reasoning still happens inside the LLM.
+            context.append(ChatMessage("system", continuation_llm_instruction()))
         # Every ordinary message reaches the LLM. Data from legacy factual/
         # memory tools is added as evidence, never returned as a canned answer.
         from .conversation_tool_evidence import conversation_tool_evidence
@@ -706,8 +713,16 @@ class LeshyApp:
                 "достаточно локальных подтверждённых данных.",
             ))
 
-        isolated_rows = conversation_rows_for_mode(rows, mode.kind)
+        isolated_rows = conversation_rows_for_mode(
+            rows, mode.kind,
+            preserve_task_anchor=is_elliptical_followup(message),
+        )
         history_messages = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
+        restored = compact_restored_task(isolated_rows, message)
+        if restored and history_messages:
+            # Position just before the newest user request so n_ctx trimming
+            # cannot silently erase the original task after many short turns.
+            history_messages.insert(len(history_messages) - 1, ChatMessage("user", restored))
         messages = context + history_messages
         grounded_fact = grounded_release_from_context(message, rows, messages, sources, app=self)
         if grounded_fact:
