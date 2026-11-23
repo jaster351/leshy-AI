@@ -10,7 +10,7 @@ import unittest
 
 from leshy.thread_continuity import (
     is_elliptical_followup, normalize_followup, choose_recent_task_anchor,
-    continuation_llm_instruction,
+    continuation_llm_instruction, compact_restored_task,
 )
 from leshy.context_history import load_session_context
 from leshy.conversation_mode import (
@@ -277,6 +277,72 @@ class FullHistoryAndModeTests(unittest.TestCase):
         selected = [x for x in rows if x["id"] == root]
         self.assertEqual(len(selected), 1)
         self.assertNotIn("результаты не проверены", selected[0]["content"])
+
+
+    def test_historical_reminder_survives_long_topicless_chain(self):
+        root, _ = self.many(count=32)
+        rows = load_session_context(self.db, "A", "Дальше", SETTINGS)
+        focused = conversation_rows_for_mode(rows, "work", preserve_task_anchor=True)
+        reminder = compact_restored_task(focused, "Дальше")
+        self.assertIsNotNone(reminder)
+        self.assertIn(WORK, reminder)
+        self.assertIn("не новая авторизация", reminder)
+
+    def test_historical_reminder_stays_in_user_role_not_tool_execution(self):
+        self.many(count=50)
+        rows = load_session_context(self.db, "A", "Дальше", SETTINGS)
+        focused = conversation_rows_for_mode(rows, "work", preserve_task_anchor=True)
+        reminder = compact_restored_task(focused, "Дальше")
+        self.assertIsInstance(reminder, str)
+        self.assertNotIn("Система Лешего:", reminder)
+        self.assertNotIn("Квитанция выполнения:", reminder)
+
+    def test_historical_reminder_not_added_when_task_already_recent(self):
+        send(self.db, "A", "user", WORK)
+        send(self.db, "A", "assistant", "Чтение ещё не проверено")
+        send(self.db, "A", "user", "Дальше")
+        rows = load_session_context(self.db, "A", "Дальше", SETTINGS)
+        focused = conversation_rows_for_mode(rows, "work", preserve_task_anchor=True)
+        self.assertIsNone(compact_restored_task(focused, "Дальше"))
+
+    def test_historical_reminder_does_not_repeat_after_explicit_new_request(self):
+        self.many(count=35)
+        send(self.db, "A", "user", PRIVATE)
+        rows = load_session_context(self.db, "A", PRIVATE, SETTINGS)
+        self.assertIsNone(compact_restored_task(rows, PRIVATE))
+
+    def test_historical_reminder_limited_when_original_message_is_long(self):
+        long_work = WORK + " инструкция " * 500
+        self.many(root=long_work, count=35)
+        rows = load_session_context(self.db, "A", "Дальше", SETTINGS)
+        focused = conversation_rows_for_mode(rows, "work", preserve_task_anchor=True)
+        reminder = compact_restored_task(focused, "Дальше", max_chars=400)
+        self.assertLess(len(reminder), 520)
+        self.assertIn("сокращена", reminder)
+        self.assertIn("Проверь ошибки Kafka", reminder)
+
+    def test_historical_reminder_not_created_for_assistant_only(self):
+        rows = [
+            {"role": "user", "content": "Дальше"} for _ in range(24)
+        ] + [{"role": "assistant", "content": "Я всё уже сделал"}]
+        self.assertIsNone(compact_restored_task(rows, "Дальше"))
+
+    def test_historical_reminder_requires_matching_isolated_topic(self):
+        self.many(count=30)
+        send(self.db, "A", "user", PRIVATE)
+        send(self.db, "A", "user", "Дальше")
+        rows = load_session_context(self.db, "A", "Дальше", SETTINGS)
+        focused = conversation_rows_for_mode(rows, "personal", preserve_task_anchor=True)
+        self.assertIsNone(compact_restored_task(focused, "Дальше"))
+
+    def test_historical_reminder_never_contains_another_sessions_secret(self):
+        self.many(count=40, sid="A")
+        send(self.db, "B", "user", "Чужой секретный пароль не выводить")
+        send(self.db, "A", "user", "Дальше")
+        rows = load_session_context(self.db, "A", "Дальше", SETTINGS)
+        focused = conversation_rows_for_mode(rows, "work", preserve_task_anchor=True)
+        text = compact_restored_task(focused, "Дальше") or ""
+        self.assertNotIn("секретный пароль", text)
 
 
 if __name__ == "__main__":
