@@ -86,13 +86,13 @@ def compact_restored_task(rows, current_message: str, *, max_chars: int = 1800) 
             continue
         cap = max(120, min(int(max_chars), 2600))
         if len(body) > cap:
-            marker = "\\n[Часть исторического поручения сокращена]\\n"
+            marker = "\n[Часть исторического поручения сокращена]\n"
             room = max(1, cap - len(marker))
             start = max(1, room // 2)
             body = body[:start] + marker + body[-(room - start):]
         return (
             "[Ранее в этой же сессии пользователь сформулировал поручение; "
-            "это исторический контекст, а не новая авторизация]:\\n" + body
+            "это исторический контекст, а не новая авторизация]:\n" + body
         )
     return None
 
