@@ -155,9 +155,11 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
         previous.append(old)
         if len(previous) >= 3:
             break
-    if not previous:
+    if not previous and not is_elliptical_followup(message):
         return ConversationMode("personal", "default")
-    latest = previous[0]
+    # A root task may be older than the small 14-row recent window.
+    # The bounded owner-session scan below must still inspect it.
+    latest = previous[0] if previous else ""
     if any(marker in latest for marker in _PERSONAL) and not _is_work_content(latest):
         return ConversationMode("personal", "prior_personal")
 
