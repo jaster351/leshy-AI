@@ -141,10 +141,13 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
     if any(cue in text for cue in _PERSONAL):
         return ConversationMode("personal", "personal_intent")
 
+    # Materialize once: callers may pass reverse iterators. The same
+    # owner-scoped history must be available for both mode and follow-up.
+    history_rows = list(rows)
     # History is bounded and same-session only; if recent user conversation
     # moved to unrelated topics, do not inherit support/work routing forever.
     previous: list[str] = []
-    for row in list(rows)[:14]:
+    for row in history_rows[:14]:
         role, content = _role_text(row)
         old = _norm(content)
         if role != "user" or not old or old == text:
@@ -171,7 +174,7 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
     # the last substantive same-session MODE, not the task content.
     # A series of 100 brief continuations must not erase the mode.
     if is_elliptical_followup(message):
-        for row in list(rows)[:80]:
+        for row in history_rows[:80]:
             role, content = _role_text(row)
             if role != "user" or _norm(content) == text:
                 continue
