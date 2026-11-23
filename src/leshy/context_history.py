@@ -68,7 +68,9 @@ def load_session_context(conn, session_id: str, current_message: str, settings) 
         args = (session_id, boundary)
 
     found = []
-    for row in conn.execute(query, args):
+    # No word-matching scan for standalone pointers such as "Дальше".
+    # A separate bounded anchor lookup handles them below.
+    for row in (conn.execute(query, args) if terms else ()):
         content = str(row["content"]).casefold()
         score = sum(int(term in content) for term in terms)
         if score and (len(terms) >= 2 or len(terms[0]) >= 5):
