@@ -17,7 +17,7 @@ _SHORT = frozenset({
     "давай дальше", "продолжай работу", "продолжи работу",
     "а потом", "ещё", "еще", "go on", "continue", "next",
 })
-_SPACE = re.compile(r"\\s+")
+_SPACE = re.compile(r"\s+")
 
 
 def normalize_followup(value: str) -> str:
