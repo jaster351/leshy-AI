@@ -154,6 +154,9 @@ class IntegratedTeamEvidenceTests(unittest.TestCase):
         agent._local_role = lambda role, task, context, **kwargs: (
             role_context.append(context) or report(role.name)
         )
+        # _agent() stubs _run_roles for synthesis-only tests; use the real
+        # coordinator to actually test the one-context-per-role contract.
+        agent._run_roles = MultiAgentOrchestrator._run_roles.__get__(agent)
         with patch("leshy.multi_agent_orchestrator.get_inference_scheduler", return_value=scheduler):
             result = agent.run("Разбери архитектуру", owner_id="owner", session_id="session")
         self.assertEqual(calls, [("owner", "Разбери архитектуру")])
