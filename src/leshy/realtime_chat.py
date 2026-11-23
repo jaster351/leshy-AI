@@ -28,7 +28,9 @@ from .source_reading import read_supplied_source, supplied_public_url
 from .fact_recheck import is_factual_challenge, recent_user_source, recheck_instruction, grounded_release_from_context, source_dispute_requires_review, source_dispute_instruction, source_dispute_fallback
 from .contextual_web_query import contextual_search_query, relevant_url_search_results
 from .context_history import load_session_context
-from .thread_continuity import is_elliptical_followup, continuation_llm_instruction
+from .thread_continuity import (
+    is_elliptical_followup, continuation_llm_instruction, compact_restored_task,
+)
 
 
 def _local_learning_question(message: str) -> bool:
@@ -410,6 +412,9 @@ class RealtimeChatManager:
             preserve_task_anchor=is_elliptical_followup(message),
         )
         history = [ChatMessage(str(row["role"]), str(row["content"])) for row in reversed(isolated_rows)]
+        restored = compact_restored_task(isolated_rows, message)
+        if restored and history:
+            history.insert(len(history) - 1, ChatMessage("user", restored))
         if source_links:
             context.append(ChatMessage(
                 "system",
