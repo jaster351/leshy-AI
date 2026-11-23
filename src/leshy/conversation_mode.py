@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 from typing import Any, Iterable
+from .thread_continuity import is_elliptical_followup
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,21 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
             if not _edit(old):
                 break
 
+    # The LLM still resolves the actual referent. Routing only inherits
+    # the last substantive same-session MODE, not the task content.
+    # A series of 100 brief continuations must not erase the mode.
+    if is_elliptical_followup(message):
+        for row in list(rows)[:80]:
+            role, content = _role_text(row)
+            if role != "user" or _norm(content) == text:
+                continue
+            old = _norm(content)
+            if is_elliptical_followup(content):
+                continue
+            if _is_work_content(old):
+                return ConversationMode("work", "technical_elliptical_followup")
+            # A new personal/support topic is a hard boundary.
+            return ConversationMode("personal", "last_substantive_topic")
     # Short status/continuation messages can follow several technical turns.
     # A casual topic change stops inheriting that context.
     if len(text) <= 400 and any(cue in text for cue in _CONTINUATION):
@@ -177,14 +193,24 @@ def resolve_conversation_mode(message: str, rows: Iterable[Any] = ()) -> Convers
     return ConversationMode("personal", "default")
 
 
-def conversation_rows_for_mode(rows: Iterable[Any], kind: str) -> list[Any]:
+def conversation_rows_for_mode(rows: Iterable[Any], kind: str, *, 
+                               preserve_task_anchor: bool = False) -> list[Any]:
     """Keep only the most recent contiguous block of this mode for LLM chat.
 
     Never send an earlier customer ticket to an unrelated personal exchange.
     History is already filtered by session owner in the storage layer.
     Return rows in the original newest-first order.
     """
-    source = list(rows)[:24]
+    received = list(rows)
+    source = received[:24]
+    if preserve_task_anchor and len(received) > 24:
+        # Context retrieval adds at most one latest substantive old user
+        # anchor for an elliptical follow-up. Do not expose unrelated matches.
+        for candidate in received[24:]:
+            role, content = _role_text(candidate)
+            if role == "user" and not is_elliptical_followup(content):
+                source.append(candidate)
+                break
     older: list[Any] = []
     block: list[Any] = []
     active = ""

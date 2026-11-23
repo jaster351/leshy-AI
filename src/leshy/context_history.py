@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from .thread_continuity import is_elliptical_followup, choose_recent_task_anchor
 
 _TOKEN = re.compile(r"[A-Za-zА-Яа-яЁё0-9]{3,}", re.UNICODE)
 _INITIAL_TOPIC = re.compile(
@@ -46,7 +47,8 @@ def load_session_context(conn, session_id: str, current_message: str, settings) 
     ids = {int(row["id"]) for row in recent}
     terms = _key_terms(current_message)
     initial_question = bool(_INITIAL_TOPIC.search(str(current_message)))
-    if not terms and not initial_question:
+    continuation = is_elliptical_followup(current_message)
+    if not terms and not initial_question and not continuation:
         return recent
 
     # В автоматическом режиме ищем по недавнему прошлому; в режиме
@@ -76,6 +78,26 @@ def load_session_context(conn, session_id: str, current_message: str, settings) 
         if int(row["id"]) not in ids:
             older.append(row)
             ids.add(int(row["id"]))
+
+    if continuation:
+        # Many consecutive "Дальше" messages can push the original request
+        # outside the 24-message tail. Restore only the latest substantive
+        # owner-scoped user turn; never promote assistant text to evidence.
+        recent_substance = any(
+            str(row["role"]) == "user"
+            and str(row["content"]).strip() != str(current_message).strip()
+            and not is_elliptical_followup(str(row["content"]))
+            and len(str(row["content"]).strip()) >= 12
+            for row in recent
+        )
+        if not recent_substance:
+            anchor = choose_recent_task_anchor(
+                conn, session_id, boundary,
+                scan_limit=5000 if unlimited else 600,
+            )
+            if anchor is not None and int(anchor["id"]) not in ids:
+                older.append(anchor)
+                ids.add(int(anchor["id"]))
 
     if initial_question:
         # «Ответь на мой первоначальный вопрос» должно восстанавливать
