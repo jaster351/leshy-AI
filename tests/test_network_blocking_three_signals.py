@@ -94,12 +94,12 @@ class ThreeSignalBlockingTests(unittest.TestCase):
         self.assertNotEqual(result.signals_met, 3)
 
     def test_legacy_score_not_a_three_signal_verdict(self):
-        self.assertIn("не подтверждена", _compact_answer({
+        self.assertIn("Не удалось однозначно", _compact_answer({
             "target": TARGET, "tspu_probability": 99,
             "blocking_attribution": "unconfirmed",
         }))
 
-    def test_three_signal_summary_reports_port_and_node_count(self):
+    def test_incomplete_legacy_metadata_does_not_claim_confirmed_blocking(self):
         metadata = {
             "target": TARGET,
             "blocking_attribution": "confirmed_three_signals",
@@ -111,10 +111,9 @@ class ThreeSignalBlockingTests(unittest.TestCase):
             "chebur_probe": {"observations": [{"verdicts": ["tspu_block"]}]},
         }
         text = _compact_answer(metadata)
-        self.assertIn("3/3", text)
-        self.assertIn("TCP/22", text)
-        self.assertIn("1 timeout из 2", text)
-        self.assertIn("tspu_block", text)
+        self.assertIn("Не удалось однозначно", text)
+        self.assertIn("SSH/22: частично: Россия", text)
+        self.assertNotIn("Обнаружена блокировка на уровне ТСПУ.", text)
 
     def test_chebur_done_requires_response_count_parsing(self):
         state = {"observations": [], "online_probes": 0}
