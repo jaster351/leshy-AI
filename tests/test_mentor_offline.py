@@ -1,4 +1,5 @@
 """Регрессии локального учебного цикла при сбоях транспорта."""
+import ssl
 import tempfile
 import threading
 import unittest
@@ -92,3 +93,11 @@ class MentorOfflineTests(unittest.TestCase):
         for status in (408, 429, 500, 502, 503, 504):
             self.assertTrue(is_transient_transport_error(
                 error.HTTPError("https://api.github.com", status, "", None, None)))
+
+    def test_tls_error_is_not_transient(self):
+        self.assertFalse(is_transient_transport_error(error.URLError(ssl.SSLCertVerificationError("bad certificate"))))
+
+    def test_wrong_private_repository_rejected(self):
+        with self.assertRaises(PermissionError):
+            self.runner(lambda *args: {"private": True, "id": 1, "full_name": "other/repo"}).cycle(self.config)
+        self.assertFalse((self.root / (self.rid + ".question.json")).exists())
