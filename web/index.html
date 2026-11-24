@@ -91,11 +91,11 @@
     <section class="pane" id="pane-tasks">
       <h2 class="section-title">Задачи</h2><div class="section-subtitle">Локальные задачи Лешего и пользователя.</div>
       <div class="card hidden" id="mentorQualityCard" style="margin:12px 0">
-        <h3>AI-mentor · Качество ответов относительно ChatGPT</h3>
+        <h3>AI-mentor · Качество ответов наставнику</h3>
         <div id="mentorQualityStatus" class="hint" role="status">Подтверждённых сравнений пока нет</div>
-        <svg id="mentorQualityChart" viewBox="0 0 620 240" role="img" aria-label="График относительного качества ответов" style="width:100%;max-height:280px;color:inherit"></svg>
+        <svg id="mentorQualityChart" viewBox="0 0 620 240" role="img" aria-label="График качества ответов наставнику" style="width:100%;max-height:280px;color:inherit"></svg>
         <div id="mentorQualityDetail" class="hint"></div>
-        <div class="hint">100% — результат модели сравнения на тех же заданиях. Выше 100% возможно. Это оценка контрольных заданий, не общий уровень интеллекта.</div>
+        <div class="hint">100% — все критерии наставника выполнены. Сравнение с ChatGPT показывается отдельно, если оценены оба ответа. Это результат контрольных заданий, не общий уровень интеллекта.</div>
       </div>
       <div class="card"><div class="task-form"><input class="field" id="taskTitle" placeholder="Название задачи"><select class="field" id="taskPriority"><option value="0">Обычная</option><option value="5">Высокая</option><option value="10">Критичная</option><option value="-5">Низкая</option></select><textarea class="field" id="taskDetails" placeholder="Описание"></textarea><button class="button create" id="taskCreate">Добавить задачу</button></div></div>
       <div class="toolbar" style="margin-top:12px"><select class="field" id="taskFilter"><option value="all">Все</option><option value="open">Открытые</option><option value="in_progress">В работе</option><option value="done">Готовые</option><option value="cancelled">Отменённые</option></select><button class="button small" id="tasksRefresh">Обновить</button></div><div class="list" id="taskList"></div>
@@ -244,24 +244,23 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     qualityCard.classList.remove('hidden');
     qualityChart.replaceChildren();
     qualityDetail.textContent='';
-    const rows=(Array.isArray(data.quality_history)?data.quality_history:[]).filter(p=>Number.isFinite(p.relative_percent)&&p.relative_percent>=0);
+    const rows=(Array.isArray(data.quality_history)?data.quality_history:[]).filter(p=>Number.isFinite(p.leshy_percent)&&p.leshy_percent>=0&&p.leshy_percent<=100);
     if(!rows.length){qualityStatus.textContent='Подтверждённых сравнений пока нет';return;}
     const last=rows[rows.length-1];
-    const key=p=>JSON.stringify([p.benchmark_id,p.rubric_id,p.reference_model]);
+    const key=p=>JSON.stringify([p.benchmark_id,p.rubric_id]);
     const series=rows.filter(p=>key(p)===key(last));
     const fmt=n=>Number(n).toLocaleString('ru-RU',{maximumFractionDigits:2})+'%';
-    qualityStatus.textContent='Леший: '+fmt(last.relative_percent)+' от результата '+last.reference_model+' · '+last.questions+' заданий';
+    qualityStatus.textContent='Качество ответов Лешего наставнику: '+fmt(last.leshy_percent)+' · '+last.questions+' заданий';
     const before=series[series.length-2];
-    qualityDetail.textContent='Абсолютные баллы: Леший '+fmt(last.leshy_percent)+', модель сравнения '+fmt(last.reference_percent)+' · '+last.timestamp+' · '+last.benchmark_id+' / '+last.rubric_id+' · '+(last.model==='not_confirmed'?'Модель Лешего не подтверждена':last.model)+' · '+(before?'Изменение: '+(last.relative_percent-before.relative_percent>=0?'+':'')+(last.relative_percent-before.relative_percent).toFixed(2)+' п. п.':'Первое сопоставимое измерение');
+    qualityDetail.textContent=last.timestamp+' · '+last.benchmark_id+' / '+last.rubric_id+' · '+(last.model==='not_confirmed'?'Модель Лешего не подтверждена':last.model)+' · '+(before?'Изменение: '+(last.leshy_percent-before.leshy_percent>=0?'+':'')+(last.leshy_percent-before.leshy_percent).toFixed(2)+' п. п.':'Первое сопоставимое измерение')+(Number.isFinite(last.relative_percent)?' · Относительно '+last.reference_model+': '+fmt(last.relative_percent):' · Сравнение с ChatGPT пока не измерено');
     const ns='http://www.w3.org/2000/svg';
     function node(tag,attrs,value,parent=qualityChart){const e=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,String(v));if(value!==undefined)e.textContent=value;parent.appendChild(e);return e;}
-    const max=Math.max(100,...series.map(p=>p.relative_percent));
-    const top=Math.ceil(max/25)*25;
+    const top=100;
     const x=i=>series.length===1?330:48+i*550/(series.length-1);
     const y=v=>210-185*v/top;
-    for(const v of [...new Set([0,100,top])]){node('line',{x1:48,y1:y(v),x2:598,y2:y(v),stroke:'currentColor','stroke-opacity':v===100?.65:.2,'stroke-dasharray':v===100?'5 4':'none'});node('text',{x:43,y:y(v)+4,fill:'currentColor','font-size':11,'text-anchor':'end'},fmt(v));}
-    if(series.length>1)node('polyline',{points:series.map((p,i)=>x(i)+','+y(p.relative_percent)).join(' '),fill:'none',stroke:'#35a889','stroke-width':3});
-    for(const [i,p] of series.entries()){const dot=node('circle',{cx:x(i),cy:y(p.relative_percent),r:series.length>60?2:4,fill:'#35a889'});node('title',{},p.timestamp+' · '+fmt(p.relative_percent)+' · '+p.questions+' заданий',dot);}
+    for(const v of [0,25,50,75,100]){node('line',{x1:48,y1:y(v),x2:598,y2:y(v),stroke:'currentColor','stroke-opacity':v===100?.65:.2,'stroke-dasharray':v===100?'5 4':'none'});node('text',{x:43,y:y(v)+4,fill:'currentColor','font-size':11,'text-anchor':'end'},fmt(v));}
+    if(series.length>1)node('polyline',{points:series.map((p,i)=>x(i)+','+y(p.leshy_percent)).join(' '),fill:'none',stroke:'#35a889','stroke-width':3});
+    for(const [i,p] of series.entries()){const dot=node('circle',{cx:x(i),cy:y(p.leshy_percent),r:series.length>60?2:4,fill:'#35a889'});node('title',{},p.timestamp+' · '+fmt(p.leshy_percent)+' · '+p.questions+' заданий',dot);}
     node('text',{x:48,y:232,fill:'currentColor','font-size':11},series[0].timestamp.slice(0,16).replace('T',' '));
     if(series.length>1)node('text',{x:598,y:232,fill:'currentColor','font-size':11,'text-anchor':'end'},last.timestamp.slice(0,16).replace('T',' '));
   }
