@@ -72,7 +72,24 @@
   }
 
   async function copyText(text){
-    try{await navigator.clipboard.writeText(text);toast('Скопировано')}catch(_e){toast('Буфер обмена недоступен')}
+    const value=String(text||'');
+    try{
+      if(navigator.clipboard&&typeof navigator.clipboard.writeText==='function'){
+        await navigator.clipboard.writeText(value);toast('Скопировано');return;
+      }
+    }catch(_e){}
+    // Clipboard API is unavailable on many plain HTTP LAN installations.
+    const field=document.createElement('textarea');
+    const previous=document.activeElement;
+    field.value=value;field.readOnly=true;
+    field.style.cssText='position:fixed;left:0;top:0;opacity:0;pointer-events:none;';
+    document.body.appendChild(field);
+    try{
+      field.focus();field.select();field.setSelectionRange(0,value.length);
+      if(!document.execCommand('copy'))throw new Error('copy unavailable');
+      toast('Скопировано');
+    }catch(_e){toast('Буфер обмена недоступен')}
+    finally{field.remove();if(previous&&typeof previous.focus==='function')previous.focus()}
   }
 
   async function shareText(text){
