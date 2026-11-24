@@ -29,7 +29,8 @@ def _runtime_html(settings, owner_id: str = "") -> bytes:
         else:
             html_text = html_text.replace("</body>", bootstrap + "\n</body>")
     for marker in ('<script src="/owner-identity-panel.js"></script>',
-                   '<script src="/telegram-proxy-panel.js"></script>'):
+                   '<script src="/telegram-proxy-panel.js"></script>',
+                   '<script src="/qa-mentor-panel.js"></script>'):
         if marker not in html_text:
             html_text = html_text.replace("</body>", marker + "\n</body>")
     return html_text.encode("utf-8")
