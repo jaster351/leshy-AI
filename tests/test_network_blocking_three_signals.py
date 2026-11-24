@@ -113,7 +113,7 @@ class ThreeSignalBlockingTests(unittest.TestCase):
         text = _compact_answer(metadata)
         self.assertIn("Не удалось однозначно", text)
         self.assertIn("SSH/22: частично: Россия", text)
-        self.assertNotIn("Обнаружена блокировка на уровне ТСПУ.", text)
+        self.assertNotIn("Обнаружена блокировка на стороне ТСПУ.", text)
 
     def test_chebur_done_requires_response_count_parsing(self):
         state = {"observations": [], "online_probes": 0}
