@@ -101,3 +101,15 @@ class MentorOfflineTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.runner(lambda *args: {"private": True, "id": 1, "full_name": "other/repo"}).cycle(self.config)
         self.assertFalse((self.root / (self.rid + ".question.json")).exists())
+
+    def test_revoked_local_token_stops_offline_cycle(self):
+        def gh(*args):
+            self.revoked = True
+            raise error.URLError("offline")
+        self.revoked = False
+        def token(*args):
+            return "" if self.revoked else "synthetic-credential"
+        with patch("leshy.mentor_batch.load_secret", side_effect=token):
+            with self.assertRaises(PermissionError):
+                self.runner(gh).cycle(self.config)
+        self.assertFalse((self.root / (self.rid + ".json")).exists())
