@@ -91,7 +91,7 @@ function Assert-MentorAppAccess([string]$Token) {
         if ($property.Name -notin @('contents','metadata') -and $property.Value -notin @('none','')) { throw 'Обнаружены лишние разрешения GitHub App' }
     }
     $repos = Get-MentorAccessJson ('/user/installations/' + $installation.id + '/repositories?per_page=100') $Token
-    if ($repos.total_count -ne 1 -or @($repos.repositories).Count -ne 1 -or $repos.repositories[0].full_name -ine 'jaster351/AI-mentor' -or $repos.repositories[0].private -ne $true) { throw 'Разрешён только закрытый AI-mentor' }
+    if ($repos.total_count -ne 1 -or @($repos.repositories).Count -ne 1 -or $repos.repositories[0].full_name -ine 'jaster351/AI-mentor' -or [string]$repos.repositories[0].id -cne '1470788052' -or $repos.repositories[0].private -ne $true) { throw 'Разрешён только закрытый AI-mentor' }
 }
 function Save-MentorOAuthGrant([string]$Root,[string]$ClientId,$Grant) {
     if ($Grant.token_type -ine 'bearer' -or $Grant.access_token -cnotmatch '^ghu_[A-Za-z0-9_]+$' -or $Grant.refresh_token -cnotmatch '^ghr_[A-Za-z0-9_]+$' -or $Grant.expires_in -lt 60 -or $Grant.expires_in -gt 28800 -or $Grant.refresh_token_expires_in -le 0) { throw 'Недопустимый ответ GitHub App' }
