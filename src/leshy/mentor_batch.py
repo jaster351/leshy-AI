@@ -138,8 +138,16 @@ class BatchRunner:
             raise PermissionError("Только приватный репозиторий")
         if not self.still_allowed(config):
             return "disabled"
-        item = gh("/contents/batches/" + batch_id + ".json?ref=main")
-        raw = base64.b64decode(item["content"])
+        if repo.casefold() == "jaster351/ai-mentor" and os.name == "nt":
+            # Штатный обновлятор доставляет только проверенные данные, без сборки кода.
+            delivery = self.root / (batch_id + ".delivery.json")
+            if not delivery.exists() and not delivery.is_symlink():
+                return "waiting_delivery"
+            raw = read_bytes(delivery)
+        else:
+            # Обратная совместимость для других разрешённых платформ и репозиториев.
+            item = gh("/contents/batches/" + batch_id + ".json?ref=main")
+            raw = base64.b64decode(item["content"])
         questions = validate_batch(raw, batch_id, expected)
         if any(token in question for _, question in questions):
             raise PermissionError("Вопрос содержит секрет")
