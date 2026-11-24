@@ -61,3 +61,24 @@ class MentorDeliveryViewTests(unittest.TestCase):
         self.assertEqual(row["status"], "received")
         self.assertTrue(row["received_at"])
         self.assertTrue(row["delivered_at"])
+
+
+    def test_delivery_authorization_status_is_independent(self):
+        (self.root / "delivery-status.json").write_bytes(encode({
+            "schema": "ai-mentor.delivery-status.v1",
+            "status": "authorization_required",
+            "timestamp": "2026-11-25T00:00:00+00:00",
+        }))
+        result = mentor_snapshot(self.brain)
+        self.assertEqual(result["delivery_status"], "authorization_required")
+        self.assertEqual(result["delivery_checked_at"], "2026-11-25T00:00:00+00:00")
+        self.assertEqual(result["delivered_count"], 0)
+
+    def test_unknown_transport_status_not_reported_as_success(self):
+        (self.root / "delivery-status.json").write_bytes(encode({
+            "schema": "ai-mentor.delivery-status.v1",
+            "status": "unexpected",
+        }))
+        result = mentor_snapshot(self.brain)
+        self.assertEqual(result["delivery_status"], "not_confirmed")
+        self.assertEqual(result["delivery_checked_at"], "")
