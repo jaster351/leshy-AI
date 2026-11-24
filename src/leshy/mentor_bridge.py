@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import threading
 import time
@@ -137,6 +138,24 @@ class MentorBridge:
                     if self.stop_event.wait(15):
                         return
                     continue
+                # Не расходуем часовой учебный интервал, пока обновлятор
+                # не доставил пакет. Проверка только локальных метаданных.
+                if os.name == "nt" and config.get("repository") == "jaster351/AI-mentor":
+                    batch_id = config.get("batch_id")
+                    expected = config.get("batch_sha256")
+                    ready = (isinstance(batch_id, str)
+                             and re.fullmatch(r"mentor-batch-[a-z0-9-]{1,55}", batch_id)
+                             and isinstance(expected, str)
+                             and re.fullmatch(r"[0-9a-f]{64}", expected))
+                    if ready:
+                        delivery = self.root / (batch_id + ".delivery.json")
+                        ready = delivery.is_file() and not delivery.is_symlink()
+                    if not ready:
+                        atomic(self.root / "status.json",
+                               {"status": "waiting_delivery", "timestamp": now()})
+                        if self.stop_event.wait(15):
+                            return
+                        continue
                 clock = self.root / "cycle.json"
                 if clock.exists():
                     last = read_obj(clock).get("started_epoch")
