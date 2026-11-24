@@ -441,6 +441,9 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     threading.Thread(target=_delayed_recovery, args=(app, telegram, 30.0), name="leshy-startup-recovery", daemon=True).start()
     bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0"); bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
     server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
+    from .mentor_bridge import MentorBridge
+    mentor_bridge = MentorBridge(settings.brain_dir, server.server_address[1])
+    mentor_bridge.start()
     print(f"Леший {app.status()['version']} запущен: http://{bind_host}:{bind_port}")
     console_stop = threading.Event()
     console_thread = threading.Thread(
@@ -453,6 +456,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     finally:
         console_stop.set()
         console_thread.join(timeout=1.0)
+        mentor_bridge.stop()
         telegram.stop()
         app.stop_background()
         server.server_close()
