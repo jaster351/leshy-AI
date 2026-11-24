@@ -33,7 +33,7 @@
     <div class="tagline">Я здесь. Слушаю. Думаю. Помогаю.</div>
     <div class="composer"><textarea id="heroInput" placeholder="Напишите Лешему…"></textarea><button id="heroSend">Отправить</button></div>
     <div class="quick">
-      <button data-start="chat">Чат</button><button data-start="search">Поиск</button><button data-start="knowledge">Знания</button><button data-start="learning">Обучение</button><button data-start="tasks">Задачи Лешего</button><button data-start="settings">Настройки</button><button disabled>Голос · в разработке</button>
+      <button data-start="chat">Чат</button><button data-start="search">Поиск</button><button data-start="knowledge">Знания</button><button data-start="learning">Обучение</button><button data-start="tasks">Задачи</button><button data-start="settings">Настройки</button><button disabled>Голос · в разработке</button>
     </div>
   </div>
 </section>
@@ -45,7 +45,7 @@
       <button class="nav-item" data-section="chat">Чат</button>
       <button class="nav-item" data-section="knowledge">Знания</button>
       <button class="nav-item" data-section="learning">Обучение</button>
-      <button class="nav-item" data-section="tasks">Задачи Лешего</button>
+      <button class="nav-item" data-section="tasks">Задачи</button>
       <button class="nav-item" data-section="tools">Инструменты</button>
       <button class="nav-item" data-section="system">Система</button>
       <button class="nav-item" data-section="settings">Настройки</button>
@@ -89,7 +89,7 @@
     </section>
 
     <section class="pane" id="pane-tasks">
-      <h2 class="section-title">Задачи Лешего</h2><div class="section-subtitle">Локальные задачи Лешего и пользователя.</div>
+      <h2 class="section-title">Задачи</h2><div class="section-subtitle">Локальные задачи Лешего и пользователя.</div>
       <div class="card hidden" id="mentorQualityCard" style="margin:12px 0">
         <h3>LiveMentor · Качество ответов наставнику</h3>
         <div class="grid" style="margin:12px 0">
@@ -141,7 +141,7 @@ const contextKey='leshy.ui.context';
 let sessionId=localStorage.getItem(sessionKey)||'';
 let uiMode=localStorage.getItem(uiModeKey)||(sessionId?'full':'minimal');
 let currentSection=localStorage.getItem(uiSectionKey)||'overview';
-const titles={overview:['Обзор','состояние Лешего'],chat:['Чат','диалог и история'],knowledge:['Знания','база знаний и память'],learning:['Обучение','управляемое самообучение'],tasks:['Задачи Лешего','локальный план работы'],superagent:['SuperAgent','автономные задачи и взаимодействие'],tools:['Инструменты','подключённые возможности'],system:['Система','runtime и ускорители'],settings:['Настройки','модель, Telegram и данные'],logs:['Логи','диагностика']};
+const titles={overview:['Обзор','состояние Лешего'],chat:['Чат','диалог и история'],knowledge:['Знания','база знаний и память'],learning:['Обучение','управляемое самообучение'],tasks:['Задачи','локальный план работы'],superagent:['SuperAgent','автономные задачи и взаимодействие'],tools:['Инструменты','подключённые возможности'],system:['Система','runtime и ускорители'],settings:['Настройки','модель, Telegram и данные'],logs:['Логи','диагностика']};
 async function api(path,options={}){const res=await fetch(path,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const data=await res.json().catch(()=>({error:'Некорректный ответ сервера'}));if(!res.ok)throw new Error(data.error||('HTTP '+res.status));return data}
 function engage(save=true){document.body.classList.add('full');uiMode='full';if(save)localStorage.setItem(uiModeKey,'full')}
 function setMinimal(){document.body.classList.remove('full');uiMode='minimal';localStorage.setItem(uiModeKey,'minimal');$('contextPanel').classList.remove('open')}
