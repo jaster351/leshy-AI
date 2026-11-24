@@ -10,13 +10,13 @@ _MAX_FILE = 128 * 1024
 _MAX_ITEMS = 50
 
 
-def _read(path: Path) -> dict:
+def _read(path: Path, limit=_MAX_FILE) -> dict:
     try:
         if path.is_symlink() or not path.is_file():
             return {}
         with path.open("rb") as handle:
-            raw = handle.read(_MAX_FILE + 1)
-        if len(raw) > _MAX_FILE:
+            raw = handle.read(limit + 1)
+        if len(raw) > limit:
             return {}
         obj = json.loads(raw)
         return obj if isinstance(obj, dict) else {}
@@ -91,7 +91,7 @@ def mentor_snapshot(brain_dir: Path) -> dict:
             raw = handle.read(256 * 1024 + 1)
         if len(raw) <= 256 * 1024:
             export_hash = sha256(raw).hexdigest()
-    load = _read(root / "load-policy.json")
+    load = _read(root / "load-policy.json", 1024 * 1024)
     last = load.get("last_review") or {}
     if not isinstance(last, dict):
         last = {}
@@ -102,13 +102,18 @@ def mentor_snapshot(brain_dir: Path) -> dict:
         for point in history[-168:]:
             if not isinstance(point, dict):
                 continue
-            nums = ("leshy_percent", "reference_percent", "relative_percent")
-            if any(type(point.get(k)) not in (int, float) or not 0 <= point[k] <= (100 if k != "relative_percent" else 153600) for k in nums):
+            value = point.get("leshy_percent")
+            if type(value) not in (int, float) or not 0 <= value <= 100:
                 continue
-            if type(point.get("questions")) is not int or not 1 <= point["questions"] <= 256 or point["reference_percent"] <= 0:
+            if type(point.get("questions")) is not int or not 1 <= point["questions"] <= 256:
                 continue
-            points.append({**{k: _text(point.get(k)) for k in ("batch_id", "timestamp", "benchmark_id", "rubric_id", "reference_model", "model", "revision")},
-                           **{k: point[k] for k in (*nums, "questions")}})
+            row = {**{k: _text(point.get(k)) for k in ("batch_id", "timestamp", "benchmark_id", "rubric_id", "model", "revision")},
+                   "leshy_percent": value, "questions": point["questions"]}
+            base, relative = point.get("reference_percent"), point.get("relative_percent")
+            if (type(base) in (int, float) and 0 < base <= 100
+                    and type(relative) in (int, float) and 0 <= relative <= 153600):
+                row.update(reference_model=_text(point.get("reference_model")), reference_percent=base, relative_percent=relative)
+            points.append(row)
     return {"configured": bool(config), "enabled": config.get("enabled") is True,
             "training_quota": load.get("quota", 30),
             "load_decision": _text(load.get("decision")),
