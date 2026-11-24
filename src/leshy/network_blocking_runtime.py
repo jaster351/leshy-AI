@@ -119,7 +119,7 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
         answer,
     )) or "подтверждена по 3/3 признакам" in answer
     concise = bool(re.match(
-        r"^\S+ — (?:обнаружена блокировка на уровне ТСПУ\.|блокировка не обнаружена\.|не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)",
+        r"^\S+ (?:обнаружена блокировка на уровне ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)",
         answer,
     ))
     if not (legacy or modern or confirmed or concise):
@@ -129,7 +129,7 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
 
 def _explain_saved_diagnostic(previous: str) -> str:
     """Replay previous measured results or explicitly admit missing evidence."""
-    if re.match(r"^\S+ — (?:обнаружена блокировка на уровне ТСПУ\.|блокировка не обнаружена\.|не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)", previous):
+    if re.match(r"^\S+ (?:обнаружена блокировка на уровне ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)", previous):
         return (
             previous + "\n\nПолный протокол не сохранён в тексте предыдущего ответа. "
             "Для подробного подтверждения нужна новая проверка; результаты не будут выдумываться."
@@ -203,7 +203,7 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
         and metadata.get("proof_verification") == "verified"
         and str(metadata.get("proof_record_id") or "").strip()
     ):
-        return f"{target} — обнаружена блокировка на уровне ТСПУ."
+        return f"{target} обнаружена блокировка на уровне ТСПУ."
     ports = metadata.get("port_verdicts") or {}
     if not isinstance(ports, dict):
         return None
@@ -212,7 +212,7 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
     # The current main's tspu_detected state alone can mean geographic
     # asymmetry without attribution. Require the completed independent probe.
     if any(row.get("state") == "tspu_detected" for row in rows) and _probe_reports_tspu(metadata):
-        return f"{target} — обнаружена блокировка на уровне ТСПУ."
+        return f"{target} обнаружена блокировка на уровне ТСПУ."
     # Keep the existing two-port negative scope; a missing port or a positive
     # independent probe is an uncertainty, not a clean negative.
     if (
@@ -220,7 +220,7 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
         and all(row.get("state") == "not_blocked" for row in rows)
         and not _probe_reports_tspu(metadata)
     ):
-        return f"{target} — блокировка не обнаружена."
+        return f"{target} Блокировка не обнаружена."
     return None
 
 
@@ -230,7 +230,7 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
         return decisive
 
     target = str(metadata.get("target") or "").strip()
-    lines = [f"{target} — не удалось однозначно определить наличие блокировки на уровне ТСПУ."]
+    lines = [f"{target} Не удалось однозначно определить наличие блокировки на уровне ТСПУ."]
     ports = metadata.get("port_verdicts") or {}
     if isinstance(ports, dict) and ports:
         for port, label in (("22", "SSH/22"), ("3389", "RDP/3389")):
