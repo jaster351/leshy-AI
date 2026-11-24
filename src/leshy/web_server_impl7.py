@@ -92,6 +92,7 @@ def _runtime_html(settings) -> bytes:
         '<script src="/sidebar-session-actions.js"></script>',
         '<script src="/chat-layout-status.js"></script>',
         '<script src="/module-settings-panel.js"></script>',
+        '<script src="/mentor-panel.js"></script>',
     ):
         if marker not in html_text:
             html_text = html_text.replace("</body>", marker + "\n</body>")
@@ -198,6 +199,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 "/sidebar-session-actions.js",
                 "/chat-layout-status.js",
                 "/module-settings-panel.js",
+                "/mentor-panel.js",
             }:
                 name = parsed.path.rsplit("/", 1)[-1]
                 try:
