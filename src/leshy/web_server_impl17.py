@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+from datetime import datetime, timezone
+import os
+import time
 from urllib.parse import parse_qs, urlsplit
 
 from . import web_server_impl16 as previous
@@ -17,6 +20,7 @@ from .module_settings import module_enabled
 from .superagent_ssh_pty import InteractiveSSHBroker
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
 from .android_voice_access import authorized_owner as _android_voice_owner, conversational_answer as _android_voice_answer
+from .qa_mentor_journal import QAMentorJournal
 
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
@@ -25,6 +29,7 @@ _PREVIOUS_MAKE_HANDLER = previous.make_handler
 def make_handler(app, telegram, settings, model_catalog):
     Parent = _PREVIOUS_MAKE_HANDLER(app, telegram, settings, model_catalog)
     identity = app.owner_identity
+    qa_journal = QAMentorJournal(settings.brain_dir)
     login = getattr(app, "telegram_browser_login", None)
     if not isinstance(login, TelegramBrowserLogin):
         login = TelegramBrowserLogin(identity)
@@ -103,6 +108,25 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_GET(self):
             route = urlsplit(self.path).path
+            if route == "/qa-mentor-panel.js":
+                try:
+                    return self._send_asset("qa-mentor-panel.js", "application/javascript; charset=utf-8")
+                except FileNotFoundError:
+                    return self._identity_json(HTTPStatus.NOT_FOUND, {"error": "Панель QA не найдена"})
+            if route == "/v1/qa-mentor/events":
+                if not self._research_owner_allowed():
+                    return
+                try:
+                    args = parse_qs(urlsplit(self.path).query)
+                    limit = int((args.get("limit") or ["80"])[0])
+                    payload = qa_journal.list_recent(limit=limit)
+                    payload["chat_enabled"] = bool(os.getenv("LESHY_API_TOKEN", "").strip()) and (
+                        os.getenv("LESHY_QA_MENTOR_ENABLED", "1").strip().lower()
+                        in {"1", "true", "yes", "on"}
+                    )
+                    return self._identity_json(HTTPStatus.OK, payload)
+                except (ValueError, TypeError):
+                    return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": "Неверный limit"})
             if route == "/v1/android/voice/status":
                 owner = _android_voice_owner(settings.brain_dir, self.headers.get("Authorization", ""))
                 if not owner:
@@ -189,6 +213,67 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             route = urlsplit(self.path).path
+            if route == "/v1/qa-mentor/chat":
+                # Only a real authenticated machine client may act as QA/mentor.
+                # No guest browser, arbitrary owner_id or Creator privilege.
+                enabled = os.getenv("LESHY_QA_MENTOR_ENABLED", "1").strip().lower() in {
+                    "1", "true", "yes", "on",
+                }
+                if not enabled:
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "QA-канал отключён"})
+                if not self._token_authenticated():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется API token"})
+                if "application/json" not in str(self.headers.get("Content-Type") or "").lower():
+                    return self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "Требуется JSON"})
+                try:
+                    payload = self._body()
+                    role = str(payload.get("role") or "").strip().lower()
+                    message = str(payload.get("message") or "").strip()
+                    session = str(payload.get("session_id") or "").strip()
+                    if role not in {"qa", "mentor"}:
+                        raise ValueError("Роль должна быть qa или mentor")
+                    if not message or len(message) > 1600:
+                        raise ValueError("Сообщение должно содержать от 1 до 1600 символов")
+                    if len(session) > 120:
+                        raise ValueError("Слишком длинный session_id")
+                except (ValueError, TypeError, UnicodeError) as exc:
+                    return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)[:160]})
+                started_at = datetime.now(timezone.utc).isoformat()
+                start = time.perf_counter()
+                try:
+                    # Independent QA owner namespace. Never use Creator identity
+                    # or other users' long-term memory.
+                    result = app.chat(
+                        message, owner_id="qa-mentor:isolated", session_id=session or None,
+                    )
+                    answer = str(result.get("answer") or "")
+                    response_session = str(result.get("session_id") or "")
+                    row = qa_journal.append_real_exchange(
+                        role=role, request=message, answer=answer,
+                        session_id=response_session, started_at=started_at,
+                        elapsed_ms=int((time.perf_counter() - start) * 1000),
+                        status="answered",
+                    )
+                    return self._json(HTTPStatus.OK, {
+                        "answer": answer, "session_id": response_session,
+                        "record_id": row["id"], "source": "live_api",
+                    })
+                except Exception as exc:
+                    # Do not pretend that failed inference was a valid reply.
+                    try:
+                        qa_journal.append_real_exchange(
+                            role=role, request=message, session_id=session,
+                            started_at=started_at,
+                            elapsed_ms=int((time.perf_counter() - start) * 1000),
+                            status="error", error_type=type(exc).__name__,
+                        )
+                    except OSError:
+                        pass
+                    problem("qa_mentor_live_chat_failed", type(exc).__name__)
+                    return self._json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                        "error": "Леший не дал подтверждённого ответа",
+                        "status": "error",
+                    })
             if route == "/v1/android/voice/chat":
                 owner = _android_voice_owner(settings.brain_dir, self.headers.get("Authorization", ""))
                 if not owner:
