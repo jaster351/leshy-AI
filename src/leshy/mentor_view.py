@@ -96,10 +96,24 @@ def mentor_snapshot(brain_dir: Path) -> dict:
     if not isinstance(last, dict):
         last = {}
     investigations = load.get("investigation") or []
+    history = load.get("quality_history", [])
+    points = []
+    if isinstance(history, list):
+        for point in history[-168:]:
+            if not isinstance(point, dict):
+                continue
+            nums = ("leshy_percent", "reference_percent", "relative_percent")
+            if any(type(point.get(k)) not in (int, float) or not 0 <= point[k] <= (100 if k != "relative_percent" else 153600) for k in nums):
+                continue
+            if type(point.get("questions")) is not int or not 1 <= point["questions"] <= 256 or point["reference_percent"] <= 0:
+                continue
+            points.append({**{k: _text(point.get(k)) for k in ("batch_id", "timestamp", "benchmark_id", "rubric_id", "reference_model", "model", "revision")},
+                           **{k: point[k] for k in (*nums, "questions")}})
     return {"configured": bool(config), "enabled": config.get("enabled") is True,
             "training_quota": load.get("quota", 30),
             "load_decision": _text(load.get("decision")),
             "review_quality": last.get("quality"),
+            "quality_history": points,
             "reviewed_questions": last.get("reviewed"),
             "open_investigations": len(investigations) if isinstance(investigations, list) else 0,
             "export_sha256": export_hash,
