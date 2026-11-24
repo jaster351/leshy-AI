@@ -236,21 +236,18 @@ _COUNTRY_NAMES = {
 }
 
 
-def _connection_status(rows: Any) -> str:
+def _connection_status(rows: Any) -> str | None:
     statuses = [row.get("status") for row in (rows or []) if isinstance(row, dict)]
-    if not statuses:
-        return "нет данных"
     successes = statuses.count("connected")
     failures = sum(value in ("timeout", "refused") for value in statuses)
     if successes and failures:
         return "частично"
-    if successes == len(statuses):
-        return "есть"
-    if failures == len(statuses):
-        return "нет"
     if successes:
-        return "есть (не все проверки завершены)"
-    return "нет данных"
+        return "есть"
+    if statuses and failures == len(statuses):
+        return "нет"
+    # A failed or unfinished measurement is neither a positive nor a negative.
+    return None
 
 
 def _port_rows(rows: Any, port: int) -> list[dict]:
@@ -264,14 +261,16 @@ def _checkhost_countries(rows: list[dict]) -> str:
         code = str(row.get("country_code") or "").strip().lower()
         country = _COUNTRY_NAMES.get(code) or str(row.get("country") or code.upper()).strip()
         if not country:
-            country = "Страна не определена"
+            continue
         groups.setdefault(country, []).append(row)
     categories: dict[str, list[str]] = {}
     for country, observations in sorted(groups.items()):
-        categories.setdefault(_connection_status(observations), []).append(country)
-    order = ("есть", "нет", "частично", "есть (не все проверки завершены)", "нет данных")
+        status = _connection_status(observations)
+        if status is not None:
+            categories.setdefault(status, []).append(country)
+    order = ("есть", "нет", "частично")
     return "; ".join(f"{status}: {', '.join(categories[status])}"
-                     for status in order if status in categories) or "нет данных"
+                     for status in order if status in categories)
 
 
 def _compact_answer(metadata: dict[str, Any]) -> str:
@@ -291,20 +290,29 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
         local_status = (
             _connection_status(local)
             if ru_confirmed and pair.get("status") != "local_region_unverified"
-            else "нет данных (выход из РФ не подтверждён)"
+            else None
         )
-        ru.append(f"{label}: {local_status}")
-        eu.append(f"{label}: {_connection_status(pair.get('eu_attempts'))}")
-        checkhost.append(f"  {label}: {_checkhost_countries(_port_rows(metadata.get('remote'), port))}")
-    lines.append("Подключение из России: " + "; ".join(ru) + ".")
-    lines.append("Подключение с Вашего EU-сервера: " + "; ".join(eu) + ".")
-    lines.append("Check-Host:")
-    lines.extend(checkhost)
+        eu_status = _connection_status(pair.get("eu_attempts"))
+        countries = _checkhost_countries(_port_rows(metadata.get("remote"), port))
+        if local_status is not None:
+            ru.append(f"{label}: {local_status}")
+        if eu_status is not None:
+            eu.append(f"{label}: {eu_status}")
+        if countries:
+            checkhost.append(f"  {label}: {countries}")
+    if ru:
+        lines.append("Подключение из России: " + "; ".join(ru) + ".")
+    if eu:
+        lines.append("Подключение с Вашего EU-сервера: " + "; ".join(eu) + ".")
+    if checkhost:
+        lines.append("Check-Host:")
+        lines.extend(checkhost)
 
     chebur = metadata.get("cheburcheck") or {}
     listed = chebur.get("blocked") if chebur.get("ok") else None
-    registry = "есть" if listed is True else "нет" if listed is False else "нет данных"
-    lines.append(f"Cheburcheck (блокировка в реестре): {registry}.")
+    if listed is True or listed is False:
+        registry = "есть" if listed else "нет"
+        lines.append(f"Cheburcheck (блокировка в реестре): {registry}.")
     probe = metadata.get("chebur_probe") or {}
     if _probe_reports_tspu(metadata):
         probe_status = "обнаружены признаки ТСПУ"
@@ -314,15 +322,16 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
     ):
         probe_status = "признаки ТСПУ не обнаружены в полученных ответах"
     else:
-        probe_status = "нет однозначного результата"
-    lines.append(f"Cheburcheck Probe: {probe_status}.")
+        probe_status = None
+    if probe_status is not None:
+        lines.append(f"Cheburcheck Probe: {probe_status}.")
     if _probe_reports_tspu(metadata) and all(
         isinstance((metadata.get("port_verdicts") or {}).get(key), dict)
         and metadata["port_verdicts"][key].get("state") == "not_blocked"
         for key in ("22", "3389")
     ):
         lines.append("Результаты проверок противоречат друг другу.")
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip()
 
 
 def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
