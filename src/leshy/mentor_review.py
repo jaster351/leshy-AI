@@ -163,14 +163,17 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
     history = state.get("quality_history", [])
     if not isinstance(history, list) or any(not isinstance(x, dict) for x in history):
         raise ValueError("Повреждена история сравнений")
-    # Только полный сопоставимый пакет с ненулевой базой даёт процент.
-    if full and comparable and reference_count == len(rows) and reference_total > 0:
+    # Основная метрика — оценка реальных ответов Лешего наставнику.
+    # Эталонный прогон необязателен; частичный пакет не является точкой динамики.
+    if full and comparable:
         point = {"batch_id": bid, "timestamp": summary["timestamp"],
                  "benchmark_id": benchmark, "rubric_id": rubric,
-                 "reference_model": reference_model, "model": model, "revision": revision,
-                 "questions": len(rows), "leshy_percent": round(100 * quality, 2),
-                 "reference_percent": round(100 * reference_total / (6 * len(rows)), 2),
-                 "relative_percent": round(100 * total / reference_total, 2)}
+                 "model": model, "revision": revision,
+                 "questions": len(rows), "leshy_percent": round(100 * quality, 2)}
+        if reference_count == len(rows) and reference_total > 0:
+            point.update(reference_model=reference_model,
+                         reference_percent=round(100 * reference_total / (6 * len(rows)), 2),
+                         relative_percent=round(100 * total / reference_total, 2))
         history = (history + [point])[-168:]
         summary["comparison"] = point
     previous = state.get("last_review") or {}
