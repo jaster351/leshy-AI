@@ -173,6 +173,10 @@ class BatchRunner:
         return (not self.stop.is_set() and current.get("enabled") is True
                 and all(current.get(k) == config.get(k) for k in keys))
 
+    @staticmethod
+    def uses_local_delivery(repo):
+        return repo.casefold() == "jaster351/ai-mentor" and os.name == "nt"
+
     def cycle(self, config):
         batch_id, expected, repo = (config.get(k) for k in
                                     ("batch_id", "batch_sha256", "repository"))
@@ -183,7 +187,7 @@ class BatchRunner:
         token = load_secret(self.root / "github_token.dat")
         if not token:
             return "not_configured"
-        local_delivery = repo.casefold() == "jaster351/ai-mentor" and os.name == "nt"
+        local_delivery = self.uses_local_delivery(repo)
         online = True
 
         def gh(path="", payload=None, method="GET"):
@@ -247,7 +251,10 @@ class BatchRunner:
         if not self.still_allowed(config):
             return "disabled"
         try:
-            load = self.receive_review(config, gh, token, allow_network=online)
+            if online:
+                load = self.receive_review(config, gh, token)
+            else:
+                load = self.receive_review(config, gh, token, allow_network=False)
         except MentorTransportUnavailable:
             online = False
             load = self.receive_review(config, gh, token, allow_network=False)
