@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import ssl
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -154,7 +155,10 @@ class MentorTransportUnavailable(RuntimeError):
 def is_transient_transport_error(exc):
     if isinstance(exc, error.HTTPError):
         return exc.code in {408, 429, 500, 502, 503, 504}
-    return isinstance(exc, (error.URLError, TimeoutError, ConnectionError))
+    if isinstance(exc, error.URLError):
+        # Ошибки доверия TLS не должны маскироваться как временная недоступность.
+        return not isinstance(exc.reason, ssl.SSLError)
+    return isinstance(exc, (TimeoutError, ConnectionError))
 
 
 class BatchRunner:
@@ -191,6 +195,8 @@ class BatchRunner:
         online = True
 
         def gh(path="", payload=None, method="GET"):
+            if not self.still_allowed(config) or load_secret(self.root / "github_token.dat") != token:
+                raise PermissionError("Локальная авторизация изменилась")
             if not online:
                 raise MentorTransportUnavailable("Нет связи с GitHub")
             try:
@@ -201,8 +207,12 @@ class BatchRunner:
                 raise
 
         try:
-            if gh().get("private") is not True:
+            remote = gh()
+            if remote.get("private") is not True:
                 raise PermissionError("Только приватный репозиторий")
+            if local_delivery and (remote.get("id") != 1470788052
+                                   or remote.get("full_name", "").casefold() != "jaster351/ai-mentor"):
+                raise PermissionError("Репозиторий наставника не совпадает")
         except MentorTransportUnavailable:
             online = False
         if not self.still_allowed(config):
