@@ -26,7 +26,9 @@ def main() -> int:
         print("NOT_RUN: требуются LESHY_BASE_URL и LESHY_API_TOKEN", file=sys.stderr)
         return 2
     parts = urlsplit(address)
-    if parts.scheme not in {"http", "https"} or not parts.netloc or parts.username or parts.password:
+    if (parts.scheme not in {"http", "https"} or not parts.netloc
+            or parts.username or parts.password or parts.path not in {"", "/"}
+            or parts.query or parts.fragment):
         print("NOT_RUN: неверный адрес LESHY_BASE_URL", file=sys.stderr)
         return 2
     if parts.scheme == "http" and parts.hostname not in {"127.0.0.1", "::1", "localhost"}:
@@ -50,8 +52,14 @@ def main() -> int:
             "Authorization": "Bearer " + token,
         },
     )
+    class RejectRedirect(request.HTTPRedirectHandler):
+        # Never forward the machine bearer credential to another origin.
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            raise error.HTTPError(req.full_url, code, "Redirect denied", headers, fp)
+
+    opener = request.build_opener(RejectRedirect)
     try:
-        with request.urlopen(req, timeout=120) as response:
+        with opener.open(req, timeout=120) as response:
             payload = json.load(response)
     except error.HTTPError as exc:
         print("FAIL: API вернул HTTP " + str(exc.code), file=sys.stderr)
