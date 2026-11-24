@@ -210,6 +210,8 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
         return None
     rows = [ports.get(key) for key in ("22", "3389")]
     rows = [row for row in rows if isinstance(row, dict)]
+    if os.environ.get("LESHY_RU_PROBE_CONFIRMED", "").strip() != "1":
+        return None
     # The current main's tspu_detected state alone can mean geographic
     # asymmetry without attribution. Require the completed independent probe.
     if any(row.get("state") == "tspu_detected" for row in rows) and _probe_reports_tspu(metadata):
@@ -220,6 +222,8 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
         len(rows) == 2
         and all(row.get("state") == "not_blocked" for row in rows)
         and not _probe_reports_tspu(metadata)
+        and not ((metadata.get("cheburcheck") or {}).get("ok")
+                 and (metadata.get("cheburcheck") or {}).get("blocked") is True)
     ):
         return f"{target} Блокировка не обнаружена."
     return None
@@ -316,9 +320,10 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
     probe = metadata.get("chebur_probe") or {}
     if _probe_reports_tspu(metadata):
         probe_status = "обнаружены признаки ТСПУ"
-    elif probe.get("ok") and probe.get("finished") and any(
-        isinstance(row, dict) and "ok" in (row.get("verdicts") or [])
-        for row in (probe.get("observations") or [])
+    elif probe.get("ok") and probe.get("finished") and (probe.get("observations") or []) and all(
+        isinstance(row, dict) and row.get("verdicts")
+        and all(value == "ok" for value in row["verdicts"])
+        for row in probe["observations"]
     ):
         probe_status = "признаки ТСПУ не обнаружены в полученных ответах"
     else:
