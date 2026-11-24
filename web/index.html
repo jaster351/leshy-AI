@@ -78,14 +78,14 @@
 
     <section class="pane" id="pane-learning">
       <h2 class="section-title">Обучение</h2><div class="section-subtitle">Управляемое самообучение из интернета с верификацией.</div>
-      <div class="grid"><div class="card"><h3>Самообучение</h3><div class="row"><span>Состояние</span><button class="switch" id="learningSwitch" aria-label="Самообучение"></button></div><input class="field" id="researchTopic" placeholder="Тема для изучения"><button class="button" style="width:100%;margin-top:8px" id="researchQueue">Добавить тему</button><div class="hint" id="learningState" style="margin-top:8px"></div></div><div class="card"><h3>Конвейер</h3><div class="muted">research → candidate → verification → trusted</div><div class="divider"></div><div class="row"><span>Candidate</span><b id="learningCandidate">0</b></div><div class="row"><span>Trusted</span><b id="learningTrusted">0</b></div></div></div>
-      <div class="grid" style="margin-top:12px"><div class="card"><h3>Очередь исследований</h3><div class="list" id="researchTasks"></div></div><div class="card"><h3>История обучения</h3><div class="list" id="learningHistory"></div></div></div>
-      <div class="card hidden" id="mentorHistoryCard" style="margin-top:12px">
+      <div class="card hidden" id="mentorHistoryCard" style="margin:12px 0">
         <div class="toolbar"><h3 style="margin:0">LiveMentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button></div>
         <div class="hint" id="mentorHistoryStatus" role="status">Проверка доступа…</div>
         <div class="hint" style="margin:8px 0">Локальная история учебных пакетов. Оценки относятся только к подтверждённым ответам. Развитие навыка требует независимой проверки.</div>
         <div class="list" id="mentorHistoryItems"></div>
       </div>
+      <div class="grid"><div class="card"><h3>Самообучение</h3><div class="row"><span>Состояние</span><button class="switch" id="learningSwitch" aria-label="Самообучение"></button></div><input class="field" id="researchTopic" placeholder="Тема для изучения"><button class="button" style="width:100%;margin-top:8px" id="researchQueue">Добавить тему</button><div class="hint" id="learningState" style="margin-top:8px"></div></div><div class="card"><h3>Конвейер</h3><div class="muted">research → candidate → verification → trusted</div><div class="divider"></div><div class="row"><span>Candidate</span><b id="learningCandidate">0</b></div><div class="row"><span>Trusted</span><b id="learningTrusted">0</b></div></div></div>
+      <div class="grid" style="margin-top:12px"><div class="card"><h3>Очередь исследований</h3><div class="list" id="researchTasks"></div></div><div class="card"><h3>История обучения</h3><div class="list" id="learningHistory"></div></div></div>
     </section>
 
     <section class="pane" id="pane-tasks">
