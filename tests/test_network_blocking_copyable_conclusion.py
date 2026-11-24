@@ -18,7 +18,7 @@ def _probe():
 def test_copyable_confirmed_statement():
     metadata = {"target": IP, "blocking_attribution": "confirmed_tspu",
                 "proof_verification": "verified", "proof_record_id": "trusted-evidence-42"}
-    assert _compact_answer(metadata) == f"{IP} обнаружена блокировка на уровне ТСПУ."
+    assert _compact_answer(metadata) == f"{IP} Обнаружена блокировка на уровне ТСПУ."
 
 
 def test_legacy_score_of_100_is_not_proof():
@@ -35,7 +35,7 @@ def test_positive_port_requires_completed_independent_probe():
     metadata = {"target": IP, "port_verdicts": _ports("tspu_detected", "insufficient")}
     assert "Не удалось однозначно" in _compact_answer(metadata)
     metadata["chebur_probe"] = _probe()
-    assert _compact_answer(metadata) == f"{IP} обнаружена блокировка на уровне ТСПУ."
+    assert _compact_answer(metadata) == f"{IP} Обнаружена блокировка на уровне ТСПУ."
 
 
 def test_negative_requires_both_ports_without_contradictory_evidence():
@@ -59,3 +59,52 @@ def test_only_conclusion_is_delivered_in_chat():
     assert sources == []
     assert result["copyable_conclusion"] == answer
     assert result["diagnostic_report"] == "Full TCP protocol"
+
+
+def test_uncertain_result_lists_actual_country_and_owned_probe_results():
+    metadata = {
+        "target": IP, "port_verdicts": _ports("insufficient", "insufficient"),
+        "eu_ssh_comparison": {"ports": {
+            "22": {"local_attempts": [{"status": "timeout"}] * 3,
+                   "eu_attempts": [{"status": "connected"}] * 3},
+            "3389": {"local_attempts": [{"status": "refused"}] * 3,
+                     "eu_attempts": [{"status": "refused"}] * 3},
+        }},
+        "remote": [
+            {"port": 22, "country_code": "ru", "status": "timeout"},
+            {"port": 22, "country_code": "de", "status": "connected"},
+            {"port": 22, "country_code": "nl", "status": "pending"},
+            {"port": 3389, "country_code": "ru", "status": "refused"},
+            {"port": 3389, "country_code": "de", "status": "error"},
+        ],
+        "cheburcheck": {"ok": True, "blocked": False},
+    }
+    with patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"}):
+        answer = _compact_answer(metadata)
+    assert "Подключение из России: SSH/22: нет; RDP/3389: нет." in answer
+    assert "Подключение с Вашего EU-сервера: SSH/22: есть; RDP/3389: нет." in answer
+    assert "SSH/22: есть: Германия; нет: Россия; нет данных: Нидерланды" in answer
+    assert "RDP/3389: нет: Россия; нет данных: Германия" in answer
+    assert "Cheburcheck (блокировка в реестре): нет." in answer
+
+
+def test_unknown_geography_and_failed_checks_are_not_negative_results():
+    metadata = {
+        "target": IP,
+        "local": [{"port": 22, "status": "connected"}],
+        "remote": [{"port": 22, "country_code": "ru", "status": "error"}],
+        "cheburcheck": {"ok": False, "blocked": False},
+    }
+    with patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "0"}):
+        answer = _compact_answer(metadata)
+    assert "выход из РФ не подтверждён" in answer
+    assert "EU-сервера: SSH/22: нет данных; RDP/3389: нет данных" in answer
+    assert "SSH/22: нет данных: Россия" in answer
+    assert "Cheburcheck (блокировка в реестре): нет данных." in answer
+
+
+def test_checkhost_mixed_country_is_not_a_binary_negative():
+    from leshy.network_blocking_runtime import _checkhost_countries
+    rows = [{"country_code": "ru", "status": "connected"},
+            {"country_code": "ru", "status": "timeout"}]
+    assert _checkhost_countries(rows) == "частично: Россия"
