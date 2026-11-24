@@ -147,6 +147,16 @@ def automatic_export_safe(raw):
         return False
 
 
+class MentorTransportUnavailable(RuntimeError):
+    """Временный сбой доставки, не отказ в авторизации."""
+
+
+def is_transient_transport_error(exc):
+    if isinstance(exc, error.HTTPError):
+        return exc.code in {408, 429, 500, 502, 503, 504}
+    return isinstance(exc, (error.URLError, TimeoutError, ConnectionError))
+
+
 class BatchRunner:
     def __init__(self, root, app, stop_event, gh_call):
         self.root = Path(root)
@@ -173,13 +183,27 @@ class BatchRunner:
         token = load_secret(self.root / "github_token.dat")
         if not token:
             return "not_configured"
+        local_delivery = repo.casefold() == "jaster351/ai-mentor" and os.name == "nt"
+        online = True
+
         def gh(path="", payload=None, method="GET"):
-            return self.gh_call(repo, token, path, payload, method)
-        if gh().get("private") is not True:
-            raise PermissionError("Только приватный репозиторий")
+            if not online:
+                raise MentorTransportUnavailable("Нет связи с GitHub")
+            try:
+                return self.gh_call(repo, token, path, payload, method)
+            except (error.URLError, TimeoutError, ConnectionError) as exc:
+                if local_delivery and is_transient_transport_error(exc):
+                    raise MentorTransportUnavailable("Временный сбой GitHub") from exc
+                raise
+
+        try:
+            if gh().get("private") is not True:
+                raise PermissionError("Только приватный репозиторий")
+        except MentorTransportUnavailable:
+            online = False
         if not self.still_allowed(config):
             return "disabled"
-        if repo.casefold() == "jaster351/ai-mentor" and os.name == "nt":
+        if local_delivery:
             # Штатный обновлятор доставляет только проверенные данные, без сборки кода.
             delivery = self.root / (batch_id + ".delivery.json")
             if not delivery.exists() and not delivery.is_symlink():
@@ -213,13 +237,20 @@ class BatchRunner:
         # Квитанция относится к проверенному и сохранённому пакету, а не к генерации ответа.
         if not self.still_allowed(config):
             return "disabled"
-        self.publish_receipt(config, gh, questions)
-        # Сначала подтверждаем публикацию ответов, затем принимаем их оценку.
-        if self.still_allowed(config):
-            self.publish(config, gh, token, questions)
+        try:
+            self.publish_receipt(config, gh, questions)
+            # Сначала подтверждаем публикацию ответов, затем принимаем их оценку.
+            if self.still_allowed(config):
+                self.publish(config, gh, token, questions)
+        except MentorTransportUnavailable:
+            online = False
         if not self.still_allowed(config):
             return "disabled"
-        load = self.receive_review(config, gh, token)
+        try:
+            load = self.receive_review(config, gh, token, allow_network=online)
+        except MentorTransportUnavailable:
+            online = False
+            load = self.receive_review(config, gh, token, allow_network=False)
         quota = load["quota"]
         deadline = time.monotonic() + 0.85 * INTERVAL
         history = []
@@ -323,10 +354,17 @@ class BatchRunner:
             atomic(self.root / "cycle-metrics.json", metrics)
         if self.still_allowed(config):
             self.prepare_export(config, questions)
-            if self.config().get("auto_publish") is True:
-                self.publish(config, gh, token, questions)
+            if online and self.config().get("auto_publish") is True:
+                try:
+                    self.publish(config, gh, token, questions)
+                except MentorTransportUnavailable:
+                    online = False
         if stop_reason in {"error", "outcome_unknown"}:
             return stop_reason
+        if not self.still_allowed(config):
+            return "disabled"
+        if not online:
+            return "waiting_connection"
         if (self.root / "export.json").exists():
             return "awaiting_review"
         return "published" if stop_reason == "batch_end" else "waiting"
@@ -384,7 +422,7 @@ class BatchRunner:
                    {"batch_id": batch_id, "batch_sha256": expected,
                     "receipt_sha256": digest(raw), "timestamp": now()})
 
-    def receive_review(self, config, gh, token):
+    def receive_review(self, config, gh, token, *, allow_network=True):
         from .mentor_review import apply_review
         current = self.config()
         approval = current.get("approved_review_sha256", "")
@@ -396,7 +434,7 @@ class BatchRunner:
                                 read_bytes=read_bytes, atomic=atomic,
                                 digest=digest, now=now, review_path=path)
 
-        if not self.still_allowed(config):
+        if not self.still_allowed(config) or not allow_network:
             return apply(dict(effective, approved_review_sha256=""))
         if not remote or not approval:
             return apply(effective)
