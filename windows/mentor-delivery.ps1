@@ -37,7 +37,17 @@ function Get-BytesSha256([byte[]]$Bytes) {
     try { return ([BitConverter]::ToString($h.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() }
     finally { $h.Dispose() }
 }
-if (-not (Test-RegularFile $configPath) -or -not (Test-RegularFile $tokenPath)) { return 'not_configured' }
+if (-not (Test-RegularFile $configPath)) { return 'not_configured' }
+foreach ($directory in @($BrainRoot, $root)) {
+    if ((Get-Item -LiteralPath $directory -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe mentor directory' }
+}
+if ((Get-Item -LiteralPath $configPath).Length -gt 65536) { throw 'Invalid local configuration size' }
+$initial = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($initial.enabled -isnot [bool] -or -not $initial.enabled -or $initial.repository -cne 'jaster351/AI-mentor') { return 'disabled' }
+. (Join-Path $PSScriptRoot 'mentor-oauth-common.ps1')
+$lock = Enter-MentorCredentialLock $root
+try { Update-MentorOAuthGrant $root } finally { $lock.Dispose() }
+if (-not (Test-RegularFile $tokenPath)) { return 'not_configured' }
 foreach ($directory in @($BrainRoot, $root)) {
     if ((Get-Item -LiteralPath $directory -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe mentor directory' }
 }
