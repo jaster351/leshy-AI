@@ -48,7 +48,7 @@ def mentor_snapshot(brain_dir: Path) -> dict:
         delivery_status = "not_confirmed"
         transport = {}
     valid_statuses = {"waiting", "awaiting_review", "published", "disabled",
-                      "error", "checking", "not_configured", "outcome_unknown", "waiting_delivery"}
+                      "error", "checking", "not_configured", "outcome_unknown", "waiting_delivery", "waiting_connection"}
     current = status.get("status")
     if current not in valid_statuses:
         current = "not_confirmed"

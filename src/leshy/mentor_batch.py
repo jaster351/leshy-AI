@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import ssl
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -147,6 +148,19 @@ def automatic_export_safe(raw):
         return False
 
 
+class MentorTransportUnavailable(RuntimeError):
+    """Временный сбой доставки, не отказ в авторизации."""
+
+
+def is_transient_transport_error(exc):
+    if isinstance(exc, error.HTTPError):
+        return exc.code in {408, 429, 500, 502, 503, 504}
+    if isinstance(exc, error.URLError):
+        # Ошибки доверия TLS не должны маскироваться как временная недоступность.
+        return not isinstance(exc.reason, ssl.SSLError)
+    return isinstance(exc, (TimeoutError, ConnectionError))
+
+
 class BatchRunner:
     def __init__(self, root, app, stop_event, gh_call):
         self.root = Path(root)
@@ -163,6 +177,10 @@ class BatchRunner:
         return (not self.stop.is_set() and current.get("enabled") is True
                 and all(current.get(k) == config.get(k) for k in keys))
 
+    @staticmethod
+    def uses_local_delivery(repo):
+        return repo.casefold() == "jaster351/ai-mentor" and os.name == "nt"
+
     def cycle(self, config):
         batch_id, expected, repo = (config.get(k) for k in
                                     ("batch_id", "batch_sha256", "repository"))
@@ -173,13 +191,37 @@ class BatchRunner:
         token = load_secret(self.root / "github_token.dat")
         if not token:
             return "not_configured"
+        local_delivery = self.uses_local_delivery(repo)
+        online = True
+
+        def cycle_allowed():
+            return (self.still_allowed(config)
+                    and load_secret(self.root / "github_token.dat") == token)
+
         def gh(path="", payload=None, method="GET"):
-            return self.gh_call(repo, token, path, payload, method)
-        if gh().get("private") is not True:
-            raise PermissionError("Только приватный репозиторий")
+            if not self.still_allowed(config) or load_secret(self.root / "github_token.dat") != token:
+                raise PermissionError("Локальная авторизация изменилась")
+            if not online:
+                raise MentorTransportUnavailable("Нет связи с GitHub")
+            try:
+                return self.gh_call(repo, token, path, payload, method)
+            except (error.URLError, TimeoutError, ConnectionError) as exc:
+                if local_delivery and is_transient_transport_error(exc):
+                    raise MentorTransportUnavailable("Временный сбой GitHub") from exc
+                raise
+
+        try:
+            remote = gh()
+            if remote.get("private") is not True:
+                raise PermissionError("Только приватный репозиторий")
+            if local_delivery and (remote.get("id") != 1470788052
+                                   or remote.get("full_name", "").casefold() != "jaster351/ai-mentor"):
+                raise PermissionError("Репозиторий наставника не совпадает")
+        except MentorTransportUnavailable:
+            online = False
         if not self.still_allowed(config):
             return "disabled"
-        if repo.casefold() == "jaster351/ai-mentor" and os.name == "nt":
+        if local_delivery:
             # Штатный обновлятор доставляет только проверенные данные, без сборки кода.
             delivery = self.root / (batch_id + ".delivery.json")
             if not delivery.exists() and not delivery.is_symlink():
@@ -213,20 +255,30 @@ class BatchRunner:
         # Квитанция относится к проверенному и сохранённому пакету, а не к генерации ответа.
         if not self.still_allowed(config):
             return "disabled"
-        self.publish_receipt(config, gh, questions)
-        # Сначала подтверждаем публикацию ответов, затем принимаем их оценку.
-        if self.still_allowed(config):
-            self.publish(config, gh, token, questions)
+        try:
+            self.publish_receipt(config, gh, questions)
+            # Сначала подтверждаем публикацию ответов, затем принимаем их оценку.
+            if self.still_allowed(config):
+                self.publish(config, gh, token, questions)
+        except MentorTransportUnavailable:
+            online = False
         if not self.still_allowed(config):
             return "disabled"
-        load = self.receive_review(config, gh, token)
+        try:
+            if online:
+                load = self.receive_review(config, gh, token)
+            else:
+                load = self.receive_review(config, gh, token, allow_network=False)
+        except MentorTransportUnavailable:
+            online = False
+            load = self.receive_review(config, gh, token, allow_network=False)
         quota = load["quota"]
         deadline = time.monotonic() + 0.85 * INTERVAL
         history = []
         completed = 0
         stop_reason = "batch_end"
         for qid, question in questions:
-            if not self.still_allowed(config) or time.monotonic() >= deadline:
+            if not cycle_allowed() or time.monotonic() >= deadline:
                 stop_reason = "disabled_or_budget"
                 break
             rid = batch_id + "-" + qid
@@ -280,7 +332,7 @@ class BatchRunner:
             try:
                 with scheduler.slot(source="ai-mentor", priority=PRIORITY_BACKGROUND,
                                     cancel_event=self.stop, timeout=0.25):
-                    if (not self.still_allowed(config)
+                    if (not cycle_allowed()
                             or self.app.conversation_activity.snapshot().get("active_conversations", 1)):
                         stop_reason = "interactive_priority_or_disabled"
                         break
@@ -321,12 +373,21 @@ class BatchRunner:
         # Do not erase the last productive capacity sample with an empty review cycle.
         if completed or not (self.root / "cycle-metrics.json").exists():
             atomic(self.root / "cycle-metrics.json", metrics)
-        if self.still_allowed(config):
+        if cycle_allowed():
             self.prepare_export(config, questions)
-            if self.config().get("auto_publish") is True:
-                self.publish(config, gh, token, questions)
+            if online and self.config().get("auto_publish") is True:
+                try:
+                    self.publish(config, gh, token, questions)
+                except MentorTransportUnavailable:
+                    online = False
         if stop_reason in {"error", "outcome_unknown"}:
             return stop_reason
+        if not self.still_allowed(config):
+            return "disabled"
+        if not cycle_allowed():
+            return "waiting"
+        if not online:
+            return "waiting_connection"
         if (self.root / "export.json").exists():
             return "awaiting_review"
         return "published" if stop_reason == "batch_end" else "waiting"
@@ -384,7 +445,7 @@ class BatchRunner:
                    {"batch_id": batch_id, "batch_sha256": expected,
                     "receipt_sha256": digest(raw), "timestamp": now()})
 
-    def receive_review(self, config, gh, token):
+    def receive_review(self, config, gh, token, *, allow_network=True):
         from .mentor_review import apply_review
         current = self.config()
         approval = current.get("approved_review_sha256", "")
@@ -396,7 +457,7 @@ class BatchRunner:
                                 read_bytes=read_bytes, atomic=atomic,
                                 digest=digest, now=now, review_path=path)
 
-        if not self.still_allowed(config):
+        if not self.still_allowed(config) or not allow_network:
             return apply(dict(effective, approved_review_sha256=""))
         if not remote or not approval:
             return apply(effective)
