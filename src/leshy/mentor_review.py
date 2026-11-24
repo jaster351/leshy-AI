@@ -20,7 +20,7 @@ INITIAL_QUOTA = 30
 MAX_PART = 256  # транспортная часть; следующие части имеют отдельные ID
 
 
-def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
+def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now, review_path=None):
     root = Path(root)
     state_path = root / "load-policy.json"
     state = read_obj(state_path) if state_path.exists() else {
@@ -42,7 +42,7 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
         return state
     if len(applied) >= 4096:
         raise ValueError("Требуется архивирование журнала оценок")
-    raw = read_bytes(root / "review.json", 256 * 1024)
+    raw = read_bytes(review_path if review_path is not None else root / "review.json", 256 * 1024)
     if digest(raw) != expected:
         raise PermissionError("Оценка не совпадает с локальным разрешением")
     obj = json.loads(raw)
