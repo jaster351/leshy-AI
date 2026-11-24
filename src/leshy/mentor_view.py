@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from datetime import datetime, timezone
+
+from .mentor_batch import read_bytes, validate_batch
 
 _ID = re.compile(r"mentor-[a-z0-9-]{1,80}")
 _MAX_FILE = 128 * 1024
@@ -58,12 +61,32 @@ def mentor_snapshot(brain_dir: Path) -> dict:
             ids.add(candidate)
         if len(ids) > 1000:
             break
+    # Доставка обновлятором видна до начала инференса, только после проверки хеша.
+    delivered = {}
+    delivery_at = ""
+    batch_id = config.get("batch_id")
+    expected = config.get("batch_sha256")
+    if (config.get("repository") == "jaster351/AI-mentor"
+            and isinstance(batch_id, str) and re.fullmatch(r"mentor-batch-[a-z0-9-]{1,55}", batch_id)
+            and isinstance(expected, str) and re.fullmatch(r"[0-9a-f]{64}", expected)):
+        delivery = root / (batch_id + ".delivery.json")
+        try:
+            pairs = validate_batch(read_bytes(delivery), batch_id, expected)
+            delivered = {batch_id + "-" + qid: question for qid, question in pairs}
+            delivery_at = datetime.fromtimestamp(delivery.stat().st_mtime, timezone.utc).isoformat()
+        except (OSError, ValueError, TypeError):
+            delivered = {}
+        ids.update(delivered)
     items = []
-    for rid in sorted(ids, reverse=True)[:_MAX_ITEMS]:
+    ordered = sorted(delivered) + sorted(ids - delivered.keys(), reverse=True)
+    for rid in ordered[:_MAX_ITEMS]:
         q = _read(root / (rid + ".question.json"))
         a = _read(root / (rid + ".json"))
         published = _read(root / (rid + ".published.json"))
         question = _text(q.get("question"), 4000) if q.get("request_id") == rid else ""
+        from_delivery = not question and rid in delivered
+        if from_delivery:
+            question = delivered[rid]
         valid_answer = a.get("request_id") == rid and a.get("status") == "answered" and a.get("source") in {"leshy_api", "leshy_model"}
         answer = _text(a.get("answer"), 12000) if valid_answer else ""
         from hashlib import sha256
@@ -72,10 +95,11 @@ def mentor_snapshot(brain_dir: Path) -> dict:
         phase = ("published" if sent else "answered" if answer else
                  "outcome_unknown" if a.get("request_id") == rid and a.get("status") == "sent"
                  else "error" if a.get("status") == "error"
-                 else "received" if question else "not_received")
+                 else "delivered" if from_delivery else "received" if question else "not_received")
         items.append({
             "request_id": rid, "status": phase, "question": question, "answer": answer,
             "received_at": _text(q.get("timestamp")),
+            "delivered_at": delivery_at if rid in delivered else "",
             "answered_at": _text(a.get("timestamp")) if answer else "",
             "published_at": _text(published.get("timestamp")) if sent else "",
             "version": _text(a.get("revision")) if answer else "",
@@ -124,4 +148,5 @@ def mentor_snapshot(brain_dir: Path) -> dict:
             "export_sha256": export_hash,
             "status": current, "last_check_at": _text(status.get("timestamp")),
             "items": items, "truncated": len(ids) > _MAX_ITEMS,
+            "delivered_count": len(delivered),
             "evaluation_status": "review_received" if last else "not_reviewed"}
