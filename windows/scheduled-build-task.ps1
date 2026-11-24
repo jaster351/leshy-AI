@@ -86,6 +86,9 @@ function Test-MentorFallbackSource {
     try {
         $currentBranch = @(& $GitExe -C $RepoRoot symbolic-ref --quiet --short HEAD 2>$null)
         if ($LASTEXITCODE -ne 0 -or $currentBranch.Count -ne 1 -or $currentBranch[0] -cne 'main') { return $false }
+        # Reject local-only commits even if the working tree is clean.
+        & $GitExe -C $RepoRoot merge-base --is-ancestor HEAD refs/remotes/origin/main 2>$null
+        if ($LASTEXITCODE -ne 0) { return $false }
         foreach ($relative in @('windows/scheduled-build-task.ps1','windows/mentor-delivery.ps1','windows/mentor-oauth-common.ps1')) {
             $localPath = Join-Path $RepoRoot $relative
             if (-not (Test-Path -LiteralPath $localPath -PathType Leaf)) { return $false }
