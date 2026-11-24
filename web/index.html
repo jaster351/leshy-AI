@@ -90,6 +90,13 @@
 
     <section class="pane" id="pane-tasks">
       <h2 class="section-title">Задачи</h2><div class="section-subtitle">Локальные задачи Лешего и пользователя.</div>
+      <div class="card hidden" id="mentorQualityCard" style="margin:12px 0">
+        <h3>AI-mentor · Качество ответов относительно ChatGPT</h3>
+        <div id="mentorQualityStatus" class="hint" role="status">Подтверждённых сравнений пока нет</div>
+        <svg id="mentorQualityChart" viewBox="0 0 620 240" role="img" aria-label="График относительного качества ответов" style="width:100%;max-height:280px;color:inherit"></svg>
+        <div id="mentorQualityDetail" class="hint"></div>
+        <div class="hint">100% — результат модели сравнения на тех же заданиях. Выше 100% возможно. Это оценка контрольных заданий, не общий уровень интеллекта.</div>
+      </div>
       <div class="card"><div class="task-form"><input class="field" id="taskTitle" placeholder="Название задачи"><select class="field" id="taskPriority"><option value="0">Обычная</option><option value="5">Высокая</option><option value="10">Критичная</option><option value="-5">Низкая</option></select><textarea class="field" id="taskDetails" placeholder="Описание"></textarea><button class="button create" id="taskCreate">Добавить задачу</button></div></div>
       <div class="toolbar" style="margin-top:12px"><select class="field" id="taskFilter"><option value="all">Все</option><option value="open">Открытые</option><option value="in_progress">В работе</option><option value="done">Готовые</option><option value="cancelled">Отменённые</option></select><button class="button small" id="tasksRefresh">Обновить</button></div><div class="list" id="taskList"></div>
     </section>
@@ -228,11 +235,42 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   const list=document.getElementById('mentorHistoryItems');
   const refresh=document.getElementById('mentorRefresh');
   const pane=document.getElementById('pane-learning');
+  const tasksPane=document.getElementById('pane-tasks');
+  const qualityCard=document.getElementById('mentorQualityCard');
+  const qualityStatus=document.getElementById('mentorQualityStatus');
+  const qualityChart=document.getElementById('mentorQualityChart');
+  const qualityDetail=document.getElementById('mentorQualityDetail');
+  function renderQuality(data){
+    qualityCard.classList.remove('hidden');
+    qualityChart.replaceChildren();
+    qualityDetail.textContent='';
+    const rows=(Array.isArray(data.quality_history)?data.quality_history:[]).filter(p=>Number.isFinite(p.relative_percent)&&p.relative_percent>=0);
+    if(!rows.length){qualityStatus.textContent='Подтверждённых сравнений пока нет';return;}
+    const last=rows[rows.length-1];
+    const key=p=>JSON.stringify([p.benchmark_id,p.rubric_id,p.reference_model]);
+    const series=rows.filter(p=>key(p)===key(last));
+    const fmt=n=>Number(n).toLocaleString('ru-RU',{maximumFractionDigits:2})+'%';
+    qualityStatus.textContent='Леший: '+fmt(last.relative_percent)+' от результата '+last.reference_model+' · '+last.questions+' заданий';
+    const before=series[series.length-2];
+    qualityDetail.textContent='Абсолютные баллы: Леший '+fmt(last.leshy_percent)+', модель сравнения '+fmt(last.reference_percent)+' · '+last.timestamp+' · '+last.benchmark_id+' / '+last.rubric_id+' · '+(last.model==='not_confirmed'?'Модель Лешего не подтверждена':last.model)+' · '+(before?'Изменение: '+(last.relative_percent-before.relative_percent>=0?'+':'')+(last.relative_percent-before.relative_percent).toFixed(2)+' п. п.':'Первое сопоставимое измерение');
+    const ns='http://www.w3.org/2000/svg';
+    function node(tag,attrs,value,parent=qualityChart){const e=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,String(v));if(value!==undefined)e.textContent=value;parent.appendChild(e);return e;}
+    const max=Math.max(100,...series.map(p=>p.relative_percent));
+    const top=Math.ceil(max/25)*25;
+    const x=i=>series.length===1?330:48+i*550/(series.length-1);
+    const y=v=>210-185*v/top;
+    for(const v of [...new Set([0,100,top])]){node('line',{x1:48,y1:y(v),x2:598,y2:y(v),stroke:'currentColor','stroke-opacity':v===100?.65:.2,'stroke-dasharray':v===100?'5 4':'none'});node('text',{x:43,y:y(v)+4,fill:'currentColor','font-size':11,'text-anchor':'end'},fmt(v));}
+    if(series.length>1)node('polyline',{points:series.map((p,i)=>x(i)+','+y(p.relative_percent)).join(' '),fill:'none',stroke:'#35a889','stroke-width':3});
+    for(const [i,p] of series.entries()){const dot=node('circle',{cx:x(i),cy:y(p.relative_percent),r:series.length>60?2:4,fill:'#35a889'});node('title',{},p.timestamp+' · '+fmt(p.relative_percent)+' · '+p.questions+' заданий',dot);}
+    node('text',{x:48,y:232,fill:'currentColor','font-size':11},series[0].timestamp.slice(0,16).replace('T',' '));
+    if(series.length>1)node('text',{x:598,y:232,fill:'currentColor','font-size':11,'text-anchor':'end'},last.timestamp.slice(0,16).replace('T',' '));
+  }
+
   if(!card||!state||!list||!refresh||!pane)return;
   const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ API сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
   let pending=false, generation=0;
-  const active=()=>pane.classList.contains('active')&&!document.hidden;
-  function clear(){generation++;card.classList.add('hidden');list.replaceChildren();state.textContent='';}
+  const active=()=>!document.hidden&&(pane.classList.contains('active')||tasksPane.classList.contains('active'));
+  function clear(){generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();state.textContent='';}
   function line(parent,label,value){
     if(!value)return;
     const el=document.createElement('div');
@@ -253,6 +291,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
       const data=await res.json();
       if(token!==generation||!active())return;
       card.classList.remove('hidden');
+      renderQuality(data);
       state.textContent=(names[data.status]||'Статус не подтверждён')+
         (data.last_check_at?' · Последняя проверка: '+data.last_check_at:' · Проверок пока нет')+
         (data.truncated?' · Показаны до 50 записей':'')+(data.export_sha256?' · SHA-256 экспорта для локальной проверки: '+data.export_sha256:'')+
@@ -278,11 +317,12 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
       }
       if(!list.children.length){const e=document.createElement('div');e.className='empty';e.textContent='Подтверждённых локальных записей пока нет';list.appendChild(e);}
     }catch(_error){
-      if(token===generation){list.replaceChildren();state.textContent='История недоступна; данные не подтверждены';}
+      if(token===generation){list.replaceChildren();state.textContent='История недоступна; данные не подтверждены';qualityChart.replaceChildren();qualityDetail.textContent='';qualityStatus.textContent='Сравнение недоступно';}
     }finally{pending=false;}
   }
   refresh.addEventListener('click',load);
   new MutationObserver(()=>{if(active())load();else clear();}).observe(pane,{attributes:true,attributeFilter:['class']});
+  new MutationObserver(()=>{if(active())load();else clear();}).observe(tasksPane,{attributes:true,attributeFilter:['class']});
   document.addEventListener('visibilitychange',()=>{if(active())load();else clear();});
   setInterval(load,5000);
   load();
