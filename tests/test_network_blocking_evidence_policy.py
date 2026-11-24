@@ -90,10 +90,10 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
     def test_legacy_hundred_percent_heuristic_never_creates_copy_text(self):
         metadata = {"target": TEST_IP, "tspu_probability": 100,
                     "blocking_attribution": "unconfirmed"}
-        self.assertIn("не подтверждена", _compact_answer(metadata))
-        self.assertNotIn("заблокирован ТСПУ", _compact_answer(metadata))
+        self.assertIn("Не удалось однозначно", _compact_answer(metadata))
+        self.assertNotIn("Обнаружена блокировка на уровне ТСПУ.", _compact_answer(metadata))
 
-    def test_run_shows_complete_data_when_attribution_is_unconfirmed(self):
+    def test_run_keeps_protocol_in_metadata_when_attribution_is_unconfirmed(self):
         metadata = {
             "target": TEST_IP, "tspu_probability": 60,
             "blocking_attribution": "unconfirmed",
@@ -104,7 +104,9 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
                 return ModuleResponse(handled=True, text="TCP 22: timeout; Check-Host: нет результатов", metadata=metadata)
         with patch("leshy.network_blocking_runtime._module", return_value=FakeModule()):
             answer, sources, result = _run(object(), TEST_IP)
-        self.assertIn("TCP 22: timeout", answer)
+        self.assertIn("Не удалось однозначно", answer)
+        self.assertNotIn("TCP 22: timeout", answer)
+        self.assertIn("TCP 22: timeout", result["diagnostic_report"])
         self.assertEqual(sources, [])
         self.assertEqual(result["copyable_conclusion"], "")
 
