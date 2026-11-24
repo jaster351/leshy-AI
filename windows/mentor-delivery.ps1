@@ -37,51 +37,100 @@ function Get-BytesSha256([byte[]]$Bytes) {
     try { return ([BitConverter]::ToString($h.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() }
     finally { $h.Dispose() }
 }
+function Read-MentorConfig {
+    if (-not (Test-RegularFile $configPath) -or (Get-Item -LiteralPath $configPath).Length -gt 65536) { throw 'Invalid mentor configuration' }
+    return (Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+}
+function Test-MentorComplete($Config) {
+    $oldId = [string]$Config.batch_id
+    $oldSha = [string]$Config.batch_sha256
+    if ($oldId -cnotmatch '^mentor-batch-[a-z0-9-]{1,55}$' -or $oldSha -cnotmatch '^[0-9a-f]{64}$') { return $false }
+    if (Test-Path -LiteralPath (Join-Path $root 'export.json')) { return $false }
+    $manifest = Join-Path $root ($oldId + '.manifest.json')
+    if (-not (Test-RegularFile $manifest) -or (Get-Item -LiteralPath $manifest).Length -gt 65536) { return $false }
+    $m = Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($m.batch_id -cne $oldId -or $m.batch_sha256 -cne $oldSha -or $m.repository -cne 'jaster351/AI-mentor' -or @($m.question_ids).Count -lt 1 -or @($m.question_ids).Count -gt 256) { return $false }
+    foreach ($qid in @($m.question_ids)) {
+        if ($qid -cnotmatch '^q[0-9]{1,6}$') { return $false }
+        $rid = $oldId + '-' + $qid
+        $answer = Join-Path $root ($rid + '.json')
+        $marker = Join-Path $root ($rid + '.published.json')
+        if (-not (Test-RegularFile $answer) -or -not (Test-RegularFile $marker)) { return $false }
+        if ((Get-Item -LiteralPath $answer).Length -gt 65536 -or (Get-Item -LiteralPath $marker).Length -gt 65536) { return $false }
+        $a = Get-Content -LiteralPath $answer -Raw -Encoding UTF8 | ConvertFrom-Json
+        $p = Get-Content -LiteralPath $marker -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($a.request_id -cne $rid -or $a.batch_sha256 -cne $oldSha -or $a.status -cne 'answered' -or $a.source -cne 'leshy_model' -or $a.answer -isnot [string] -or $p.request_id -cne $rid -or $p.answer_sha256 -cne (Get-BytesSha256 ([Text.Encoding]::UTF8.GetBytes($a.answer)))) { return $false }
+    }
+    return $true
+}
 if (-not (Test-RegularFile $configPath)) { return 'not_configured' }
 foreach ($directory in @($BrainRoot, $root)) {
     if ((Get-Item -LiteralPath $directory -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe mentor directory' }
 }
-if ((Get-Item -LiteralPath $configPath).Length -gt 65536) { throw 'Invalid local configuration size' }
-$initial = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($initial.enabled -isnot [bool] -or -not $initial.enabled -or $initial.repository -cne 'jaster351/AI-mentor') { return 'disabled' }
+$config = Read-MentorConfig
+if ($config.enabled -isnot [bool] -or -not $config.enabled -or $config.repository -cne 'jaster351/AI-mentor') { return 'disabled' }
 . (Join-Path $PSScriptRoot 'mentor-oauth-common.ps1')
 $lock = Enter-MentorCredentialLock $root
 try { Update-MentorOAuthGrant $root } finally { $lock.Dispose() }
 if (-not (Test-RegularFile $tokenPath)) { return 'not_configured' }
-foreach ($directory in @($BrainRoot, $root)) {
-    if ((Get-Item -LiteralPath $directory -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Unsafe mentor directory' }
-}
-if ((Get-Item -LiteralPath $configPath).Length -gt 65536 -or (Get-Item -LiteralPath $tokenPath).Length -gt 65536) { throw 'Invalid local configuration size' }
-$config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$config = Read-MentorConfig
 if ($config.enabled -isnot [bool] -or -not $config.enabled -or $config.repository -cne 'jaster351/AI-mentor') { return 'disabled' }
+$configHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
 $id = [string]$config.batch_id
 $expected = [string]$config.batch_sha256
-if ($id -cnotmatch '^mentor-batch-[a-z0-9-]{1,55}$' -or $expected -cnotmatch '^[0-9a-f]{64}$') { return 'not_configured' }
-$target = Join-Path $root ($id + '.delivery.json')
-if (Test-Path -LiteralPath $target) {
-    if (-not (Test-RegularFile $target)) { throw 'Unsafe mentor delivery path' }
-    if ((Get-Item -LiteralPath $target).Length -le 1048576 -and (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $expected) { return 'up_to_date' }
-    throw 'Existing delivery does not match approved package'
-}
-$secret = [IO.File]::ReadAllText($tokenPath).Trim()
-if (-not $secret.StartsWith('dpapi:')) { return 'secure_token_required' }
-Add-Type -AssemblyName System.Security
-$clear = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($secret.Substring(6)), $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
-try { $token = [Text.Encoding]::UTF8.GetString($clear).Trim() } finally { [Array]::Clear($clear,0,$clear.Length) }
-if (-not $token -or $token -match '[\r\n]') { throw 'Invalid mentor credential' }
+$autoQueue = $config.auto_queue -is [bool] -and $config.auto_queue
+$queueChange = $false
+$token = Read-MentorSecret $tokenPath
+if (-not $token -or $token -match '[\r\n]') { return 'not_configured' }
 try {
     $repository = Get-MentorJson '' $token
     if ($repository.private -isnot [bool] -or -not $repository.private -or $repository.full_name -ine 'jaster351/AI-mentor') { throw 'Private repository required' }
-    $item = Get-MentorJson ('/contents/batches/' + $id + '.json?ref=main') $token
-    if ($item.type -cne 'file' -or $item.encoding -cne 'base64' -or $item.size -gt 1048576) { throw 'Invalid mentor package' }
-    $raw = [Convert]::FromBase64String([string]$item.content)
-    if ($raw.Length -gt 1048576 -or (Get-BytesSha256 $raw) -cne $expected) { throw 'Approved mentor digest mismatch' }
-    $latest = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($latest.enabled -isnot [bool] -or -not $latest.enabled -or $latest.repository -cne $config.repository -or $latest.batch_id -cne $id -or $latest.batch_sha256 -cne $expected) { return 'configuration_changed' }
-    $tmp = Join-Path $root ('.delivery-' + [Guid]::NewGuid().ToString('N') + '.tmp')
-    try {
-        [IO.File]::WriteAllBytes($tmp,$raw)
-        [IO.File]::Move($tmp,$target)
-    } finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force } }
+    if ($autoQueue) {
+        $entry = Get-MentorJson '/contents/queue/current.json?ref=main' $token
+        if ($entry.type -cne 'file' -or $entry.encoding -cne 'base64' -or $entry.size -gt 8192) { throw 'Invalid mentor queue' }
+        $queueRaw = [Convert]::FromBase64String([string]$entry.content)
+        if ($queueRaw.Length -gt 8192) { throw 'Invalid mentor queue size' }
+        $queue = [Text.Encoding]::UTF8.GetString($queueRaw) | ConvertFrom-Json
+        if ($queue.schema -cne 'ai-mentor.queue.v1' -or $queue.batch_id -cnotmatch '^mentor-batch-[a-z0-9-]{1,55}$' -or $queue.batch_sha256 -cnotmatch '^[0-9a-f]{64}$' -or $queue.question_count -lt 1 -or $queue.question_count -gt 256) { throw 'Invalid mentor queue schema' }
+        if ($queue.batch_id -ceq $id -and $queue.batch_sha256 -cne $expected) { throw 'Batch ID reused with a different digest' }
+        if ($queue.batch_id -cne $id) {
+            if (-not $id -or (Test-MentorComplete $config)) {
+                $id = [string]$queue.batch_id
+                $expected = [string]$queue.batch_sha256
+                $queueChange = $true
+            }
+        }
+    }
+    if ($id -cnotmatch '^mentor-batch-[a-z0-9-]{1,55}$' -or $expected -cnotmatch '^[0-9a-f]{64}$') { return 'not_configured' }
+    $target = Join-Path $root ($id + '.delivery.json')
+    $existing = Test-Path -LiteralPath $target
+    if ($existing) {
+        if (-not (Test-RegularFile $target) -or (Get-Item -LiteralPath $target).Length -gt 1048576 -or (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw 'Existing delivery does not match approved package' }
+    } else {
+        $item = Get-MentorJson ('/contents/batches/' + $id + '.json?ref=main') $token
+        if ($item.type -cne 'file' -or $item.encoding -cne 'base64' -or $item.size -gt 1048576) { throw 'Invalid mentor package' }
+        $raw = [Convert]::FromBase64String([string]$item.content)
+        if ($raw.Length -gt 1048576 -or (Get-BytesSha256 $raw) -cne $expected) { throw 'Approved mentor digest mismatch' }
+        if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -cne $configHash) { return 'configuration_changed' }
+        $tmp = Join-Path $root ('.delivery-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+        try { [IO.File]::WriteAllBytes($tmp,$raw); [IO.File]::Move($tmp,$target) }
+        finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force } }
+    }
+    if ($queueChange) {
+        $lock = Enter-MentorCredentialLock $root
+        try {
+            if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -cne $configHash -or (Read-MentorSecret $tokenPath) -cne $token) { return 'configuration_changed' }
+            $config.batch_id = $id
+            $config.batch_sha256 = $expected
+            $config.approved_export_sha256 = ''
+            $config.approved_review_sha256 = ''
+            $tmp = Join-Path $root ('.config-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+            try {
+                [IO.File]::WriteAllText($tmp,($config | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+                [IO.File]::Replace($tmp,$configPath,$null)
+            } finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force } }
+        } finally { $lock.Dispose() }
+    }
+    if ($existing -and -not $queueChange) { return 'up_to_date' }
     return 'delivered'
-} finally { $token = $null; $secret = $null }
+} finally { $token = $null }
