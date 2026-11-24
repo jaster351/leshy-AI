@@ -44,6 +44,64 @@ function Publish-UpdateStatus {
     }
 }
 
+function Invoke-MentorDelivery {
+    param([string]$LiveRoot)
+    # Optional private mentor delivery is independent of code changes and build status.
+    $mentorStatus = 'not_confirmed'
+    $mentorBrain = Join-Path $LiveRoot 'LeshyBrain'
+    try {
+        $mentorScript = Join-Path $PSScriptRoot 'mentor-delivery.ps1'
+        if (Test-Path -LiteralPath $mentorScript -PathType Leaf) {
+            $result = & $mentorScript -BrainRoot $mentorBrain
+            if ($result -is [string] -and $result -cin @('not_configured','disabled','authorization_required','authorization_error','configuration_changed','delivered','up_to_date')) {
+                $mentorStatus = $result
+            } else { $mentorStatus = 'error' }
+        }
+    } catch {
+        # Do not log remote response bodies, credentials or private questions.
+        $mentorStatus = 'error'
+    }
+    Write-Host ('MENTOR_DELIVERY: ' + $mentorStatus)
+    try {
+        $mentorRoot = Join-Path $mentorBrain 'ai-mentor'
+        if ((Test-Path -LiteralPath $mentorRoot -PathType Container) -and
+            -not ((Get-Item -LiteralPath $mentorBrain -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+            -not ((Get-Item -LiteralPath $mentorRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $mentorStatusPath = Join-Path $mentorRoot 'delivery-status.json'
+            if ((Test-Path -LiteralPath $mentorStatusPath) -and ((Get-Item -LiteralPath $mentorStatusPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe mentor status path' }
+            $temp = Join-Path $mentorRoot ('.delivery-status-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+            try {
+                $record = @{schema='ai-mentor.delivery-status.v1';status=$mentorStatus;timestamp=[DateTimeOffset]::UtcNow.ToString('o')}
+                [IO.File]::WriteAllText($temp,($record | ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
+                if ([IO.File]::Exists($mentorStatusPath)) { [IO.File]::Replace($temp,$mentorStatusPath,$null) } else { [IO.File]::Move($temp,$mentorStatusPath) }
+            } finally { if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) } }
+        }
+    } catch { Write-Warning 'MENTOR_DELIVERY_STATUS_ERROR' }
+    # Private delivery never decides the result of the public code update.
+}
+
+function Test-MentorFallbackSource {
+    param([string]$GitExe)
+    # Do not execute modified, untracked or local-only scripts after a failed git operation.
+    try {
+        $currentBranch = @(& $GitExe -C $RepoRoot symbolic-ref --quiet --short HEAD 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $currentBranch.Count -ne 1 -or $currentBranch[0] -cne 'main') { return $false }
+        & $GitExe -C $RepoRoot merge-base --is-ancestor HEAD refs/remotes/origin/main 2>$null
+        if ($LASTEXITCODE -ne 0) { return $false }
+        foreach ($relative in @('windows/scheduled-build-task.ps1','windows/mentor-delivery.ps1','windows/mentor-oauth-common.ps1')) {
+            $localPath = Join-Path $RepoRoot $relative
+            if (-not (Test-Path -LiteralPath $localPath -PathType Leaf)) { return $false }
+            if ((Get-Item -LiteralPath $localPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+            $expected = @(& $GitExe -C $RepoRoot rev-parse ('HEAD:' + $relative) 2>$null)
+            if ($LASTEXITCODE -ne 0 -or $expected.Count -ne 1 -or $expected[0] -notmatch '^[a-f0-9]{40}$') { return $false }
+            $actual = @(& $GitExe -C $RepoRoot hash-object -- $relative 2>$null)
+            if ($LASTEXITCODE -ne 0 -or $actual.Count -ne 1 -or $actual[0] -cne $expected[0]) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
+
 try {
     # The user-triggered tray check leaves a one-shot request token.
     # Ignore old requests to avoid announcing unrelated scheduled runs.
@@ -107,7 +165,18 @@ try {
     )) {
         Write-Host ('> git ' + ($gitArgs -join ' '))
         & $gitExe @gitArgs
-        if ($LASTEXITCODE -ne 0) { throw ('Git operation failed: git ' + ($gitArgs -join ' ')) }
+        if ($LASTEXITCODE -ne 0) {
+            $failedOperation = 'Git operation failed: git ' + ($gitArgs -join ' ')
+            if ($gitArgs[0] -in @('fetch','pull')) {
+                try {
+                    if (Test-MentorFallbackSource -GitExe $gitExe) {
+                        Write-Host 'MENTOR_DELIVERY_FALLBACK: public Git operation failed'
+                        Invoke-MentorDelivery -LiveRoot (Join-Path $RepoRoot 'dist\Leshy')
+                    } else { Write-Host 'MENTOR_DELIVERY_FALLBACK_SKIPPED: unverified source' }
+                } catch { Write-Warning 'MENTOR_DELIVERY_FALLBACK_ERROR' }
+            }
+            throw $failedOperation
+        }
     }
 
     $sourceVersion = (Get-Content -LiteralPath (Join-Path $RepoRoot 'VERSION') -Raw -Encoding UTF8).Trim()
@@ -119,37 +188,7 @@ try {
 
     $liveRoot = Join-Path $RepoRoot 'dist\Leshy'
     $liveExe = Join-Path $liveRoot 'Leshy.exe'
-    # Optional private mentor delivery is independent of code changes and build status.
-    $mentorStatus = 'not_confirmed'
-    $mentorBrain = Join-Path $liveRoot 'LeshyBrain'
-    try {
-        $mentorScript = Join-Path $PSScriptRoot 'mentor-delivery.ps1'
-        if (Test-Path -LiteralPath $mentorScript -PathType Leaf) {
-            $result = & $mentorScript -BrainRoot $mentorBrain
-            if ($result -is [string] -and $result -cin @('not_configured','disabled','authorization_required','authorization_error','configuration_changed','delivered','up_to_date')) {
-                $mentorStatus = $result
-            } else { $mentorStatus = 'error' }
-        }
-    } catch {
-        # Do not log remote response bodies, credentials or private questions.
-        $mentorStatus = 'error'
-    }
-    Write-Host ('MENTOR_DELIVERY: ' + $mentorStatus)
-    try {
-        $mentorRoot = Join-Path $mentorBrain 'ai-mentor'
-        if ((Test-Path -LiteralPath $mentorRoot -PathType Container) -and
-            -not ((Get-Item -LiteralPath $mentorBrain -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -and
-            -not ((Get-Item -LiteralPath $mentorRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            $mentorStatusPath = Join-Path $mentorRoot 'delivery-status.json'
-            if ((Test-Path -LiteralPath $mentorStatusPath) -and ((Get-Item -LiteralPath $mentorStatusPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe mentor status path' }
-            $temp = Join-Path $mentorRoot ('.delivery-status-' + [Guid]::NewGuid().ToString('N') + '.tmp')
-            try {
-                $record = @{schema='ai-mentor.delivery-status.v1';status=$mentorStatus;timestamp=[DateTimeOffset]::UtcNow.ToString('o')}
-                [IO.File]::WriteAllText($temp,($record | ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
-                if ([IO.File]::Exists($mentorStatusPath)) { [IO.File]::Replace($temp,$mentorStatusPath,$null) } else { [IO.File]::Move($temp,$mentorStatusPath) }
-            } finally { if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) } }
-        }
-    } catch { Write-Warning 'MENTOR_DELIVERY_STATUS_ERROR' }
+    Invoke-MentorDelivery -LiveRoot $liveRoot
     $installer = Join-Path $RepoRoot ('dist\LeshySetup-' + $sourceVersion + '.exe')
     $liveState = Join-Path $AutoRoot 'live-state.json'
     if (Test-Path -LiteralPath $liveState -PathType Leaf) {
