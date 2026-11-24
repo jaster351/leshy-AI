@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 from typing import Any, Iterator
@@ -119,7 +120,7 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
         answer,
     )) or "подтверждена по 3/3 признакам" in answer
     concise = bool(re.match(
-        r"^\S+ (?:обнаружена блокировка на уровне ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)",
+        r"^\S+ (?:[Оо]бнаружена блокировка на уровне ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)",
         answer,
     ))
     if not (legacy or modern or confirmed or concise):
@@ -129,7 +130,7 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
 
 def _explain_saved_diagnostic(previous: str) -> str:
     """Replay previous measured results or explicitly admit missing evidence."""
-    if re.match(r"^\S+ (?:обнаружена блокировка на уровне ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)", previous):
+    if re.match(r"^\S+ (?:[Оо]бнаружена блокировка на уровне ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)", previous):
         return (
             previous + "\n\nПолный протокол не сохранён в тексте предыдущего ответа. "
             "Для подробного подтверждения нужна новая проверка; результаты не будут выдумываться."
@@ -203,7 +204,7 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
         and metadata.get("proof_verification") == "verified"
         and str(metadata.get("proof_record_id") or "").strip()
     ):
-        return f"{target} обнаружена блокировка на уровне ТСПУ."
+        return f"{target} Обнаружена блокировка на уровне ТСПУ."
     ports = metadata.get("port_verdicts") or {}
     if not isinstance(ports, dict):
         return None
@@ -212,7 +213,7 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
     # The current main's tspu_detected state alone can mean geographic
     # asymmetry without attribution. Require the completed independent probe.
     if any(row.get("state") == "tspu_detected" for row in rows) and _probe_reports_tspu(metadata):
-        return f"{target} обнаружена блокировка на уровне ТСПУ."
+        return f"{target} Обнаружена блокировка на уровне ТСПУ."
     # Keep the existing two-port negative scope; a missing port or a positive
     # independent probe is an uncertainty, not a clean negative.
     if (
@@ -224,35 +225,103 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
     return None
 
 
+_COUNTRY_NAMES = {
+    "ru": "Россия", "nl": "Нидерланды", "de": "Германия", "fr": "Франция",
+    "pl": "Польша", "fi": "Финляндия", "se": "Швеция", "gb": "Великобритания",
+    "us": "США", "kz": "Казахстан", "by": "Беларусь", "ua": "Украина",
+    "tr": "Турция", "cz": "Чехия", "at": "Австрия", "ch": "Швейцария",
+    "it": "Италия", "es": "Испания", "lt": "Литва", "lv": "Латвия",
+    "ee": "Эстония", "sg": "Сингапур", "ca": "Канада", "jp": "Япония",
+    "in": "Индия", "br": "Бразилия", "ro": "Румыния", "bg": "Болгария",
+}
+
+
+def _connection_status(rows: Any) -> str:
+    statuses = [row.get("status") for row in (rows or []) if isinstance(row, dict)]
+    if not statuses:
+        return "нет данных"
+    successes = statuses.count("connected")
+    failures = sum(value in ("timeout", "refused") for value in statuses)
+    if successes and failures:
+        return "частично"
+    if successes == len(statuses):
+        return "есть"
+    if failures == len(statuses):
+        return "нет"
+    if successes:
+        return "есть (не все проверки завершены)"
+    return "нет данных"
+
+
+def _port_rows(rows: Any, port: int) -> list[dict]:
+    return [row for row in (rows or []) if isinstance(row, dict)
+            and str(row.get("port")) == str(port)]
+
+
+def _checkhost_countries(rows: list[dict]) -> str:
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        code = str(row.get("country_code") or "").strip().lower()
+        country = _COUNTRY_NAMES.get(code) or str(row.get("country") or code.upper()).strip()
+        if not country:
+            country = "Страна не определена"
+        groups.setdefault(country, []).append(row)
+    categories: dict[str, list[str]] = {}
+    for country, observations in sorted(groups.items()):
+        categories.setdefault(_connection_status(observations), []).append(country)
+    order = ("есть", "нет", "частично", "есть (не все проверки завершены)", "нет данных")
+    return "; ".join(f"{status}: {', '.join(categories[status])}"
+                     for status in order if status in categories) or "нет данных"
+
+
 def _compact_answer(metadata: dict[str, Any]) -> str:
     decisive = _decisive_conclusion(metadata)
     if decisive is not None:
         return decisive
 
     target = str(metadata.get("target") or "").strip()
-    lines = [f"{target} Не удалось однозначно определить наличие блокировки на уровне ТСПУ."]
-    ports = metadata.get("port_verdicts") or {}
-    if isinstance(ports, dict) and ports:
-        for port, label in (("22", "SSH/22"), ("3389", "RDP/3389")):
-            row = ports.get(port)
-            if not isinstance(row, dict):
-                lines.append(f"{label}: результат проверки отсутствует.")
-                continue
-            state = row.get("state")
-            if state == "not_blocked":
-                continue
-            if state == "tspu_detected" and not _probe_reports_tspu(metadata):
-                lines.append(f"{label}: доступность различается по регионам, но Cheburcheck Probe не подтвердил причину ТСПУ.")
-                continue
-            explanation = str(row.get("explanation") or "недостаточно данных").strip().rstrip(".")
-            lines.append(f"{label}: {explanation}.")
-        if _probe_reports_tspu(metadata) and all(
-            isinstance(ports.get(key), dict) and ports[key].get("state") == "not_blocked"
-            for key in ("22", "3389")
-        ):
-            lines.append("Cheburcheck сообщает о блокировке, но оба порта доступны из сети Лешего; данные противоречат друг другу.")
+    lines = [f"{target} Не удалось однозначно определить наличие блокировки на уровне ТСПУ.", ""]
+    owned = metadata.get("eu_ssh_comparison") or {}
+    owned_ports = owned.get("ports") or {"22": owned}
+    ru_confirmed = os.environ.get("LESHY_RU_PROBE_CONFIRMED", "").strip() == "1"
+    ru, eu, checkhost = [], [], []
+    for port, label in ((22, "SSH/22"), (3389, "RDP/3389")):
+        pair = owned_ports.get(str(port)) or {}
+        local = pair.get("local_attempts") or _port_rows(metadata.get("local"), port)
+        local_status = (
+            _connection_status(local)
+            if ru_confirmed and pair.get("status") != "local_region_unverified"
+            else "нет данных (выход из РФ не подтверждён)"
+        )
+        ru.append(f"{label}: {local_status}")
+        eu.append(f"{label}: {_connection_status(pair.get('eu_attempts'))}")
+        checkhost.append(f"  {label}: {_checkhost_countries(_port_rows(metadata.get('remote'), port))}")
+    lines.append("Подключение из России: " + "; ".join(ru) + ".")
+    lines.append("Подключение с Вашего EU-сервера: " + "; ".join(eu) + ".")
+    lines.append("Check-Host:")
+    lines.extend(checkhost)
+
+    chebur = metadata.get("cheburcheck") or {}
+    listed = chebur.get("blocked") if chebur.get("ok") else None
+    registry = "есть" if listed is True else "нет" if listed is False else "нет данных"
+    lines.append(f"Cheburcheck (блокировка в реестре): {registry}.")
+    probe = metadata.get("chebur_probe") or {}
+    if _probe_reports_tspu(metadata):
+        probe_status = "обнаружены признаки ТСПУ"
+    elif probe.get("ok") and probe.get("finished") and any(
+        isinstance(row, dict) and "ok" in (row.get("verdicts") or [])
+        for row in (probe.get("observations") or [])
+    ):
+        probe_status = "признаки ТСПУ не обнаружены в полученных ответах"
     else:
-        lines.append("Блокировка не подтверждена: нет достаточных результатов проверки по портам.")
+        probe_status = "нет однозначного результата"
+    lines.append(f"Cheburcheck Probe: {probe_status}.")
+    if _probe_reports_tspu(metadata) and all(
+        isinstance((metadata.get("port_verdicts") or {}).get(key), dict)
+        and metadata["port_verdicts"][key].get("state") == "not_blocked"
+        for key in ("22", "3389")
+    ):
+        lines.append("Результаты проверок противоречат друг другу.")
     return "\n".join(lines)
 
 
