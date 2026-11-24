@@ -1,6 +1,14 @@
 ﻿# Однократная авторизация доверенного Windows-узла через браузер.
-param([string]$ClientId, [switch]$Disconnect, [switch]$EnableMentor)
+param([string]$ClientId, [switch]$Disconnect, [switch]$EnableMentor, [switch]$Register)
 $ErrorActionPreference = 'Stop'
+if ($Register) {
+    if ($Disconnect -or $EnableMentor -or $ClientId) { throw 'Регистрация приложения выполняется отдельно от авторизации и отключения' }
+    $url = 'https://github.com/settings/apps/new?name=Leshy-LiveMentor-jaster351&description=Private%20LiveMentor%20exchange&url=https%3A%2F%2Fgithub.com%2Fjaster351%2Fleshy-AI&public=false&webhook_active=false&contents=write'
+    Write-Host 'В форме GitHub проверьте права Contents: Read and write, Metadata: Read-only, остальные — No access.'
+    Write-Host 'Включите Device Flow и срок действия пользовательских токенов; установите приложение только на AI-mentor.'
+    Start-Process $url
+    return
+}
 $BrainRoot = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'dist\Leshy') 'LeshyBrain'
 $root = Join-Path $BrainRoot 'ai-mentor'
 try {
