@@ -1,4 +1,4 @@
-"""Opt-in sequential educational runner; no ordinary chat, tools or user memory."""
+"""Последовательная учебная диагностика без обычного чата и личной памяти."""
 from __future__ import annotations
 
 import base64
@@ -62,7 +62,10 @@ def read_obj(path):
 
 
 def atomic(path, obj):
-    raw = encode(obj)
+    atomic_bytes(path, encode(obj))
+
+
+def atomic_bytes(path, raw):
     if len(raw) > MAX_INPUT or path.is_symlink():
         raise ValueError("Недопустимая учебная запись")
     fd, name = tempfile.mkstemp(prefix=".mentor-", suffix=".tmp", dir=path.parent)
@@ -158,13 +161,13 @@ class BatchRunner:
                 existing = read_obj(path)
                 if (existing.get("request_id"), existing.get("batch_sha256"), existing.get("question")) != (rid, expected, question):
                     raise ValueError("Локальный вопрос не совпадает с пакетом")
-        from .mentor_review import apply_review
-        load = apply_review(self.root, config, read_obj=read_obj, read_bytes=read_bytes,
-                            atomic=atomic, digest=digest, now=now)
-        quota = load["quota"]
-        # Publish only an exact, locally reviewed export, never raw model text by default.
+        # Сначала подтверждаем публикацию ответов, затем принимаем их оценку.
         if self.still_allowed(config):
             self.publish(config, gh, token, questions)
+        if not self.still_allowed(config):
+            return "disabled"
+        load = self.receive_review(config, gh, token)
+        quota = load["quota"]
         deadline = time.monotonic() + 0.85 * INTERVAL
         history = []
         completed = 0
@@ -272,6 +275,55 @@ class BatchRunner:
         if (self.root / "export.json").exists():
             return "awaiting_review"
         return "published" if stop_reason == "batch_end" else "waiting"
+
+    def receive_review(self, config, gh, token):
+        from .mentor_review import apply_review
+        current = self.config()
+        approval = current.get("approved_review_sha256", "")
+        remote = current.get("review_download_enabled") is True
+        effective = dict(config, approved_review_sha256=approval)
+
+        def apply(cfg, path=None):
+            return apply_review(self.root, cfg, read_obj=read_obj,
+                                read_bytes=read_bytes, atomic=atomic,
+                                digest=digest, now=now, review_path=path)
+
+        if not self.still_allowed(config):
+            return apply(dict(effective, approved_review_sha256=""))
+        if not remote or not approval:
+            return apply(effective)
+        if not isinstance(approval, str) or not re.fullmatch(r"[0-9a-f]{64}", approval):
+            raise ValueError("Некорректный SHA-256 оценки")
+        state = apply(dict(effective, approved_review_sha256=""))
+        if approval in state.get("applied", []):
+            return state
+        path = self.root / ("review-" + approval + ".json")
+        if not path.exists():
+            try:
+                item = gh("/contents/reviews/" + approval + ".json?ref=main")
+            except error.HTTPError as exc:
+                if exc.code != 404:
+                    raise
+                return state
+            if (item.get("type") != "file" or item.get("encoding") != "base64"
+                    or not isinstance(item.get("content"), str)):
+                raise ValueError("Некорректный файл оценки")
+            raw = base64.b64decode("".join(item["content"].split()), validate=True)
+            if len(raw) > MAX_EXPORT or digest(raw) != approval or token.encode("utf-8") in raw:
+                raise PermissionError("Файл оценки не соответствует разрешению")
+            if not self.still_allowed(config):
+                return state
+            latest = self.config()
+            if latest.get("review_download_enabled") is not True or latest.get("approved_review_sha256") != approval:
+                return state
+            atomic_bytes(path, raw)
+        if not self.still_allowed(config):
+            return state
+        latest = self.config()
+        if latest.get("review_download_enabled") is not True or latest.get("approved_review_sha256") != approval:
+            return state
+        # Повторно проверяем сохранённые байты; оценка не является командой.
+        return apply(effective, path)
 
     def prepare_export(self, config, questions):
         path = self.root / "export.json"
