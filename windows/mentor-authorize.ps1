@@ -1,5 +1,5 @@
 ﻿# Однократная авторизация доверенного Windows-узла через браузер.
-param([string]$ClientId, [switch]$Disconnect)
+param([string]$ClientId, [switch]$Disconnect, [switch]$EnableMentor)
 $ErrorActionPreference = 'Stop'
 $BrainRoot = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'dist\Leshy') 'LeshyBrain'
 $root = Join-Path $BrainRoot 'ai-mentor'
@@ -38,6 +38,24 @@ try {
             if ($grant.error) { throw 'Авторизация отклонена или истекла' }
             Assert-MentorAppAccess ([string]$grant.access_token)
             Save-MentorOAuthGrant $root $ClientId $grant
+            if ($EnableMentor) {
+                $path = Join-Path $root 'config.json'
+                if (Test-Path -LiteralPath $path) {
+                    $item = Get-Item -LiteralPath $path -Force
+                    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 65536) { throw 'Недопустимая конфигурация' }
+                    $cfg = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+                    if ($cfg.repository -cne 'jaster351/AI-mentor') { throw 'Существующая конфигурация другого репозитория' }
+                } else {
+                    $cfg = [PSCustomObject]@{repository='jaster351/AI-mentor';batch_id='';batch_sha256='';approved_export_sha256='';approved_review_sha256='';review_download_enabled=$false}
+                }
+                foreach ($key in @('enabled','auto_queue','auto_publish')) { $cfg | Add-Member -NotePropertyName $key -NotePropertyValue $true -Force }
+                $tmp = Join-Path $root ('.config-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+                try {
+                    [IO.File]::WriteAllText($tmp,($cfg | ConvertTo-Json -Depth 8),(New-Object Text.UTF8Encoding($false)))
+                    if ([IO.File]::Exists($path)) { [IO.File]::Replace($tmp,$path,$null) } else { [IO.File]::Move($tmp,$path) }
+                } finally { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } }
+                Write-Host 'Автоматическая учебная очередь включена. Обычное самообучение не изменялось.'
+            }
             Write-Host 'GitHub App подключён только к закрытому AI-mentor. Токен сохранён локально.'
             return
         }
