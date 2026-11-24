@@ -34,7 +34,7 @@ class TspuVerdictTests(unittest.TestCase):
         self.assertEqual(ports["22"]["state"], "tspu_detected")
         self.assertEqual(ports["3389"]["state"], "not_blocked")
 
-    def test_same_diagnosis_without_chebur_token_if_checkhost_agrees(self):
+    def test_checkhost_agreement_without_probe_does_not_prove_tspu(self):
         own = {"ports": {
             "22": pair(22, ["timeout"] * 3, ["connected"] * 3),
             "3389": pair(3389, ["refused"] * 3, ["refused"] * 3),
@@ -47,8 +47,8 @@ class TspuVerdictTests(unittest.TestCase):
             own, checks,
             cheburcheck=CheburcheckEvidence(ok=True, blocked=True),
         )
-        self.assertIn("Обнаружена блокировка на стороне ТСПУ", verdict)
-        self.assertEqual(ports["22"]["state"], "tspu_detected")
+        self.assertIn("Блокировка не обнаружена на стороне ТСПУ по имеющимся данным", verdict)
+        self.assertEqual(ports["22"]["state"], "owned_path_restriction")
 
     def test_check_host_russian_success_prevents_tspu_assertion(self):
         own = {"ports": {
@@ -61,9 +61,23 @@ class TspuVerdictTests(unittest.TestCase):
             TcpObservation("check-host", 22, "connected", country_code="nl", node="nl1"),
         )
         verdict, ports = assess_ports(own, checks)
-        self.assertIn("Возможное ограничение доступа", verdict)
+        self.assertIn("Блокировка не обнаружена на стороне ТСПУ по имеющимся данным", verdict)
         self.assertNotIn("Обнаружена блокировка на стороне ТСПУ", verdict)
-        self.assertEqual(ports["22"]["state"], "possible_restriction")
+        self.assertEqual(ports["22"]["state"], "owned_path_restriction")
+        self.assertIn("Check-Host из РФ подключается", ports["22"]["explanation"])
+
+    def test_checkhost_only_cannot_override_missing_owner_probes(self):
+        own = {"ports": {
+            "22": pair(22, [], []),
+            "3389": pair(3389, [], []),
+        }}
+        checks = (
+            TcpObservation("check-host", 22, "timeout", country_code="ru", node="ru1"),
+            TcpObservation("check-host", 22, "connected", country_code="nl", node="nl1"),
+        )
+        verdict, ports = assess_ports(own, checks)
+        self.assertEqual(ports["22"]["state"], "insufficient")
+        self.assertIn("Недостаточно данных", verdict)
 
     def test_both_ports_local_success_mean_not_detected(self):
         own = {"ports": {

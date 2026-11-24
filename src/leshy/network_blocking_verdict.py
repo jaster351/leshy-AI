@@ -63,38 +63,48 @@ def assess_ports(
             state = "intermittent"
             explanation = "Порт частично доступен из сети Лешего; возможна нестабильность"
         elif len(local) == 3 and all(x == "timeout" for x in local) and eu_ok == 3:
+            # The two owner-controlled probes are the primary observation.
+            # Third-party vantage points may corroborate but cannot override
+            # the owner's measured path or prove the filtering mechanism.
             if not region_known:
                 state = "possible_restriction"
-                explanation = "Из сети Лешего тайм-аут, из Нидерландов доступен; география локальной сети не подтверждена"
-            elif ru_ch_ok:
-                state = "possible_restriction"
-                explanation = "Из сети Лешего тайм-аут, но российские узлы Check-Host подключаются; возможна локальная фильтрация"
-            elif ru_ch_timeout and other_ch_ok and not ru_ch_ok:
+                explanation = (
+                    "Собственные точки расходятся (Леший: 0/3, EU: 3/3), "
+                    "но расположение локальной точки в РФ не подтверждено"
+                )
+            elif reported_tspu and ru_ch_timeout and other_ch_ok and not ru_ch_ok:
                 state = "tspu_detected"
                 explanation = (
-                    "Совпали: 3/3 timeout из сети Лешего, 3/3 connected из Нидерландов, "
-                    "timeout узлов Check-Host в РФ и успешные подключения Check-Host за рубежом. "
-                    "Это диагностические признаки блокировки на стороне РФ, "
-                    "а не доказательство, что причина именно в ТСПУ."
-                    + (" Cheburcheck Probe также сообщил tspu_block." if reported_tspu else "")
+                    "Собственные точки: Леший 0/3 timeout, EU 3/3 connected; "
+                    "Check-Host сообщает timeout из РФ и доступность извне; "
+                    "завершённый Cheburcheck Probe сообщил tspu_block. "
+                    "Это диагностический вывод, не прямое измерение оборудования ТСПУ"
                 )
             else:
-                state = "likely_blocked"
+                state = "owned_path_restriction"
                 explanation = (
-                    "Вероятное ограничение из РФ: три тайм-аута локально, "
-                    "три подключения из Нидерландов"
-                    + ("; Check-Host также сообщает о тайм-аутах в РФ"
-                       if ru_ch_timeout else "; Check-Host не подтвердил фильтрацию")
-                    + ("; адрес в списках Cheburcheck" if listed else "")
+                    "Собственные точки: Леший 0/3 (тайм-аут), "
+                    "EU 3/3 (успешно). Различие доступности подтверждено, "
+                    "причина не установлена; блокировка именно ТСПУ не подтверждена"
                 )
+                if ru_ch_ok:
+                    explanation += (
+                        "; Check-Host из РФ подключается, но его результаты "
+                        "не отменяют измерения Вашей сети"
+                    )
+                elif ru_ch_timeout and other_ch_ok:
+                    explanation += "; Check-Host дополнительно показывает различие по странам"
         elif len(local) == 3 and all(x == "refused" for x in local) and eu_ok == 3:
             state = "possible_restriction"
             explanation = "Из сети Лешего соединение отклоняется, из Нидерландов доступно; возможны ACL/firewall"
         elif len(local) == 3 and all(x in ("timeout", "refused") for x in local) and len(eu) == 3 and all(x in ("timeout", "refused") for x in eu):
             explanation = "Порт недоступен в обеих сетях; это не доказывает блокировку"
         elif ru_ch_timeout and other_ch_ok and not ru_ch_ok:
-            state = "possible_restriction"
-            explanation = "Check-Host видит тайм-ауты в РФ и доступность за рубежом, но собственные измерения неполные"
+            # External samples alone must never establish a positive verdict.
+            explanation = (
+                "Check-Host видит различия между странами, но собственных "
+                "измерений Лешего и EU недостаточно для вывода"
+            )
         elif pair.get("status") in ("not_configured", "probe_error"):
             explanation = "Зарубежный агент не предоставил результат по этому порту"
         assessments[str(port)] = {
@@ -110,6 +120,7 @@ def assess_ports(
         }
 
     detected = [v["label"] for v in assessments.values() if v["state"] == "tspu_detected"]
+    owned_path = [v["label"] for v in assessments.values() if v["state"] == "owned_path_restriction"]
     likely = [v["label"] for v in assessments.values() if v["state"] == "likely_blocked"]
     possible = [v["label"] for v in assessments.values() if v["state"] == "possible_restriction"]
     available = [v["label"] for v in assessments.values() if v["state"] == "not_blocked"]
@@ -117,6 +128,12 @@ def assess_ports(
         verdict = (
             "Обнаружена блокировка на стороне ТСПУ: " + ", ".join(detected)
             + " (по совокупности диагностических признаков)"
+        )
+    elif owned_path:
+        verdict = (
+            "Блокировка не обнаружена на стороне ТСПУ по имеющимся данным для "
+            + ", ".join(owned_path)
+            + "; собственные точки показывают разную доступность, причина не установлена"
         )
     elif likely:
         verdict = "Вероятная блокировка из РФ: " + ", ".join(likely) + ". Причина не доказана"
