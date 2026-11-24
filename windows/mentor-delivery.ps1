@@ -71,8 +71,8 @@ $config = Read-MentorConfig
 if ($config.enabled -isnot [bool] -or -not $config.enabled -or $config.repository -cne 'jaster351/AI-mentor') { return 'disabled' }
 . (Join-Path $PSScriptRoot 'mentor-oauth-common.ps1')
 $lock = Enter-MentorCredentialLock $root
-try { Update-MentorOAuthGrant $root } finally { $lock.Dispose() }
-if (-not (Test-RegularFile $tokenPath)) { return 'not_configured' }
+try { Update-MentorOAuthGrant $root } catch { return 'authorization_error' } finally { $lock.Dispose() }
+if (-not (Test-RegularFile $tokenPath)) { return 'authorization_required' }
 $config = Read-MentorConfig
 if ($config.enabled -isnot [bool] -or -not $config.enabled -or $config.repository -cne 'jaster351/AI-mentor') { return 'disabled' }
 $configHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
@@ -81,8 +81,11 @@ $expected = [string]$config.batch_sha256
 $autoQueue = $config.auto_queue -is [bool] -and $config.auto_queue
 $queueChange = $false
 $token = Read-MentorSecret $tokenPath
-if (-not $token -or $token -match '[\r\n]') { return 'not_configured' }
+if (-not $token -or $token -match '[\r\n]') { return 'authorization_required' }
 try {
+    if ($token.StartsWith('ghu_')) {
+        try { Assert-MentorAppAccess $token } catch { return 'authorization_error' }
+    }
     $repository = Get-MentorJson '' $token
     if ($repository.private -isnot [bool] -or -not $repository.private -or $repository.full_name -ine 'jaster351/AI-mentor') { throw 'Private repository required' }
     if ($autoQueue) {
