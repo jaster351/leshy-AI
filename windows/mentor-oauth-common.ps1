@@ -105,7 +105,7 @@ function Update-MentorOAuthGrant([string]$Root) {
     $secret = Read-MentorSecret (Join-Path $Root 'github_oauth.dat')
     if (-not $secret) { return }
     $record = $secret | ConvertFrom-Json
-    if ($record.client_id -cnotmatch '^[A-Za-z0-9_]{8,100}$' -or $record.access_token -cnotmatch '^ghu_[A-Za-z0-9_]+$' -or $record.refresh_token -cnotmatch '^ghr_[A-Za-z0-9_]+$') { throw 'Недопустимая локальная авторизация' }
+    if ($record.client_id -cnotmatch '^[A-Za-z0-9_.-]{8,100}$' -or $record.access_token -cnotmatch '^ghu_[A-Za-z0-9_]+$' -or $record.refresh_token -cnotmatch '^ghr_[A-Za-z0-9_]+$') { throw 'Недопустимая локальная авторизация' }
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     if ($record.expires_at -le ($now + 1200)) {
         if ($record.refresh_expires_at -le $now) { throw 'Требуется повторная авторизация в браузере' }
