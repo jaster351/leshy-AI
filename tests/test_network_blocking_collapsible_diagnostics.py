@@ -68,7 +68,7 @@ def test_chat_keeps_complete_diagnostics_in_metadata():
             )
     with patch("leshy.network_blocking_runtime._module", return_value=Module()):
         answer, _, result = _run(object(), "188.130.141.48")
-    assert answer.startswith("188.130.141.48 — не удалось однозначно")
+    assert answer.startswith("188.130.141.48 Не удалось однозначно")
     assert "[[LESHY_DIAGNOSTICS]]" not in answer
     assert "Протокол TCP/22" not in answer
     assert "Протокол TCP/22" in result["diagnostic_report"]
