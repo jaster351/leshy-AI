@@ -37,7 +37,7 @@ try {
         $interval = [int]$device.interval
         while ($clock.Elapsed.TotalSeconds + $interval -lt [int]$device.expires_in) {
             Start-Sleep -Seconds $interval
-            $grant = Invoke-MentorOAuth '/login/oauth/access_token' @{client_id=$ClientId;device_code=[string]$device.device_code;grant_type='urn:ietf:params:oauth:grant-type:device_code'}
+            $grant = Invoke-MentorOAuth '/login/oauth/access_token' @{client_id=$ClientId;device_code=[string]$device.device_code;grant_type='urn:ietf:params:oauth:grant-type:device_code';repository_id='1470788052'}
             if ($grant.error -eq 'authorization_pending') { continue }
             if ($grant.error -eq 'slow_down') {
                 $interval = [Math]::Max($interval+5,[int]$grant.interval)
