@@ -122,8 +122,8 @@ def automatic_export_safe(raw):
         secret_pattern = re.compile(
             r"(?i)(?:gh[pousr]_[a-z0-9_]{12,}|github_pat_[a-z0-9_]{12,}|"
             r"-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[a-z0-9_-]{16,}|"
-            r"bearer\\s+[a-z0-9_.-]{12,}|[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}|"
-            r"(?:password|passwd|пароль|api[_ -]?key|токен)\\s*[:=]\\s*\\S+)"
+            r"bearer\s+[a-z0-9_.-]{12,}|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|"
+            r"(?:password|passwd|пароль|api[_ -]?key|токен)\s*[:=]\s*\S+)"
         )
         for row in rows:
             if (not isinstance(row, dict) or set(row) != expected
@@ -134,7 +134,7 @@ def automatic_export_safe(raw):
                     or not 1 <= len(row["answer"]) <= MAX_ANSWER
                     or secret_pattern.search(row["answer"])
                     or not isinstance(row.get("revision"), str)
-                    or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+|not_confirmed", row["revision"])
+                    or not re.fullmatch(r"\d+\.\d+\.\d+|not_confirmed", row["revision"])
                     or not isinstance(row.get("timestamp"), str)
                     or len(row["timestamp"]) > 64
                     or type(row.get("duration_ms")) is not int
