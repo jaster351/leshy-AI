@@ -194,6 +194,10 @@ class BatchRunner:
         local_delivery = self.uses_local_delivery(repo)
         online = True
 
+        def cycle_allowed():
+            return (self.still_allowed(config)
+                    and load_secret(self.root / "github_token.dat") == token)
+
         def gh(path="", payload=None, method="GET"):
             if not self.still_allowed(config) or load_secret(self.root / "github_token.dat") != token:
                 raise PermissionError("Локальная авторизация изменилась")
@@ -274,7 +278,7 @@ class BatchRunner:
         completed = 0
         stop_reason = "batch_end"
         for qid, question in questions:
-            if not self.still_allowed(config) or time.monotonic() >= deadline:
+            if not cycle_allowed() or time.monotonic() >= deadline:
                 stop_reason = "disabled_or_budget"
                 break
             rid = batch_id + "-" + qid
@@ -328,7 +332,7 @@ class BatchRunner:
             try:
                 with scheduler.slot(source="ai-mentor", priority=PRIORITY_BACKGROUND,
                                     cancel_event=self.stop, timeout=0.25):
-                    if (not self.still_allowed(config)
+                    if (not cycle_allowed()
                             or self.app.conversation_activity.snapshot().get("active_conversations", 1)):
                         stop_reason = "interactive_priority_or_disabled"
                         break
@@ -369,7 +373,7 @@ class BatchRunner:
         # Do not erase the last productive capacity sample with an empty review cycle.
         if completed or not (self.root / "cycle-metrics.json").exists():
             atomic(self.root / "cycle-metrics.json", metrics)
-        if self.still_allowed(config):
+        if cycle_allowed():
             self.prepare_export(config, questions)
             if online and self.config().get("auto_publish") is True:
                 try:
@@ -380,6 +384,8 @@ class BatchRunner:
             return stop_reason
         if not self.still_allowed(config):
             return "disabled"
+        if not cycle_allowed():
+            return "waiting"
         if not online:
             return "waiting_connection"
         if (self.root / "export.json").exists():
