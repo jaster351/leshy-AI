@@ -70,6 +70,12 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
     seen, issues, models, revisions = set(), [], set(), set()
     total = 0
     reactions = []
+    reference_total = 0
+    reference_count = 0
+    reference_model = obj.get("reference_model")
+    if reference_model is not None and (not isinstance(reference_model, str)
+            or not _TAG.fullmatch(reference_model)):
+        raise ValueError("Некорректная идентификация модели сравнения")
     critical = False
     for row in rows:
         if not isinstance(row, dict):
@@ -93,6 +99,16 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
         if (not isinstance(score, dict) or set(score) != set(CRITERIA)
                 or any(type(score[k]) is not int or not 0 <= score[k] <= 2 for k in CRITERIA)):
             raise ValueError("Оценки должны быть целыми числами 0–2")
+        # Сравнение по тем же критериям, а не по сходству текста ответов.
+        if "reference_scores" in row or "reference_answer_sha256" in row:
+            rs = row.get("reference_scores")
+            rh = row.get("reference_answer_sha256")
+            if (not reference_model or not isinstance(rh, str) or not _HASH.fullmatch(rh)
+                    or not isinstance(rs, dict) or set(rs) != set(CRITERIA)
+                    or any(type(rs[k]) is not int or not 0 <= rs[k] <= 2 for k in CRITERIA)):
+                raise ValueError("Некорректная оценка ответа модели сравнения")
+            reference_total += sum(rs.values())
+            reference_count += 1
         flag = row.get("critical")
         if type(flag) is not bool:
             raise ValueError("Не указан признак критической ошибки")
@@ -144,6 +160,19 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
                              "dislike": sum(x["reaction"] == "dislike" for x in reactions),
                              "missing": len(rows) - len(reactions)},
                "timestamp": now()}
+    history = state.get("quality_history", [])
+    if not isinstance(history, list) or any(not isinstance(x, dict) for x in history):
+        raise ValueError("Повреждена история сравнений")
+    # Только полный сопоставимый пакет с ненулевой базой даёт процент.
+    if full and comparable and reference_count == len(rows) and reference_total > 0:
+        point = {"batch_id": bid, "timestamp": summary["timestamp"],
+                 "benchmark_id": benchmark, "rubric_id": rubric,
+                 "reference_model": reference_model, "model": model, "revision": revision,
+                 "questions": len(rows), "leshy_percent": round(100 * quality, 2),
+                 "reference_percent": round(100 * reference_total / (6 * len(rows)), 2),
+                 "relative_percent": round(100 * total / reference_total, 2)}
+        history = (history + [point])[-168:]
+        summary["comparison"] = point
     previous = state.get("last_review") or {}
     matched = (isinstance(previous, dict) and comparable and previous.get("comparable") is True
                and full and previous.get("complete") is True
@@ -197,7 +226,7 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
     state = {"quota": quota, "maximum_confirmed": maximum,
              "applied": applied + [expected], "reviewed_batches": reviewed + [bid],
              "last_review": summary, "decision": decision, "previous_quota": old_quota,
-             "investigation": outstanding}
+             "investigation": outstanding, "quality_history": history}
     # Отдельная запись с хешем утверждённого отчёта; повтор безопасен.
     if reactions:
         atomic(root / (bid + ".reactions-" + expected + ".json"), {
