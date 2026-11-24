@@ -119,6 +119,37 @@ try {
 
     $liveRoot = Join-Path $RepoRoot 'dist\Leshy'
     $liveExe = Join-Path $liveRoot 'Leshy.exe'
+    # Optional private mentor delivery is independent of code changes and build status.
+    $mentorStatus = 'not_confirmed'
+    $mentorBrain = Join-Path $liveRoot 'LeshyBrain'
+    try {
+        $mentorScript = Join-Path $PSScriptRoot 'mentor-delivery.ps1'
+        if (Test-Path -LiteralPath $mentorScript -PathType Leaf) {
+            $result = & $mentorScript -BrainRoot $mentorBrain
+            if ($result -is [string] -and $result -cin @('not_configured','disabled','authorization_required','authorization_error','configuration_changed','delivered','up_to_date')) {
+                $mentorStatus = $result
+            } else { $mentorStatus = 'error' }
+        }
+    } catch {
+        # Do not log remote response bodies, credentials or private questions.
+        $mentorStatus = 'error'
+    }
+    Write-Host ('MENTOR_DELIVERY: ' + $mentorStatus)
+    try {
+        $mentorRoot = Join-Path $mentorBrain 'ai-mentor'
+        if ((Test-Path -LiteralPath $mentorRoot -PathType Container) -and
+            -not ((Get-Item -LiteralPath $mentorBrain -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+            -not ((Get-Item -LiteralPath $mentorRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $mentorStatusPath = Join-Path $mentorRoot 'delivery-status.json'
+            if ((Test-Path -LiteralPath $mentorStatusPath) -and ((Get-Item -LiteralPath $mentorStatusPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe mentor status path' }
+            $temp = Join-Path $mentorRoot ('.delivery-status-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+            try {
+                $record = @{schema='ai-mentor.delivery-status.v1';status=$mentorStatus;timestamp=[DateTimeOffset]::UtcNow.ToString('o')}
+                [IO.File]::WriteAllText($temp,($record | ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
+                if ([IO.File]::Exists($mentorStatusPath)) { [IO.File]::Replace($temp,$mentorStatusPath,$null) } else { [IO.File]::Move($temp,$mentorStatusPath) }
+            } finally { if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) } }
+        }
+    } catch { Write-Warning 'MENTOR_DELIVERY_STATUS_ERROR' }
     $installer = Join-Path $RepoRoot ('dist\LeshySetup-' + $sourceVersion + '.exe')
     $liveState = Join-Path $AutoRoot 'live-state.json'
     if (Test-Path -LiteralPath $liveState -PathType Leaf) {

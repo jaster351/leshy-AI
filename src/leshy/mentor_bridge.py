@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import threading
 import time
@@ -32,10 +33,14 @@ class MentorBridge:
         self.github = request.build_opener(_NoRedirect())
 
     def start(self):
-        if self.root.is_symlink() or not (self.root / "config.json").is_file():
+        if self.root.is_symlink() or self.thread is not None:
             return
         self.thread = threading.Thread(target=self._run, name="leshy-ai-mentor", daemon=True)
-        self.thread.start()
+        try:
+            self.thread.start()
+        except Exception as exc:
+            self.thread = None
+            event("mentor_thread_start_failed", error_type=type(exc).__name__)
 
     def stop(self):
         self.stop_event.set()
@@ -120,13 +125,46 @@ class MentorBridge:
         if self.stop_event.wait(15):
             return
         runner = BatchRunner(self.root, self.app, self.stop_event, self._gh)
+        last_waiting_heartbeat = None
         while not self.stop_event.is_set():
             started = time.monotonic()
             try:
+                if self.root.is_symlink() or not (self.root / "config.json").is_file():
+                    if self.stop_event.wait(15):
+                        return
+                    continue
                 config = runner.config()
                 if config.get("enabled") is not True:
                     atomic(self.root / "status.json", {"status": "disabled", "timestamp": now()})
-                    return
+                    if self.stop_event.wait(15):
+                        return
+                    continue
+                # Не расходуем часовой учебный интервал, пока обновлятор
+                # не доставил пакет. Проверка только локальных метаданных.
+                if os.name == "nt" and config.get("repository") == "jaster351/AI-mentor":
+                    batch_id = config.get("batch_id")
+                    expected = config.get("batch_sha256")
+                    ready = (isinstance(batch_id, str)
+                             and re.fullmatch(r"mentor-batch-[a-z0-9-]{1,55}", batch_id)
+                             and isinstance(expected, str)
+                             and re.fullmatch(r"[0-9a-f]{64}", expected))
+                    if ready:
+                        delivery = self.root / (batch_id + ".delivery.json")
+                        ready = delivery.is_file() and not delivery.is_symlink()
+                    if not ready:
+                        # Телеметрия версии остаётся независимой от пакета.
+                        current_time = time.monotonic()
+                        if last_waiting_heartbeat is None or current_time - last_waiting_heartbeat >= INTERVAL:
+                            last_waiting_heartbeat = current_time
+                            try:
+                                self._publish_runtime_version(config)
+                            except Exception as exc:
+                                event("mentor_runtime_version_failed", error_type=type(exc).__name__)
+                        atomic(self.root / "status.json",
+                               {"status": "waiting_delivery", "timestamp": now()})
+                        if self.stop_event.wait(15):
+                            return
+                        continue
                 clock = self.root / "cycle.json"
                 if clock.exists():
                     last = read_obj(clock).get("started_epoch")
@@ -137,7 +175,7 @@ class MentorBridge:
                         return
                     config = runner.config()
                     if config.get("enabled") is not True:
-                        return
+                        continue
                 atomic(clock, {"started_epoch": time.time()})
                 started = time.monotonic()
                 atomic(self.root / "status.json", {"status": "checking", "timestamp": now()})

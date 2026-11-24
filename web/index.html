@@ -280,7 +280,8 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   }
 
   if(!card||!state||!list||!refresh||!pane)return;
-  const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ API сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
+  const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',waiting_delivery:'Ожидание скачивания пакета',delivered:'Скачан, ожидает ответа',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ API сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
+  const deliveryNames={not_configured:'Не настроен',disabled:'Отключён',authorization_required:'Требуется вход в GitHub',authorization_error:'Ошибка авторизации GitHub',configuration_changed:'Настройки изменились, ожидается повторная проверка',delivered:'Пакет скачан',up_to_date:'Пакет уже скачан',error:'Ошибка доставки',not_confirmed:'Нет подтверждения'};
   let pending=false, generation=0;
   const active=()=>!document.hidden&&(pane.classList.contains('active')||tasksPane.classList.contains('active'));
   function clear(){resetComparison('');generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();state.textContent='';}
@@ -307,7 +308,9 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
       renderQuality(data);
       state.textContent=(names[data.status]||'Статус не подтверждён')+
         (data.last_check_at?' · Последняя проверка: '+data.last_check_at:' · Проверок пока нет')+
-        (data.truncated?' · Показаны до 50 записей':'')+(data.export_sha256?' · SHA-256 экспорта для локальной проверки: '+data.export_sha256:'')+
+        (data.delivery_status?' · Обновлятор: '+(deliveryNames[data.delivery_status]||'Нет подтверждения'):'')+
+        (data.delivery_checked_at?' · Проверка доставки: '+data.delivery_checked_at:'')+
+        (Number.isInteger(data.delivered_count)?' · Скачано вопросов: '+data.delivered_count:'')+(data.truncated?' · Показаны до 50 записей':'')+(data.export_sha256?' · SHA-256 экспорта для локальной проверки: '+data.export_sha256:'')+
         (Number.isInteger(data.training_quota)?' · Вопросов за цикл: '+data.training_quota:'')+
         (typeof data.review_quality==='number'?' · Оценка наставника: '+Math.round(data.review_quality*100)+'%':' · Оценка ещё не получена')+
         (data.open_investigations?' · Требуют разбора: '+data.open_investigations:'');
@@ -321,6 +324,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
         block.appendChild(title);
         line(block,'LiveMentor',row.question);
         line(block,row.source==='leshy_model'?'Леший (ответ модели)':'Леший (ответ локального API)',row.answer);
+        line(block,'Скачан обновлятором',row.delivered_at);
         line(block,'Получен',row.received_at);
         line(block,'Ответ сохранён',row.answered_at);
         line(block,'Публикация подтверждена',row.published_at);
