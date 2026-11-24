@@ -83,7 +83,7 @@
       <div class="card hidden" id="mentorHistoryCard" style="margin-top:12px">
         <div class="toolbar"><h3 style="margin:0">AI-mentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button></div>
         <div class="hint" id="mentorHistoryStatus" role="status">Проверка доступа…</div>
-        <div class="hint" style="margin:8px 0">Локальная история учебного обмена. Ответ API не означает подтверждённое обучение. Оценки и пакетный режим ещё не подключены.</div>
+        <div class="hint" style="margin:8px 0">Локальная история учебных пакетов. Ответ модели не означает подтверждённое обучение. Независимые оценки ещё не подключены.</div>
         <div class="list" id="mentorHistoryItems"></div>
       </div>
     </section>
@@ -255,7 +255,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
       card.classList.remove('hidden');
       state.textContent=(names[data.status]||'Статус не подтверждён')+
         (data.last_check_at?' · Последняя проверка: '+data.last_check_at:' · Проверок пока нет')+
-        (data.truncated?' · Показаны до 50 записей':'');
+        (data.truncated?' · Показаны до 50 записей':'')+(data.export_sha256?' · SHA-256 экспорта для локальной проверки: '+data.export_sha256:'');
       list.replaceChildren();
       for(const row of Array.isArray(data.items)?data.items:[]){
         const block=document.createElement('div');
@@ -265,7 +265,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
         title.textContent=row.request_id+' · '+(names[row.status]||'Не подтверждено');
         block.appendChild(title);
         line(block,'AI-mentor',row.question);
-        line(block,'Леший (ответ локального API)',row.answer);
+        line(block,row.source==='leshy_model'?'Леший (ответ модели)':'Леший (ответ локального API)',row.answer);
         line(block,'Получен',row.received_at);
         line(block,'Ответ сохранён',row.answered_at);
         line(block,'Публикация подтверждена',row.published_at);

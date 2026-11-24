@@ -442,7 +442,7 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     bind_host = host or os.getenv("LESHY_HOST", "0.0.0.0"); bind_port = int(port or os.getenv("LESHY_PORT", "8765"))
     server = ThreadingHTTPServer((bind_host, bind_port), make_handler(app, telegram, settings, model_catalog))
     from .mentor_bridge import MentorBridge
-    mentor_bridge = MentorBridge(settings.brain_dir, server.server_address[1])
+    mentor_bridge = MentorBridge(settings.brain_dir, app)
     mentor_bridge.start()
     print(f"Леший {app.status()['version']} запущен: http://{bind_host}:{bind_port}")
     console_stop = threading.Event()

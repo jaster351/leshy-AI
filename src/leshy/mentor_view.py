@@ -36,7 +36,7 @@ def mentor_snapshot(brain_dir: Path) -> dict:
     config = _read(root / "config.json")
     status = _read(root / "status.json")
     valid_statuses = {"waiting", "awaiting_review", "published", "disabled",
-                      "error", "checking", "not_configured"}
+                      "error", "checking", "not_configured", "outcome_unknown"}
     current = status.get("status")
     if current not in valid_statuses:
         current = "not_confirmed"
@@ -64,13 +64,14 @@ def mentor_snapshot(brain_dir: Path) -> dict:
         a = _read(root / (rid + ".json"))
         published = _read(root / (rid + ".published.json"))
         question = _text(q.get("question"), 4000) if q.get("request_id") == rid else ""
-        valid_answer = a.get("request_id") == rid and a.get("status") == "answered" and a.get("source") == "leshy_api"
+        valid_answer = a.get("request_id") == rid and a.get("status") == "answered" and a.get("source") in {"leshy_api", "leshy_model"}
         answer = _text(a.get("answer"), 12000) if valid_answer else ""
         from hashlib import sha256
         sent = bool(answer and published.get("request_id") == rid
                     and published.get("answer_sha256") == sha256(answer.encode("utf-8")).hexdigest())
         phase = ("published" if sent else "answered" if answer else
                  "outcome_unknown" if a.get("request_id") == rid and a.get("status") == "sent"
+                 else "error" if a.get("status") == "error"
                  else "received" if question else "not_received")
         items.append({
             "request_id": rid, "status": phase, "question": question, "answer": answer,
@@ -79,10 +80,19 @@ def mentor_snapshot(brain_dir: Path) -> dict:
             "published_at": _text(published.get("timestamp")) if sent else "",
             "version": _text(a.get("revision")) if answer else "",
             "model": _text(a.get("model")) if answer else "",
-            "source": "leshy_api" if answer else "",
+            "source": _text(a.get("source")) if answer else "",
         })
     items.sort(key=lambda row: row["answered_at"] or row["received_at"], reverse=True)
+    export_hash = ""
+    export_path = root / "export.json"
+    if export_path.is_file() and not export_path.is_symlink():
+        from hashlib import sha256
+        with export_path.open("rb") as handle:
+            raw = handle.read(256 * 1024 + 1)
+        if len(raw) <= 256 * 1024:
+            export_hash = sha256(raw).hexdigest()
     return {"configured": bool(config), "enabled": config.get("enabled") is True,
+            "export_sha256": export_hash,
             "status": current, "last_check_at": _text(status.get("timestamp")),
             "items": items, "truncated": len(ids) > _MAX_ITEMS,
             "evaluation_status": "not_implemented"}
