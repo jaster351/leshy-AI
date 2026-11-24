@@ -1,0 +1,50 @@
+﻿# Однократная авторизация доверенного Windows-узла через браузер.
+param([string]$ClientId, [switch]$Disconnect)
+$ErrorActionPreference = 'Stop'
+$BrainRoot = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'dist\Leshy') 'LeshyBrain'
+$root = Join-Path $BrainRoot 'ai-mentor'
+try {
+    if (-not (Test-Path -LiteralPath $BrainRoot -PathType Container)) { throw 'Сначала установите Лешего' }
+    if ((Get-Item -LiteralPath $BrainRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Недопустимый каталог LeshyBrain' }
+    if (-not (Test-Path -LiteralPath $root)) { New-Item -ItemType Directory -Path $root | Out-Null }
+    if ((Get-Item -LiteralPath $root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Недопустимый каталог наставника' }
+    . (Join-Path $PSScriptRoot 'mentor-oauth-common.ps1')
+    $lock = Enter-MentorCredentialLock $root
+    try {
+        if ($Disconnect) {
+            foreach ($name in @('github_oauth.dat','github_token.dat')) {
+                $path = Join-Path $root $name
+                if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+            }
+            Write-Host 'Локальная авторизация удалена. Для отзыва разрешения откройте настройки GitHub.'
+            return
+        }
+        if ($ClientId -cnotmatch '^[A-Za-z0-9_]{8,100}$') { throw 'Требуется Client ID отдельного GitHub App' }
+        $device = Invoke-MentorOAuth '/login/device/code' @{client_id=$ClientId;scope='offline_access'}
+        if ($device.error -or $device.verification_uri -cne 'https://github.com/login/device' -or $device.user_code -cnotmatch '^[A-Z0-9]{4}-[A-Z0-9]{4}$' -or -not $device.device_code -or $device.expires_in -lt 1 -or $device.expires_in -gt 1800 -or $device.interval -lt 5 -or $device.interval -gt 60) { throw 'Некорректный ответ GitHub для устройства' }
+        Write-Host 'Откройте https://github.com/login/device и введите показанный код. Проверьте название своего GitHub App и права.'
+        Write-Host ('Код: ' + $device.user_code)
+        try { Start-Process 'https://github.com/login/device' } catch { Write-Host 'Откройте адрес вручную в доверенном браузере.' }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        $interval = [int]$device.interval
+        while ($clock.Elapsed.TotalSeconds + $interval -lt [int]$device.expires_in) {
+            Start-Sleep -Seconds $interval
+            $grant = Invoke-MentorOAuth '/login/oauth/access_token' @{client_id=$ClientId;device_code=[string]$device.device_code;grant_type='urn:ietf:params:oauth:grant-type:device_code'}
+            if ($grant.error -eq 'authorization_pending') { continue }
+            if ($grant.error -eq 'slow_down') {
+                $interval = [Math]::Max($interval+5,[int]$grant.interval)
+                continue
+            }
+            if ($grant.error) { throw 'Авторизация отклонена или истекла' }
+            Assert-MentorAppAccess ([string]$grant.access_token)
+            Save-MentorOAuthGrant $root $ClientId $grant
+            Write-Host 'GitHub App подключён только к закрытому AI-mentor. Токен сохранён локально.'
+            return
+        }
+        throw 'Время авторизации истекло'
+    } finally { $lock.Dispose() }
+} catch {
+    # Не выводим серверный ответ, токены, запросы или исключения сетевого клиента.
+    Write-Error 'Авторизация не завершена. Проверьте Client ID, Device Flow, срок кода и права приложения на AI-mentor.'
+    exit 1
+}
