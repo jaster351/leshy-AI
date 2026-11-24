@@ -147,7 +147,7 @@ BATCH_SHA256 = hashlib.sha256(BATCH_RAW).hexdigest()
 
 
 def local_config():
-    return {"enabled": True, "transport": "bundled", "repository": "local/bundled",
+    return {"enabled": True, "transport": "bundled", "repository": "jaster351/AI-mentor", "auto_publish": True,
             "batch_id": BATCH_ID, "batch_sha256": BATCH_SHA256,
             "approved_export_sha256": "", "approved_review_sha256": "",
             "review_download_enabled": False}
