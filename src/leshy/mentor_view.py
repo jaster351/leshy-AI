@@ -36,7 +36,7 @@ def mentor_snapshot(brain_dir: Path) -> dict:
     config = _read(root / "config.json")
     status = _read(root / "status.json")
     valid_statuses = {"waiting", "awaiting_review", "published", "disabled",
-                      "error", "checking", "not_configured", "outcome_unknown"}
+                      "error", "checking", "not_configured", "outcome_unknown", "waiting_delivery"}
     current = status.get("status")
     if current not in valid_statuses:
         current = "not_confirmed"
