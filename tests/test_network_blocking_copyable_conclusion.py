@@ -83,9 +83,11 @@ def test_uncertain_result_lists_actual_country_and_owned_probe_results():
         answer = _compact_answer(metadata)
     assert "Подключение из России: SSH/22: нет; RDP/3389: нет." in answer
     assert "Подключение с Вашего EU-сервера: SSH/22: есть; RDP/3389: нет." in answer
-    assert "SSH/22: есть: Германия; нет: Россия; нет данных: Нидерланды" in answer
-    assert "RDP/3389: нет: Россия; нет данных: Германия" in answer
+    assert "SSH/22: есть: Германия; нет: Россия" in answer
+    assert "RDP/3389: нет: Россия" in answer
     assert "Cheburcheck (блокировка в реестре): нет." in answer
+    assert "нет данных" not in answer
+    assert "Нидерланды" not in answer
 
 
 def test_unknown_geography_and_failed_checks_are_not_negative_results():
@@ -97,10 +99,8 @@ def test_unknown_geography_and_failed_checks_are_not_negative_results():
     }
     with patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "0"}):
         answer = _compact_answer(metadata)
-    assert "выход из РФ не подтверждён" in answer
-    assert "EU-сервера: SSH/22: нет данных; RDP/3389: нет данных" in answer
-    assert "SSH/22: нет данных: Россия" in answer
-    assert "Cheburcheck (блокировка в реестре): нет данных." in answer
+    assert answer == f"{IP} Не удалось однозначно определить наличие блокировки на уровне ТСПУ."
+    assert "нет данных" not in answer
 
 
 def test_checkhost_mixed_country_is_not_a_binary_negative():
@@ -108,3 +108,11 @@ def test_checkhost_mixed_country_is_not_a_binary_negative():
     rows = [{"country_code": "ru", "status": "connected"},
             {"country_code": "ru", "status": "timeout"}]
     assert _checkhost_countries(rows) == "частично: Россия"
+
+
+def test_unfinished_measurements_never_create_negative_result():
+    from leshy.network_blocking_runtime import _connection_status
+    assert _connection_status([{"status": "pending"}]) is None
+    assert _connection_status([{"status": "timeout"}, {"status": "error"}]) is None
+    assert _connection_status([{"status": "connected"}, {"status": "pending"}]) == "есть"
+    assert _connection_status([{"status": "refused"}, {"status": "timeout"}]) == "нет"
