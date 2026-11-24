@@ -161,6 +161,10 @@ class BatchRunner:
                 existing = read_obj(path)
                 if (existing.get("request_id"), existing.get("batch_sha256"), existing.get("question")) != (rid, expected, question):
                     raise ValueError("Локальный вопрос не совпадает с пакетом")
+        # Квитанция относится к проверенному и сохранённому пакету, а не к генерации ответа.
+        if not self.still_allowed(config):
+            return "disabled"
+        self.publish_receipt(config, gh, questions)
         # Сначала подтверждаем публикацию ответов, затем принимаем их оценку.
         if self.still_allowed(config):
             self.publish(config, gh, token, questions)
@@ -275,6 +279,59 @@ class BatchRunner:
         if (self.root / "export.json").exists():
             return "awaiting_review"
         return "published" if stop_reason == "batch_end" else "waiting"
+
+    def publish_receipt(self, config, gh, questions):
+        """Подтверждение сохранения вопросов без передачи их текста или личных данных."""
+        batch_id = config["batch_id"]
+        expected = config["batch_sha256"]
+        identity = {"schema": "ai-mentor.receipt.v1", "source": "leshy_runtime",
+                    "status": "received", "batch_id": batch_id,
+                    "batch_sha256": expected, "question_count": len(questions)}
+        local = self.root / (batch_id + ".receipt.json")
+        if local.exists():
+            receipt = read_obj(local)
+            if any(receipt.get(k) != v for k, v in identity.items()):
+                raise ValueError("Квитанция другого пакета")
+        else:
+            receipt = dict(identity, timestamp=now())
+            atomic(local, receipt)
+        target = "/contents/receipts/" + batch_id + "-" + expected + ".json"
+        try:
+            item = gh(target + "?ref=main")
+        except error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+            if not self.still_allowed(config):
+                return
+            try:
+                gh(target, {"message": "Квитанция приёма учебного пакета " + batch_id,
+                            "branch": "main",
+                            "content": base64.b64encode(encode(receipt)).decode("ascii")}, "PUT")
+            except error.HTTPError as put_error:
+                if put_error.code not in {409, 422}:
+                    raise
+            item = gh(target + "?ref=main")
+        if (item.get("type") != "file" or item.get("encoding") != "base64"
+                or not isinstance(item.get("content"), str)):
+            raise ValueError("Некорректная удалённая квитанция")
+        raw = base64.b64decode("".join(item["content"].split()), validate=True)
+        if len(raw) > 4096:
+            raise ValueError("Превышен размер квитанции")
+        published = json.loads(raw)
+        if (not isinstance(published, dict)
+                or any(published.get(k) != v for k, v in identity.items())
+                or not isinstance(published.get("timestamp"), str)):
+            raise PermissionError("Квитанция не совпадает с принятым пакетом")
+        try:
+            ts = datetime.fromisoformat(published["timestamp"])
+            if ts.tzinfo is None:
+                raise ValueError("Нет часового пояса")
+        except ValueError as exc:
+            raise ValueError("Некорректное время квитанции") from exc
+        if self.still_allowed(config):
+            atomic(self.root / (batch_id + ".receipt-published.json"),
+                   {"batch_id": batch_id, "batch_sha256": expected,
+                    "receipt_sha256": digest(raw), "timestamp": now()})
 
     def receive_review(self, config, gh, token):
         from .mentor_review import apply_review
