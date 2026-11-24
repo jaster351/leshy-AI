@@ -15,7 +15,7 @@ import uuid
 
 _ROLES = {"qa": "QA-тестировщик", "mentor": "AI-наставник"}
 _SECRET = re.compile(
-    r"(?i)(?:(?:bearer|api[_ -]?token|password|passwd|secret|пароль|токен)"
+    r"(?i)(?:(?:bearer|api[_ -]?token|token|password|passwd|secret|пароль|токен)"
     r"\s*[:=]\s*)([^\s,;]+)"
 )
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9_+./=-]{12,}")
