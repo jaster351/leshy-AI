@@ -33,7 +33,7 @@
     <div class="tagline">Я здесь. Слушаю. Думаю. Помогаю.</div>
     <div class="composer"><textarea id="heroInput" placeholder="Напишите Лешему…"></textarea><button id="heroSend">Отправить</button></div>
     <div class="quick">
-      <button data-start="chat">Чат</button><button data-start="search">Поиск</button><button data-start="knowledge">Знания</button><button data-start="learning">Обучение</button><button data-start="tasks">Задачи</button><button data-start="settings">Настройки</button><button disabled>Голос · в разработке</button>
+      <button data-start="chat">Чат</button><button data-start="search">Поиск</button><button data-start="knowledge">Знания</button><button data-start="learning">Обучение</button><button data-start="tasks">Задачи Лешего</button><button data-start="settings">Настройки</button><button disabled>Голос · в разработке</button>
     </div>
   </div>
 </section>
@@ -45,7 +45,7 @@
       <button class="nav-item" data-section="chat">Чат</button>
       <button class="nav-item" data-section="knowledge">Знания</button>
       <button class="nav-item" data-section="learning">Обучение</button>
-      <button class="nav-item" data-section="tasks">Задачи</button>
+      <button class="nav-item" data-section="tasks">Задачи Лешего</button>
       <button class="nav-item" data-section="tools">Инструменты</button>
       <button class="nav-item" data-section="system">Система</button>
       <button class="nav-item" data-section="settings">Настройки</button>
@@ -81,7 +81,7 @@
       <div class="grid"><div class="card"><h3>Самообучение</h3><div class="row"><span>Состояние</span><button class="switch" id="learningSwitch" aria-label="Самообучение"></button></div><input class="field" id="researchTopic" placeholder="Тема для изучения"><button class="button" style="width:100%;margin-top:8px" id="researchQueue">Добавить тему</button><div class="hint" id="learningState" style="margin-top:8px"></div></div><div class="card"><h3>Конвейер</h3><div class="muted">research → candidate → verification → trusted</div><div class="divider"></div><div class="row"><span>Candidate</span><b id="learningCandidate">0</b></div><div class="row"><span>Trusted</span><b id="learningTrusted">0</b></div></div></div>
       <div class="grid" style="margin-top:12px"><div class="card"><h3>Очередь исследований</h3><div class="list" id="researchTasks"></div></div><div class="card"><h3>История обучения</h3><div class="list" id="learningHistory"></div></div></div>
       <div class="card hidden" id="mentorHistoryCard" style="margin-top:12px">
-        <div class="toolbar"><h3 style="margin:0">AI-mentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button></div>
+        <div class="toolbar"><h3 style="margin:0">LiveMentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button></div>
         <div class="hint" id="mentorHistoryStatus" role="status">Проверка доступа…</div>
         <div class="hint" style="margin:8px 0">Локальная история учебных пакетов. Оценки относятся только к подтверждённым ответам. Развитие навыка требует независимой проверки.</div>
         <div class="list" id="mentorHistoryItems"></div>
@@ -89,17 +89,17 @@
     </section>
 
     <section class="pane" id="pane-tasks">
-      <h2 class="section-title">Задачи</h2><div class="section-subtitle">Локальные задачи Лешего и пользователя.</div>
+      <h2 class="section-title">Задачи Лешего</h2><div class="section-subtitle">Локальные задачи Лешего и пользователя.</div>
       <div class="card hidden" id="mentorQualityCard" style="margin:12px 0">
-        <h3>AI-mentor · Качество ответов наставнику</h3>
+        <h3>LiveMentor · Качество ответов наставнику</h3>
         <div class="grid" style="margin:12px 0">
-          <div class="card"><div class="hint">Уровень ChatGPT на тех же заданиях</div><strong id="mentorReferenceLevel" style="font-size:2rem">—</strong></div>
-          <div class="card"><div class="hint">Уровень Лешего относительно ChatGPT</div><strong id="mentorRelativeLevel" style="font-size:2rem">—</strong><div class="hint" id="mentorRelativeStatus" role="status">Сравнение пока не измерено</div></div>
+          <div class="card"><div class="hint">Уровень LiveMentor на тех же заданиях</div><strong id="mentorReferenceLevel" style="font-size:2rem">—</strong></div>
+          <div class="card"><div class="hint">Уровень Лешего относительно LiveMentor</div><strong id="mentorRelativeLevel" style="font-size:2rem">—</strong><div class="hint" id="mentorRelativeStatus" role="status">Сравнение пока не измерено</div></div>
         </div>
         <div id="mentorQualityStatus" class="hint" role="status">Подтверждённых сравнений пока нет</div>
         <svg id="mentorQualityChart" viewBox="0 0 620 240" role="img" aria-label="График качества ответов наставнику" style="width:100%;max-height:280px;color:inherit"></svg>
         <div id="mentorQualityDetail" class="hint"></div>
-        <div class="hint">100% — все критерии наставника выполнены. Сравнение с ChatGPT показывается отдельно, если оценены оба ответа. Это результат контрольных заданий, не общий уровень интеллекта.</div>
+        <div class="hint">100% — все критерии наставника выполнены. Сравнение с LiveMentor показывается отдельно, если оценены оба ответа. Это результат контрольных заданий, не общий уровень интеллекта.</div>
       </div>
       <div class="card"><div class="task-form"><input class="field" id="taskTitle" placeholder="Название задачи"><select class="field" id="taskPriority"><option value="0">Обычная</option><option value="5">Высокая</option><option value="10">Критичная</option><option value="-5">Низкая</option></select><textarea class="field" id="taskDetails" placeholder="Описание"></textarea><button class="button create" id="taskCreate">Добавить задачу</button></div></div>
       <div class="toolbar" style="margin-top:12px"><select class="field" id="taskFilter"><option value="all">Все</option><option value="open">Открытые</option><option value="in_progress">В работе</option><option value="done">Готовые</option><option value="cancelled">Отменённые</option></select><button class="button small" id="tasksRefresh">Обновить</button></div><div class="list" id="taskList"></div>
@@ -141,7 +141,7 @@ const contextKey='leshy.ui.context';
 let sessionId=localStorage.getItem(sessionKey)||'';
 let uiMode=localStorage.getItem(uiModeKey)||(sessionId?'full':'minimal');
 let currentSection=localStorage.getItem(uiSectionKey)||'overview';
-const titles={overview:['Обзор','состояние Лешего'],chat:['Чат','диалог и история'],knowledge:['Знания','база знаний и память'],learning:['Обучение','управляемое самообучение'],tasks:['Задачи','локальный план работы'],superagent:['SuperAgent','автономные задачи и взаимодействие'],tools:['Инструменты','подключённые возможности'],system:['Система','runtime и ускорители'],settings:['Настройки','модель, Telegram и данные'],logs:['Логи','диагностика']};
+const titles={overview:['Обзор','состояние Лешего'],chat:['Чат','диалог и история'],knowledge:['Знания','база знаний и память'],learning:['Обучение','управляемое самообучение'],tasks:['Задачи Лешего','локальный план работы'],superagent:['SuperAgent','автономные задачи и взаимодействие'],tools:['Инструменты','подключённые возможности'],system:['Система','runtime и ускорители'],settings:['Настройки','модель, Telegram и данные'],logs:['Логи','диагностика']};
 async function api(path,options={}){const res=await fetch(path,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const data=await res.json().catch(()=>({error:'Некорректный ответ сервера'}));if(!res.ok)throw new Error(data.error||('HTTP '+res.status));return data}
 function engage(save=true){document.body.classList.add('full');uiMode='full';if(save)localStorage.setItem(uiModeKey,'full')}
 function setMinimal(){document.body.classList.remove('full');uiMode='minimal';localStorage.setItem(uiModeKey,'minimal');$('contextPanel').classList.remove('open')}
@@ -263,10 +263,10 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     if(Number.isFinite(last.relative_percent)&&Number.isFinite(last.reference_percent)&&last.reference_percent>0){
       referenceLevel.textContent='100%';
       relativeLevel.textContent=fmt(last.relative_percent);
-      relativeStatus.textContent=last.reference_model+' · '+last.questions+' одинаковых заданий · '+last.timestamp;
-    }else{resetComparison('Для последнего пакета нет парной оценки ChatGPT');}
+      relativeStatus.textContent='LiveMentor · '+last.questions+' одинаковых заданий · '+last.timestamp;
+    }else{resetComparison('Для последнего пакета нет парной оценки LiveMentor');}
     const before=series[series.length-2];
-    qualityDetail.textContent=last.timestamp+' · '+last.benchmark_id+' / '+last.rubric_id+' · '+(last.model==='not_confirmed'?'Модель Лешего не подтверждена':last.model)+' · '+(before?'Изменение: '+(last.leshy_percent-before.leshy_percent>=0?'+':'')+(last.leshy_percent-before.leshy_percent).toFixed(2)+' п. п.':'Первое сопоставимое измерение')+(Number.isFinite(last.relative_percent)?' · Относительно '+last.reference_model+': '+fmt(last.relative_percent):' · Сравнение с ChatGPT пока не измерено');
+    qualityDetail.textContent=last.timestamp+' · '+last.benchmark_id+' / '+last.rubric_id+' · '+(last.model==='not_confirmed'?'Модель Лешего не подтверждена':last.model)+' · '+(before?'Изменение: '+(last.leshy_percent-before.leshy_percent>=0?'+':'')+(last.leshy_percent-before.leshy_percent).toFixed(2)+' п. п.':'Первое сопоставимое измерение')+(Number.isFinite(last.relative_percent)?' · Относительно LiveMentor: '+fmt(last.relative_percent):' · Сравнение с LiveMentor пока не измерено');
     const ns='http://www.w3.org/2000/svg';
     function node(tag,attrs,value,parent=qualityChart){const e=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,String(v));if(value!==undefined)e.textContent=value;parent.appendChild(e);return e;}
     const top=100;
@@ -319,7 +319,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
         title.className='item-title';
         title.textContent=row.request_id+' · '+(names[row.status]||'Не подтверждено');
         block.appendChild(title);
-        line(block,'AI-mentor',row.question);
+        line(block,'LiveMentor',row.question);
         line(block,row.source==='leshy_model'?'Леший (ответ модели)':'Леший (ответ локального API)',row.answer);
         line(block,'Получен',row.received_at);
         line(block,'Ответ сохранён',row.answered_at);
