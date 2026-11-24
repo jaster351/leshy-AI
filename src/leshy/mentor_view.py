@@ -91,8 +91,18 @@ def mentor_snapshot(brain_dir: Path) -> dict:
             raw = handle.read(256 * 1024 + 1)
         if len(raw) <= 256 * 1024:
             export_hash = sha256(raw).hexdigest()
+    load = _read(root / "load-policy.json")
+    last = load.get("last_review") or {}
+    if not isinstance(last, dict):
+        last = {}
+    investigations = load.get("investigation") or []
     return {"configured": bool(config), "enabled": config.get("enabled") is True,
+            "training_quota": load.get("quota", 30),
+            "load_decision": _text(load.get("decision")),
+            "review_quality": last.get("quality"),
+            "reviewed_questions": last.get("reviewed"),
+            "open_investigations": len(investigations) if isinstance(investigations, list) else 0,
             "export_sha256": export_hash,
             "status": current, "last_check_at": _text(status.get("timestamp")),
             "items": items, "truncated": len(ids) > _MAX_ITEMS,
-            "evaluation_status": "not_implemented"}
+            "evaluation_status": "review_received" if last else "not_reviewed"}

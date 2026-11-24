@@ -158,13 +158,20 @@ class BatchRunner:
                 existing = read_obj(path)
                 if (existing.get("request_id"), existing.get("batch_sha256"), existing.get("question")) != (rid, expected, question):
                     raise ValueError("Локальный вопрос не совпадает с пакетом")
+        from .mentor_review import apply_review
+        load = apply_review(self.root, config, read_obj=read_obj, read_bytes=read_bytes,
+                            atomic=atomic, digest=digest, now=now)
+        quota = load["quota"]
         # Publish only an exact, locally reviewed export, never raw model text by default.
         if self.still_allowed(config):
             self.publish(config, gh, token, questions)
         deadline = time.monotonic() + 0.85 * INTERVAL
         history = []
+        completed = 0
+        stop_reason = "batch_end"
         for qid, question in questions:
             if not self.still_allowed(config) or time.monotonic() >= deadline:
+                stop_reason = "disabled_or_budget"
                 break
             rid = batch_id + "-" + qid
             path = self.root / (rid + ".json")
@@ -180,18 +187,25 @@ class BatchRunner:
                     history.append((question, answer))
                     continue
                 # Crash during inference or failure: do not pretend it succeeded.
-                return "outcome_unknown" if saved.get("status") == "sent" else "error"
+                stop_reason = "outcome_unknown" if saved.get("status") == "sent" else "error"
+                break
+            if completed >= quota:
+                stop_reason = "quota"
+                break
             # Native local model only for the first integration. Never invoke echo,
             # ordinary app.chat, an external Ollama endpoint, or tools.
             if (self.app.settings.llm_backend != "native"
                     or isinstance(self.app.llm, EchoLLM)
                     or not self.app.model_path.is_file()):
-                return "waiting"
+                stop_reason = "model_unavailable"
+                break
             if self.app.conversation_activity.snapshot().get("active_conversations", 1):
+                stop_reason = "interactive_priority"
                 break
             scheduler = get_inference_scheduler(self.app)
             scheduler_status = scheduler.status()
             if scheduler_status.get("active") or scheduler_status.get("waiting"):
+                stop_reason = "interactive_priority"
                 break
             messages = [ChatMessage("system", _SYSTEM)]
             # Keep recent complete turns, with a character budget independent
@@ -212,6 +226,7 @@ class BatchRunner:
                                     cancel_event=self.stop, timeout=0.25):
                     if (not self.still_allowed(config)
                             or self.app.conversation_activity.snapshot().get("active_conversations", 1)):
+                        stop_reason = "interactive_priority_or_disabled"
                         break
                     started = time.monotonic()
                     record = {"request_id": rid, "batch_sha256": expected,
@@ -236,13 +251,27 @@ class BatchRunner:
                         record.pop("answer", None)
                         atomic(path, record)
                         event("mentor_batch_inference_failed", error_type=type(exc).__name__)
-                        return "error"
+                        stop_reason = "error"
+                        break
             except (TimeoutError, InterruptedError):
+                stop_reason = "queue_interrupted"
                 break
+            completed += 1
             history.append((question, answer))
+        if completed >= quota and stop_reason == "batch_end":
+            stop_reason = "quota"
+        metrics = {"batch_id": batch_id, "quota": quota, "completed": completed,
+                   "stop_reason": stop_reason, "timestamp": now()}
+        # Do not erase the last productive capacity sample with an empty review cycle.
+        if completed or not (self.root / "cycle-metrics.json").exists():
+            atomic(self.root / "cycle-metrics.json", metrics)
         if self.still_allowed(config):
             self.prepare_export(config, questions)
-        return "awaiting_review" if (self.root / "export.json").exists() else "waiting"
+        if stop_reason in {"error", "outcome_unknown"}:
+            return stop_reason
+        if (self.root / "export.json").exists():
+            return "awaiting_review"
+        return "published" if stop_reason == "batch_end" else "waiting"
 
     def prepare_export(self, config, questions):
         path = self.root / "export.json"

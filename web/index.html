@@ -83,7 +83,7 @@
       <div class="card hidden" id="mentorHistoryCard" style="margin-top:12px">
         <div class="toolbar"><h3 style="margin:0">AI-mentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button></div>
         <div class="hint" id="mentorHistoryStatus" role="status">Проверка доступа…</div>
-        <div class="hint" style="margin:8px 0">Локальная история учебных пакетов. Ответ модели не означает подтверждённое обучение. Независимые оценки ещё не подключены.</div>
+        <div class="hint" style="margin:8px 0">Локальная история учебных пакетов. Оценки относятся только к подтверждённым ответам. Развитие навыка требует независимой проверки.</div>
         <div class="list" id="mentorHistoryItems"></div>
       </div>
     </section>
@@ -255,7 +255,10 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
       card.classList.remove('hidden');
       state.textContent=(names[data.status]||'Статус не подтверждён')+
         (data.last_check_at?' · Последняя проверка: '+data.last_check_at:' · Проверок пока нет')+
-        (data.truncated?' · Показаны до 50 записей':'')+(data.export_sha256?' · SHA-256 экспорта для локальной проверки: '+data.export_sha256:'');
+        (data.truncated?' · Показаны до 50 записей':'')+(data.export_sha256?' · SHA-256 экспорта для локальной проверки: '+data.export_sha256:'')+
+        (Number.isInteger(data.training_quota)?' · Вопросов за цикл: '+data.training_quota:'')+
+        (typeof data.review_quality==='number'?' · Оценка наставника: '+Math.round(data.review_quality*100)+'%':' · Оценка ещё не получена')+
+        (data.open_investigations?' · Требуют разбора: '+data.open_investigations:'');
       list.replaceChildren();
       for(const row of Array.isArray(data.items)?data.items:[]){
         const block=document.createElement('div');
