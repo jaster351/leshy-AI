@@ -112,8 +112,17 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
                 raise ValueError("Некорректная реакция наставника")
             if reaction == "dislike" and cause == "none":
                 raise ValueError("Для дизлайка требуется причина или unknown")
-            reactions.append({"id": qid, "answer_sha256": marker["answer_sha256"],
-                              "reaction": reaction, "cause": cause})
+            entry = {"id": qid, "answer_sha256": marker["answer_sha256"],
+                     "reaction": reaction, "cause": cause}
+            # Текст исправления — только данные для разбора, не инструкция runtime.
+            for key, limit in (("reason", 1000), ("corrected_answer", 4000)):
+                if key in row:
+                    value = row[key]
+                    if (reaction != "dislike" or not isinstance(value, str)
+                            or not value.strip() or len(value) > limit):
+                        raise ValueError("Некорректное пояснение или исправление наставника")
+                    entry[key] = value.strip()
+            reactions.append(entry)
             if reaction == "dislike" and not any(x["id"] == qid for x in issues):
                 issues.append({"id": qid, "cause": cause, "critical": flag,
                                "status": "requires_investigation"})
