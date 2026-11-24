@@ -32,10 +32,14 @@ class MentorBridge:
         self.github = request.build_opener(_NoRedirect())
 
     def start(self):
-        if self.root.is_symlink() or not (self.root / "config.json").is_file():
+        if self.root.is_symlink() or self.thread is not None:
             return
         self.thread = threading.Thread(target=self._run, name="leshy-ai-mentor", daemon=True)
-        self.thread.start()
+        try:
+            self.thread.start()
+        except Exception as exc:
+            self.thread = None
+            event("mentor_thread_start_failed", error_type=type(exc).__name__)
 
     def stop(self):
         self.stop_event.set()
@@ -123,10 +127,16 @@ class MentorBridge:
         while not self.stop_event.is_set():
             started = time.monotonic()
             try:
+                if self.root.is_symlink() or not (self.root / "config.json").is_file():
+                    if self.stop_event.wait(15):
+                        return
+                    continue
                 config = runner.config()
                 if config.get("enabled") is not True:
                     atomic(self.root / "status.json", {"status": "disabled", "timestamp": now()})
-                    return
+                    if self.stop_event.wait(15):
+                        return
+                    continue
                 clock = self.root / "cycle.json"
                 if clock.exists():
                     last = read_obj(clock).get("started_epoch")
@@ -137,7 +147,7 @@ class MentorBridge:
                         return
                     config = runner.config()
                     if config.get("enabled") is not True:
-                        return
+                        continue
                 atomic(clock, {"started_epoch": time.time()})
                 started = time.monotonic()
                 atomic(self.root / "status.json", {"status": "checking", "timestamp": now()})
