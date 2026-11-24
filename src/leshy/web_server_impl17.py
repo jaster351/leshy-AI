@@ -114,8 +114,17 @@ def make_handler(app, telegram, settings, model_catalog):
                 except FileNotFoundError:
                     return self._identity_json(HTTPStatus.NOT_FOUND, {"error": "Панель QA не найдена"})
             if route == "/v1/qa-mentor/events":
-                if not self._research_owner_allowed():
-                    return
+                # Browser access is bound to the verified HttpOnly owner
+                # session; read-only viewing must not require the machine token.
+                owner = self._existing_web_owner()
+                if not owner:
+                    return self._identity_json(HTTPStatus.UNAUTHORIZED, {
+                        "error": "Требуется подтверждённая Web-сессия",
+                    })
+                if role_for_web(telegram, identity, owner) not in {"creator", "server_owner"}:
+                    return self._identity_json(HTTPStatus.FORBIDDEN, {
+                        "error": "Журнал доступен только владельцу",
+                    })
                 try:
                     args = parse_qs(urlsplit(self.path).query)
                     limit = int((args.get("limit") or ["80"])[0])
