@@ -87,7 +87,7 @@ try {
         try { Assert-MentorAppAccess $token } catch { return 'authorization_error' }
     }
     $repository = Get-MentorJson '' $token
-    if ($repository.private -isnot [bool] -or -not $repository.private -or $repository.full_name -ine 'jaster351/AI-mentor') { throw 'Private repository required' }
+    if ($repository.private -isnot [bool] -or -not $repository.private -or $repository.full_name -ine 'jaster351/AI-mentor' -or [string]$repository.id -cne '1470788052') { throw 'Private repository required' }
     if ($autoQueue) {
         $entry = Get-MentorJson '/contents/queue/current.json?ref=main' $token
         if ($entry.type -cne 'file' -or $entry.encoding -cne 'base64' -or $entry.size -gt 8192) { throw 'Invalid mentor queue' }
