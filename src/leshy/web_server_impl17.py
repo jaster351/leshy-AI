@@ -17,6 +17,7 @@ from .module_settings import module_enabled
 from .superagent_ssh_pty import InteractiveSSHBroker
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
 from .android_voice_access import authorized_owner as _android_voice_owner, conversational_answer as _android_voice_answer
+from .mentor_exchange import MentorExchange
 
 
 _PREVIOUS_MAKE_HANDLER = previous.make_handler
@@ -25,6 +26,10 @@ _PREVIOUS_MAKE_HANDLER = previous.make_handler
 def make_handler(app, telegram, settings, model_catalog):
     Parent = _PREVIOUS_MAKE_HANDLER(app, telegram, settings, model_catalog)
     identity = app.owner_identity
+    mentor_exchange = getattr(app, "_mentor_exchange", None)
+    if not isinstance(mentor_exchange, MentorExchange):
+        mentor_exchange = MentorExchange(app)
+        app._mentor_exchange = mentor_exchange
     login = getattr(app, "telegram_browser_login", None)
     if not isinstance(login, TelegramBrowserLogin):
         login = TelegramBrowserLogin(identity)
@@ -103,6 +108,17 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_GET(self):
             route = urlsplit(self.path).path
+            if route == "/v1/mentor/messages":
+                # A self-asserted owner_id, API token alone or anonymous Web
+                # session must not expose private mentorship conversations.
+                if not self._authorized():
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется авторизация"})
+                owner = self._existing_web_owner()
+                if not owner:
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется Web-сессия"})
+                if role_for_web(telegram, identity, owner) not in {"creator", "server_owner"}:
+                    return self._json(HTTPStatus.FORBIDDEN, {"error": "Требуются права владельца"})
+                return self._json(HTTPStatus.OK, mentor_exchange.snapshot())
             if route == "/v1/android/voice/status":
                 owner = _android_voice_owner(settings.brain_dir, self.headers.get("Authorization", ""))
                 if not owner:
