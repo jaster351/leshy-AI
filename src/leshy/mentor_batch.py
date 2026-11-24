@@ -106,6 +106,47 @@ def validate_batch(raw, batch_id, expected):
     return result
 
 
+def automatic_export_safe(raw):
+    """Ограниченный экспорт учебных ответов; сомнительные строки остаются локально."""
+    try:
+        data = json.loads(raw)
+        if (not isinstance(data, dict)
+                or set(data) != {"schema", "batch_id", "batch_sha256", "responses"}
+                or data.get("schema") != "ai-mentor.responses.v1"):
+            return False
+        rows = data.get("responses")
+        if not isinstance(rows, list) or not 1 <= len(rows) <= MAX_QUESTIONS:
+            return False
+        expected = {"id", "answer", "timestamp", "revision", "model", "duration_ms", "status", "source"}
+        # Это консервативный дополнительный фильтр, не доказательство отсутствия личных данных.
+        secret_pattern = re.compile(
+            r"(?i)(?:gh[pousr]_[a-z0-9_]{12,}|github_pat_[a-z0-9_]{12,}|"
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[a-z0-9_-]{16,}|"
+            r"bearer\\s+[a-z0-9_.-]{12,}|[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}|"
+            r"(?:password|passwd|пароль|api[_ -]?key|токен)\\s*[:=]\\s*\\S+)"
+        )
+        for row in rows:
+            if (not isinstance(row, dict) or set(row) != expected
+                    or row.get("source") != "leshy_model" or row.get("status") != "answered"
+                    or row.get("model") != "not_confirmed"
+                    or not isinstance(row.get("id"), str) or not _QID.fullmatch(row["id"])
+                    or not isinstance(row.get("answer"), str)
+                    or not 1 <= len(row["answer"]) <= MAX_ANSWER
+                    or secret_pattern.search(row["answer"])
+                    or not isinstance(row.get("revision"), str)
+                    or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+|not_confirmed", row["revision"])
+                    or not isinstance(row.get("timestamp"), str)
+                    or len(row["timestamp"]) > 64
+                    or type(row.get("duration_ms")) is not int
+                    or row["duration_ms"] < 0):
+                return False
+            if datetime.fromisoformat(row["timestamp"]).tzinfo is None:
+                return False
+        return True
+    except (ValueError, TypeError, OverflowError):
+        return False
+
+
 class BatchRunner:
     def __init__(self, root, app, stop_event, gh_call):
         self.root = Path(root)
@@ -282,6 +323,8 @@ class BatchRunner:
             atomic(self.root / "cycle-metrics.json", metrics)
         if self.still_allowed(config):
             self.prepare_export(config, questions)
+            if self.config().get("auto_publish") is True:
+                self.publish(config, gh, token, questions)
         if stop_reason in {"error", "outcome_unknown"}:
             return stop_reason
         if (self.root / "export.json").exists():
@@ -427,8 +470,21 @@ class BatchRunner:
         if not path.exists():
             return
         raw = read_bytes(path, MAX_EXPORT)
-        approved = self.config()
-        if approved.get("approved_export_sha256") != digest(raw):
+        def allowed_export():
+            approved = self.config()
+            if (not self.still_allowed(config)
+                    or not token or load_secret(self.root / "github_token.dat") != token):
+                return False
+            if approved.get("approved_export_sha256") == digest(raw):
+                return True
+            return (config.get("repository") == "jaster351/AI-mentor"
+                    and config.get("auto_publish") is True
+                    and approved.get("auto_publish") is True
+                    and approved.get("auto_queue") is True
+                    and token.startswith("ghu_")
+                    and automatic_export_safe(raw))
+
+        if not allowed_export():
             return
         obj = json.loads(raw)
         if (obj.get("schema") != "ai-mentor.responses.v1"
@@ -462,7 +518,7 @@ class BatchRunner:
                 raise
             result = None
         if result is None:
-            if not self.still_allowed(config) or self.config().get("approved_export_sha256") != digest(raw):
+            if not allowed_export() or gh().get("private") is not True or not allowed_export():
                 return
             gh(target, {"message": "Проверенный учебный пакет " + config["batch_id"],
                         "branch": "main", "content": base64.b64encode(raw).decode("ascii")}, "PUT")
