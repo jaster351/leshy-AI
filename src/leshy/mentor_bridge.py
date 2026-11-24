@@ -83,13 +83,19 @@ class MentorBridge:
             return
         while not self.stop_event.is_set():
             try:
+                _atomic(self.root / "status.json", {"status": "checking", "timestamp": _now()})
                 status = self._step()
+                _atomic(self.root / "status.json", {"status": status, "timestamp": _now()})
                 if status in {"published", "disabled"}:
                     return
             except Exception as exc:
                 # Никаких тел HTTP-ответов, запросов, токенов или приватных путей.
                 event("mentor_bridge_error", error_type=type(exc).__name__)
-            if self.stop_event.wait(60):
+                try:
+                    _atomic(self.root / "status.json", {"status": "error", "timestamp": _now()})
+                except OSError:
+                    pass
+            if self.stop_event.wait(3600):
                 return
 
     def _step(self):
@@ -135,6 +141,10 @@ class MentorBridge:
                 saved = json.loads(state.read_text(encoding="utf-8"))
                 received = json.loads(base64.b64decode(remote["content"]))
                 if saved.get("status") == "answered" and received == saved:
+                    answer = saved.get("answer")
+                    if not isinstance(answer, str) or not answer.strip():
+                        raise ValueError("Нет подтверждённого текста ответа")
+                    self._mark_published(rid, answer)
                     event("mentor_bridge_published", request_id=rid)
                     return "published"
             # Не генерируем заново и не перезаписываем чужой результат.
@@ -153,6 +163,11 @@ class MentorBridge:
                 raise ValueError("Неверный источник запроса")
             if not isinstance(question, str) or len(question) > 4000 or _digest(question) != question_hash:
                 raise PermissionError("Вопрос не совпадает с локальным разрешением")
+            if github_token in question or api_token in question:
+                raise PermissionError("Вопрос содержит секрет")
+            _atomic(self.root / (rid + ".question.json"), {
+                "request_id": rid, "question": question, "timestamp": _now(),
+            })
             status = local("/v1/status")
             if status.get("backend") not in {"native", "ollama", "inkling-original", "inferssd"} or not status.get("model_ready"):
                 return "waiting"
@@ -193,5 +208,17 @@ class MentorBridge:
         confirmed = gh(target + "?ref=main")
         if base64.b64decode(confirmed["content"]) != raw:
             raise RuntimeError("Не подтверждена публикация")
+        self._mark_published(rid, answer)
         event("mentor_bridge_published", request_id=rid)
         return "published"
+
+    def _mark_published(self, rid, answer):
+        path = self.root / (rid + ".published.json")
+        if path.is_file():
+            try:
+                old = json.loads(path.read_text(encoding="utf-8"))
+                if old.get("request_id") == rid and old.get("answer_sha256") == _digest(answer):
+                    return
+            except (OSError, ValueError, TypeError, AttributeError):
+                pass
+        _atomic(path, {"request_id": rid, "answer_sha256": _digest(answer), "timestamp": _now()})

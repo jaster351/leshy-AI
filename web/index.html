@@ -80,6 +80,12 @@
       <h2 class="section-title">Обучение</h2><div class="section-subtitle">Управляемое самообучение из интернета с верификацией.</div>
       <div class="grid"><div class="card"><h3>Самообучение</h3><div class="row"><span>Состояние</span><button class="switch" id="learningSwitch" aria-label="Самообучение"></button></div><input class="field" id="researchTopic" placeholder="Тема для изучения"><button class="button" style="width:100%;margin-top:8px" id="researchQueue">Добавить тему</button><div class="hint" id="learningState" style="margin-top:8px"></div></div><div class="card"><h3>Конвейер</h3><div class="muted">research → candidate → verification → trusted</div><div class="divider"></div><div class="row"><span>Candidate</span><b id="learningCandidate">0</b></div><div class="row"><span>Trusted</span><b id="learningTrusted">0</b></div></div></div>
       <div class="grid" style="margin-top:12px"><div class="card"><h3>Очередь исследований</h3><div class="list" id="researchTasks"></div></div><div class="card"><h3>История обучения</h3><div class="list" id="learningHistory"></div></div></div>
+      <div class="card hidden" id="mentorHistoryCard" style="margin-top:12px">
+        <div class="toolbar"><h3 style="margin:0">AI-mentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button></div>
+        <div class="hint" id="mentorHistoryStatus" role="status">Проверка доступа…</div>
+        <div class="hint" style="margin:8px 0">Локальная история учебного обмена. Ответ API не означает подтверждённое обучение. Оценки и пакетный режим ещё не подключены.</div>
+        <div class="list" id="mentorHistoryItems"></div>
+      </div>
     </section>
 
     <section class="pane" id="pane-tasks">
@@ -214,6 +220,70 @@ $('modelDownload').onclick=async()=>{try{await api('/v1/model/download',{method:
 if(uiMode==='full'){engage(false);showSection(currentSection,false);if(localStorage.getItem(contextKey)==='open')$('contextPanel').classList.add('open')}else{setMinimal()}
 if(sessionId){api('/v1/history?session_id='+encodeURIComponent(sessionId)+'&owner_id='+encodeURIComponent(ownerId)).then(r=>{for(const m of r.items)addMessage(m.role,m.content)}).catch(()=>{})}
 refreshStatus();loadSessions();setInterval(refreshStatus,3000);
+</script>
+<script>
+(function(){
+  const card=document.getElementById('mentorHistoryCard');
+  const state=document.getElementById('mentorHistoryStatus');
+  const list=document.getElementById('mentorHistoryItems');
+  const refresh=document.getElementById('mentorRefresh');
+  const pane=document.getElementById('pane-learning');
+  if(!card||!state||!list||!refresh||!pane)return;
+  const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ API сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
+  let pending=false, generation=0;
+  const active=()=>pane.classList.contains('active')&&!document.hidden;
+  function clear(){generation++;card.classList.add('hidden');list.replaceChildren();state.textContent='';}
+  function line(parent,label,value){
+    if(!value)return;
+    const el=document.createElement('div');
+    el.className='item-body';
+    el.textContent=label+': '+value;
+    parent.appendChild(el);
+  }
+  async function load(){
+    if(!active()){clear();return;}
+    if(pending)return;
+    pending=true;
+    const token=++generation;
+    try{
+      const res=await fetch('/v1/mentor/history',{cache:'no-store',credentials:'same-origin'});
+      if(token!==generation||!active())return;
+      if(res.status===401||res.status===403){clear();return;}
+      if(!res.ok)throw Error('HTTP '+res.status);
+      const data=await res.json();
+      if(token!==generation||!active())return;
+      card.classList.remove('hidden');
+      state.textContent=(names[data.status]||'Статус не подтверждён')+
+        (data.last_check_at?' · Последняя проверка: '+data.last_check_at:' · Проверок пока нет')+
+        (data.truncated?' · Показаны до 50 записей':'');
+      list.replaceChildren();
+      for(const row of Array.isArray(data.items)?data.items:[]){
+        const block=document.createElement('div');
+        block.className='item';
+        const title=document.createElement('div');
+        title.className='item-title';
+        title.textContent=row.request_id+' · '+(names[row.status]||'Не подтверждено');
+        block.appendChild(title);
+        line(block,'AI-mentor',row.question);
+        line(block,'Леший (ответ локального API)',row.answer);
+        line(block,'Получен',row.received_at);
+        line(block,'Ответ сохранён',row.answered_at);
+        line(block,'Публикация подтверждена',row.published_at);
+        line(block,'Версия',row.version);
+        line(block,'Модель',row.model==='not_confirmed'?'Не подтверждена':row.model);
+        list.appendChild(block);
+      }
+      if(!list.children.length){const e=document.createElement('div');e.className='empty';e.textContent='Подтверждённых локальных записей пока нет';list.appendChild(e);}
+    }catch(_error){
+      if(token===generation){list.replaceChildren();state.textContent='История недоступна; данные не подтверждены';}
+    }finally{pending=false;}
+  }
+  refresh.addEventListener('click',load);
+  new MutationObserver(()=>{if(active())load();else clear();}).observe(pane,{attributes:true,attributeFilter:['class']});
+  document.addEventListener('visibilitychange',()=>{if(active())load();else clear();});
+  setInterval(load,5000);
+  load();
+})();
 </script>
 </body>
 </html>

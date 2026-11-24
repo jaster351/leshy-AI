@@ -16,6 +16,7 @@ from .model_repository_search import search_hub_models
 from .module_settings import module_enabled
 from .superagent_ssh_pty import InteractiveSSHBroker
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
+from .mentor_view import mentor_snapshot
 from .android_voice_access import authorized_owner as _android_voice_owner, conversational_answer as _android_voice_answer
 
 
@@ -103,6 +104,16 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_GET(self):
             route = urlsplit(self.path).path
+            if route == "/v1/mentor/history":
+                owner = self._existing_web_owner()
+                if not self._authorized() or not owner:
+                    return self._identity_json(HTTPStatus.UNAUTHORIZED, {"error": "Требуется подтверждённая Web-сессия"})
+                if role_for_web(telegram, identity, owner) != "creator":
+                    return self._identity_json(HTTPStatus.FORBIDDEN, {"error": "Доступ только для Создателя"})
+                try:
+                    return self._identity_json(HTTPStatus.OK, mentor_snapshot(settings.brain_dir))
+                except (OSError, ValueError, TypeError):
+                    return self._identity_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось прочитать журнал AI-mentor"})
             if route == "/v1/android/voice/status":
                 owner = _android_voice_owner(settings.brain_dir, self.headers.get("Authorization", ""))
                 if not owner:
