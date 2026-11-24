@@ -38,6 +38,15 @@ def mentor_snapshot(brain_dir: Path) -> dict:
                 "status": "not_configured", "last_check_at": "", "truncated": False}
     config = _read(root / "config.json")
     status = _read(root / "status.json")
+    transport = _read(root / "delivery-status.json")
+    delivery_status = transport.get("status")
+    valid_delivery = {"not_configured", "disabled", "authorization_required",
+                      "authorization_error", "configuration_changed", "delivered",
+                      "up_to_date", "error", "not_confirmed"}
+    if (transport.get("schema") != "ai-mentor.delivery-status.v1"
+            or not isinstance(delivery_status, str) or delivery_status not in valid_delivery):
+        delivery_status = "not_confirmed"
+        transport = {}
     valid_statuses = {"waiting", "awaiting_review", "published", "disabled",
                       "error", "checking", "not_configured", "outcome_unknown", "waiting_delivery"}
     current = status.get("status")
@@ -149,4 +158,6 @@ def mentor_snapshot(brain_dir: Path) -> dict:
             "status": current, "last_check_at": _text(status.get("timestamp")),
             "items": items, "truncated": len(ids) > _MAX_ITEMS,
             "delivered_count": len(delivered),
+            "delivery_status": delivery_status,
+            "delivery_checked_at": _text(transport.get("timestamp")),
             "evaluation_status": "review_received" if last else "not_reviewed"}
