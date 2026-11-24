@@ -51,7 +51,7 @@ def test_verified_listing_is_reported_even_without_3_of_3():
     assert not assessment.three_signal_confirmed
 
 
-def test_chat_saves_complete_diagnostics_behind_spoiler():
+def test_chat_keeps_complete_diagnostics_in_metadata():
     metadata = {
         "target": "188.130.141.48",
         "verdict": "Недостаточно данных для вывода о наличии или отсутствии блокировки",
@@ -67,11 +67,11 @@ def test_chat_saves_complete_diagnostics_behind_spoiler():
                 metadata=metadata,
             )
     with patch("leshy.network_blocking_runtime._module", return_value=Module()):
-        answer, _, _ = _run(object(), "188.130.141.48")
-    assert answer.startswith("Проверка IP:")
-    assert "[[LESHY_DIAGNOSTICS]]" in answer
-    assert "[[/LESHY_DIAGNOSTICS]]" in answer
-    assert "Протокол TCP/22" in answer
+        answer, _, result = _run(object(), "188.130.141.48")
+    assert answer.startswith("188.130.141.48 — не удалось однозначно")
+    assert "[[LESHY_DIAGNOSTICS]]" not in answer
+    assert "Протокол TCP/22" not in answer
+    assert "Протокол TCP/22" in result["diagnostic_report"]
 
 
 def test_ui_and_telegram_support_expanding_report():
