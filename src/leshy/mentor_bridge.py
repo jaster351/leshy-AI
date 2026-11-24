@@ -14,6 +14,7 @@ from .diagnostics import event
 from .mentor_batch import BatchRunner, atomic, digest, encode, now, read_obj, INTERVAL
 from .secret_store import load_secret
 from .version import VERSION
+from .mentor_bundled import local_config
 
 MAX_BYTES = 2 * 1024 * 1024
 
@@ -32,10 +33,30 @@ class MentorBridge:
         self.github = request.build_opener(_NoRedirect())
 
     def start(self):
-        if self.root.is_symlink() or not (self.root / "config.json").is_file():
+        if self.root.is_symlink():
             return
         self.thread = threading.Thread(target=self._run, name="leshy-ai-mentor", daemon=True)
-        self.thread.start()
+        try:
+            self.thread.start()
+        except Exception as exc:
+            self.thread = None
+            event("mentor_thread_start_failed", error_type=type(exc).__name__)
+
+    def _initialize_config(self):
+        if self.root.is_symlink():
+            raise PermissionError("Ссылка вместо учебной папки")
+        self.root.mkdir(parents=True, exist_ok=True)
+        path = self.root / "config.json"
+        if path.is_symlink():
+            raise PermissionError("Ссылка вместо учебной конфигурации")
+        if not path.exists():
+            try:
+                with path.open("xb") as handle:
+                    handle.write(encode(local_config()))
+            except FileExistsError:
+                pass
+        # Never overwrite explicit local settings, especially enabled=false.
+        return read_obj(path)
 
     def stop(self):
         self.stop_event.set()
@@ -118,6 +139,11 @@ class MentorBridge:
 
     def _run(self):
         if self.stop_event.wait(15):
+            return
+        try:
+            self._initialize_config()
+        except Exception as exc:
+            event("mentor_bundled_configuration_failed", error_type=type(exc).__name__)
             return
         runner = BatchRunner(self.root, self.app, self.stop_event, self._gh)
         while not self.stop_event.is_set():
