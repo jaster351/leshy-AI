@@ -1,7 +1,7 @@
-"""Evidence-bound mentor evaluations and conservative hourly quota decisions.
+"""Оценки наставника, привязанные к ответам, и осторожная часовая планка.
 
-Reviews are data, not executable instructions. Only an explicitly approved
-review of published answers may alter a local training quota.
+Отчёт содержит данные, а не команды. Только явно утверждённая оценка
+опубликованных ответов может менять локальную планку.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ CAUSES = {"question", "rubric", "knowledge", "context", "code", "model",
           "resources", "transport", "unknown"}
 CRITERIA = ("factuality", "constraints", "meaning")
 INITIAL_QUOTA = 30
-MAX_PART = 256  # transport part; additional parts use separate IDs
+MAX_PART = 256  # транспортная часть; следующие части имеют отдельные ID
 
 
 def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
@@ -69,6 +69,7 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
         raise ValueError("Нет допустимых оценок")
     seen, issues, models, revisions = set(), [], set(), set()
     total = 0
+    reactions = []
     critical = False
     for row in rows:
         if not isinstance(row, dict):
@@ -104,6 +105,18 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
                 cause = "unknown"
             issues.append({"id": qid, "cause": cause, "critical": flag,
                            "status": "requires_investigation"})
+        # Резервный сигнал наставника не подменяет объективные критерии.
+        reaction = row.get("reaction")
+        if "reaction" in row:
+            if not isinstance(reaction, str) or reaction not in {"like", "dislike"}:
+                raise ValueError("Некорректная реакция наставника")
+            if reaction == "dislike" and cause == "none":
+                raise ValueError("Для дизлайка требуется причина или unknown")
+            reactions.append({"id": qid, "answer_sha256": marker["answer_sha256"],
+                              "reaction": reaction, "cause": cause})
+            if reaction == "dislike" and not any(x["id"] == qid for x in issues):
+                issues.append({"id": qid, "cause": cause, "critical": flag,
+                               "status": "requires_investigation"})
         total += sum(score.values())
         model, revision = a.get("model"), a.get("revision")
         models.add(model if isinstance(model, str) else "not_confirmed")
@@ -118,6 +131,9 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
                "rubric_id": rubric, "quality": round(quality, 6), "reviewed": len(rows),
                "total": len(qids), "complete": full, "critical": critical,
                "model": model, "revision": revision, "comparable": comparable,
+               "reactions": {"like": sum(x["reaction"] == "like" for x in reactions),
+                             "dislike": sum(x["reaction"] == "dislike" for x in reactions),
+                             "missing": len(rows) - len(reactions)},
                "timestamp": now()}
     previous = state.get("last_review") or {}
     matched = (isinstance(previous, dict) and comparable and previous.get("comparable") is True
@@ -126,7 +142,7 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
                and previous.get("benchmark_id") == benchmark and previous.get("rubric_id") == rubric
                and previous.get("model") == model and previous.get("revision") == revision
                and confirmed and isinstance(previous.get("quality"), (int, float)))
-    # Do not evaluate the same accepted batch twice, even with different hashes.
+    # Не учитываем один пакет повторно даже с другим хешем.
     reviewed = state.get("reviewed_batches", [])
     if not isinstance(reviewed, list) or any(not isinstance(x, str) for x in reviewed):
         raise ValueError("Повреждён журнал пакетов")
@@ -146,8 +162,8 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
         quota = max(1, quota * 7 // 10)
         decision = "low_quality_investigation"
     elif matched and quality > previous["quality"] + 0.000001 and not issues:
-        # Quality alone does not establish hourly throughput. The runner
-        # records actual completed calls per cycle, not reviewed answers.
+        # Качество само по себе не доказывает часовую пропускную способность.
+        # Исполнитель фиксирует завершённые вызовы, а не оценки.
         perf = read_obj(root / "cycle-metrics.json") if (root / "cycle-metrics.json").exists() else {}
         if (perf.get("batch_id") == bid and perf.get("quota") == quota
                 and type(perf.get("completed")) is int and perf["completed"] >= (quota * 9 + 9) // 10
@@ -165,7 +181,7 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
     outstanding = state.get("investigation", [])
     if not isinstance(outstanding, list):
         raise ValueError("Повреждён журнал расследований")
-    # Previous investigations remain open. A score is not a receipt of a fix.
+    # Старые расследования остаются открытыми: оценка не доказывает исправление.
     outstanding = outstanding + [{"batch_id": bid, **x} for x in issues]
     if len(outstanding) > 4096:
         raise ValueError("Требуется архивирование расследований")
@@ -173,5 +189,11 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now):
              "applied": applied + [expected], "reviewed_batches": reviewed + [bid],
              "last_review": summary, "decision": decision, "previous_quota": old_quota,
              "investigation": outstanding}
+    # Отдельная запись с хешем утверждённого отчёта; повтор безопасен.
+    if reactions:
+        atomic(root / (bid + ".reactions-" + expected + ".json"), {
+            "source": "AI-mentor", "batch_id": bid, "review_sha256": expected,
+            "reactions": reactions,
+        })
     atomic(state_path, state)
     return state
