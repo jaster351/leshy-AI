@@ -125,6 +125,7 @@ class MentorBridge:
         if self.stop_event.wait(15):
             return
         runner = BatchRunner(self.root, self.app, self.stop_event, self._gh)
+        last_waiting_heartbeat = None
         while not self.stop_event.is_set():
             started = time.monotonic()
             try:
@@ -151,6 +152,14 @@ class MentorBridge:
                         delivery = self.root / (batch_id + ".delivery.json")
                         ready = delivery.is_file() and not delivery.is_symlink()
                     if not ready:
+                        # Телеметрия версии остаётся независимой от пакета.
+                        current_time = time.monotonic()
+                        if last_waiting_heartbeat is None or current_time - last_waiting_heartbeat >= INTERVAL:
+                            last_waiting_heartbeat = current_time
+                            try:
+                                self._publish_runtime_version(config)
+                            except Exception as exc:
+                                event("mentor_runtime_version_failed", error_type=type(exc).__name__)
                         atomic(self.root / "status.json",
                                {"status": "waiting_delivery", "timestamp": now()})
                         if self.stop_event.wait(15):
