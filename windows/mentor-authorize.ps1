@@ -27,7 +27,7 @@ try {
             Write-Host 'Локальная авторизация удалена. Для отзыва разрешения откройте настройки GitHub.'
             return
         }
-        if ($ClientId -cnotmatch '^[A-Za-z0-9_]{8,100}$') { throw 'Требуется Client ID отдельного GitHub App' }
+        if ($ClientId -cnotmatch '^[A-Za-z0-9_.-]{8,100}$') { throw 'Требуется Client ID отдельного GitHub App' }
         $device = Invoke-MentorOAuth '/login/device/code' @{client_id=$ClientId;scope='offline_access'}
         if ($device.error -or $device.verification_uri -cne 'https://github.com/login/device' -or $device.user_code -cnotmatch '^[A-Z0-9]{4}-[A-Z0-9]{4}$' -or -not $device.device_code -or $device.expires_in -lt 1 -or $device.expires_in -gt 1800 -or $device.interval -lt 5 -or $device.interval -gt 60) { throw 'Некорректный ответ GitHub для устройства' }
         Write-Host 'Откройте https://github.com/login/device и введите показанный код. Проверьте название своего GitHub App и права.'
