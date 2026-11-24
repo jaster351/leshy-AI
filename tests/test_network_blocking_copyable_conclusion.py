@@ -31,6 +31,7 @@ def test_claim_requires_verified_proof_record():
     assert "Не удалось однозначно" in _compact_answer(metadata)
 
 
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
 def test_positive_port_requires_completed_independent_probe():
     metadata = {"target": IP, "port_verdicts": _ports("tspu_detected", "insufficient")}
     assert "Не удалось однозначно" in _compact_answer(metadata)
@@ -38,6 +39,7 @@ def test_positive_port_requires_completed_independent_probe():
     assert _compact_answer(metadata) == f"{IP} Обнаружена блокировка на уровне ТСПУ."
 
 
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
 def test_negative_requires_both_ports_without_contradictory_evidence():
     metadata = {"target": IP, "port_verdicts": _ports()}
     assert _compact_answer(metadata) == f"{IP} Блокировка не обнаружена."
@@ -47,6 +49,7 @@ def test_negative_requires_both_ports_without_contradictory_evidence():
         {"target": IP, "port_verdicts": _ports("not_blocked", "insufficient")})
 
 
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
 def test_only_conclusion_is_delivered_in_chat():
     metadata = {"target": IP, "port_verdicts": _ports(), "verdict": "long summary",
                 "cheburcheck": {"ok": True, "source_url": "https://cheburcheck.ru/"}}
@@ -116,3 +119,20 @@ def test_unfinished_measurements_never_create_negative_result():
     assert _connection_status([{"status": "timeout"}, {"status": "error"}]) is None
     assert _connection_status([{"status": "connected"}, {"status": "pending"}]) == "есть"
     assert _connection_status([{"status": "refused"}, {"status": "timeout"}]) == "нет"
+
+
+def test_no_decisive_country_verdict_without_verified_russian_vantage():
+    with patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "0"}):
+        assert "Не удалось однозначно" in _compact_answer({"target": IP, "port_verdicts": _ports()})
+        assert "Не удалось однозначно" in _compact_answer({
+            "target": IP, "port_verdicts": _ports("tspu_detected", "insufficient"),
+            "chebur_probe": _probe(),
+        })
+
+
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
+def test_positive_registry_is_not_hidden_by_accessible_ports():
+    answer = _compact_answer({"target": IP, "port_verdicts": _ports(),
+                              "cheburcheck": {"ok": True, "blocked": True}})
+    assert "Не удалось однозначно" in answer
+    assert "Cheburcheck (блокировка в реестре): есть." in answer
