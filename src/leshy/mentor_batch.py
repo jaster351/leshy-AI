@@ -16,6 +16,7 @@ from .inference_scheduler import get_inference_scheduler, PRIORITY_BACKGROUND
 from .llm import ChatMessage, EchoLLM, finalize_model_output
 from .diagnostics import event
 from .secret_store import load_secret
+from .mentor_bundled import bundled_bytes
 
 INTERVAL = 3600
 MAX_INPUT = 1024 * 1024
@@ -118,7 +119,7 @@ class BatchRunner:
 
     def still_allowed(self, config):
         current = self.config()
-        keys = ("repository", "batch_id", "batch_sha256")
+        keys = ("repository", "batch_id", "batch_sha256", "transport")
         return (not self.stop.is_set() and current.get("enabled") is True
                 and all(current.get(k) == config.get(k) for k in keys))
 
@@ -129,19 +130,35 @@ class BatchRunner:
                 or not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected)
                 or not isinstance(repo, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo)):
             return "not_configured"
-        token = load_secret(self.root / "github_token.dat")
-        if not token:
+        raw = bundled_bytes(config)
+        bundled = raw is not None
+        if config.get("transport") == "bundled" and not bundled:
             return "not_configured"
-        def gh(path="", payload=None, method="GET"):
-            return self.gh_call(repo, token, path, payload, method)
-        if gh().get("private") is not True:
-            raise PermissionError("Только приватный репозиторий")
         if not self.still_allowed(config):
             return "disabled"
-        item = gh("/contents/batches/" + batch_id + ".json?ref=main")
-        raw = base64.b64decode(item["content"])
+        token = ""
+        online = False
+        def gh(path="", payload=None, method="GET"):
+            return self.gh_call(repo, token, path, payload, method)
+        try:
+            token = load_secret(self.root / "github_token.dat")
+            if token:
+                if gh().get("private") is not True:
+                    raise PermissionError("Только приватный репозиторий")
+                online = True
+        except Exception as exc:
+            if not bundled:
+                raise
+            event("mentor_bundled_transport_unavailable", error_type=type(exc).__name__)
+        if not bundled:
+            if not online:
+                return "not_configured"
+            if not self.still_allowed(config):
+                return "disabled"
+            item = gh("/contents/batches/" + batch_id + ".json?ref=main")
+            raw = base64.b64decode(item["content"])
         questions = validate_batch(raw, batch_id, expected)
-        if any(token in question for _, question in questions):
+        if token and any(token in question for _, question in questions):
             raise PermissionError("Вопрос содержит секрет")
         manifest_path = self.root / (batch_id + ".manifest.json")
         manifest = {"batch_id": batch_id, "batch_sha256": expected, "repository": repo,
@@ -164,13 +181,29 @@ class BatchRunner:
         # Квитанция относится к проверенному и сохранённому пакету, а не к генерации ответа.
         if not self.still_allowed(config):
             return "disabled"
-        self.publish_receipt(config, gh, questions)
-        # Сначала подтверждаем публикацию ответов, затем принимаем их оценку.
-        if self.still_allowed(config):
-            self.publish(config, gh, token, questions)
+        def exchange():
+            if not online or not self.still_allowed(config):
+                return
+            try:
+                self.publish_receipt(config, gh, questions)
+                self.publish(config, gh, token, questions)
+            except Exception as exc:
+                if not bundled:
+                    raise
+                event("mentor_bundled_exchange_failed", error_type=type(exc).__name__)
+
+        # В офлайн-режиме сохранение вопросов не зависит от квитанции GitHub.
+        exchange()
         if not self.still_allowed(config):
             return "disabled"
-        load = self.receive_review(config, gh, token)
+        try:
+            load = self.receive_review(config, gh if online else None, token)
+        except Exception as exc:
+            if not bundled:
+                raise
+            event("mentor_bundled_review_unavailable", error_type=type(exc).__name__)
+            load = self.receive_review(dict(config, approved_review_sha256=""), None, token,
+                                       allow_review=False)
         quota = load["quota"]
         deadline = time.monotonic() + 0.85 * INTERVAL
         history = []
@@ -246,7 +279,7 @@ class BatchRunner:
                         os.fsync(f.fileno())
                     try:
                         answer = finalize_model_output(self.app.llm.chat(messages))
-                        if not answer or len(answer) > MAX_ANSWER or token in answer:
+                        if not answer or len(answer) > MAX_ANSWER or (token and token in answer):
                             raise ValueError("Недопустимый ответ")
                         from .app import VERSION
                         record.update(status="answered", answer=answer, timestamp=now(),
@@ -274,6 +307,8 @@ class BatchRunner:
             atomic(self.root / "cycle-metrics.json", metrics)
         if self.still_allowed(config):
             self.prepare_export(config, questions)
+            if bundled:
+                exchange()
         if stop_reason in {"error", "outcome_unknown"}:
             return stop_reason
         if (self.root / "export.json").exists():
@@ -333,7 +368,7 @@ class BatchRunner:
                    {"batch_id": batch_id, "batch_sha256": expected,
                     "receipt_sha256": digest(raw), "timestamp": now()})
 
-    def receive_review(self, config, gh, token):
+    def receive_review(self, config, gh, token, *, allow_review=True):
         from .mentor_review import apply_review
         current = self.config()
         approval = current.get("approved_review_sha256", "")
@@ -345,7 +380,9 @@ class BatchRunner:
                                 read_bytes=read_bytes, atomic=atomic,
                                 digest=digest, now=now, review_path=path)
 
-        if not self.still_allowed(config):
+        if not allow_review or not self.still_allowed(config):
+            return apply(dict(effective, approved_review_sha256=""))
+        if remote and gh is None:
             return apply(dict(effective, approved_review_sha256=""))
         if not remote or not approval:
             return apply(effective)
@@ -419,8 +456,16 @@ class BatchRunner:
         if not path.exists():
             return
         raw = read_bytes(path, MAX_EXPORT)
-        approved = self.config()
-        if approved.get("approved_export_sha256") != digest(raw):
+        def approved_for_export():
+            current = self.config()
+            manual = current.get("approved_export_sha256") == digest(raw)
+            automatic = (bundled_bytes(config) is not None
+                         and config.get("repository") == "jaster351/AI-mentor"
+                         and current.get("auto_publish", True) is True)
+            return (bool(token) and self.still_allowed(config)
+                    and load_secret(self.root / "github_token.dat") == token
+                    and (manual or automatic))
+        if not approved_for_export():
             return
         obj = json.loads(raw)
         if (obj.get("schema") != "ai-mentor.responses.v1"
@@ -444,7 +489,8 @@ class BatchRunner:
                     or local.get("batch_sha256") != config["batch_sha256"]
                     or row.get("answer") != local.get("answer")
                     or not isinstance(row.get("answer"), str)
-                    or token in row["answer"]):
+                    or local.get("question_sha256") != digest(qmap[qid].encode("utf-8"))
+                   or token in row["answer"]):
                 raise PermissionError("Несовпадение локального результата")
         target = "/contents/responses/" + config["batch_id"] + "-" + digest(raw) + ".json"
         try:
@@ -454,7 +500,7 @@ class BatchRunner:
                 raise
             result = None
         if result is None:
-            if not self.still_allowed(config) or self.config().get("approved_export_sha256") != digest(raw):
+            if not approved_for_export():
                 return
             gh(target, {"message": "Проверенный учебный пакет " + config["batch_id"],
                         "branch": "main", "content": base64.b64encode(raw).decode("ascii")}, "PUT")
