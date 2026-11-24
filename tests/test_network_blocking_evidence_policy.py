@@ -91,7 +91,7 @@ class NetworkBlockingEvidencePolicyTests(unittest.TestCase):
         metadata = {"target": TEST_IP, "tspu_probability": 100,
                     "blocking_attribution": "unconfirmed"}
         self.assertIn("Не удалось однозначно", _compact_answer(metadata))
-        self.assertNotIn("Обнаружена блокировка на уровне ТСПУ.", _compact_answer(metadata))
+        self.assertNotIn("Обнаружена блокировка на стороне ТСПУ.", _compact_answer(metadata))
 
     def test_run_keeps_protocol_in_metadata_when_attribution_is_unconfirmed(self):
         metadata = {

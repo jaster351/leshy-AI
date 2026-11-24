@@ -120,7 +120,7 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
         answer,
     )) or "подтверждена по 3/3 признакам" in answer
     concise = bool(re.match(
-        r"^\S+ (?:[Оо]бнаружена блокировка на уровне ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)",
+        r"^\S+ (?:[Оо]бнаружена блокировка на (?:уровне|стороне) ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)",
         answer,
     ))
     if not (legacy or modern or confirmed or concise):
@@ -130,7 +130,7 @@ def _previous_diagnostic(app, owner_id: str, session_id: str | None) -> str | No
 
 def _explain_saved_diagnostic(previous: str) -> str:
     """Replay previous measured results or explicitly admit missing evidence."""
-    if re.match(r"^\S+ (?:[Оо]бнаружена блокировка на уровне ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)", previous):
+    if re.match(r"^\S+ (?:[Оо]бнаружена блокировка на (?:уровне|стороне) ТСПУ\.|Блокировка не обнаружена\.|Не удалось однозначно определить наличие блокировки на уровне ТСПУ\.)", previous):
         return (
             previous + "\n\nПолный протокол не сохранён в тексте предыдущего ответа. "
             "Для подробного подтверждения нужна новая проверка; результаты не будут выдумываться."
@@ -193,6 +193,52 @@ def _probe_reports_tspu(metadata: dict[str, Any]) -> bool:
     )
 
 
+def _owned_geo_corroborated_ports(metadata: dict[str, Any]) -> tuple[int, ...]:
+    """Owner's operational TSPU rule; a diagnostic inference, not direct DPI proof.
+
+    Require three local timeouts and three owned EU connections on the same
+    service port, plus successful Check-Host connections in two foreign countries.
+    Missing Russian Check-Host results and an absent registry entry do not veto
+    this rule; actual Russian success or an explicit clear Probe does.
+    """
+    if os.environ.get("LESHY_RU_PROBE_CONFIRMED", "").strip() != "1":
+        return ()
+    probe = metadata.get("chebur_probe") or {}
+    observations = probe.get("observations") or []
+    if probe.get("ok") and probe.get("finished") and observations and all(
+        isinstance(row, dict) and row.get("verdicts")
+        and all(value == "ok" for value in row["verdicts"])
+        for row in observations
+    ):
+        return ()
+    owned = metadata.get("eu_ssh_comparison") or {}
+    owned_ports = owned.get("ports") or {"22": owned}
+    matches = []
+    for port in (22, 3389):
+        pair = owned_ports.get(str(port)) or {}
+        if pair.get("status") == "local_region_unverified":
+            continue
+        local = pair.get("local_attempts") or []
+        eu = pair.get("eu_attempts") or []
+        if len(local) != 3 or len(eu) != 3:
+            continue
+        if not all(isinstance(row, dict) and row.get("status") == "timeout" for row in local):
+            continue
+        if not all(isinstance(row, dict) and row.get("status") == "connected" for row in eu):
+            continue
+        remote = _port_rows(metadata.get("remote"), port)
+        if any(str(row.get("country_code") or "").strip().lower() == "ru"
+               and row.get("status") == "connected" for row in remote):
+            continue
+        foreign = {
+            str(row.get("country_code") or "").strip().lower()
+            for row in remote if row.get("status") == "connected"
+        } - {"", "ru"}
+        if len(foreign) >= 2:
+            matches.append(port)
+    return tuple(matches)
+
+
 def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
     """An operator-facing sentence; never equate missing evidence with no block."""
     target = str(metadata.get("target") or "").strip()
@@ -204,7 +250,7 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
         and metadata.get("proof_verification") == "verified"
         and str(metadata.get("proof_record_id") or "").strip()
     ):
-        return f"{target} Обнаружена блокировка на уровне ТСПУ."
+        return f"{target} Обнаружена блокировка на стороне ТСПУ."
     ports = metadata.get("port_verdicts") or {}
     if not isinstance(ports, dict):
         return None
@@ -215,7 +261,9 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
     # The current main's tspu_detected state alone can mean geographic
     # asymmetry without attribution. Require the completed independent probe.
     if any(row.get("state") == "tspu_detected" for row in rows) and _probe_reports_tspu(metadata):
-        return f"{target} Обнаружена блокировка на уровне ТСПУ."
+        return f"{target} Обнаружена блокировка на стороне ТСПУ."
+    if _owned_geo_corroborated_ports(metadata):
+        return f"{target} Обнаружена блокировка на стороне ТСПУ."
     # Keep the existing two-port negative scope; a missing port or a positive
     # independent probe is an uncertainty, not a clean negative.
     if (
@@ -354,6 +402,13 @@ def _run(app, text: str) -> tuple[str, list[dict[str, str]], dict[str, Any]]:
     # appending them to the visible response or the normal copy action.
     response.metadata["diagnostic_report"] = response.text.strip()
     response.metadata["copyable_conclusion"] = _decisive_conclusion(response.metadata) or ""
+    operational_ports = _owned_geo_corroborated_ports(response.metadata)
+    if operational_ports:
+        response.metadata["operator_diagnostic_basis"] = {
+            "rule": "owned_ru_eu_plus_two_foreign_countries",
+            "ports": list(operational_ports),
+            "direct_tspu_proof": False,
+        }
     return summary, [], response.metadata
 
 
