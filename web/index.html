@@ -92,6 +92,10 @@
       <h2 class="section-title">Задачи</h2><div class="section-subtitle">Локальные задачи Лешего и пользователя.</div>
       <div class="card hidden" id="mentorQualityCard" style="margin:12px 0">
         <h3>AI-mentor · Качество ответов наставнику</h3>
+        <div class="grid" style="margin:12px 0">
+          <div class="card"><div class="hint">Уровень ChatGPT на тех же заданиях</div><strong id="mentorReferenceLevel" style="font-size:2rem">—</strong></div>
+          <div class="card"><div class="hint">Уровень Лешего относительно ChatGPT</div><strong id="mentorRelativeLevel" style="font-size:2rem">—</strong><div class="hint" id="mentorRelativeStatus" role="status">Сравнение пока не измерено</div></div>
+        </div>
         <div id="mentorQualityStatus" class="hint" role="status">Подтверждённых сравнений пока нет</div>
         <svg id="mentorQualityChart" viewBox="0 0 620 240" role="img" aria-label="График качества ответов наставнику" style="width:100%;max-height:280px;color:inherit"></svg>
         <div id="mentorQualityDetail" class="hint"></div>
@@ -240,7 +244,12 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   const qualityStatus=document.getElementById('mentorQualityStatus');
   const qualityChart=document.getElementById('mentorQualityChart');
   const qualityDetail=document.getElementById('mentorQualityDetail');
+  const referenceLevel=document.getElementById('mentorReferenceLevel');
+  const relativeLevel=document.getElementById('mentorRelativeLevel');
+  const relativeStatus=document.getElementById('mentorRelativeStatus');
+  function resetComparison(message){referenceLevel.textContent='—';relativeLevel.textContent='—';relativeStatus.textContent=message;}
   function renderQuality(data){
+    resetComparison('Сравнение пока не измерено');
     qualityCard.classList.remove('hidden');
     qualityChart.replaceChildren();
     qualityDetail.textContent='';
@@ -251,6 +260,11 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     const series=rows.filter(p=>key(p)===key(last));
     const fmt=n=>Number(n).toLocaleString('ru-RU',{maximumFractionDigits:2})+'%';
     qualityStatus.textContent='Качество ответов Лешего наставнику: '+fmt(last.leshy_percent)+' · '+last.questions+' заданий';
+    if(Number.isFinite(last.relative_percent)&&Number.isFinite(last.reference_percent)&&last.reference_percent>0){
+      referenceLevel.textContent='100%';
+      relativeLevel.textContent=fmt(last.relative_percent);
+      relativeStatus.textContent=last.reference_model+' · '+last.questions+' одинаковых заданий · '+last.timestamp;
+    }else{resetComparison('Для последнего пакета нет парной оценки ChatGPT');}
     const before=series[series.length-2];
     qualityDetail.textContent=last.timestamp+' · '+last.benchmark_id+' / '+last.rubric_id+' · '+(last.model==='not_confirmed'?'Модель Лешего не подтверждена':last.model)+' · '+(before?'Изменение: '+(last.leshy_percent-before.leshy_percent>=0?'+':'')+(last.leshy_percent-before.leshy_percent).toFixed(2)+' п. п.':'Первое сопоставимое измерение')+(Number.isFinite(last.relative_percent)?' · Относительно '+last.reference_model+': '+fmt(last.relative_percent):' · Сравнение с ChatGPT пока не измерено');
     const ns='http://www.w3.org/2000/svg';
@@ -269,7 +283,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ API сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
   let pending=false, generation=0;
   const active=()=>!document.hidden&&(pane.classList.contains('active')||tasksPane.classList.contains('active'));
-  function clear(){generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();state.textContent='';}
+  function clear(){resetComparison('');generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();state.textContent='';}
   function line(parent,label,value){
     if(!value)return;
     const el=document.createElement('div');
@@ -316,7 +330,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
       }
       if(!list.children.length){const e=document.createElement('div');e.className='empty';e.textContent='Подтверждённых локальных записей пока нет';list.appendChild(e);}
     }catch(_error){
-      if(token===generation){list.replaceChildren();state.textContent='История недоступна; данные не подтверждены';qualityChart.replaceChildren();qualityDetail.textContent='';qualityStatus.textContent='Сравнение недоступно';}
+      if(token===generation){list.replaceChildren();state.textContent='История недоступна; данные не подтверждены';qualityChart.replaceChildren();qualityDetail.textContent='';qualityStatus.textContent='Сравнение недоступно';resetComparison('Сравнение недоступно');}
     }finally{pending=false;}
   }
   refresh.addEventListener('click',load);
