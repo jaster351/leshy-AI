@@ -119,6 +119,17 @@ try {
 
     $liveRoot = Join-Path $RepoRoot 'dist\Leshy'
     $liveExe = Join-Path $liveRoot 'Leshy.exe'
+    # Optional private mentor delivery is independent of code changes and build status.
+    try {
+        $mentorScript = Join-Path $PSScriptRoot 'mentor-delivery.ps1'
+        if (Test-Path -LiteralPath $mentorScript -PathType Leaf) {
+            $mentorStatus = & $mentorScript -BrainRoot (Join-Path $liveRoot 'LeshyBrain')
+            Write-Host ('MENTOR_DELIVERY: ' + $mentorStatus)
+        }
+    } catch {
+        # Do not log remote response bodies, credentials or private questions.
+        Write-Warning 'MENTOR_DELIVERY_ERROR: see local configuration and connectivity.'
+    }
     $installer = Join-Path $RepoRoot ('dist\LeshySetup-' + $sourceVersion + '.exe')
     $liveState = Join-Path $AutoRoot 'live-state.json'
     if (Test-Path -LiteralPath $liveState -PathType Leaf) {
