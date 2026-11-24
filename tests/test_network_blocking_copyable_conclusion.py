@@ -18,7 +18,7 @@ def _probe():
 def test_copyable_confirmed_statement():
     metadata = {"target": IP, "blocking_attribution": "confirmed_tspu",
                 "proof_verification": "verified", "proof_record_id": "trusted-evidence-42"}
-    assert _compact_answer(metadata) == f"{IP} Обнаружена блокировка на уровне ТСПУ."
+    assert _compact_answer(metadata) == f"{IP} Обнаружена блокировка на стороне ТСПУ."
 
 
 def test_legacy_score_of_100_is_not_proof():
@@ -36,7 +36,7 @@ def test_positive_port_requires_completed_independent_probe():
     metadata = {"target": IP, "port_verdicts": _ports("tspu_detected", "insufficient")}
     assert "Не удалось однозначно" in _compact_answer(metadata)
     metadata["chebur_probe"] = _probe()
-    assert _compact_answer(metadata) == f"{IP} Обнаружена блокировка на уровне ТСПУ."
+    assert _compact_answer(metadata) == f"{IP} Обнаружена блокировка на стороне ТСПУ."
 
 
 @patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
@@ -136,3 +136,63 @@ def test_positive_registry_is_not_hidden_by_accessible_ports():
                               "cheburcheck": {"ok": True, "blocked": True}})
     assert "Не удалось однозначно" in answer
     assert "Cheburcheck (блокировка в реестре): есть." in answer
+
+
+def _owned_geographic_evidence():
+    return {
+        "target": IP,
+        "port_verdicts": _ports("likely_blocked", "insufficient"),
+        "eu_ssh_comparison": {"ports": {
+            "22": {"status": "ru_unreachable_eu_reachable",
+                   "local_attempts": [{"status": "timeout"}] * 3,
+                   "eu_attempts": [{"status": "connected"}] * 3},
+            "3389": {"local_attempts": [{"status": "refused"}] * 3,
+                     "eu_attempts": [{"status": "refused"}] * 3},
+        }},
+        "remote": [
+            {"port": 22, "country_code": "de", "status": "connected"},
+            {"port": 22, "country_code": "nl", "status": "connected"},
+            {"port": 3389, "country_code": "de", "status": "refused"},
+            {"port": 3389, "country_code": "nl", "status": "refused"},
+        ],
+        "cheburcheck": {"ok": True, "blocked": False},
+    }
+
+
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
+def test_owned_geographic_evidence_is_sufficient_without_chebur_probe():
+    metadata = _owned_geographic_evidence()
+    assert _compact_answer(metadata) == f"{IP} Обнаружена блокировка на стороне ТСПУ."
+
+
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
+def test_geographic_rule_rejects_refusal_and_conflicting_russian_success():
+    metadata = _owned_geographic_evidence()
+    metadata["eu_ssh_comparison"]["ports"]["22"]["local_attempts"] = [{"status": "refused"}] * 3
+    assert "Не удалось однозначно" in _compact_answer(metadata)
+    metadata = _owned_geographic_evidence()
+    metadata["remote"].append({"port": 22, "country_code": "ru", "status": "connected"})
+    assert "Не удалось однозначно" in _compact_answer(metadata)
+
+
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
+def test_geographic_rule_requires_two_distinct_countries_on_same_port():
+    metadata = _owned_geographic_evidence()
+    metadata["remote"][1]["country_code"] = "de"
+    assert "Не удалось однозначно" in _compact_answer(metadata)
+    metadata = _owned_geographic_evidence()
+    metadata["remote"][1]["port"] = 3389
+    assert "Не удалось однозначно" in _compact_answer(metadata)
+
+
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "0"})
+def test_geographic_rule_requires_verified_russian_exit():
+    assert "Не удалось однозначно" in _compact_answer(_owned_geographic_evidence())
+
+
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
+def test_geographic_rule_keeps_explicit_clear_probe_as_conflicting_evidence():
+    metadata = _owned_geographic_evidence()
+    metadata["chebur_probe"] = {"ok": True, "finished": True,
+                               "observations": [{"verdicts": ["ok"]}]}
+    assert "Не удалось однозначно" in _compact_answer(metadata)
