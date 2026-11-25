@@ -18,6 +18,7 @@ from .superagent_ssh_pty import InteractiveSSHBroker
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
 from .mentor_view import mentor_snapshot
 from .mentor_delivery_request import request_delivery, request_state
+from .mentor_web_auth import MentorWebAuth
 from pathlib import Path
 from .android_voice_access import authorized_owner as _android_voice_owner, conversational_answer as _android_voice_answer
 
@@ -50,6 +51,11 @@ def make_handler(app, telegram, settings, model_catalog):
                 pty_broker.shutdown()
                 return previous_stop()
             app.stop_background = stop_with_ssh_pty
+
+    mentor_auth = getattr(app, '_mentor_web_auth', None)
+    if not isinstance(mentor_auth, MentorWebAuth):
+        mentor_auth = MentorWebAuth(settings.brain_dir)
+        app._mentor_web_auth = mentor_auth
 
     class Handler(Parent):
         def _identity_status_payload(self, owner_id: str) -> dict:
@@ -126,6 +132,8 @@ def make_handler(app, telegram, settings, model_catalog):
                     payload = mentor_snapshot(settings.brain_dir)
                     payload['delivery_request'] = request_state(Path(settings.brain_dir) / 'ai-mentor')
                     payload['delivery_allowed'] = self._mentor_delivery_owner()
+                    if payload['delivery_allowed']:
+                        payload['authorization'] = mentor_auth.snapshot()
                     return self._identity_json(HTTPStatus.OK, payload)
                 except (OSError, ValueError, TypeError):
                     return self._identity_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось прочитать журнал AI-mentor"})
@@ -215,6 +223,19 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             route = urlsplit(self.path).path
+            if route == "/v1/mentor/authorize":
+                if not self._identity_write_allowed():
+                    return
+                if not self._mentor_delivery_owner():
+                    return self._identity_json(HTTPStatus.FORBIDDEN, {"error": "Требуется подтверждённый Создатель и хозяин сервера"})
+                try:
+                    if self._body() != {}:
+                        return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": "Ожидается пустой JSON-объект"})
+                    return self._identity_json(HTTPStatus.ACCEPTED, mentor_auth.start())
+                except ValueError as exc:
+                    return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)[:200]})
+                except (OSError, RuntimeError, TypeError):
+                    return self._identity_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "Не удалось запустить авторизацию"})
             if route == "/v1/mentor/delivery":
                 if not self._identity_write_allowed():
                     return
