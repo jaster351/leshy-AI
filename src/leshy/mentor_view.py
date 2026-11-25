@@ -31,7 +31,7 @@ def _text(value, limit=200):
     return value[:limit] if isinstance(value, str) else ""
 
 
-def mentor_snapshot(brain_dir: Path) -> dict:
+def mentor_snapshot(brain_dir: Path, *, chat_offset: int | None = None) -> dict:
     root = Path(brain_dir) / "ai-mentor"
     if root.is_symlink() or not root.is_dir():
         return {"configured": False, "enabled": False, "items": [],
@@ -88,7 +88,18 @@ def mentor_snapshot(brain_dir: Path) -> dict:
         ids.update(delivered)
     items = []
     ordered = sorted(delivered) + sorted(ids - delivered.keys(), reverse=True)
-    for rid in ordered[:_MAX_ITEMS]:
+    if chat_offset is not None:
+        def order_key(rid):
+            # Question numbers are numeric, not lexicographic (q2 before q10).
+            match = re.fullmatch(r"(.+)-q([0-9]+)", rid)
+            if match:
+                return (match.group(1), int(match.group(2)))
+            return (rid, 0)
+        ordered = sorted(ids, key=order_key, reverse=True)
+        page = list(reversed(ordered[chat_offset:chat_offset + _MAX_ITEMS]))
+    else:
+        page = ordered[:_MAX_ITEMS]
+    for rid in page:
         q = _read(root / (rid + ".question.json"))
         a = _read(root / (rid + ".json"))
         published = _read(root / (rid + ".published.json"))
@@ -115,7 +126,8 @@ def mentor_snapshot(brain_dir: Path) -> dict:
             "model": _text(a.get("model")) if answer else "",
             "source": _text(a.get("source")) if answer else "",
         })
-    items.sort(key=lambda row: row["answered_at"] or row["received_at"], reverse=True)
+    if chat_offset is None:
+        items.sort(key=lambda row: row["answered_at"] or row["received_at"], reverse=True)
     export_hash = ""
     export_path = root / "export.json"
     if export_path.is_file() and not export_path.is_symlink():
@@ -156,7 +168,8 @@ def mentor_snapshot(brain_dir: Path) -> dict:
             "open_investigations": len(investigations) if isinstance(investigations, list) else 0,
             "export_sha256": export_hash,
             "status": current, "last_check_at": _text(status.get("timestamp")),
-            "items": items, "truncated": len(ids) > _MAX_ITEMS,
+            "items": items, "truncated": len(ids) > (_MAX_ITEMS if chat_offset is None else 1000),
+            "has_older": chat_offset is not None and chat_offset + _MAX_ITEMS < len(ordered),
             "delivered_count": len(delivered),
             "delivery_status": delivery_status,
             "delivery_checked_at": _text(transport.get("timestamp")),
