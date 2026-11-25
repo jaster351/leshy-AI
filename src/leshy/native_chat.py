@@ -150,7 +150,8 @@ class NativeGGUFLLM:
             m.role == "system" and "LESHY_SUPPORT_DRAFT_V1" in str(m.content)
             for m in items
         )
-        prefix = [] if support_mode else [ChatMessage("system", _SYSTEM_PROMPT)]
+        from .mentor_context import mentor_active
+        prefix = [] if support_mode or mentor_active() else [ChatMessage("system", _SYSTEM_PROMPT)]
         prepared = _normalize_system_messages(prefix + items)
         payload = [{"role": m.role, "content": m.content} for m in prepared]
         with self._lock:
