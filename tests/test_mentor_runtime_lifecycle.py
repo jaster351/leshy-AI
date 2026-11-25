@@ -42,3 +42,32 @@ def test_mentor_waits_for_warmup_without_starting_runner(tmp_path, monkeypatch):
     monkeypatch.setattr(mentor_bridge, "BatchRunner", forbidden)
     bridge._run()
     assert waits == [15, 1]
+
+
+def test_delivery_preserves_review_approval_across_batch_change():
+    script = (ROOT / "windows/mentor-delivery.ps1").read_text(encoding="utf-8-sig")
+    block = script.split("    if ($queueChange) {", 1)[1]
+    assert "$config.approved_export_sha256 = ''" in block
+    assert "$config.approved_review_sha256 =" not in block
+
+
+def test_review_telemetry_requires_committed_local_review(tmp_path):
+    from leshy.mentor_batch import atomic
+    bridge = MentorBridge(tmp_path, object())
+    bridge.root.mkdir()
+    h = "a" * 64
+    last = {"review_sha256": h, "batch_id": "mentor-batch-002", "reviewed": 30,
+            "timestamp": "2026-11-25T13:00:00+00:00",
+            "reactions": {"like": 13, "dislike": 17, "missing": 0},
+            "private_text": "never export"}
+    path = bridge.root / "load-policy.json"
+    atomic(path, {"last_review": last, "applied": []})
+    assert bridge._applied_review_summary() is None
+    atomic(path, {"last_review": last, "applied": [h]})
+    summary = bridge._applied_review_summary()
+    assert summary["review_sha256"] == h
+    assert summary["reactions"] == {"like": 13, "dislike": 17, "missing": 0}
+    assert "private_text" not in summary
+    last["reactions"]["like"] = 14
+    atomic(path, {"last_review": last, "applied": [h]})
+    assert bridge._applied_review_summary() is None
