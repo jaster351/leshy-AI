@@ -165,6 +165,7 @@ class BatchRunner:
         self.stop = stop_event
         self.gh_call = gh_call
         self.last_performance = None
+        self.export_status = "not_pending"
 
     def config(self):
         return read_obj(self.root / "config.json")
@@ -181,6 +182,9 @@ class BatchRunner:
 
     def cycle(self, config):
         self.last_performance = None
+        self.export_status = "not_pending"
+        receipt_confirmed = False
+        reconnect_attempted = False
         batch_id, expected, repo = (config.get(k) for k in
                                     ("batch_id", "batch_sha256", "repository"))
         if (not isinstance(batch_id, str) or not _ID.fullmatch(batch_id)
@@ -256,6 +260,7 @@ class BatchRunner:
             return "disabled"
         try:
             self.publish_receipt(config, gh, questions)
+            receipt_confirmed = True
             # Сначала подтверждаем публикацию ответов, затем принимаем их оценку.
             if self.still_allowed(config):
                 self.publish(config, gh, token, questions)
@@ -382,11 +387,42 @@ class BatchRunner:
             atomic(self.root / "cycle-metrics.json", metrics)
         if cycle_allowed():
             self.prepare_export(config, questions)
+            # Offline is a snapshot, not a verdict for the entire hour. Retry
+            # transport once after generation, never re-dispatch saved answers.
+            if not online:
+                reconnect_attempted = True
+                online = True
+                try:
+                    remote = gh()
+                    if (remote.get("private") is not True
+                            or (local_delivery and (remote.get("id") != 1470788052
+                                or remote.get("full_name", "").casefold() != "jaster351/ai-mentor"))):
+                        raise PermissionError("Репозиторий наставника не совпадает")
+                    self.publish_receipt(config, gh, questions)
+                    receipt_confirmed = True
+                except MentorTransportUnavailable:
+                    online = False
             if online and self.config().get("auto_publish") is True:
                 try:
                     self.publish(config, gh, token, questions)
                 except MentorTransportUnavailable:
                     online = False
+            if (self.root / "export.json").exists():
+                if not online:
+                    self.export_status = "transport_unavailable"
+                elif self.config().get("auto_publish") is not True and self.export_status == "not_pending":
+                    self.export_status = "awaiting_approval"
+        if isinstance(self.last_performance, dict):
+            self.last_performance["delivery"] = {
+                "receipt_confirmed": receipt_confirmed,
+                "reconnect_attempted": reconnect_attempted,
+                "export_status": self.export_status,
+                "export_pending": (self.root / "export.json").exists(),
+            }
+            try:
+                atomic(self.root / "performance-latest.json", self.last_performance)
+            except Exception as exc:
+                event("mentor_performance_local_failed", error_type=type(exc).__name__)
         if stop_reason in {"error", "outcome_unknown"}:
             return stop_reason
         if not self.still_allowed(config):
@@ -643,6 +679,8 @@ class BatchRunner:
         if not path.exists():
             return
         raw = read_bytes(path, MAX_EXPORT)
+        self.export_status = "awaiting_approval"
+
         def allowed_export():
             approved = self.config()
             if (not self.still_allowed(config)
@@ -658,6 +696,16 @@ class BatchRunner:
                     and automatic_export_safe(raw))
 
         if not allowed_export():
+            current = self.config()
+            if (self.still_allowed(config)
+                    and token and load_secret(self.root / "github_token.dat") == token
+                    and config.get("repository") == "jaster351/AI-mentor"
+                    and config.get("auto_publish") is True
+                    and current.get("auto_publish") is True
+                    and current.get("auto_queue") is True
+                    and token.startswith("ghu_")
+                    and not automatic_export_safe(raw)):
+                self.export_status = "automatic_filter_rejected"
             return
         obj = json.loads(raw)
         if (obj.get("schema") != "ai-mentor.responses.v1"
@@ -693,13 +741,22 @@ class BatchRunner:
         if result is None:
             if not allowed_export() or gh().get("private") is not True or not allowed_export():
                 return
-            gh(target, {"message": "Проверенный учебный пакет " + config["batch_id"],
-                        "branch": "main", "content": base64.b64encode(raw).decode("ascii")}, "PUT")
+            try:
+                gh(target, {"message": "Проверенный учебный пакет " + config["batch_id"],
+                            "branch": "main", "content": base64.b64encode(raw).decode("ascii")}, "PUT")
+            except error.HTTPError as exc:
+                if exc.code not in {409, 422}:
+                    raise
+            # A concurrent create or ambiguous result is reconciled by exact
+            # bytes, never by creating another export or marking it successful.
             result = gh(target + "?ref=main")
-        if base64.b64decode(result["content"]) != raw:
+        if (result.get("type") != "file" or result.get("encoding") != "base64"
+                or not isinstance(result.get("content"), str)
+                or base64.b64decode("".join(result["content"].split()), validate=True) != raw):
             raise RuntimeError("Публикация не подтверждена")
         for row in rows:
             rid = config["batch_id"] + "-" + row["id"]
             atomic(self.root / (rid + ".published.json"), {"request_id": rid,
                    "answer_sha256": digest(row["answer"].encode("utf-8")), "timestamp": now()})
         path.unlink()
+        self.export_status = "published"
