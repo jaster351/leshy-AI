@@ -107,6 +107,10 @@ class NativeGGUFLLM:
             self._idle_sleep_thread.join(timeout=1.0)
 
     @property
+    def max_tokens(self) -> int:
+        return int(os.getenv("LESHY_MAX_TOKENS", "1024"))
+
+    @property
     def model(self) -> str:
         return self.model_path.name
 
@@ -150,7 +154,7 @@ class NativeGGUFLLM:
             m.role == "system" and "LESHY_SUPPORT_DRAFT_V1" in str(m.content)
             for m in items
         )
-        from .mentor_context import mentor_active
+        from .mentor_context import mentor_active, mentor_generation_limit
         prefix = [] if support_mode or mentor_active() else [ChatMessage("system", _SYSTEM_PROMPT)]
         prepared = _normalize_system_messages(prefix + items)
         payload = [{"role": m.role, "content": m.content} for m in prepared]
@@ -161,7 +165,7 @@ class NativeGGUFLLM:
                 result = model.create_chat_completion(
                     messages=payload,
                     temperature=float(os.getenv("LESHY_TEMPERATURE", "0.25")),
-                    max_tokens=int(os.getenv("LESHY_MAX_TOKENS", "1024")),
+                    max_tokens=mentor_generation_limit(self.max_tokens),
                 )
                 from .mentor_performance import observe_completion
                 observe_completion(result, backend="native-gguf", model=self.model,
