@@ -49,6 +49,31 @@ function Invoke-MentorDelivery {
     # Optional private mentor delivery is independent of code changes and build status.
     $mentorStatus = 'not_confirmed'
     $mentorBrain = Join-Path $LiveRoot 'LeshyBrain'
+    $mentorRoot = Join-Path $mentorBrain 'ai-mentor'
+    $deliveryRequestId = ''
+    try {
+        $requestFile = Join-Path $mentorRoot 'delivery-request.json'
+        $resultFile = Join-Path $mentorRoot 'delivery-request-result.json'
+        if ((Test-Path -LiteralPath $requestFile -PathType Leaf) -and
+            -not ((Get-Item -LiteralPath $mentorBrain -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+            -not ((Get-Item -LiteralPath $mentorRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+            -not ((Get-Item -LiteralPath $requestFile -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+            (Get-Item -LiteralPath $requestFile).Length -le 4096) {
+            $deliveryRequest = Get-Content -LiteralPath $requestFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            $age = ([DateTimeOffset]::UtcNow - [DateTimeOffset]::Parse([string]$deliveryRequest.created_at)).TotalSeconds
+            if ($deliveryRequest.schema -ceq 'ai-mentor.delivery-request.v1' -and
+                $deliveryRequest.request_id -cmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -and
+                $age -ge 0 -and $age -lt 1800) {
+                $deliveryRequestId = [string]$deliveryRequest.request_id
+                if ((Test-Path -LiteralPath $resultFile -PathType Leaf) -and
+                    -not ((Get-Item -LiteralPath $resultFile -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+                    (Get-Item -LiteralPath $resultFile).Length -le 4096) {
+                    $lastResult = Get-Content -LiteralPath $resultFile -Raw -Encoding UTF8 | ConvertFrom-Json
+                    if ($lastResult.request_id -ceq $deliveryRequestId) { $deliveryRequestId = '' }
+                }
+            }
+        }
+    } catch { $deliveryRequestId = '' }
     try {
         $mentorScript = Join-Path $PSScriptRoot 'mentor-delivery.ps1'
         if (Test-Path -LiteralPath $mentorScript -PathType Leaf) {
@@ -75,6 +100,16 @@ function Invoke-MentorDelivery {
                 [IO.File]::WriteAllText($temp,($record | ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
                 if ([IO.File]::Exists($mentorStatusPath)) { [IO.File]::Replace($temp,$mentorStatusPath,$null) } else { [IO.File]::Move($temp,$mentorStatusPath) }
             } finally { if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) } }
+            if ($deliveryRequestId) {
+                $resultPath = Join-Path $mentorRoot 'delivery-request-result.json'
+                if ((Test-Path -LiteralPath $resultPath) -and ((Get-Item -LiteralPath $resultPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe mentor result path' }
+                $record['request_id'] = $deliveryRequestId
+                $tempResult = Join-Path $mentorRoot ('.delivery-result-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+                try {
+                    [IO.File]::WriteAllText($tempResult,($record | ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
+                    if ([IO.File]::Exists($resultPath)) { [IO.File]::Replace($tempResult,$resultPath,$null) } else { [IO.File]::Move($tempResult,$resultPath) }
+                } finally { if ([IO.File]::Exists($tempResult)) { [IO.File]::Delete($tempResult) } }
+            }
         }
     } catch { Write-Warning 'MENTOR_DELIVERY_STATUS_ERROR' }
     # Private delivery never decides the result of the public code update.
