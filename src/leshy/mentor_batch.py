@@ -385,29 +385,40 @@ class BatchRunner:
         # Do not erase the last productive capacity sample with an empty review cycle.
         if completed or not (self.root / "cycle-metrics.json").exists():
             atomic(self.root / "cycle-metrics.json", metrics)
+        delivery_error = False
         if cycle_allowed():
             self.prepare_export(config, questions)
-            # Offline is a snapshot, not a verdict for the entire hour. Retry
-            # transport once after generation, never re-dispatch saved answers.
-            if not online:
-                reconnect_attempted = True
-                online = True
-                try:
-                    remote = gh()
-                    if (remote.get("private") is not True
-                            or (local_delivery and (remote.get("id") != 1470788052
-                                or remote.get("full_name", "").casefold() != "jaster351/ai-mentor"))):
-                        raise PermissionError("Репозиторий наставника не совпадает")
-                    self.publish_receipt(config, gh, questions)
-                    receipt_confirmed = True
-                except MentorTransportUnavailable:
-                    online = False
-            if online and self.config().get("auto_publish") is True:
-                try:
-                    self.publish(config, gh, token, questions)
-                except MentorTransportUnavailable:
-                    online = False
-            if (self.root / "export.json").exists():
+            try:
+                if online and self.config().get("auto_publish") is True:
+                    try:
+                        self.publish(config, gh, token, questions)
+                    except MentorTransportUnavailable:
+                        online = False
+                # Offline is a snapshot, not a verdict for the entire hour.
+                # Reconnect once, recheck the repository, then reconcile the
+                # content-addressed export without dispatching inference again.
+                if not online and cycle_allowed():
+                    reconnect_attempted = True
+                    online = True
+                    try:
+                        remote = gh()
+                        if (remote.get("private") is not True
+                                or (local_delivery and (remote.get("id") != 1470788052
+                                    or remote.get("full_name", "").casefold() != "jaster351/ai-mentor"))):
+                            raise PermissionError("Репозиторий наставника не совпадает")
+                        self.publish_receipt(config, gh, questions)
+                        receipt_confirmed = True
+                        if self.config().get("auto_publish") is True:
+                            self.publish(config, gh, token, questions)
+                    except MentorTransportUnavailable:
+                        online = False
+            except Exception as exc:
+                # Fail closed; distinguish a denied or invalid delivery from
+                # a transient failure. No retry of authorization or integrity errors.
+                delivery_error = True
+                self.export_status = "delivery_error"
+                event("mentor_delivery_failed", error_type=type(exc).__name__)
+            if (self.root / "export.json").exists() and not delivery_error:
                 if not online:
                     self.export_status = "transport_unavailable"
                 elif self.config().get("auto_publish") is not True and self.export_status == "not_pending":
@@ -425,6 +436,8 @@ class BatchRunner:
                 event("mentor_performance_local_failed", error_type=type(exc).__name__)
         if stop_reason in {"error", "outcome_unknown"}:
             return stop_reason
+        if delivery_error:
+            return "error"
         if not self.still_allowed(config):
             return "disabled"
         if not cycle_allowed():
