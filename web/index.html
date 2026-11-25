@@ -274,8 +274,8 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   document.getElementById('mentorChatSettings').addEventListener('click',()=>showSection('learning'));
   placeEntry();
   let offset=0,chatSignature='';
-  older.addEventListener('click',()=>{offset+=50;chatSignature='';load();});
-  newer.addEventListener('click',()=>{offset=Math.max(0,offset-50);chatSignature='';load();});
+  older.addEventListener('click',()=>{offset=Math.min(1000,offset+50);chatSignature='';older.disabled=true;newer.disabled=true;load();});
+  newer.addEventListener('click',()=>{offset=Math.max(0,offset-50);chatSignature='';older.disabled=true;newer.disabled=true;load();});
   const accessStyle=document.createElement('style');
   accessStyle.textContent=`
     #mentorSidebarChat{width:100%;flex:0 0 auto;text-align:left;padding:10px 9px;margin:2px 0 5px;border:1px solid transparent;border-radius:9px;background:transparent;color:inherit;cursor:pointer;font:inherit;min-height:38px}
@@ -346,7 +346,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   }
 
   if(!card||!state||!list||!refresh||!pane||!download||!deliveryRequest)return;
-  const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',waiting_delivery:'Ожидание скачивания пакета',waiting_connection:'Нет связи с GitHub — локальная обработка',delivered:'Скачан, ожидает ответа',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ API сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
+  const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',waiting_delivery:'Ожидание скачивания пакета',waiting_connection:'Нет связи с GitHub — локальная обработка',delivered:'Скачан, ожидает ответа',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
   const deliveryNames={not_configured:'Не настроен',disabled:'Отключён',authorization_required:'Требуется вход в GitHub',authorization_error:'Ошибка авторизации GitHub',configuration_changed:'Настройки изменились, ожидается повторная проверка',delivered:'Пакет скачан',up_to_date:'Пакет уже скачан',error:'Ошибка доставки',not_confirmed:'Нет подтверждения'};
   let pending=false, generation=0, requesting=false, connecting=false;
   function renderAuth(data){
