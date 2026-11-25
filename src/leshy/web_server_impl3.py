@@ -405,6 +405,10 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     # Expose the live HTTP server to the Windows tray for graceful shutdown.
     from .desktop_tray import register_server, unregister_server, is_shutdown_requested
     register_server(server)
+    # This is the canonical runtime used by web_server_impl4..17, not the legacy server.
+    from .mentor_bridge import MentorBridge
+    mentor_bridge = MentorBridge(settings.brain_dir, app, ready_event=warmup_ready)
+    app.mentor_bridge = mentor_bridge
 
     threading.Thread(
         target=_warmup_soft,
@@ -435,11 +439,13 @@ def serve(host: str | None = None, port: int | None = None) -> None:
     print(f"Леший {app.status()['version']} запущен: http://{bind_host}:{bind_port}")
     try:
         if not is_shutdown_requested():
+            mentor_bridge.start()
             server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         shutdown.set()
+        mentor_bridge.stop()
         telegram.stop()
         app.stop_background()
         unregister_server(server)
