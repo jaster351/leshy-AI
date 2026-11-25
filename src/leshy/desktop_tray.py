@@ -79,30 +79,36 @@ def _icon_path() -> Path:
     return root / "assets" / "leshy-icon.jpg"
 
 
-def monitor_script_path(brain_root: Path) -> Path:
+def monitor_script_path(brain_root: Path, *, console: bool = False) -> Path:
     """Prefer the monitor bundled with the running application."""
     bundle = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
-    bundled = bundle / "Leshy-Monitor.ps1"
+    filename = "Leshy-Monitor.ps1" if console else "Leshy-Monitor-GUI.ps1"
+    bundled = bundle / filename
     if bundled.is_file():
         return bundled
-    source = bundle / "windows" / "Leshy-Monitor.ps1"
+    source = bundle / "windows" / filename
     if source.is_file():
         return source
-    raise FileNotFoundError("Не найден штатный Leshy-Monitor.ps1")
+    raise FileNotFoundError("Не найден штатный " + filename)
 
 
-def launch_monitor(brain_root: Path):
-    """Start a separate console without touching the running inference/build."""
+def launch_monitor(brain_root: Path, *, console: bool = False):
+    """Open an independent WPF window, or the explicit technical console."""
     brain = Path(brain_root).resolve()
-    script = monitor_script_path(brain)
-    root = brain.parents[2] if len(brain.parents) >= 3 else brain.parent
+    script = monitor_script_path(brain, console=console)
+    root = brain.parent
+    if len(brain.parents) >= 3 and brain == brain.parents[2] / "dist" / "Leshy" / "LeshyBrain":
+        root = brain.parents[2]
     system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
     exe = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    args = [str(exe), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass"]
+    if not console:
+        args.extend(["-STA", "-WindowStyle", "Hidden"])
+    args.extend(["-File", str(script), "-Repository", str(root), "-BrainRoot", str(brain)])
     return subprocess.Popen(
-        [str(exe), "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
-         "-File", str(script), "-Repository", str(root), "-BrainRoot", str(brain)],
-        cwd=str(brain.parent), shell=False,
-        creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10),
+        args, cwd=str(brain.parent), shell=False,
+        creationflags=(getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10) if console
+                       else getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)),
     )
 
 
@@ -166,11 +172,11 @@ def start_tray(
         feedback.start()
 
     monitor_lock = threading.Lock()
-    monitor_process = None
+    monitor_processes = {}
 
-    def open_monitor(icon=None, item=None):
-        nonlocal monitor_process
+    def open_monitor(icon=None, item=None, *, console=False):
         with monitor_lock:
+            monitor_process = monitor_processes.get(console)
             if monitor_process is not None and monitor_process.poll() is None:
                 try:
                     if icon is not None:
@@ -179,7 +185,7 @@ def start_tray(
                     pass
                 return
             try:
-                monitor_process = launch_monitor(brain_root)
+                monitor_processes[console] = launch_monitor(brain_root, console=console)
             except (OSError, ValueError):
                 _LOG.exception("Не удалось запустить монитор Лешего")
                 try:
@@ -203,6 +209,7 @@ def start_tray(
     menu = pystray.Menu(
         pystray.MenuItem("Открыть Лешего", open_web_item, default=True),
         pystray.MenuItem("Монитор", open_monitor),
+        pystray.MenuItem("Монитор (консоль)", lambda icon, item: open_monitor(icon, item, console=True)),
         pystray.MenuItem("Проверить обновления", check_updates),
         pystray.MenuItem(
             lambda item: "Обновления: " + (
