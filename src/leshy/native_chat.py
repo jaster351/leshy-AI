@@ -156,11 +156,15 @@ class NativeGGUFLLM:
         with self._lock:
             model = self._load()
             try:
+                measured_start = time.monotonic()
                 result = model.create_chat_completion(
                     messages=payload,
                     temperature=float(os.getenv("LESHY_TEMPERATURE", "0.25")),
                     max_tokens=int(os.getenv("LESHY_MAX_TOKENS", "1024")),
                 )
+                from .mentor_performance import observe_completion
+                observe_completion(result, backend="native-gguf", model=self.model,
+                                   duration_seconds=time.monotonic() - measured_start)
                 text = result["choices"][0]["message"]["content"]
             except Exception as exc:  # pragma: no cover - зависит от backend
                 raise LLMUnavailable(f"Ошибка локальной модели: {exc}") from exc
