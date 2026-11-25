@@ -123,6 +123,37 @@ class MentorBridge:
         atomic(self.root / "runtime-version-published.json",
                dict(record, sha256=digest(raw)))
 
+    def _applied_review_summary(self):
+        """Only allowlisted evidence from the committed local review journal."""
+        try:
+            state = read_obj(self.root / "load-policy.json")
+            last = state.get("last_review")
+            if not isinstance(last, dict):
+                return None
+            approval = last.get("review_sha256")
+            batch = last.get("batch_id")
+            applied = state.get("applied")
+            if (not isinstance(approval, str) or not re.fullmatch(r"[0-9a-f]{64}", approval)
+                    or not isinstance(batch, str) or not re.fullmatch(r"mentor-batch-[a-z0-9-]{1,55}", batch)
+                    or not isinstance(applied, list) or approval not in applied):
+                return None
+            reviewed = last.get("reviewed")
+            counts = last.get("reactions")
+            timestamp = last.get("timestamp")
+            if (type(reviewed) is not int or not 1 <= reviewed <= 256
+                    or not isinstance(counts, dict)
+                    or not isinstance(timestamp, str)
+                    or not re.fullmatch(r"[0-9T:+.Z-]{20,40}", timestamp)):
+                return None
+            reactions = {k: counts.get(k) for k in ("like", "dislike", "missing")}
+            if (any(type(v) is not int or not 0 <= v <= reviewed for v in reactions.values())
+                    or sum(reactions.values()) != reviewed):
+                return None
+            return {"status": "applied", "review_sha256": approval, "batch_id": batch,
+                    "reviewed": reviewed, "reactions": reactions, "timestamp": timestamp}
+        except (OSError, ValueError, TypeError):
+            return None
+
     def _publish_performance(self, config, sample):
         """Publish only numeric/allowlisted mentor-cycle telemetry to the dedicated repo."""
         repo = config.get("repository")
@@ -160,6 +191,9 @@ class MentorBridge:
         if not isinstance(instance, str) or not re.fullmatch(r"[0-9a-f]{32}", instance):
             return
         record = dict(sample, instance_id=instance, version=VERSION)
+        review = self._applied_review_summary()
+        if review is not None:
+            record["applied_review"] = review
         raw = encode(record)
         if len(raw) > 64 * 1024:
             raise ValueError("Telemetry size limit")
