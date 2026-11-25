@@ -5,6 +5,7 @@ from leshy.context_budget import estimate_tokens
 from leshy.llm import ChatMessage, LLMUnavailable
 from leshy.mentor_context import (
     SYSTEM, build_mentor_messages, budget_mentor_messages, mentor_active, mentor_scope,
+    mentor_generation_limit,
 )
 from leshy.mentor_performance import CyclePerformance
 
@@ -63,3 +64,14 @@ def test_context_telemetry_counts_only_final_attempt(tmp_path):
     assert data["kept_user_turns"] == 4
     assert data["omitted_user_turns"] == 0
     assert data["answers_with_history_omissions"] == 1
+
+
+def test_generation_reserve_matches_backend_limit():
+    messages = build_mentor_messages([], "Ответь: да.")
+    assert mentor_generation_limit(1536) == 1536
+    with mentor_scope() as samples:
+        prepared = budget_mentor_messages(messages, context_size=2048, reserve_tokens=1536)
+        assert mentor_generation_limit(1536) == 1024
+        assert estimate_tokens(prepared) + mentor_generation_limit(1536) + 128 <= 2048
+        assert prepared[-1] == messages[-1]
+    assert mentor_generation_limit(1536) == 1536
