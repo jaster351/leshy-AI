@@ -170,6 +170,8 @@ def mentor_snapshot(brain_dir: Path, *, chat_offset: int | None = None) -> dict:
             "open_investigations": len(investigations) if isinstance(investigations, list) else 0,
             "export_sha256": export_hash,
             "status": current, "last_check_at": _text(status.get("timestamp")),
+            "stop_reason": _text(status.get("stop_reason"), 80),
+            "error_type": _text(status.get("error_type"), 80),
             "items": items, "truncated": scan_truncated or len(ids) > (_MAX_ITEMS if chat_offset is None else 1000),
             "has_older": chat_offset is not None and chat_offset + _MAX_ITEMS <= 1000 and chat_offset + _MAX_ITEMS < len(ordered),
             "delivered_count": len(delivered),
