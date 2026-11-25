@@ -65,6 +65,11 @@
       <div class="grid" style="margin-top:12px"><div class="card"><h3>Аппаратная часть</h3><div id="overviewHardware" class="muted">Загрузка…</div></div><div class="card"><h3>Хранилище</h3><div id="overviewStorage" class="muted">Загрузка…</div></div></div>
     </section>
 
+    <section class="pane chat-pane" id="pane-mentor-chat">
+      <div class="mentor-chat-bar"><span id="mentorChatState" role="status">Проверка доступа…</span><div class="toolbar" style="margin:0"><button id="mentorChatOlder" type="button" class="button small secondary" disabled>Ранее</button><button id="mentorChatNewer" type="button" class="button small secondary" disabled>Позже</button><button id="mentorChatSettings" class="button small secondary" type="button">Настройки обучения</button></div></div>
+      <div class="messages" id="mentorChatMessages" aria-label="Переписка LiveMentor и Лешего"></div>
+      <div class="mentor-chat-footer">Системный учебный чат · только чтение · обновляется автоматически</div>
+    </section>
     <section class="pane chat-pane" id="pane-chat">
       <div class="messages" id="messages"></div>
       <div class="chat-compose"><div class="composer"><textarea id="chatInput" placeholder="Сообщение… Для явного поиска: /search запрос"></textarea><button id="chatSend">Отправить</button></div><div class="toolbar" style="margin-top:8px"><button class="button secondary small" id="newChat">Новый диалог</button><button class="button secondary small" id="showSessions">История диалогов</button></div></div>
@@ -79,7 +84,7 @@
     <section class="pane" id="pane-learning">
       <h2 class="section-title">Обучение</h2><div class="section-subtitle">Управляемое самообучение из интернета с верификацией.</div>
       <div class="card hidden" id="mentorHistoryCard" style="margin:12px 0">
-        <div class="toolbar"><h3 style="margin:0">LiveMentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button><button class="button small" id="mentorDownload" type="button">Получить вопросы</button></div>
+        <div class="toolbar"><h3 style="margin:0">LiveMentor · Управление обучением</h3><button class="button small secondary" id="mentorOpenChat" type="button">Открыть чат LiveMentor</button><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button><button class="button small" id="mentorDownload" type="button">Получить вопросы</button></div>
         <div id="mentorAuthPanel" class="hidden" style="margin:10px 0">
           <div class="toolbar"><button class="button small" id="mentorConnect" type="button">Подключить GitHub</button><span class="hint" id="mentorAuthStatus" role="status"></span></div>
           <div id="mentorAuthDevice" class="hidden" style="margin-top:8px">
@@ -89,8 +94,7 @@
         </div>
         <div class="hint" id="mentorDeliveryRequest" role="status">Автоматическая проверка обновлятором каждые 15 минут.</div>
         <div class="hint" id="mentorHistoryStatus" role="status">Проверка доступа…</div>
-        <div class="hint" style="margin:8px 0">Локальная история учебных пакетов. Оценки относятся только к подтверждённым ответам. Развитие навыка требует независимой проверки.</div>
-        <div class="list" id="mentorHistoryItems"></div>
+        <div class="hint" style="margin:8px 0">Переписка доступна в отдельном чате LiveMentor. Оценки относятся только к подтверждённым ответам.</div>
       </div>
       <div class="grid"><div class="card"><h3>Самообучение</h3><div class="row"><span>Состояние</span><button class="switch" id="learningSwitch" aria-label="Самообучение"></button></div><input class="field" id="researchTopic" placeholder="Тема для изучения"><button class="button" style="width:100%;margin-top:8px" id="researchQueue">Добавить тему</button><div class="hint" id="learningState" style="margin-top:8px"></div></div><div class="card"><h3>Конвейер</h3><div class="muted">research → candidate → verification → trusted</div><div class="divider"></div><div class="row"><span>Candidate</span><b id="learningCandidate">0</b></div><div class="row"><span>Trusted</span><b id="learningTrusted">0</b></div></div></div>
       <div class="grid" style="margin-top:12px"><div class="card"><h3>Очередь исследований</h3><div class="list" id="researchTasks"></div></div><div class="card"><h3>История обучения</h3><div class="list" id="learningHistory"></div></div></div>
@@ -149,7 +153,7 @@ const contextKey='leshy.ui.context';
 let sessionId=localStorage.getItem(sessionKey)||'';
 let uiMode=localStorage.getItem(uiModeKey)||(sessionId?'full':'minimal');
 let currentSection=localStorage.getItem(uiSectionKey)||'overview';
-const titles={overview:['Обзор','состояние Лешего'],chat:['Чат','диалог и история'],knowledge:['Знания','база знаний и память'],learning:['Обучение','управляемое самообучение'],tasks:['Задачи','локальный план работы'],superagent:['SuperAgent','автономные задачи и взаимодействие'],tools:['Инструменты','подключённые возможности'],system:['Система','runtime и ускорители'],settings:['Настройки','модель, Telegram и данные'],logs:['Логи','диагностика']};
+const titles={overview:['Обзор','состояние Лешего'],chat:['Чат','диалог и история'],'mentor-chat':['LiveMentor','учебный диалог'],knowledge:['Знания','база знаний и память'],learning:['Обучение','управляемое самообучение'],tasks:['Задачи','локальный план работы'],superagent:['SuperAgent','автономные задачи и взаимодействие'],tools:['Инструменты','подключённые возможности'],system:['Система','runtime и ускорители'],settings:['Настройки','модель, Telegram и данные'],logs:['Логи','диагностика']};
 async function api(path,options={}){const res=await fetch(path,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const data=await res.json().catch(()=>({error:'Некорректный ответ сервера'}));if(!res.ok)throw new Error(data.error||('HTTP '+res.status));return data}
 function engage(save=true){document.body.classList.add('full');uiMode='full';if(save)localStorage.setItem(uiModeKey,'full')}
 function setMinimal(){document.body.classList.remove('full');uiMode='minimal';localStorage.setItem(uiModeKey,'minimal');$('contextPanel').classList.remove('open')}
@@ -244,7 +248,53 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
 (function(){
   const card=document.getElementById('mentorHistoryCard');
   const state=document.getElementById('mentorHistoryStatus');
-  const list=document.getElementById('mentorHistoryItems');
+  const list=document.getElementById('mentorChatMessages');
+  const chatPane=document.getElementById('pane-mentor-chat');
+  const chatState=document.getElementById('mentorChatState');
+  const older=document.getElementById('mentorChatOlder');
+  const newer=document.getElementById('mentorChatNewer');
+  const sidebarEntry=document.createElement('button');
+  sidebarEntry.id='mentorSidebarChat';sidebarEntry.type='button';
+  sidebarEntry.textContent='LiveMentor';sidebarEntry.title='Системный учебный чат';
+  sidebarEntry.hidden=true;
+  function placeEntry(){
+    const sessions=document.getElementById('sessionList');
+    const sidebar=document.querySelector('.sidebar');
+    if(sessions&&sidebar&&sidebar.contains(sessions)){
+      if(sidebarEntry.parentElement!==sessions.parentElement||sidebarEntry.nextElementSibling!==sessions)
+        sessions.parentElement.insertBefore(sidebarEntry,sessions);
+    }else if(sidebar&&!sidebar.contains(sidebarEntry)){
+      sidebar.insertBefore(sidebarEntry,sidebar.querySelector('.sidebar-foot')||null);
+    }
+    sidebarEntry.classList.toggle('active',chatPane.classList.contains('active'));
+  }
+  const openMentorChat=()=>{showSection('mentor-chat');};
+  sidebarEntry.addEventListener('click',openMentorChat);
+  document.getElementById('mentorOpenChat').addEventListener('click',openMentorChat);
+  document.getElementById('mentorChatSettings').addEventListener('click',()=>showSection('learning'));
+  placeEntry();
+  let offset=0,chatSignature='';
+  older.addEventListener('click',()=>{offset+=50;chatSignature='';load();});
+  newer.addEventListener('click',()=>{offset=Math.max(0,offset-50);chatSignature='';load();});
+  const accessStyle=document.createElement('style');
+  accessStyle.textContent=`
+    #mentorSidebarChat{width:100%;flex:0 0 auto;text-align:left;padding:10px 9px;margin:2px 0 5px;border:1px solid transparent;border-radius:9px;background:transparent;color:inherit;cursor:pointer;font:inherit;min-height:38px}
+    #mentorSidebarChat[hidden]{display:none!important}
+    #mentorSidebarChat:hover,#mentorSidebarChat.active{background:rgba(127,201,157,.12);border-color:var(--line)}
+    #mentorSidebarChat::before{content:'✦';margin-right:9px;color:var(--accent)}
+    #pane-mentor-chat{min-height:0;overflow:hidden}
+    #mentorChatMessages{min-height:0;overflow:auto;overflow-anchor:auto;padding:20px max(16px,6vw)}
+    #mentorChatMessages .msg{white-space:normal;overflow-wrap:anywhere;font-size:15px;max-width:840px}
+    #mentorChatMessages .mentor-text{white-space:pre-wrap;line-height:1.6}
+    #mentorChatMessages .mentor-meta{font-size:11px;color:var(--muted);margin-top:9px}
+    #mentorChatMessages .mentor-pair{margin:0 auto 26px;max-width:840px}
+    #mentorChatMessages .msg.user{margin-left:auto;width:fit-content;max-width:min(92%,840px)}
+    #mentorChatMessages .msg.assistant{margin-right:auto}
+    #mentorChatMessages .mentor-wait{font-size:12px;color:var(--muted);padding:5px 10px}
+    #pane-mentor-chat .mentor-chat-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px max(16px,6vw);font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
+    #pane-mentor-chat .mentor-chat-footer{text-align:center;padding:10px;font-size:11px;color:var(--muted);border-top:1px solid var(--line)}
+  `;
+  document.head.appendChild(accessStyle);
   const refresh=document.getElementById('mentorRefresh');
   const download=document.getElementById('mentorDownload');
   const deliveryRequest=document.getElementById('mentorDeliveryRequest');
@@ -316,14 +366,61 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     download.disabled=requesting||req.state==='queued'||!data.enabled||data.delivery_allowed!==true;
     deliveryRequest.textContent=req.state==='queued'?'Запрос в очереди обновлятора · '+req.created_at:req.state==='finished'?'Результат запроса: '+(deliveryNames[req.result]||'Нет подтверждения')+' · '+req.checked_at:req.state==='unconfirmed'?'Обновлятор не подтвердил выполнение запроса за 30 минут. Можно повторить.':'Автоматическая проверка обновлятором каждые 15 минут.';
   }
-  const active=()=>!document.hidden&&(pane.classList.contains('active')||tasksPane.classList.contains('active'));
-  function clear(){authCode.value='';authDevice.classList.add('hidden');authPanel.classList.add('hidden');resetComparison('');generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();state.textContent='';}
-  function line(parent,label,value){
-    if(!value)return;
-    const el=document.createElement('div');
-    el.className='item-body';
-    el.textContent=label+': '+value;
-    parent.appendChild(el);
+  const active=()=>!document.hidden&&(pane.classList.contains('active')||tasksPane.classList.contains('active')||chatPane.classList.contains('active'));
+  function clear(){authCode.value='';authDevice.classList.add('hidden');authPanel.classList.add('hidden');resetComparison('');generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();chatSignature='';chatState.textContent='Проверка доступа…';state.textContent='';}
+  function localTime(raw){
+    if(!raw)return '';
+    const date=new Date(raw);return Number.isNaN(date.getTime())?'':date.toLocaleString('ru-RU');
+  }
+  function message(pair,role,who,body,meta){
+    if(!body)return;
+    const msg=document.createElement('div');msg.className='msg '+role;
+    const label=document.createElement('div');label.className='who';label.textContent=who;
+    const text=document.createElement('div');text.className='mentor-text';text.textContent=body;
+    msg.append(label,text);
+    const info=document.createElement('div');info.className='mentor-meta';info.textContent=meta.filter(Boolean).join(' · ');
+    if(info.textContent)msg.appendChild(info);
+    pair.appendChild(msg);
+  }
+  function renderChat(data){
+    if(!chatPane.classList.contains('active'))return;
+    const rows=Array.isArray(data.items)?data.items:[];
+    older.disabled=!data.has_older;newer.disabled=offset===0;
+    chatState.textContent=(names[data.status]||'Статус не подтверждён')+' · '+rows.length+' вопросов на странице'+(data.truncated?' · История ограничена текущим журналом':'');
+    const signature=JSON.stringify([offset,rows]);
+    if(signature===chatSignature)return;
+    const before=list.scrollTop;
+    const nearBottom=list.scrollHeight-list.clientHeight-before<80;
+    const first=!chatSignature;
+    chatSignature=signature;
+    const fragment=document.createDocumentFragment();
+    for(const row of rows){
+      const pair=document.createElement('div');pair.className='mentor-pair';
+      message(pair,'user','LiveMentor',row.question,[row.request_id,localTime(row.received_at||row.delivered_at)]);
+      if(row.answer)message(pair,'assistant','Леший',row.answer,[localTime(row.answered_at),names[row.status],row.published_at?'Отправлен: '+localTime(row.published_at):'',row.model&&row.model!=='not_confirmed'?row.model:'',row.version]);
+      else{const note=document.createElement('div');note.className='mentor-wait';note.textContent=names[row.status]||'Ответ не подтверждён';pair.appendChild(note);}
+      fragment.appendChild(pair);
+    }
+    if(!rows.length){const e=document.createElement('div');e.className='empty';e.textContent='Учебных сообщений пока нет';fragment.appendChild(e);}
+    list.replaceChildren(fragment);
+    if(offset===0&&(first||nearBottom))list.scrollTop=list.scrollHeight;
+    else if(first)list.scrollTop=0;
+    else list.scrollTop=before;
+  }
+  let accessPending=false;
+  async function checkAccess(){
+    placeEntry();
+    if(document.hidden||accessPending)return;
+    accessPending=true;
+    try{
+      const res=await fetch('/v1/mentor/history?access=1',{cache:'no-store',credentials:'same-origin'});
+      if(res.ok){sidebarEntry.hidden=false;return;}
+      sidebarEntry.hidden=true;
+      if(res.status===401||res.status===403){
+        clear();if(chatPane.classList.contains('active'))showSection('chat');
+      }
+    }catch(_){sidebarEntry.hidden=true;if(chatPane.classList.contains('active')){clear();chatState.textContent='Сервер недоступен';}}
+    finally{accessPending=false;}
   }
   async function load(){
     if(!active()){clear();return;}
@@ -331,12 +428,16 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     pending=true;
     const token=++generation;
     try{
-      const res=await fetch('/v1/mentor/history',{cache:'no-store',credentials:'same-origin'});
+      const chatActive=chatPane.classList.contains('active');
+      const requestOffset=offset;
+      const res=await fetch('/v1/mentor/history'+(chatActive?'?chat=1&offset='+requestOffset:''),{cache:'no-store',credentials:'same-origin'});
       if(token!==generation||!active())return;
-      if(res.status===401||res.status===403){clear();return;}
+      if(res.status===401||res.status===403){sidebarEntry.hidden=true;clear();if(chatPane.classList.contains('active'))showSection('chat');return;}
       if(!res.ok)throw Error('HTTP '+res.status);
       const data=await res.json();
       if(token!==generation||!active())return;
+      sidebarEntry.hidden=false;
+      if(chatActive){if(requestOffset===offset)renderChat(data);return;}
       card.classList.remove('hidden');
       renderQuality(data);
       renderDelivery(data);
@@ -349,27 +450,8 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
         (Number.isInteger(data.training_quota)?' · Вопросов за цикл: '+data.training_quota:'')+
         (typeof data.review_quality==='number'?' · Оценка наставника: '+Math.round(data.review_quality*100)+'%':' · Оценка ещё не получена')+
         (data.open_investigations?' · Требуют разбора: '+data.open_investigations:'');
-      list.replaceChildren();
-      for(const row of Array.isArray(data.items)?data.items:[]){
-        const block=document.createElement('div');
-        block.className='item';
-        const title=document.createElement('div');
-        title.className='item-title';
-        title.textContent=row.request_id+' · '+(names[row.status]||'Не подтверждено');
-        block.appendChild(title);
-        line(block,'LiveMentor',row.question);
-        line(block,row.source==='leshy_model'?'Леший (ответ модели)':'Леший (ответ локального API)',row.answer);
-        line(block,'Скачан обновлятором',row.delivered_at);
-        line(block,'Получен',row.received_at);
-        line(block,'Ответ сохранён',row.answered_at);
-        line(block,'Публикация подтверждена',row.published_at);
-        line(block,'Версия',row.version);
-        line(block,'Модель',row.model==='not_confirmed'?'Не подтверждена':row.model);
-        list.appendChild(block);
-      }
-      if(!list.children.length){const e=document.createElement('div');e.className='empty';e.textContent='Подтверждённых локальных записей пока нет';list.appendChild(e);}
     }catch(_error){
-      if(token===generation){list.replaceChildren();state.textContent='История недоступна; данные не подтверждены';qualityChart.replaceChildren();qualityDetail.textContent='';qualityStatus.textContent='Сравнение недоступно';resetComparison('Сравнение недоступно');}
+      if(token===generation){list.replaceChildren();chatSignature='';chatState.textContent='История недоступна; данные не подтверждены';state.textContent='История недоступна; данные не подтверждены';qualityChart.replaceChildren();qualityDetail.textContent='';qualityStatus.textContent='Сравнение недоступно';resetComparison('Сравнение недоступно');}
     }finally{pending=false;}
   }
   connect.addEventListener('click',async()=>{
@@ -407,9 +489,11 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   });
   new MutationObserver(()=>{if(active())load();else clear();}).observe(pane,{attributes:true,attributeFilter:['class']});
   new MutationObserver(()=>{if(active())load();else clear();}).observe(tasksPane,{attributes:true,attributeFilter:['class']});
-  document.addEventListener('visibilitychange',()=>{if(active())load();else clear();});
-  setInterval(load,5000);
-  load();
+  new MutationObserver(()=>{placeEntry();chatSignature='';if(active())load();else clear();}).observe(chatPane,{attributes:true,attributeFilter:['class']});
+  document.addEventListener('visibilitychange',()=>{if(active())load();else clear();checkAccess();});
+  setInterval(()=>{if(active())load();else checkAccess();},5000);
+  setInterval(placeEntry,1000);
+  checkAccess();load();
 })();
 </script>
 </body>
