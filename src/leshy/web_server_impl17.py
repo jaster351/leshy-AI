@@ -133,7 +133,10 @@ def make_handler(app, telegram, settings, model_catalog):
                     if params.get("access") == ["1"]:
                         return self._identity_json(HTTPStatus.OK, {"allowed": True})
                     if params.get("chat") == ["1"]:
-                        offset = int(params.get("offset", ["0"])[0])
+                        raw_offset = params.get("offset", ["0"])[0]
+                        if not raw_offset.isascii() or not raw_offset.isdecimal() or len(raw_offset) > 4:
+                            return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": "Недопустимая страница истории"})
+                        offset = int(raw_offset)
                         if not 0 <= offset <= 1000 or offset % 50:
                             return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": "Недопустимая страница истории"})
                         return self._identity_json(HTTPStatus.OK, mentor_snapshot(settings.brain_dir, chat_offset=offset))
