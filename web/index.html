@@ -84,7 +84,7 @@
           <div class="toolbar"><button class="button small" id="mentorConnect" type="button">Подключить GitHub</button><span class="hint" id="mentorAuthStatus" role="status"></span></div>
           <div id="mentorAuthDevice" class="hidden" style="margin-top:8px">
             <div class="hint">Подтвердите доступ приложения LiveMentor в GitHub. Одноразовый код:</div>
-            <div class="toolbar"><input class="field" id="mentorAuthCode" aria-label="Код GitHub" readonly style="max-width:130px;font-weight:bold"><button class="button small secondary" id="mentorCopyCode" type="button">Копировать код</button><a class="button small" href="https://github.com/login/device" target="_blank" rel="noopener noreferrer">Открыть GitHub</a></div>
+            <div class="toolbar"><input class="field" id="mentorAuthCode" aria-label="Код GitHub" readonly style="max-width:130px;font-weight:bold"><button class="button small secondary" id="mentorCopyCode" type="button">Копировать код</button><a id="mentorOpenGitHub" class="button small" href="https://github.com/login/device" target="_blank" rel="noopener noreferrer">Открыть GitHub</a></div>
           </div>
         </div>
         <div class="hint" id="mentorDeliveryRequest" role="status">Автоматическая проверка обновлятором каждые 15 минут.</div>
@@ -305,10 +305,10 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     const busy=['starting','waiting','finishing'].includes(a.state);
     connect.disabled=connecting||busy||a.available!==true;
     connect.textContent=a.saved?'Переподключить GitHub':'Подключить GitHub';
-    const messages={starting:'Запрашиваю код GitHub…',waiting:'Ожидается подтверждение в GitHub',finishing:'Сохраняю авторизацию…',connected:'GitHub подключён. Запрошена доставка вопросов.'};
+    const messages={starting:'Запрашиваю код GitHub…',waiting:'Ожидается подтверждение в GitHub',finishing:'Сохраняю авторизацию…',connected:a.delivery_queued?'GitHub подключён. Запрошена доставка вопросов.':'GitHub подключён. Доставка при следующем штатном цикле.'};
     authStatus.textContent=a.state==='error'?(a.error||'Ошибка авторизации'):messages[a.state]||(a.available!==true?'Подключение доступно на штатной Windows-установке':a.saved?(['authorization_error','authorization_required'].includes(data.delivery_status)?'Требуется повторная авторизация':'Авторизация сохранена'):'GitHub не подключён');
     const code=typeof a.user_code==='string'&&/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(a.user_code)?a.user_code:'';
-    authCode.value=code;
+    if(authCode.value!==code){authCode.value=code;copyCode.textContent='Копировать код';}
     authDevice.classList.toggle('hidden',!code||data.delivery_allowed!==true);
   }
   function renderDelivery(data){
@@ -384,11 +384,13 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     }catch(e){authStatus.textContent=e.message;connect.disabled=false;}
     finally{connecting=false;load();}
   });
-  copyCode.addEventListener('click',async()=>{
+  async function copyDeviceCode(){
     if(!authCode.value)return;
     try{await navigator.clipboard.writeText(authCode.value);copyCode.textContent='Скопировано';}
-    catch(_){authCode.select();if(document.execCommand('copy'))copyCode.textContent='Скопировано';}
-  });
+    catch(_){authCode.select();try{if(document.execCommand('copy'))copyCode.textContent='Скопировано';}catch(_){}}
+  }
+  copyCode.addEventListener('click',copyDeviceCode);
+  document.getElementById('mentorOpenGitHub').addEventListener('click',copyDeviceCode);
   refresh.addEventListener('click',load);
   download.addEventListener('click',async()=>{
     if(requesting)return;
