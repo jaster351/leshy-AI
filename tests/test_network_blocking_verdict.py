@@ -81,7 +81,26 @@ class TspuVerdictTests(unittest.TestCase):
         }}
         verdict, ports = assess_ports(own, ())
         self.assertIn("Недостаточно данных", verdict)
-        self.assertTrue(all(x["state"] == "insufficient" for x in ports.values()))
+        self.assertTrue(all(x["state"] == "unavailable_both" for x in ports.values()))
+
+    def test_one_accessible_and_one_unavailable_both_is_clear(self):
+        for active, inactive in ((22, 3389), (3389, 22)):
+            own = {"ports": {
+                str(active): pair(active, ["connected"] * 3, ["connected"] * 3),
+                str(inactive): pair(inactive, ["timeout"] * 3, ["refused"] * 3),
+            }}
+            verdict, ports = assess_ports(own, ())
+            self.assertIn("Признаки блокировки на стороне ТСПУ не обнаружены", verdict)
+            self.assertEqual(ports[str(inactive)]["state"], "unavailable_both")
+            for status in ("pending", "error"):
+                own["ports"][str(inactive)]["eu_attempts"][0]["status"] = status
+                verdict, ports = assess_ports(own, ())
+                self.assertEqual(ports[str(inactive)]["state"], "insufficient")
+            own["ports"][str(inactive)] = pair(inactive, ["timeout"] * 3, ["timeout"] * 3)
+            verdict, ports = assess_ports(own, (
+                TcpObservation("check-host", inactive, "connected", country_code="de", node="de1"),
+            ))
+            self.assertEqual(ports[str(inactive)]["state"], "insufficient")
 
     def test_stale_country_prevents_confirmed_attribution(self):
         own = {"ports": {
