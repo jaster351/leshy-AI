@@ -128,12 +128,16 @@ foreach ($s in $sections) {
     $button=[System.Windows.Controls.Button]::new();$button.Tag=$s.id;$button.Margin=[System.Windows.Thickness]::new(0,0,0,7);$button.Padding=[System.Windows.Thickness]::new(10,9,10,9);$button.HorizontalContentAlignment='Stretch'
     $row=[System.Windows.Controls.DockPanel]::new()
     $stripe=[System.Windows.Controls.Border]::new();$stripe.Width=3;$stripe.Background=Brush $s.color;$stripe.CornerRadius=[System.Windows.CornerRadius]::new(2);$stripe.Margin=[System.Windows.Thickness]::new(0,0,10,0);[System.Windows.Controls.DockPanel]::SetDock($stripe,'Left');[void]$row.Children.Add($stripe)
+    $mini=[System.Windows.Controls.Canvas]::new()
+    $mini.Width=55;$mini.Height=36;$mini.ClipToBounds=$true
+    $mini.Background=Brush '#131C27';$mini.Margin=[System.Windows.Thickness]::new(0,0,8,0)
+    [System.Windows.Controls.DockPanel]::SetDock($mini,'Left');[void]$row.Children.Add($mini)
     $stack=[System.Windows.Controls.StackPanel]::new()
     $title=NewText $s.title 14;$title.FontWeight='SemiBold'
     $value=NewText '—' 13 '#A9B6C6';$value.Margin=[System.Windows.Thickness]::new(0,4,0,0)
     [void]$stack.Children.Add($title);[void]$stack.Children.Add($value);[void]$row.Children.Add($stack);$button.Content=$row
     $button.Add_Click({param($sender,$e) $script:section=[string]$sender.Tag;RenderMonitor})
-    [void]$ui.Navigation.Children.Add($button);$nav[$s.id]=@{button=$button;value=$value}
+    [void]$ui.Navigation.Children.Add($button);$nav[$s.id]=@{button=$button;value=$value;mini=$mini}
 }
 $cards=@()
 for ($i=0;$i -lt 6;$i++) {
@@ -145,6 +149,7 @@ for ($i=0;$i -lt 6;$i++) {
 }
 function ShowCards([object[]]$pairs) {
     $count=[int]($pairs.Count/2)
+    $ui.MetricCards.Columns=[Math]::Max(1,[Math]::Min(3,$count))
     for($i=0;$i -lt $cards.Count;$i++) {
         $c=$cards[$i]
         if($i -lt $count) {$c.label.Text=[string]$pairs[2*$i];$c.value.Text=[string]$pairs[2*$i+1];$c.border.Visibility='Visible'}
@@ -177,6 +182,34 @@ function DrawSeries($key,$color,$scale,$end,$w,$h) {
         $previous=@{x=$x;y=$y;age=$age}
     }
 }
+function DrawMiniPlot($sec) {
+    $canvas=$nav[$sec.id].mini
+    $canvas.Children.Clear()
+    $w=$canvas.Width;$h=$canvas.Height
+    $scale=100.0;$end=[datetimeoffset]::UtcNow
+    if($sec.id -eq 'AI'){
+        $scale=10.0
+        foreach($sample in $script:history){if($null -ne $sample.rate){$scale=[Math]::Max($scale,[double]$sample.rate)}}
+    }
+    $previous=$null
+    foreach($sample in $script:history){
+        try{$age=($end-[datetimeoffset]::Parse([string]$sample.timestamp)).TotalSeconds}catch{$previous=$null;continue}
+        $v=SampleValue $sample $sec.key
+        if($age -lt 0 -or $age -gt 60 -or $null -eq $v){$previous=$null;continue}
+        $x=1+($w-2)*(1-$age/60);$y=1+($h-2)*(1-[Math]::Max(0,[Math]::Min(1,[double]$v/$scale)))
+        if($null -ne $previous -and $previous.age-$age -le 10){
+            $line=[System.Windows.Shapes.Line]::new()
+            $line.X1=$previous.x;$line.Y1=$previous.y;$line.X2=$x;$line.Y2=$y
+            $line.Stroke=Brush $sec.color;$line.StrokeThickness=1.4
+            [void]$canvas.Children.Add($line)
+        }else{
+            $dot=[System.Windows.Shapes.Ellipse]::new();$dot.Width=3;$dot.Height=3;$dot.Fill=Brush $sec.color
+            [System.Windows.Controls.Canvas]::SetLeft($dot,$x-1.5);[System.Windows.Controls.Canvas]::SetTop($dot,$y-1.5)
+            [void]$canvas.Children.Add($dot)
+        }
+        $previous=@{x=$x;y=$y;age=$age}
+    }
+}
 function DrawPlot {
     $ui.Plot.Children.Clear()
     $w=$ui.Plot.ActualWidth;$h=$ui.Plot.ActualHeight
@@ -198,6 +231,7 @@ function RenderMonitor {
         $nav[$sec.id].button.Background=Brush $(if($sec.id -eq $script:section){'#283B51'}else{'#1A2532'})
         $v=SampleValue $s $sec.key
         $nav[$sec.id].value.Text=$(if($sec.id -eq 'AI'){FormatValue $v 'N1' ' ток/с'}else{Percent $v})
+        DrawMiniPlot $sec
     }
     $ui.GpuSelect.Visibility=$(if($script:section -eq 'GPU'){'Visible'}else{'Collapsed'})
     $g=SelectedGpu $s
