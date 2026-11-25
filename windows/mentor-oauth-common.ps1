@@ -52,7 +52,7 @@ function Write-MentorSecret([string]$Path,[string]$Value) {
     $tmp = Join-Path $parent ('.oauth-' + [Guid]::NewGuid().ToString('N') + '.tmp')
     try {
         [IO.File]::WriteAllText($tmp,('dpapi:' + [Convert]::ToBase64String($cipher)),[Text.Encoding]::ASCII)
-        if ([IO.File]::Exists($Path)) { [IO.File]::Replace($tmp,$Path,$null) } else { [IO.File]::Move($tmp,$Path) }
+        if ([IO.File]::Exists($Path)) { [IO.File]::Replace($tmp,$Path,[NullString]::Value) } else { [IO.File]::Move($tmp,$Path) }
     } finally { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } }
 }
 function Enter-MentorCredentialLock([string]$Root) {
