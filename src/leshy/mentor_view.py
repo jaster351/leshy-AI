@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from .mentor_batch import read_bytes, validate_batch
+from .mentor_feedback_view import attach_feedback, committed_reviews, committed_summary
 
 _ID = re.compile(r"mentor-[a-z0-9-]{1,80}")
 _MAX_FILE = 128 * 1024
@@ -139,15 +140,18 @@ def mentor_snapshot(brain_dir: Path, *, chat_offset: int | None = None) -> dict:
         if len(raw) <= 256 * 1024:
             export_hash = sha256(raw).hexdigest()
     load = _read(root / "load-policy.json", 1024 * 1024)
-    last = load.get("last_review") or {}
-    if not isinstance(last, dict):
-        last = {}
+    reviews = committed_reviews(load)
+    last = committed_summary(load, reviews)
+    attach_feedback(items, root, reviews, _read)
     investigations = load.get("investigation") or []
     history = load.get("quality_history", [])
     points = []
     if isinstance(history, list):
         for point in history[-168:]:
             if not isinstance(point, dict):
+                continue
+            point_batch = point.get("batch_id")
+            if not isinstance(point_batch, str) or point_batch not in reviews:
                 continue
             value = point.get("leshy_percent")
             if type(value) not in (int, float) or not 0 <= value <= 100:
@@ -165,6 +169,8 @@ def mentor_snapshot(brain_dir: Path, *, chat_offset: int | None = None) -> dict:
             "training_quota": load.get("quota", 30),
             "load_decision": _text(load.get("decision")),
             "review_quality": last.get("quality"),
+            "review_feedback": last,
+            "applied_reviews_count": len(reviews),
             "quality_history": points,
             "reviewed_questions": last.get("reviewed"),
             "open_investigations": len(investigations) if isinstance(investigations, list) else 0,
@@ -177,4 +183,4 @@ def mentor_snapshot(brain_dir: Path, *, chat_offset: int | None = None) -> dict:
             "delivered_count": len(delivered),
             "delivery_status": delivery_status,
             "delivery_checked_at": _text(transport.get("timestamp")),
-            "evaluation_status": "review_received" if last else "not_reviewed"}
+            "evaluation_status": "review_applied" if last else "not_reviewed"}

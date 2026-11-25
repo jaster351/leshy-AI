@@ -108,6 +108,7 @@
           <div class="card"><div class="hint">Уровень LiveMentor на тех же заданиях</div><strong id="mentorReferenceLevel" style="font-size:2rem">—</strong></div>
           <div class="card"><div class="hint">Уровень Лешего относительно LiveMentor</div><strong id="mentorRelativeLevel" style="font-size:2rem">—</strong><div class="hint" id="mentorRelativeStatus" role="status">Сравнение пока не измерено</div></div>
         </div>
+        <div id="mentorReviewSummary" class="hint" role="status">Применённых оценок пока нет</div>
         <div id="mentorQualityStatus" class="hint" role="status">Подтверждённых сравнений пока нет</div>
         <svg id="mentorQualityChart" viewBox="0 0 620 240" role="img" aria-label="График качества ответов наставнику" style="width:100%;max-height:280px;color:inherit"></svg>
         <div id="mentorQualityDetail" class="hint"></div>
@@ -291,6 +292,10 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     #mentorChatMessages .msg.user{margin-left:auto;width:fit-content;max-width:min(92%,840px)}
     #mentorChatMessages .msg.assistant{margin-right:auto}
     #mentorChatMessages .mentor-wait{font-size:12px;color:var(--muted);padding:5px 10px}
+    #mentorChatMessages .mentor-feedback{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+    #mentorChatMessages .mentor-feedback strong{display:block;margin-bottom:5px}
+    #mentorChatMessages .mentor-feedback p{margin:7px 0 0}
+    #mentorChatMessages .mentor-feedback.like strong{color:var(--accent)}
     #pane-mentor-chat .mentor-chat-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px max(16px,6vw);font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
     #pane-mentor-chat .mentor-chat-footer{text-align:center;padding:10px;font-size:11px;color:var(--muted);border-top:1px solid var(--line)}
   `;
@@ -308,6 +313,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   const tasksPane=document.getElementById('pane-tasks');
   const qualityCard=document.getElementById('mentorQualityCard');
   const qualityStatus=document.getElementById('mentorQualityStatus');
+  const reviewSummary=document.getElementById('mentorReviewSummary');
   const qualityChart=document.getElementById('mentorQualityChart');
   const qualityDetail=document.getElementById('mentorQualityDetail');
   const referenceLevel=document.getElementById('mentorReferenceLevel');
@@ -319,18 +325,25 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     qualityCard.classList.remove('hidden');
     qualityChart.replaceChildren();
     qualityDetail.textContent='';
+    const review=data.review_feedback||{};
+    const fmt=n=>Number(n).toLocaleString('ru-RU',{maximumFractionDigits:2})+'%';
+    const hasReview=typeof review.review_sha256==='string'&&Number.isFinite(review.quality)&&Number.isInteger(review.reviewed);
+    reviewSummary.textContent=hasReview?'Последняя применённая оценка: '+fmt(review.quality*100)+' · '+review.reviewed+'/'+review.total+' ответов · '+review.batch_id+(review.comparable?'':' · Отдельная оценка, не точка динамики'):'Применённых оценок пока нет';
+    if(hasReview&&review.reactions){
+      const counts=review.reactions;
+      reviewSummary.textContent+=' · 👍 '+counts.like+' · 👎 '+counts.dislike+' · Без реакции: '+counts.missing;
+    }
+    if(hasReview&&review.timestamp)reviewSummary.textContent+=' · '+localTime(review.timestamp);
+    if(hasReview&&review.complete&&Number.isFinite(review.relative_percent)&&Number.isFinite(review.reference_percent)&&review.reference_percent>0){
+      referenceLevel.textContent='100%';relativeLevel.textContent=fmt(review.relative_percent);
+      relativeStatus.textContent='Последний применённый пакет · '+review.reviewed+' заданий'+(review.comparable?'':' · Не показатель динамики');
+    }
     const rows=(Array.isArray(data.quality_history)?data.quality_history:[]).filter(p=>Number.isFinite(p.leshy_percent)&&p.leshy_percent>=0&&p.leshy_percent<=100);
     if(!rows.length){qualityStatus.textContent='Подтверждённых сравнений пока нет';return;}
     const last=rows[rows.length-1];
     const key=p=>JSON.stringify([p.benchmark_id,p.rubric_id]);
     const series=rows.filter(p=>key(p)===key(last));
-    const fmt=n=>Number(n).toLocaleString('ru-RU',{maximumFractionDigits:2})+'%';
-    qualityStatus.textContent='Качество ответов Лешего наставнику: '+fmt(last.leshy_percent)+' · '+last.questions+' заданий';
-    if(Number.isFinite(last.relative_percent)&&Number.isFinite(last.reference_percent)&&last.reference_percent>0){
-      referenceLevel.textContent='100%';
-      relativeLevel.textContent=fmt(last.relative_percent);
-      relativeStatus.textContent='LiveMentor · '+last.questions+' одинаковых заданий · '+last.timestamp;
-    }else{resetComparison('Для последнего пакета нет парной оценки LiveMentor');}
+    qualityStatus.textContent='История сопоставимых оценок: '+fmt(last.leshy_percent)+' · '+last.questions+' заданий';
     const before=series[series.length-2];
     qualityDetail.textContent=last.timestamp+' · '+last.benchmark_id+' / '+last.rubric_id+' · '+(last.model==='not_confirmed'?'Модель Лешего не подтверждена':last.model)+' · '+(before?'Изменение: '+(last.leshy_percent-before.leshy_percent>=0?'+':'')+(last.leshy_percent-before.leshy_percent).toFixed(2)+' п. п.':'Первое сопоставимое измерение')+(Number.isFinite(last.relative_percent)?' · Относительно LiveMentor: '+fmt(last.relative_percent):' · Сравнение с LiveMentor пока не измерено');
     const ns='http://www.w3.org/2000/svg';
@@ -369,7 +382,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     deliveryRequest.textContent=req.state==='queued'?'Запрос в очереди обновлятора · '+req.created_at:req.state==='finished'?'Результат запроса: '+(deliveryNames[req.result]||'Нет подтверждения')+' · '+req.checked_at:req.state==='unconfirmed'?'Обновлятор не подтвердил выполнение запроса за 30 минут. Можно повторить.':'Автоматическая проверка обновлятором каждые 15 минут.';
   }
   const active=()=>!document.hidden&&(pane.classList.contains('active')||tasksPane.classList.contains('active')||chatPane.classList.contains('active'));
-  function clear(){authCode.value='';authDevice.classList.add('hidden');authPanel.classList.add('hidden');resetComparison('');generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();chatSignature='';chatState.textContent='Проверка доступа…';state.textContent='';}
+  function clear(){authCode.value='';authDevice.classList.add('hidden');authPanel.classList.add('hidden');resetComparison('');generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';reviewSummary.textContent='';list.replaceChildren();chatSignature='';chatState.textContent='Проверка доступа…';state.textContent='';}
   function localTime(raw){
     if(!raw)return '';
     const date=new Date(raw);return Number.isNaN(date.getTime())?'':date.toLocaleString('ru-RU');
@@ -383,6 +396,19 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     const info=document.createElement('div');info.className='mentor-meta';info.textContent=meta.filter(Boolean).join(' · ');
     if(info.textContent)msg.appendChild(info);
     pair.appendChild(msg);
+    return msg;
+  }
+  const feedbackCauses={question:'Условие вопроса',rubric:'Критерии оценки',knowledge:'Знания',context:'Контекст',code:'Код',model:'Модель',resources:'Ресурсы',transport:'Связь',unknown:'Причина уточняется',none:''};
+  function renderFeedback(msg,feedback){
+    if(!msg||!feedback||!['like','dislike'].includes(feedback.reaction))return;
+    const block=document.createElement('div');block.className='mentor-feedback '+feedback.reaction;
+    const heading=document.createElement('strong');heading.textContent=feedback.reaction==='like'?'👍 LiveMentor · оценка применена':'👎 LiveMentor · оценка применена';block.appendChild(heading);
+    if(feedback.reaction==='dislike'){
+      for(const value of [feedbackCauses[feedback.cause]||'',feedback.reason||'',feedback.corrected_answer?'Исправленный ответ: '+feedback.corrected_answer:'']){
+        if(!value)continue;const p=document.createElement('p');p.textContent=value;block.appendChild(p);
+      }
+    }
+    msg.appendChild(block);
   }
   function renderChat(data){
     if(!chatPane.classList.contains('active'))return;
@@ -399,7 +425,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     for(const row of rows){
       const pair=document.createElement('div');pair.className='mentor-pair';
       message(pair,'user','LiveMentor',row.question,[row.request_id,localTime(row.received_at||row.delivered_at)]);
-      if(row.answer)message(pair,'assistant','Леший',row.answer,[localTime(row.answered_at),names[row.status],row.published_at?'Отправлен: '+localTime(row.published_at):'',row.model&&row.model!=='not_confirmed'?row.model:'',row.version]);
+      if(row.answer){const msg=message(pair,'assistant','Леший',row.answer,[localTime(row.answered_at),names[row.status],row.published_at?'Отправлен: '+localTime(row.published_at):'',row.model&&row.model!=='not_confirmed'?row.model:'',row.version]);renderFeedback(msg,row.feedback);}
       else{const note=document.createElement('div');note.className='mentor-wait';note.textContent=names[row.status]||'Ответ не подтверждён';pair.appendChild(note);}
       fragment.appendChild(pair);
     }
@@ -451,9 +477,10 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
         (Number.isInteger(data.delivered_count)?' · Скачано вопросов: '+data.delivered_count:'')+(data.truncated?' · Показаны до 50 записей':'')+(data.export_sha256?' · SHA-256 экспорта для локальной проверки: '+data.export_sha256:'')+
         (Number.isInteger(data.training_quota)?' · Вопросов за цикл: '+data.training_quota:'')+
         (typeof data.review_quality==='number'?' · Оценка наставника: '+Math.round(data.review_quality*100)+'%':' · Оценка ещё не получена')+
+        (Number.isInteger(data.applied_reviews_count)?' · Применено отчётов: '+data.applied_reviews_count:'')+
         (data.open_investigations?' · Требуют разбора: '+data.open_investigations:'');
     }catch(_error){
-      if(token===generation){list.replaceChildren();chatSignature='';chatState.textContent='История недоступна; данные не подтверждены';state.textContent='История недоступна; данные не подтверждены';qualityChart.replaceChildren();qualityDetail.textContent='';qualityStatus.textContent='Сравнение недоступно';resetComparison('Сравнение недоступно');}
+      if(token===generation){list.replaceChildren();chatSignature='';chatState.textContent='История недоступна; данные не подтверждены';state.textContent='История недоступна; данные не подтверждены';qualityChart.replaceChildren();qualityDetail.textContent='';qualityStatus.textContent='Сравнение недоступно';reviewSummary.textContent='Оценки недоступны';resetComparison('Сравнение недоступно');}
     }finally{pending=false;}
   }
   connect.addEventListener('click',async()=>{

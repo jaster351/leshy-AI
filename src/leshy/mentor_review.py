@@ -160,6 +160,14 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now, rev
                              "dislike": sum(x["reaction"] == "dislike" for x in reactions),
                              "missing": len(rows) - len(reactions)},
                "timestamp": now()}
+    # A complete paired evaluation is meaningful for this batch even when
+    # the model/revision cannot support a longitudinal comparison.
+    if full and reference_count == len(rows) and reference_total > 0:
+        summary["reference"] = {
+            "reference_model": reference_model,
+            "reference_percent": round(100 * reference_total / (6 * len(rows)), 2),
+            "relative_percent": round(100 * total / reference_total, 2),
+        }
     history = state.get("quality_history", [])
     if not isinstance(history, list) or any(not isinstance(x, dict) for x in history):
         raise ValueError("Повреждена история сравнений")
