@@ -15,7 +15,7 @@ from .diagnostics import event, problem
 from .modules import ModuleManifest, ModuleRequest, ModuleResponse
 from .network_service_fingerprint import collect_service_fingerprint
 from .eu_ssh_probe import compare_tcp_ports, configured as eu_ssh_probe_configured
-from .network_blocking_verdict import assess_ports
+from .network_blocking_verdict import assess_ports, no_selective_blocking_evidence
 from .verified_tool_receipts import VerifiedToolReceipts, ToolReceipt
 
 
@@ -1143,9 +1143,11 @@ class NetworkBlockingModule:
                     else "likely_region_filtered" if any(
                         row.get("state") == "likely_blocked" for row in result.port_verdicts.values()
                     )
-                    else "not_blocked_tested_ports" if result.port_verdicts and all(
-                        row.get("state") == "not_blocked" for row in result.port_verdicts.values()
-                    )
+                    else "not_blocked_tested_ports" if no_selective_blocking_evidence(result.port_verdicts)
+                    and not (result.cheburcheck.ok and result.cheburcheck.blocked)
+                    and not (result.chebur_probe.ok and result.chebur_probe.finished and any(
+                        "tspu_block" in row.verdicts for row in result.chebur_probe.observations
+                    ))
                     else "inconclusive"
                 ),
                 "signals_met": result.signals_met,

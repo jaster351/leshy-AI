@@ -196,3 +196,24 @@ def test_geographic_rule_keeps_explicit_clear_probe_as_conflicting_evidence():
     metadata["chebur_probe"] = {"ok": True, "finished": True,
                                "observations": [{"verdicts": ["ok"]}]}
     assert "Не удалось однозначно" in _compact_answer(metadata)
+
+
+@patch.dict("os.environ", {"LESHY_RU_PROBE_CONFIRMED": "1"})
+def test_symmetric_unavailable_port_does_not_veto_reachable_service():
+    from leshy.network_blocking_verdict import assess_ports
+    from leshy.network_blocking_module import CheburcheckEvidence
+    for active, inactive in ((22, 3389), (3389, 22)):
+        owned = {"ports": {
+            str(active): {"local_attempts": [{"status": "connected"}] * 3,
+                          "eu_attempts": [{"status": "connected"}] * 3},
+            str(inactive): {"local_attempts": [{"status": "timeout"}] * 3,
+                            "eu_attempts": [{"status": "refused"}] * 3},
+        }}
+        _, ports = assess_ports(owned, (), cheburcheck=CheburcheckEvidence(ok=True, blocked=False))
+        metadata = {"target": "185.221.163.248", "port_verdicts": ports,
+                    "eu_ssh_comparison": owned,
+                    "cheburcheck": {"ok": True, "blocked": False}}
+        assert _compact_answer(metadata) == "185.221.163.248 Блокировка не обнаружена."
+        assert "Не удалось однозначно" in _compact_answer(dict(metadata, chebur_probe=_probe()))
+        assert "Не удалось однозначно" in _compact_answer(dict(
+            metadata, cheburcheck={"ok": True, "blocked": True}))
