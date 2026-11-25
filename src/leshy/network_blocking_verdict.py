@@ -11,6 +11,26 @@ from typing import Any
 PORT_NAMES = {22: "SSH/22", 3389: "RDP/3389"}
 
 
+def no_selective_blocking_evidence(ports: dict[str, Any]) -> bool:
+    """A reachable RU service and no unexplained second port.
+
+    Completed failure in both networks is neutral. Two unavailable ports
+    alone cannot clear an IP.
+    """
+    rows = [ports.get(str(port)) for port in (22, 3389)]
+    if not all(isinstance(row, dict) for row in rows):
+        return False
+    states = [row.get("state") for row in rows]
+    if states == ["not_blocked", "not_blocked"]:
+        return True
+    return (
+        sorted(str(state) for state in states) == ["not_blocked", "unavailable_both"]
+        and any(row.get("state") == "not_blocked"
+                and row.get("local_ok") == 3 and row.get("nl_ok") == 3
+                for row in rows)
+    )
+
+
 def assess_ports(
     owned: dict[str, Any],
     check_host: tuple[Any, ...],
@@ -91,7 +111,9 @@ def assess_ports(
             state = "possible_restriction"
             explanation = "Из сети Лешего соединение отклоняется, из Нидерландов доступно; возможны ACL/firewall"
         elif len(local) == 3 and all(x in ("timeout", "refused") for x in local) and len(eu) == 3 and all(x in ("timeout", "refused") for x in eu):
-            explanation = "Порт недоступен в обеих сетях; это не доказывает блокировку"
+            if region_known and not ru_ch_ok and not other_ch_ok:
+                state = "unavailable_both"
+            explanation = "Порт недоступен в обеих сетях; это не признак избирательной блокировки"
         elif ru_ch_timeout and other_ch_ok and not ru_ch_ok:
             state = "possible_restriction"
             explanation = "Check-Host видит тайм-ауты в РФ и доступность за рубежом, но собственные измерения неполные"
@@ -124,6 +146,8 @@ def assess_ports(
         verdict = "Возможное ограничение доступа: " + ", ".join(possible) + ". Причина не установлена"
     elif len(available) == 2:
         verdict = "Блокировка не обнаружена на стороне ТСПУ для SSH/22 и RDP/3389"
+    elif no_selective_blocking_evidence(assessments) and not reported_tspu and not listed:
+        verdict = "Признаки блокировки на стороне ТСПУ не обнаружены; другой порт недоступен в обеих сетях"
     elif available:
         verdict = "Блокировка не обнаружена на стороне ТСПУ для " + ", ".join(available) + "; другой порт не подтверждён"
     else:
