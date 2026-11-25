@@ -19,6 +19,7 @@ from .diagnostics import event
 from .secret_store import load_secret
 from .mentor_performance import CyclePerformance, capture_mentor_inference, cpu_clock
 from .mentor_context import build_mentor_messages, mentor_scope
+from .mentor_answer_evidence import response_evidence, diagnostic_rows
 
 INTERVAL = 3600
 MAX_INPUT = 1024 * 1024
@@ -349,6 +350,11 @@ class BatchRunner:
                         record.update(status="answered", answer=answer, timestamp=now(),
                                       revision=VERSION, model="not_confirmed",
                                       duration_ms=int((time.monotonic() - started) * 1000))
+                        # Evidence is optional; diagnostics cannot invalidate a real answer.
+                        try:
+                            record["diagnostic_evidence"] = response_evidence(context_samples, measured)
+                        except Exception as exc:
+                            event("mentor_answer_evidence_failed", error_type=type(exc).__name__)
                         atomic(path, record)
                         try:
                             for sample in context_samples:
@@ -379,6 +385,11 @@ class BatchRunner:
                                      "batch_id": batch_id, "batch_sha256": expected,
                                      "timestamp": now(), "cycle": metrics,
                                      "measurements": performance.summary()}
+            try:
+                self.last_performance["answer_evidence"] = diagnostic_rows(
+                    self.root, batch_id, expected, questions, read_obj, digest)
+            except Exception as exc:
+                event("mentor_answer_evidence_summary_failed", error_type=type(exc).__name__)
             atomic(self.root / "performance-latest.json", self.last_performance)
         except Exception as exc:
             event("mentor_performance_local_failed", error_type=type(exc).__name__)
