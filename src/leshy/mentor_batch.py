@@ -352,7 +352,9 @@ class BatchRunner:
                                       duration_ms=int((time.monotonic() - started) * 1000))
                         # Evidence is optional; diagnostics cannot invalidate a real answer.
                         try:
-                            record["diagnostic_evidence"] = response_evidence(context_samples, measured)
+                            record["diagnostic_evidence"] = response_evidence(
+                                context_samples, measured, history_total=len(history),
+                                history_window=(len(messages) - 2) // 2)
                         except Exception as exc:
                             event("mentor_answer_evidence_failed", error_type=type(exc).__name__)
                         atomic(path, record)
