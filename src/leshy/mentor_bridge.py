@@ -301,6 +301,25 @@ class MentorBridge:
                 except Exception as exc:
                     event("mentor_runtime_version_failed", error_type=type(exc).__name__)
                 status = runner.cycle(config)
+                # Local preparation is independent of publishing or inference.
+                # The synthetic-only plan does not grant training/OS privileges.
+                if (config.get("repository") == "jaster351/AI-mentor"
+                        and config.get("auto_queue") is True
+                        and config.get("auto_publish") is True):
+                    try:
+                        from .mentor_training_prepare import prepare
+                        def preparation_allowed():
+                            current = runner.config()
+                            return (runner.still_allowed(config)
+                                    and current.get("auto_queue") is True
+                                    and current.get("auto_publish") is True)
+                        preparation = prepare(self.root, allowed=preparation_allowed)
+                        if isinstance(runner.last_performance, dict):
+                            runner.last_performance["training_preparation"] = preparation
+                    except Exception as exc:
+                        event("mentor_training_preparation_failed", error_type=type(exc).__name__)
+                        if isinstance(runner.last_performance, dict):
+                            runner.last_performance["training_preparation"] = {"status": "error"}
                 result = {"status": status, "timestamp": now()}
                 if isinstance(runner.last_performance, dict):
                     metrics = runner.last_performance.get("cycle", {})
