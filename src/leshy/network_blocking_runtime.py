@@ -10,6 +10,7 @@ from .action_intent_guard import explicit_network_probe, local_memory_intent
 from .module_settings import module_enabled
 from .modules import ModuleRequest
 from .network_blocking_module import NetworkBlockingModule
+from .network_blocking_verdict import no_selective_blocking_evidence
 from .realtime_chat import RealtimeChatManager, StreamEvent
 from .storage import utcnow
 
@@ -264,11 +265,10 @@ def _decisive_conclusion(metadata: dict[str, Any]) -> str | None:
         return f"{target} Обнаружена блокировка на стороне ТСПУ."
     if _owned_geo_corroborated_ports(metadata):
         return f"{target} Обнаружена блокировка на стороне ТСПУ."
-    # Keep the existing two-port negative scope; a missing port or a positive
-    # independent probe is an uncertainty, not a clean negative.
+    # Symmetric completed failures on the unused port do not veto a clean
+    # reachable service. Missing measurements or positive evidence still do.
     if (
-        len(rows) == 2
-        and all(row.get("state") == "not_blocked" for row in rows)
+        no_selective_blocking_evidence(ports)
         and not _probe_reports_tspu(metadata)
         and not ((metadata.get("cheburcheck") or {}).get("ok")
                  and (metadata.get("cheburcheck") or {}).get("blocked") is True)
@@ -378,11 +378,7 @@ def _compact_answer(metadata: dict[str, Any]) -> str:
         probe_status = None
     if probe_status is not None:
         lines.append(f"Cheburcheck Probe: {probe_status}.")
-    if _probe_reports_tspu(metadata) and all(
-        isinstance((metadata.get("port_verdicts") or {}).get(key), dict)
-        and metadata["port_verdicts"][key].get("state") == "not_blocked"
-        for key in ("22", "3389")
-    ):
+    if _probe_reports_tspu(metadata) and no_selective_blocking_evidence(metadata.get("port_verdicts") or {}):
         lines.append("Результаты проверок противоречат друг другу.")
     return "\n".join(lines).rstrip()
 
