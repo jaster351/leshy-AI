@@ -79,7 +79,8 @@
     <section class="pane" id="pane-learning">
       <h2 class="section-title">Обучение</h2><div class="section-subtitle">Управляемое самообучение из интернета с верификацией.</div>
       <div class="card hidden" id="mentorHistoryCard" style="margin:12px 0">
-        <div class="toolbar"><h3 style="margin:0">LiveMentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button></div>
+        <div class="toolbar"><h3 style="margin:0">LiveMentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button><button class="button small" id="mentorDownload" type="button">Получить вопросы</button></div>
+        <div class="hint" id="mentorDeliveryRequest" role="status">Автоматическая проверка обновлятором каждые 15 минут.</div>
         <div class="hint" id="mentorHistoryStatus" role="status">Проверка доступа…</div>
         <div class="hint" style="margin:8px 0">Локальная история учебных пакетов. Оценки относятся только к подтверждённым ответам. Развитие навыка требует независимой проверки.</div>
         <div class="list" id="mentorHistoryItems"></div>
@@ -238,6 +239,8 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   const state=document.getElementById('mentorHistoryStatus');
   const list=document.getElementById('mentorHistoryItems');
   const refresh=document.getElementById('mentorRefresh');
+  const download=document.getElementById('mentorDownload');
+  const deliveryRequest=document.getElementById('mentorDeliveryRequest');
   const pane=document.getElementById('pane-learning');
   const tasksPane=document.getElementById('pane-tasks');
   const qualityCard=document.getElementById('mentorQualityCard');
@@ -282,7 +285,12 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   if(!card||!state||!list||!refresh||!pane)return;
   const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',waiting_delivery:'Ожидание скачивания пакета',waiting_connection:'Нет связи с GitHub — локальная обработка',delivered:'Скачан, ожидает ответа',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ API сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
   const deliveryNames={not_configured:'Не настроен',disabled:'Отключён',authorization_required:'Требуется вход в GitHub',authorization_error:'Ошибка авторизации GitHub',configuration_changed:'Настройки изменились, ожидается повторная проверка',delivered:'Пакет скачан',up_to_date:'Пакет уже скачан',error:'Ошибка доставки',not_confirmed:'Нет подтверждения'};
-  let pending=false, generation=0;
+  let pending=false, generation=0, requesting=false;
+  function renderDelivery(data){
+    const req=data.delivery_request||{};
+    download.disabled=requesting||req.state==='queued'||!data.enabled;
+    deliveryRequest.textContent=req.state==='queued'?'Запрос в очереди обновлятора · '+req.created_at:req.state==='finished'?'Результат запроса: '+(deliveryNames[req.result]||'Нет подтверждения')+' · '+req.checked_at:req.state==='unconfirmed'?'Обновлятор не подтвердил выполнение запроса за 30 минут. Можно повторить.':'Автоматическая проверка обновлятором каждые 15 минут.';
+  }
   const active=()=>!document.hidden&&(pane.classList.contains('active')||tasksPane.classList.contains('active'));
   function clear(){resetComparison('');generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();state.textContent='';}
   function line(parent,label,value){
@@ -306,6 +314,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
       if(token!==generation||!active())return;
       card.classList.remove('hidden');
       renderQuality(data);
+      renderDelivery(data);
       state.textContent=(names[data.status]||'Статус не подтверждён')+
         (data.last_check_at?' · Последняя проверка: '+data.last_check_at:' · Проверок пока нет')+
         (data.delivery_status?' · Обновлятор: '+(deliveryNames[data.delivery_status]||'Нет подтверждения'):'')+
@@ -338,6 +347,19 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     }finally{pending=false;}
   }
   refresh.addEventListener('click',load);
+  download.addEventListener('click',async()=>{
+    if(requesting)return;
+    requesting=true;download.disabled=true;
+    deliveryRequest.textContent='Отправляю запрос обновлятору…';
+    try{
+      const res=await fetch('/v1/mentor/delivery',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'});
+      const data=await res.json();
+      if(res.status===401||res.status===403){clear();return;}
+      if(!res.ok)throw Error(data.error||'HTTP '+res.status);
+      deliveryRequest.textContent=data.triggered?'Запрос принят, планировщику отправлена команда запуска.':'Запрос сохранён. Ожидается штатный запуск обновлятора.';
+    }catch(e){deliveryRequest.textContent='Не удалось запросить доставку: '+e.message;download.disabled=false;}
+    finally{requesting=false;}
+  });
   new MutationObserver(()=>{if(active())load();else clear();}).observe(pane,{attributes:true,attributeFilter:['class']});
   new MutationObserver(()=>{if(active())load();else clear();}).observe(tasksPane,{attributes:true,attributeFilter:['class']});
   document.addEventListener('visibilitychange',()=>{if(active())load();else clear();});
