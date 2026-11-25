@@ -98,7 +98,7 @@ function Invoke-MentorDelivery {
             try {
                 $record = @{schema='ai-mentor.delivery-status.v1';status=$mentorStatus;timestamp=[DateTimeOffset]::UtcNow.ToString('o')}
                 [IO.File]::WriteAllText($temp,($record | ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
-                if ([IO.File]::Exists($mentorStatusPath)) { [IO.File]::Replace($temp,$mentorStatusPath,$null) } else { [IO.File]::Move($temp,$mentorStatusPath) }
+                if ([IO.File]::Exists($mentorStatusPath)) { [IO.File]::Replace($temp,$mentorStatusPath,[NullString]::Value) } else { [IO.File]::Move($temp,$mentorStatusPath) }
             } finally { if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) } }
             if ($deliveryRequestId) {
                 $resultPath = Join-Path $mentorRoot 'delivery-request-result.json'
@@ -107,7 +107,7 @@ function Invoke-MentorDelivery {
                 $tempResult = Join-Path $mentorRoot ('.delivery-result-' + [Guid]::NewGuid().ToString('N') + '.tmp')
                 try {
                     [IO.File]::WriteAllText($tempResult,($record | ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
-                    if ([IO.File]::Exists($resultPath)) { [IO.File]::Replace($tempResult,$resultPath,$null) } else { [IO.File]::Move($tempResult,$resultPath) }
+                    if ([IO.File]::Exists($resultPath)) { [IO.File]::Replace($tempResult,$resultPath,[NullString]::Value) } else { [IO.File]::Move($tempResult,$resultPath) }
                 } finally { if ([IO.File]::Exists($tempResult)) { [IO.File]::Delete($tempResult) } }
             }
         }
