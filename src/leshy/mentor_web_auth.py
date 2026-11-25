@@ -35,6 +35,7 @@ class MentorWebAuth:
         self.code = ""
         self.expires = 0.0
         self.error = ""
+        self.delivery_queued = False
 
     def _script(self):
         if os.name != "nt" or not self.brain.is_dir() or _reparse(self.brain):
@@ -72,7 +73,8 @@ class MentorWebAuth:
             available = False
         with self.lock:
             result = {"available": available, "saved": self._saved(),
-                      "state": self.state, "error": self.error}
+                      "state": self.state, "error": self.error,
+                      "delivery_queued": self.delivery_queued}
             remaining = max(0, int(self.expires - time.monotonic()))
             if self.state == "waiting" and remaining:
                 result.update(user_code=self.code, expires_in=remaining)
@@ -84,6 +86,7 @@ class MentorWebAuth:
             if self.state in {"starting", "waiting", "finishing"}:
                 return {"state": self.state}
             self.state, self.code, self.error, self.expires = "starting", "", "", 0.0
+            self.delivery_queued = False
             thread = threading.Thread(target=self._run, args=(script,), daemon=True,
                                       name="leshy-mentor-web-auth")
             try:
@@ -98,6 +101,8 @@ class MentorWebAuth:
         proc = None
         timer = None
         confirmed = False
+        success = False
+        delivery_queued = False
         message = "Не удалось завершить авторизацию GitHub."
         try:
             exe = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
@@ -138,11 +143,10 @@ class MentorWebAuth:
                 # Use the existing fixed scheduled task; no direct GitHub tokens
                 # or user-provided shell arguments cross the Web API.
                 try:
-                    request_delivery(self.brain)
+                    delivery_queued = request_delivery(self.brain).get("state") == "queued"
                 except (OSError, ValueError):
                     pass
-                with self.lock:
-                    self.state, self.error = "connected", ""
+                success = True
                 return
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
@@ -157,5 +161,5 @@ class MentorWebAuth:
                     pass
             with self.lock:
                 self.code, self.expires = "", 0.0
-                if self.state != "connected":
-                    self.state, self.error = "error", message
+                self.delivery_queued = delivery_queued
+                self.state, self.error = ("connected", "") if success else ("error", message)
