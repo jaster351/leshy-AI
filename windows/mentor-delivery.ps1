@@ -126,7 +126,8 @@ try {
             $config.batch_id = $id
             $config.batch_sha256 = $expected
             $config.approved_export_sha256 = ''
-            $config.approved_review_sha256 = ''
+            # Review approval belongs to published answer hashes, not the active batch.
+            # Keep it until the owner replaces/revokes it; runtime deduplicates applied reviews.
             $tmp = Join-Path $root ('.config-' + [Guid]::NewGuid().ToString('N') + '.tmp')
             try {
                 [IO.File]::WriteAllText($tmp,($config | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
