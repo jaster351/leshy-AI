@@ -113,3 +113,60 @@ class MentorOfflineTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 self.runner(gh).cycle(self.config)
         self.assertFalse((self.root / (self.rid + ".json")).exists())
+
+
+    def test_connection_recovers_after_saved_answer_without_generation(self):
+        self.config.update(auto_queue=True, auto_publish=True)
+        (self.root / "config.json").write_bytes(encode(self.config))
+        (self.root / (self.rid + ".json")).write_bytes(encode({
+            "request_id": self.rid, "batch_sha256": digest(self.raw),
+            "question_sha256": digest("Учебный пример".encode("utf-8")),
+            "status": "answered", "source": "leshy_model",
+            "answer": "Ответ", "timestamp": "2026-11-25T00:00:00+00:00",
+            "revision": "1.10.230", "duration_ms": 50,
+        }))
+        files = {}
+        calls = []
+        def gh(repo, token, path="", payload=None, method="GET"):
+            calls.append((path, method))
+            if len(calls) == 1:
+                raise TimeoutError("offline")
+            if not path:
+                return {"private": True, "id": 1470788052,
+                        "full_name": "jaster351/AI-mentor"}
+            target = path.split("?")[0]
+            if method == "PUT":
+                files[target] = payload["content"]
+                return {}
+            if target not in files:
+                raise error.HTTPError(path, 404, "missing", None, None)
+            return {"type": "file", "encoding": "base64", "content": files[target]}
+        with patch("leshy.mentor_batch.load_secret", return_value="ghu_synthetic"):
+            runner = self.runner(gh)
+            self.assertEqual(runner.cycle(self.config), "published")
+        self.assertFalse((self.root / "export.json").exists())
+        self.assertTrue((self.root / (self.rid + ".published.json")).exists())
+        self.assertTrue(runner.last_performance["delivery"]["reconnect_attempted"])
+        self.assertTrue(runner.last_performance["delivery"]["receipt_confirmed"])
+        self.assertEqual(runner.last_performance["delivery"]["export_status"], "published")
+        self.assertEqual(runner.last_performance["cycle"]["completed"], 0)
+        self.assertEqual(sum(p.startswith("/contents/responses/") and m == "PUT"
+                             for p, m in calls), 1)
+
+    def test_persistent_offline_reports_pending_export(self):
+        (self.root / (self.rid + ".json")).write_bytes(encode({
+            "request_id": self.rid, "batch_sha256": digest(self.raw),
+            "question_sha256": digest("Учебный пример".encode("utf-8")),
+            "status": "answered", "source": "leshy_model",
+            "answer": "Ответ", "timestamp": "2026-11-25T00:00:00+00:00",
+            "revision": "1.10.230", "duration_ms": 50,
+        }))
+        def gh(*args):
+            raise TimeoutError("offline")
+        runner = self.runner(gh)
+        self.assertEqual(runner.cycle(self.config), "waiting_connection")
+        self.assertEqual(runner.last_performance["delivery"], {
+            "receipt_confirmed": False, "reconnect_attempted": True,
+            "export_status": "transport_unavailable", "export_pending": True,
+        })
+        self.assertTrue((self.root / "export.json").exists())
