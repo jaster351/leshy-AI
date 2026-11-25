@@ -28,7 +28,7 @@ def request_state(root: Path) -> dict:
         age = (datetime.now(timezone.utc) - created).total_seconds()
     except (KeyError, TypeError, ValueError, AttributeError):
         return {}
-    status = _read(root / "delivery-status.json")
+    status = _read(root / "delivery-request-result.json")
     if status.get("schema") == "ai-mentor.delivery-status.v1" and status.get("request_id") == rid:
         try:
             checked = datetime.fromisoformat(status["timestamp"])
