@@ -130,7 +130,7 @@ try {
             $tmp = Join-Path $root ('.config-' + [Guid]::NewGuid().ToString('N') + '.tmp')
             try {
                 [IO.File]::WriteAllText($tmp,($config | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
-                [IO.File]::Replace($tmp,$configPath,$null)
+                [IO.File]::Replace($tmp,$configPath,[NullString]::Value)
             } finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force } }
         } finally { $lock.Dispose() }
     }
