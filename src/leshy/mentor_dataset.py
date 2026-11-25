@@ -28,7 +28,8 @@ _MAX_BYTES = 8 * 1024 * 1024
 
 def clean_text(value, limit=4000):
     return (isinstance(value, str) and 0 < len(value) <= limit and value.strip()
-            and not _SECRET.search(value) and "\x00" not in value)
+            and not _SECRET.search(value) and "\x00" not in value
+            and not re.search(r"<\|[^\n]{1,80}\|>|</?think>|</?tool_call>|</?tool_response>", value))
 
 
 def _questions(root, bid, review_hash):
