@@ -1,9 +1,11 @@
 ﻿param(
     [string]$Repository,
     [string]$BrainRoot,
-    [ValidateRange(2,30)][int]$Interval = 3
+    [ValidateRange(2,30)][int]$Interval = 3,
+    [switch]$JsonLines
 )
 $ErrorActionPreference = 'Stop'
+if ($JsonLines) { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); $ProgressPreference='SilentlyContinue' }
 if (-not $Repository) { $Repository = Split-Path -Parent $PSScriptRoot }
 $repo = [IO.Path]::GetFullPath($Repository)
 if (-not $BrainRoot) { $BrainRoot = Join-Path $repo 'dist\Leshy\LeshyBrain' }
@@ -147,6 +149,38 @@ while ($true) {
     $averageRate=$null; if ($rateSeconds -gt 0) { $averageRate=$rateTokens/$rateSeconds }
     if (($now-$lastLogRead).TotalSeconds -ge 12) {
         try { $completed=@(Get-CompletedTimings); $lastLogRead=$now } catch { $completed=@(); $lastLogRead=$now }
+    }
+    if ($JsonLines) {
+        $gpuMetrics=@(foreach ($g in $gpus) {
+            [pscustomobject]@{index=$g.Index.Trim();name=$g.Name.Trim();load=(Number $g.Load);used=(Number $g.Used);total=(Number $g.Total);temperature=(Number $g.Temp)}
+        })
+        $models=@(foreach ($s in $servers) {
+            $name=$null; $backend=$null
+            if ($s.CommandLine -match '(?:^|\s)-m\s+(?:"([^"]+)"|(\S+))') {
+                $modelPath=$Matches[1]; if (-not $modelPath) {$modelPath=$Matches[2]}
+                $name=[IO.Path]::GetFileName($modelPath)
+            }
+            if ($s.ExecutablePath -match '(?i)[\\/](vulkan|openvino|cpu|cuda)(?:[\\/_-]|$)') {$backend=$Matches[1]}
+            [pscustomobject]@{model=$name;backend=$backend}
+        })
+        $summary=$null
+        if ($completed.Count -gt 0) {
+            $outs=$completed | Measure-Object -Property Output -Sum -Average -Maximum
+            $secs=($completed | Measure-Object -Property Seconds -Sum).Sum
+            $inputs=@($completed | Where-Object {$null -ne $_.Input})
+            $inTokens=$null; $allTokens=$null; $finishedRate=$null
+            if ($inputs.Count -eq $completed.Count) {$inTokens=($inputs | Measure-Object -Property Input -Sum).Sum;$allTokens=$inTokens+$outs.Sum}
+            if ($secs -gt 0) {$finishedRate=$outs.Sum/$secs}
+            $summary=@{count=$completed.Count;output=$outs.Sum;input=$inTokens;total=$allTokens;mean_output=$outs.Average;max_output=$outs.Maximum;mean_speed=$finishedRate;max_speed=($completed|Measure-Object -Property Speed -Maximum).Maximum}
+        }
+        $displayNow=$null; if ($active -gt 0 -and $known -eq $active -and $readOK -eq $servers.Count) {$displayNow=$tokensNow}
+        $ramPercent=$null; if ($null -ne $ramTotal -and $ramTotal -gt 0) {$ramPercent=100*($ramTotal-$ramFree)/$ramTotal}
+        $state='unavailable';if ($readOK -gt 0) {if ($active -gt 0) {$state='generating'} else {$state='idle'};if ($readOK -lt $servers.Count) {$state='partial'}}
+        $sample=@{timestamp=(Get-Date).ToUniversalTime().ToString('o');cpu=$cpu;disk=$disk;disk_mib_s=$diskMbps;ram_free_gib=$ramFree;ram_total_gib=$ramTotal;ram_percent=$ramPercent;gpus=$gpuMetrics;models=$models;task=$taskState;stage=$stage;build_age=$buildAge;generation_state=$state;tokens_now=$displayNow;rate=$liveRate;rate_mean=$averageRate;rate_peak=$peakRate;completed=$summary}
+        [Console]::WriteLine(($sample | ConvertTo-Json -Depth 6 -Compress))
+        [Console]::Out.Flush()
+        Start-Sleep -Seconds $Interval
+        continue
     }
     Clear-Host
     Write-Host '══════════════════════════════════════════════════════════════════' -ForegroundColor Cyan
