@@ -194,6 +194,15 @@ class MentorBridge:
         review = self._applied_review_summary()
         if review is not None:
             record["applied_review"] = review
+            # A cycle may apply several reviews; expose the bounded recent
+            # committed digests rather than only the last reaction summary.
+            state = read_obj(self.root / "load-policy.json")
+            applied = state.get("applied", [])
+            if isinstance(applied, list):
+                record["applied_review_hashes"] = [
+                    h for h in applied[-32:]
+                    if isinstance(h, str) and re.fullmatch(r"[0-9a-f]{64}", h)
+                ]
         raw = encode(record)
         if len(raw) > 64 * 1024:
             raise ValueError("Telemetry size limit")
