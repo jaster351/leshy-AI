@@ -336,8 +336,6 @@ class BatchRunner:
                         cpu_before = cpu_clock()
                         with mentor_scope() as context_samples, capture_mentor_inference() as measured:
                             answer = finalize_model_output(self.app.llm.chat(messages))
-                        for sample in context_samples:
-                            event("mentor_context_budget", **sample)
                         if not answer or len(answer) > MAX_ANSWER or token in answer:
                             raise ValueError("Недопустимый ответ")
                         from .app import VERSION
@@ -346,6 +344,8 @@ class BatchRunner:
                                       duration_ms=int((time.monotonic() - started) * 1000))
                         atomic(path, record)
                         try:
+                            for sample in context_samples:
+                                event("mentor_context_budget", **sample)
                             performance.add(measured, record["duration_ms"] / 1000, cpu_before)
                             performance.add_context(context_samples)
                         except Exception as exc:
