@@ -17,6 +17,8 @@ from .module_settings import module_enabled
 from .superagent_ssh_pty import InteractiveSSHBroker
 from .role_authority import creator_telegram_id, register_local_creator, role_for_web, ROLE_DISPLAY
 from .mentor_view import mentor_snapshot
+from .mentor_delivery_request import request_delivery, request_state
+from pathlib import Path
 from .android_voice_access import authorized_owner as _android_voice_owner, conversational_answer as _android_voice_answer
 
 
@@ -111,7 +113,9 @@ def make_handler(app, telegram, settings, model_catalog):
                 if role_for_web(telegram, identity, owner) != "creator":
                     return self._identity_json(HTTPStatus.FORBIDDEN, {"error": "Доступ только для Создателя"})
                 try:
-                    return self._identity_json(HTTPStatus.OK, mentor_snapshot(settings.brain_dir))
+                    payload = mentor_snapshot(settings.brain_dir)
+                    payload['delivery_request'] = request_state(Path(settings.brain_dir) / 'ai-mentor')
+                    return self._identity_json(HTTPStatus.OK, payload)
                 except (OSError, ValueError, TypeError):
                     return self._identity_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось прочитать журнал AI-mentor"})
             if route == "/v1/android/voice/status":
@@ -200,6 +204,19 @@ def make_handler(app, telegram, settings, model_catalog):
 
         def do_POST(self):
             route = urlsplit(self.path).path
+            if route == "/v1/mentor/delivery":
+                if not self._identity_write_allowed():
+                    return
+                if role_for_web(telegram, identity, self._existing_web_owner()) != "creator":
+                    return self._identity_json(HTTPStatus.FORBIDDEN, {"error": "Доступ только для Создателя"})
+                try:
+                    if self._body() != {}:
+                        return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": "Ожидается пустой JSON-объект"})
+                    return self._identity_json(HTTPStatus.ACCEPTED, request_delivery(settings.brain_dir))
+                except ValueError as exc:
+                    return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)[:200]})
+                except (OSError, TypeError):
+                    return self._identity_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "Не удалось поставить запрос доставки"})
             if route == "/v1/android/voice/chat":
                 owner = _android_voice_owner(settings.brain_dir, self.headers.get("Authorization", ""))
                 if not owner:
