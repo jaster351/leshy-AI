@@ -56,3 +56,20 @@ def test_saved_answer_binding_and_legacy_missing(tmp_path):
     atomic(path, dict(base, batch_sha256="b" * 64,
                       diagnostic_evidence=response_evidence([context()], [])))
     assert diagnostic_rows(*args) == []
+
+
+def test_window_omissions_are_separate_from_budget():
+    obj = response_evidence([context()], [], history_total=12, history_window=4)
+    assert obj["history_window"] == {"available_pairs": 12, "selected_pairs": 4,
+                                      "omitted_before_budget": 8}
+    assert obj["context"]["omitted_user_turns"] == 0
+    assert validate_evidence(obj) == obj
+    obj["history_window"]["omitted_before_budget"] = 99
+    assert validate_evidence(obj)["history_window"]["omitted_before_budget"] == 8
+
+
+def test_inconsistent_window_and_budget_do_not_claim_retention():
+    obj = response_evidence([context()], [], history_total=10, history_window=8)
+    assert obj["context"] is None
+    assert obj["history_window"]["omitted_before_budget"] == 2
+    assert response_evidence([], [], history_total=2, history_window=4)["history_window"] is None
