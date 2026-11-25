@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 from .mentor_dataset import clean_text
+from .mentor_context import SYSTEM
 
 MAX_DATA = 8 * 1024 * 1024
 
@@ -64,7 +65,7 @@ def read_dataset(path, expected):
             ms = row["messages"]
             if (not 3 <= len(ms) <= 19 or len(ms) % 2 != 1
                     or any(not isinstance(m, dict) for m in ms)
-                    or ms[0].get("role") != "system"
+                    or ms[0].get("role") != "system" or ms[0].get("content") != SYSTEM
                     or any(m.get("role") != ("user" if i % 2 else "assistant")
                            for i, m in enumerate(ms[1:], 1))
                     or any(not clean_text(m.get("content")) for m in ms)):
@@ -102,6 +103,8 @@ def train_candidate(args):
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
     data = read_dataset(args.dataset, args.dataset_sha256)
+    if args.base.is_symlink() or args.output.is_symlink():
+        raise ValueError("Use explicit local paths, not symlinks")
     base = args.base.resolve(strict=True)
     output = args.output.resolve()
     if output == base or base in output.parents or output.exists():
