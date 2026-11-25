@@ -42,7 +42,7 @@ def test_monitor_launch_uses_separate_console_and_actual_brain(tmp_path, monkeyp
     script = tmp_path / "windows" / "Leshy-Monitor.ps1"
     script.parent.mkdir()
     script.write_text("# monitor", encoding="utf-8")
-    monkeypatch.setattr(desktop_tray, "monitor_script_path", lambda _: script)
+    monkeypatch.setattr(desktop_tray, "monitor_script_path", lambda _, **kwargs: script)
     calls = []
 
     def fake_popen(args, **kwargs):
@@ -50,7 +50,7 @@ def test_monitor_launch_uses_separate_console_and_actual_brain(tmp_path, monkeyp
         return object()
 
     monkeypatch.setattr(desktop_tray.subprocess, "Popen", fake_popen)
-    desktop_tray.launch_monitor(brain)
+    desktop_tray.launch_monitor(brain, console=True)
     args, kwargs = calls[0]
     assert args[args.index("-File") + 1] == str(script)
     assert args[args.index("-BrainRoot") + 1] == str(brain.resolve())
@@ -58,3 +58,28 @@ def test_monitor_launch_uses_separate_console_and_actual_brain(tmp_path, monkeyp
     assert kwargs["shell"] is False
     assert kwargs["creationflags"] == 0x10
     assert kwargs["cwd"] == str(brain.resolve().parent)
+
+
+def test_monitor_gui_default_is_sta_and_without_console(tmp_path, monkeypatch):
+    brain = tmp_path / "dist" / "Leshy" / "LeshyBrain"
+    brain.mkdir(parents=True)
+    script = tmp_path / "Leshy-Monitor-GUI.ps1"
+    script.write_text("# monitor GUI", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(desktop_tray, "monitor_script_path", lambda _, **kw: script if not kw["console"] else None)
+    monkeypatch.setattr(desktop_tray.subprocess, "Popen", lambda args, **kw: calls.append((args, kw)))
+    desktop_tray.launch_monitor(brain)
+    args, kwargs = calls[0]
+    assert "-STA" in args
+    assert args[args.index("-File") + 1] == str(script)
+    assert kwargs["creationflags"] == 0x08000000
+    assert kwargs["shell"] is False
+
+
+def test_both_monitor_modes_are_bundled():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    build = (root / "windows" / "build.ps1").read_text(encoding="utf-8-sig")
+    for filename in ("Leshy-Monitor.ps1", "Leshy-Monitor-GUI.ps1"):
+        assert (root / "windows" / filename).is_file()
+        assert f'--add-data "windows/{filename};."' in build
