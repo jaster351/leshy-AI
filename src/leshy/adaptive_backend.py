@@ -102,6 +102,13 @@ class AdaptiveLLM:
         context_size=int(getattr(state.provider,"n_ctx",4096) or 4096); max_tokens=int(getattr(state.provider,"max_tokens",1024) or 1024)
         if context_settings is not None:
             context_size = context_settings.context_size(context_size)
+        from .mentor_context import mentor_active, budget_mentor_messages
+        if mentor_active():
+            # OpenVINO NPU actually starts llama-server with at most 2048.
+            if (getattr(state.provider, "backend", None) == "openvino"
+                    and str(getattr(state.provider, "device", "") or "").upper().startswith("NPU")):
+                context_size = min(context_size, 2048)
+            return budget_mentor_messages(messages, context_size=context_size, reserve_tokens=max_tokens)
         result=apply_context_budget(messages,context_size=context_size,reserve_tokens=max_tokens)
         if result.tokens_before>result.budget:
             event("llm_context_compacted",backend=state.name,context_size=context_size,reserve_tokens=max_tokens,tokens_before=result.tokens_before,tokens_after=result.tokens_after,budget=result.budget,dropped_messages=result.dropped_messages,truncated_messages=result.truncated_messages)
@@ -112,7 +119,8 @@ class AdaptiveLLM:
             )
         return result.messages
     def chat(self, messages):
-        prepared_messages = with_leshy_identity(messages)
+        from .mentor_context import mentor_active
+        prepared_messages = list(messages) if mentor_active() else with_leshy_identity(messages)
         errors = []
         routing = self._routing_priority()
         ordered = self._ordered()

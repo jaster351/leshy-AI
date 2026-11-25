@@ -196,6 +196,28 @@ class CyclePerformance:
         self.duration = 0.0
         self.min_answer = None
         self.max_answer = None
+        self.context_samples = 0
+        self.context_turn_totals = {key: 0 for key in (
+            "prior_turns", "kept_user_turns", "kept_assistant_turns",
+            "omitted_user_turns", "omitted_assistant_turns")}
+        self.context_answers_with_omissions = 0
+
+    def add_context(self, samples):
+        # Record only the final prepared context of a completed answer; failed
+        # backend attempts must not inflate the count of completed responses.
+        if not samples:
+            return
+        row = samples[-1]
+        if not isinstance(row, dict):
+            return
+        if any(type(row.get(key)) is not int or not 0 <= row[key] <= 8
+               for key in self.context_turn_totals):
+            return
+        self.context_samples += 1
+        for key in self.context_turn_totals:
+            self.context_turn_totals[key] += row[key]
+        if row["omitted_user_turns"] or row["omitted_assistant_turns"]:
+            self.context_answers_with_omissions += 1
 
     def add(self, rows, elapsed, before):
         self.answers += 1
@@ -234,6 +256,9 @@ class CyclePerformance:
         ram = [r["ram_used_percent"] for r in self.hardware if r.get("ram_used_percent") is not None]
         return {"scope": "mentor_answers_only", "answers_completed": self.answers,
                 "backend_response_samples": len(rows), "models": models,
+                "context_budget": {"completed_answer_samples": self.context_samples,
+                                   "answers_with_history_omissions": self.context_answers_with_omissions if self.context_samples else None,
+                                   **{k: v if self.context_samples else None for k, v in self.context_turn_totals.items()}},
                 "prompt_tokens": stats("prompt_tokens"), "completion_tokens": stats("completion_tokens"),
                 "generation_tokens_per_second": gen,
                 "request_output_tokens_per_second": stats("request_output_tokens_per_second"),

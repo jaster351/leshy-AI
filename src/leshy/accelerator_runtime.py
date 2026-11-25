@@ -506,6 +506,7 @@ class LlamaServerLLM:
 
     def chat(self, messages: list[ChatMessage]) -> str:
         from .context_budget import _normalize_system_messages
+        from .mentor_context import mentor_generation_limit
 
         # Qwen3.5 chat templates accept a system message only at position zero.
         # Direct calls to this backend may bypass AdaptiveLLM context preparation.
@@ -517,7 +518,7 @@ class LlamaServerLLM:
                     "messages": [{"role": m.role, "content": m.content} for m in messages],
                     "temperature": 0.25,
                     "top_p": 0.92,
-                    "max_tokens": self.max_tokens,
+                    "max_tokens": mentor_generation_limit(self.max_tokens),
                     "stream": False,
                     **_visible_answer_options(self.model),
                 }).encode("utf-8")
