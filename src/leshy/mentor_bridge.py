@@ -121,6 +121,73 @@ class MentorBridge:
         atomic(self.root / "runtime-version-published.json",
                dict(record, sha256=digest(raw)))
 
+    def _publish_performance(self, config, sample):
+        """Publish only numeric/allowlisted mentor-cycle telemetry to the dedicated repo."""
+        repo = config.get("repository")
+        if (repo != "jaster351/AI-mentor" or config.get("enabled") is not True
+                or config.get("auto_publish") is not True or config.get("auto_queue") is not True
+                or self.stop_event.is_set() or not isinstance(sample, dict)):
+            return
+        token = load_secret(self.root / "github_token.dat")
+        if not token or not token.startswith("ghu_"):
+            return
+        if (sample.get("schema") != "ai-mentor.performance.v1"
+                or sample.get("batch_id") != config.get("batch_id")
+                or sample.get("batch_sha256") != config.get("batch_sha256")):
+            return
+
+        def allowed():
+            current = read_obj(self.root / "config.json")
+            return (not self.stop_event.is_set() and current.get("enabled") is True
+                    and current.get("auto_publish") is True and current.get("auto_queue") is True
+                    and all(current.get(k) == config.get(k)
+                            for k in ("repository", "batch_id", "batch_sha256"))
+                    and load_secret(self.root / "github_token.dat") == token)
+
+        if not allowed():
+            return
+        repository = self._gh(repo, token)
+        if (repository.get("private") is not True
+                or repository.get("full_name", "").casefold() != repo.casefold()
+                or repository.get("id") != 1470788052):
+            return
+        identity = self.root / "runtime-identity.json"
+        if not identity.is_file():
+            atomic(identity, {"instance_id": uuid.uuid4().hex})
+        instance = read_obj(identity).get("instance_id")
+        if not isinstance(instance, str) or not re.fullmatch(r"[0-9a-f]{32}", instance):
+            return
+        record = dict(sample, instance_id=instance, version=VERSION)
+        raw = encode(record)
+        if len(raw) > 64 * 1024:
+            raise ValueError("Telemetry size limit")
+        target = "/contents/performance/" + instance + ".json"
+        payload = {"message": "Обезличенная производительность учебного цикла Лешего",
+                   "branch": "main", "content": base64.b64encode(raw).decode("ascii")}
+        try:
+            existing = self._gh(repo, token, target + "?ref=main")
+        except error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+        else:
+            sha = existing.get("sha")
+            if (existing.get("type") != "file" or not isinstance(sha, str)
+                    or not re.fullmatch(r"[0-9a-f]{40}", sha)):
+                raise ValueError("Invalid telemetry file")
+            payload["sha"] = sha
+        if not allowed():
+            return
+        self._gh(repo, token, target, payload, "PUT")
+        if not allowed():
+            return
+        verified = self._gh(repo, token, target + "?ref=main")
+        if (verified.get("type") != "file" or verified.get("encoding") != "base64"
+                or not isinstance(verified.get("content"), str)
+                or base64.b64decode("".join(verified["content"].split()), validate=True) != raw):
+            raise ValueError("Telemetry publication not confirmed")
+        atomic(self.root / "performance-published.json",
+               {"timestamp": now(), "batch_id": sample["batch_id"], "sha256": digest(raw)})
+
     def _run(self):
         if self.stop_event.wait(15):
             return
@@ -185,6 +252,10 @@ class MentorBridge:
                     event("mentor_runtime_version_failed", error_type=type(exc).__name__)
                 status = runner.cycle(config)
                 atomic(self.root / "status.json", {"status": status, "timestamp": now()})
+                try:
+                    self._publish_performance(config, runner.last_performance)
+                except Exception as exc:
+                    event("mentor_performance_publish_failed", error_type=type(exc).__name__)
             except Exception as exc:
                 event("mentor_bridge_error", error_type=type(exc).__name__)
                 try:
