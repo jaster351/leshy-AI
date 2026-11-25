@@ -271,6 +271,8 @@ class BatchRunner:
         except MentorTransportUnavailable:
             online = False
             load = self.receive_review(config, gh, token, allow_network=False)
+        if online and remote.get("id") == 1470788052 and remote.get("full_name", "").casefold() == "jaster351/ai-mentor":
+            load = self.receive_automatic_reviews(config, gh, token, load)
         quota = load["quota"]
         deadline = time.monotonic() + 0.85 * INTERVAL
         history = []
@@ -498,6 +500,111 @@ class BatchRunner:
             return state
         # Повторно проверяем сохранённые байты; оценка не является командой.
         return apply(effective, path)
+
+    def receive_automatic_reviews(self, config, gh, token, state):
+        """Import bounded feedback only within the existing owner-enabled exchange.
+
+        The remote index is a locator, never a command or a grant of OS access.
+        Manual approval remains available. The local manifest and published
+        answer hashes are checked again by apply_review before committing.
+        """
+        from .mentor_review import apply_review
+
+        def allowed():
+            current = self.config()
+            return (self.still_allowed(config)
+                    and current.get("repository") == "jaster351/AI-mentor"
+                    and current.get("auto_queue") is True
+                    and current.get("auto_publish") is True
+                    and current.get("auto_review", True) is True
+                    and token.startswith("ghu_")
+                    and load_secret(self.root / "github_token.dat") == token)
+
+        def fetch_bytes(path, limit):
+            item = gh(path + "?ref=main")
+            if (item.get("type") != "file" or item.get("encoding") != "base64"
+                    or not isinstance(item.get("content"), str)):
+                raise ValueError("Invalid mentor feedback file")
+            raw = base64.b64decode("".join(item["content"].split()), validate=True)
+            if len(raw) > limit or token.encode("utf-8") in raw:
+                raise ValueError("Invalid mentor feedback size or content")
+            return raw
+
+        try:
+            if not allowed():
+                return state
+            index = json.loads(fetch_bytes("/contents/reviews/index.json", 32768))
+            if (not isinstance(index, dict) or index.get("schema") != "ai-mentor.review-index.v1"
+                    or not isinstance(index.get("reviews"), list)
+                    or len(index["reviews"]) > 128):
+                raise ValueError("Invalid mentor feedback index")
+        except error.HTTPError as exc:
+            if exc.code != 404:
+                event("mentor_auto_review_failed", error_type=type(exc).__name__)
+            return state
+        except Exception as exc:
+            event("mentor_auto_review_failed", error_type=type(exc).__name__)
+            return state
+
+        attempts = 0
+        for entry in index["reviews"]:
+            if attempts >= 8 or not allowed():
+                break
+            try:
+                if not isinstance(entry, dict):
+                    raise ValueError("Invalid review index entry")
+                bid = entry.get("batch_id")
+                bh = entry.get("batch_sha256")
+                approval = entry.get("review_sha256")
+                if (not isinstance(bid, str) or not _ID.fullmatch(bid)
+                        or not isinstance(bh, str) or not re.fullmatch(r"[0-9a-f]{64}", bh)
+                        or not isinstance(approval, str) or not re.fullmatch(r"[0-9a-f]{64}", approval)):
+                    raise ValueError("Invalid review index identity")
+                if approval in state.get("applied", []) or bid in state.get("reviewed_batches", []):
+                    continue
+                manifest_path = self.root / (bid + ".manifest.json")
+                if not manifest_path.is_file():
+                    continue
+                manifest = read_obj(manifest_path)
+                if (manifest.get("batch_id") != bid or manifest.get("batch_sha256") != bh
+                        or manifest.get("repository") != config.get("repository")):
+                    raise ValueError("Review index does not match local manifest")
+                attempts += 1
+                raw = fetch_bytes("/contents/reviews/" + approval + ".json", MAX_EXPORT)
+                if digest(raw) != approval:
+                    raise PermissionError("Review digest mismatch")
+                obj = json.loads(raw)
+                if not isinstance(obj, dict) or obj.get("batch_id") != bid or obj.get("batch_sha256") != bh:
+                    raise PermissionError("Review identity mismatch")
+                # A partial review would prevent later complete evaluation of this batch.
+                rows = obj.get("scores")
+                qids = manifest.get("question_ids")
+                if (not isinstance(rows, list) or not isinstance(qids, list)
+                        or len(rows) != len(qids)):
+                    raise ValueError("Automatic review must cover the complete batch")
+                if not allowed():
+                    break
+                path = self.root / ("review-" + approval + ".json")
+                if path.exists():
+                    if read_bytes(path, MAX_EXPORT) != raw:
+                        raise PermissionError("Cached review differs")
+                else:
+                    atomic_bytes(path, raw)
+                if not allowed():
+                    break
+                state = apply_review(self.root, dict(config, approved_review_sha256=approval),
+                                     read_obj=read_obj, read_bytes=read_bytes, atomic=atomic,
+                                     digest=digest, now=now, review_path=path)
+                event("mentor_auto_review_applied", batch_id=bid)
+            except Exception as exc:
+                # Do not let a malformed report prevent the next question cycle.
+                event("mentor_auto_review_failed", error_type=type(exc).__name__)
+                # Reload the committed state: a later report must not overwrite
+                # an already applied evaluation even after a partial failure.
+                state_path = self.root / "load-policy.json"
+                if state_path.is_file():
+                    state = read_obj(state_path)
+        return state
 
     def prepare_export(self, config, questions):
         path = self.root / "export.json"
