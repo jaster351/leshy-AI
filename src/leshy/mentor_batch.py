@@ -17,6 +17,7 @@ from .inference_scheduler import get_inference_scheduler, PRIORITY_BACKGROUND
 from .llm import ChatMessage, EchoLLM, finalize_model_output
 from .diagnostics import event
 from .secret_store import load_secret
+from .mentor_performance import CyclePerformance, capture_mentor_inference, cpu_clock
 
 INTERVAL = 3600
 MAX_INPUT = 1024 * 1024
@@ -167,6 +168,7 @@ class BatchRunner:
         self.app = app
         self.stop = stop_event
         self.gh_call = gh_call
+        self.last_performance = None
 
     def config(self):
         return read_obj(self.root / "config.json")
@@ -182,6 +184,7 @@ class BatchRunner:
         return repo.casefold() == "jaster351/ai-mentor" and os.name == "nt"
 
     def cycle(self, config):
+        self.last_performance = None
         batch_id, expected, repo = (config.get(k) for k in
                                     ("batch_id", "batch_sha256", "repository"))
         if (not isinstance(batch_id, str) or not _ID.fullmatch(batch_id)
@@ -276,6 +279,7 @@ class BatchRunner:
         deadline = time.monotonic() + 0.85 * INTERVAL
         history = []
         completed = 0
+        performance = CyclePerformance(self.root.parent)
         stop_reason = "batch_end"
         for qid, question in questions:
             if not cycle_allowed() or time.monotonic() >= deadline:
@@ -346,7 +350,9 @@ class BatchRunner:
                         f.flush()
                         os.fsync(f.fileno())
                     try:
-                        answer = finalize_model_output(self.app.llm.chat(messages))
+                        cpu_before = cpu_clock()
+                        with capture_mentor_inference() as measured:
+                            answer = finalize_model_output(self.app.llm.chat(messages))
                         if not answer or len(answer) > MAX_ANSWER or token in answer:
                             raise ValueError("Недопустимый ответ")
                         from .app import VERSION
@@ -354,6 +360,10 @@ class BatchRunner:
                                       revision=VERSION, model="not_confirmed",
                                       duration_ms=int((time.monotonic() - started) * 1000))
                         atomic(path, record)
+                        try:
+                            performance.add(measured, record["duration_ms"] / 1000, cpu_before)
+                        except Exception as exc:
+                            event("mentor_performance_sample_failed", error_type=type(exc).__name__)
                     except Exception as exc:
                         record.update(status="error", timestamp=now(), error_type=type(exc).__name__)
                         record.pop("answer", None)
@@ -370,6 +380,15 @@ class BatchRunner:
             stop_reason = "quota"
         metrics = {"batch_id": batch_id, "quota": quota, "completed": completed,
                    "stop_reason": stop_reason, "timestamp": now()}
+        try:
+            self.last_performance = {"schema": "ai-mentor.performance.v1",
+                                     "source": "leshy_runtime",
+                                     "batch_id": batch_id, "batch_sha256": expected,
+                                     "timestamp": now(), "cycle": metrics,
+                                     "measurements": performance.summary()}
+            atomic(self.root / "performance-latest.json", self.last_performance)
+        except Exception as exc:
+            event("mentor_performance_local_failed", error_type=type(exc).__name__)
         # Do not erase the last productive capacity sample with an empty review cycle.
         if completed or not (self.root / "cycle-metrics.json").exists():
             atomic(self.root / "cycle-metrics.json", metrics)
