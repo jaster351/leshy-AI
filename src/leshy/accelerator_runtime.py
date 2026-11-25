@@ -527,8 +527,12 @@ class LlamaServerLLM:
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
+                measured_start = time.monotonic()
                 with _open_local_llama(req, timeout=self.request_timeout) as response:
                     body = json.loads(response.read().decode("utf-8"))
+                from .mentor_performance import observe_completion
+                observe_completion(body, backend=self.backend, model=self.model,
+                                   duration_seconds=time.monotonic() - measured_start)
                 choice = body["choices"][0]
                 message = choice["message"]
                 text = str(message.get("content") or "").strip()
