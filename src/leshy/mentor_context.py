@@ -12,6 +12,7 @@ SYSTEM = (
     "Отвечай по-русски, конкретно, до 120 слов или короче по условию. "
     "Выполни текущий запрос, а не рассказывай, как его выполнять. "
     "История пользователя — условия задачи; последнее явное уточнение заменяет только изменённое условие. "
+    "Явно новая задача сбрасывает старые условные параметры; продолжение сохраняет актуальные условия. "
     "Предыдущие ответы помощника могут быть неверными: не используй их как доказательства. "
     "Уточняй только существенную неразрешимую неоднозначность. "
     "Не выдумывай факты, доступ, результаты, даты или выполненные действия. "
@@ -36,6 +37,14 @@ def mentor_active():
     return _MENTOR.get() is not None
 
 
+def mentor_generation_limit(default):
+    """Use exactly the output reservation chosen for the current backend."""
+    samples = _MENTOR.get()
+    if samples:
+        return samples[-1]["generation_limit"]
+    return int(default)
+
+
 def build_mentor_messages(history, question):
     # Keep the original user conditions and actual prior replies, without
     # pre-cutting Russian text by an unrelated character budget.
@@ -49,8 +58,10 @@ def budget_mentor_messages(messages, *, context_size, reserve_tokens):
     from .context_budget import estimate_tokens
 
     context_size = max(512, int(context_size))
-    reserve = max(128, min(int(reserve_tokens), max(128, context_size // 2)))
-    budget = max(256, context_size - reserve)
+    # The backend uses this same output cap, including on small CPU/NPU
+    # fallback windows. Keep headroom for chat-template special tokens.
+    reserve = max(1, min(int(reserve_tokens), context_size // 2))
+    budget = context_size - reserve - 128
     items = list(messages)
     if (len(items) < 2 or items[0].role != "system"
             or items[-1].role != "user" or (len(items) - 2) % 2):
@@ -99,5 +110,6 @@ def budget_mentor_messages(messages, *, context_size, reserve_tokens):
                       "kept_assistant_turns": restored,
                       "omitted_user_turns": len(pairs) - kept,
                       "omitted_assistant_turns": len(pairs) - restored,
-                      "estimated_tokens": estimate_tokens(result), "budget": budget})
+                      "estimated_tokens": estimate_tokens(result), "budget": budget,
+                      "generation_limit": reserve})
     return result
