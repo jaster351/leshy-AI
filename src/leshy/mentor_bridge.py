@@ -25,9 +25,10 @@ class _NoRedirect(request.HTTPRedirectHandler):
 
 
 class MentorBridge:
-    def __init__(self, brain_dir: Path, app):
+    def __init__(self, brain_dir: Path, app, *, ready_event=None):
         self.root = Path(brain_dir) / "ai-mentor"
         self.app = app
+        self.ready_event = ready_event
         self.stop_event = threading.Event()
         self.thread = None
         self.github = request.build_opener(_NoRedirect())
@@ -38,6 +39,7 @@ class MentorBridge:
         self.thread = threading.Thread(target=self._run, name="leshy-ai-mentor", daemon=True)
         try:
             self.thread.start()
+            event("mentor_thread_started", version=VERSION)
         except Exception as exc:
             self.thread = None
             event("mentor_thread_start_failed", error_type=type(exc).__name__)
@@ -191,6 +193,11 @@ class MentorBridge:
     def _run(self):
         if self.stop_event.wait(15):
             return
+        # Avoid competing with the initial model warmup. No new inference is
+        # scheduled until the canonical server signals completion of warmup.
+        while self.ready_event is not None and not self.ready_event.is_set():
+            if self.stop_event.wait(1):
+                return
         runner = BatchRunner(self.root, self.app, self.stop_event, self._gh)
         last_waiting_heartbeat = None
         while not self.stop_event.is_set():
@@ -251,7 +258,12 @@ class MentorBridge:
                 except Exception as exc:
                     event("mentor_runtime_version_failed", error_type=type(exc).__name__)
                 status = runner.cycle(config)
-                atomic(self.root / "status.json", {"status": status, "timestamp": now()})
+                result = {"status": status, "timestamp": now()}
+                if isinstance(runner.last_performance, dict):
+                    metrics = runner.last_performance.get("cycle", {})
+                    result.update(stop_reason=metrics.get("stop_reason"), completed=metrics.get("completed"),
+                                  quota=metrics.get("quota"))
+                atomic(self.root / "status.json", result)
                 try:
                     self._publish_performance(config, runner.last_performance)
                 except Exception as exc:
