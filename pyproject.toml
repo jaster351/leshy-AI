@@ -38,6 +38,9 @@ dependencies = [
 native = ["llama-cpp-python>=0.3.27,<0.4", "diskcache>=5.6.1,<6"]
 build = ["pyinstaller>=6.11,<7"]
 test = ["pytest>=8,<9"]
+# Optional isolated training environment; never included in the default install.
+mentor-training = ["torch>=2.5,<3", "transformers>=4.51,<5", "peft>=0.15,<1", "accelerate>=1,<2", "safetensors>=0.5,<1"]
+mentor-qlora = ["bitsandbytes>=0.45,<1"]
 
 [project.scripts]
 leshy = "leshy.web_server:main"
