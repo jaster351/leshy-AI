@@ -34,3 +34,27 @@ def test_manual_restart_clears_persistent_tray_stop(tmp_path):
     assert marker.is_file()
     desktop_tray.resume_manually(brain)
     assert not marker.exists()
+
+
+def test_monitor_launch_uses_separate_console_and_actual_brain(tmp_path, monkeypatch):
+    brain = tmp_path / "dist" / "Leshy" / "LeshyBrain"
+    brain.mkdir(parents=True)
+    script = tmp_path / "windows" / "Leshy-Monitor.ps1"
+    script.parent.mkdir()
+    script.write_text("# monitor", encoding="utf-8")
+    monkeypatch.setattr(desktop_tray, "monitor_script_path", lambda _: script)
+    calls = []
+
+    def fake_popen(args, **kwargs):
+        calls.append((args, kwargs))
+        return object()
+
+    monkeypatch.setattr(desktop_tray.subprocess, "Popen", fake_popen)
+    desktop_tray.launch_monitor(brain)
+    args, kwargs = calls[0]
+    assert args[args.index("-File") + 1] == str(script)
+    assert args[args.index("-BrainRoot") + 1] == str(brain.resolve())
+    assert args[args.index("-Repository") + 1] == str(tmp_path.resolve())
+    assert kwargs["shell"] is False
+    assert kwargs["creationflags"] == 0x10
+    assert kwargs["cwd"] == str(brain.resolve().parent)
