@@ -132,8 +132,8 @@ def train_candidate(args):
         if any(r is None for r in rows):
             raise ValueError("An example exceeds max_length; prepare a shorter dataset")
         splits[name] = rows
-    if len(splits["train"]) < 16 or len(splits["holdout"]) < 8:
-        raise ValueError("Need at least 16 training and 8 holdout examples for a pilot")
+    if len(splits["train"]) < 16 or not 8 <= len(splits["holdout"]) <= 64:
+        raise ValueError("Need at least 16 training and 8–64 holdout examples for a pilot")
 
     kw = {"local_files_only": True, "trust_remote_code": False,
           "use_safetensors": True, "torch_dtype": dtype, "device_map": {"": args.gpu}}
@@ -177,8 +177,33 @@ def train_candidate(args):
                 count += tokens
         return total / count
 
+    def generate_holdout():
+        model.eval()
+        results = []
+        with torch.no_grad():
+            for item, row in zip(data["holdout"], splits["holdout"]):
+                # The target is never passed to generation.
+                prefix = [token for token, label in zip(row["input_ids"], row["labels"])
+                          if label == -100]
+                inputs = torch.tensor([prefix], device=device, dtype=torch.long)
+                cap = min(args.max_new_tokens, args.max_length - len(prefix))
+                if cap < 1:
+                    raise ValueError("No space for holdout generation")
+                answer_ids = model.generate(input_ids=inputs,
+                    attention_mask=torch.ones_like(inputs), max_new_tokens=cap,
+                    do_sample=False, use_cache=True,
+                    pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None
+                    else tokenizer.eos_token_id)
+                answer = tokenizer.decode(answer_ids[0, len(prefix):], skip_special_tokens=True).strip()
+                results.append({"id": item["id"],
+                    "question_sha256": item["question_sha256"],
+                    "status": "answered" if clean_text(answer) else "withheld",
+                    "answer": answer if clean_text(answer) else None})
+        return results
+
     with model.disable_adapter():
         before = evaluate()
+        baseline_answers = generate_holdout()
     steps = 0
     train_loss = []
     model.train()
@@ -199,6 +224,7 @@ def train_candidate(args):
             optimizer.zero_grad(set_to_none=True)
             steps += 1
     after = evaluate()
+    candidate_answers = generate_holdout()
     if not math.isfinite(before) or not math.isfinite(after) or not steps:
         raise RuntimeError("Incomplete training")
     # Verify the base did not change on disk. No base weights are saved.
@@ -214,10 +240,19 @@ def train_candidate(args):
                       for k in f.keys())
     if not changed:
         raise RuntimeError("No nonzero LoRA delta found")
+    comparison = {"schema": "leshy.mentor-lora-paired-responses.v1",
+                  "dataset_sha256": args.dataset_sha256,
+                  "adapter_sha256": file_hash(adapter), "generation": "greedy",
+                  "max_new_tokens": args.max_new_tokens,
+                  "baseline": baseline_answers, "candidate": candidate_answers}
+    paired_path = output / "paired-responses.json"
+    with paired_path.open("x", encoding="utf-8") as f:
+        json.dump(comparison, f, ensure_ascii=False, indent=2)
     record = {"schema": "leshy.mentor-lora-candidate.v1",
               "status": "candidate_unvalidated", "dataset_sha256": args.dataset_sha256,
               "base_files": manifest, "adapter_sha256": file_hash(adapter),
               "adapter_config_sha256": file_hash(output / "adapter_config.json"),
+              "paired_responses_sha256": file_hash(paired_path),
               "train_examples": len(splits["train"]), "holdout_examples": len(splits["holdout"]),
               "optimizer_steps": steps, "trainable_parameters": sum(p.numel() for _, p in trainable),
               "train_loss_mean": sum(train_loss) / len(train_loss),
@@ -241,6 +276,7 @@ def main(argv=None):
     p.add_argument("--rank", type=int, choices=(4, 8, 16), default=8)
     p.add_argument("--epochs", type=int, choices=(1, 2, 3), default=1)
     p.add_argument("--max-length", type=int, choices=(1024, 2048, 4096), default=2048)
+    p.add_argument("--max-new-tokens", type=int, choices=(128, 256, 512), default=256)
     p.add_argument("--accumulation", type=int, choices=(1, 2, 4, 8, 16), default=4)
     p.add_argument("--learning-rate", type=float, default=0.0001)
     p.add_argument("--seed", type=int, default=42)
