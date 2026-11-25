@@ -1144,6 +1144,10 @@ class NetworkBlockingModule:
                         row.get("state") == "likely_blocked" for row in result.port_verdicts.values()
                     )
                     else "not_blocked_tested_ports" if no_selective_blocking_evidence(result.port_verdicts)
+                    and not (result.cheburcheck.ok and result.cheburcheck.blocked)
+                    and not (result.chebur_probe.ok and result.chebur_probe.finished and any(
+                        "tspu_block" in row.verdicts for row in result.chebur_probe.observations
+                    ))
                     else "inconclusive"
                 ),
                 "signals_met": result.signals_met,
