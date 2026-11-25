@@ -129,6 +129,14 @@ def make_handler(app, telegram, settings, model_catalog):
                 if role_for_web(telegram, identity, owner) != "creator":
                     return self._identity_json(HTTPStatus.FORBIDDEN, {"error": "Доступ только для Создателя"})
                 try:
+                    params = parse_qs(urlsplit(self.path).query)
+                    if params.get("access") == ["1"]:
+                        return self._identity_json(HTTPStatus.OK, {"allowed": True})
+                    if params.get("chat") == ["1"]:
+                        offset = int(params.get("offset", ["0"])[0])
+                        if not 0 <= offset <= 1000 or offset % 50:
+                            return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": "Недопустимая страница истории"})
+                        return self._identity_json(HTTPStatus.OK, mentor_snapshot(settings.brain_dir, chat_offset=offset))
                     payload = mentor_snapshot(settings.brain_dir)
                     payload['delivery_request'] = request_state(Path(settings.brain_dir) / 'ai-mentor')
                     payload['delivery_allowed'] = self._mentor_delivery_owner()
