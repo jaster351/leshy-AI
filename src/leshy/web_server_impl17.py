@@ -104,6 +104,16 @@ def make_handler(app, telegram, settings, model_catalog):
                 return False
             return True
 
+        def _mentor_delivery_owner(self):
+            owner = self._existing_web_owner()
+            if not owner or role_for_web(telegram, identity, owner) != "creator":
+                return False
+            try:
+                return any(telegram._is_owner(str(row.get("user_id") or ""))
+                           for row in identity.status(owner).get("telegram", []))
+            except (OSError, ValueError, TypeError, KeyError):
+                return False
+
         def do_GET(self):
             route = urlsplit(self.path).path
             if route == "/v1/mentor/history":
@@ -115,6 +125,7 @@ def make_handler(app, telegram, settings, model_catalog):
                 try:
                     payload = mentor_snapshot(settings.brain_dir)
                     payload['delivery_request'] = request_state(Path(settings.brain_dir) / 'ai-mentor')
+                    payload['delivery_allowed'] = self._mentor_delivery_owner()
                     return self._identity_json(HTTPStatus.OK, payload)
                 except (OSError, ValueError, TypeError):
                     return self._identity_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Не удалось прочитать журнал AI-mentor"})
@@ -207,8 +218,8 @@ def make_handler(app, telegram, settings, model_catalog):
             if route == "/v1/mentor/delivery":
                 if not self._identity_write_allowed():
                     return
-                if role_for_web(telegram, identity, self._existing_web_owner()) != "creator":
-                    return self._identity_json(HTTPStatus.FORBIDDEN, {"error": "Доступ только для Создателя"})
+                if not self._mentor_delivery_owner():
+                    return self._identity_json(HTTPStatus.FORBIDDEN, {"error": "Требуется подтверждённый Создатель и хозяин сервера"})
                 try:
                     if self._body() != {}:
                         return self._identity_json(HTTPStatus.BAD_REQUEST, {"error": "Ожидается пустой JSON-объект"})
