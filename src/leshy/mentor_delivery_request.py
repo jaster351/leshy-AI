@@ -17,6 +17,8 @@ _MAX_AGE = 30 * 60
 
 
 def request_state(root: Path) -> dict:
+    if not root.is_dir() or _reparse(root) or _reparse(root.parent):
+        return {}
     req = _read(root / "delivery-request.json")
     if req.get("schema") != "ai-mentor.delivery-request.v1":
         return {}
