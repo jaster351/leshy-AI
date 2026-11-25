@@ -104,6 +104,10 @@ class AdaptiveLLM:
             context_size = context_settings.context_size(context_size)
         from .mentor_context import mentor_active, budget_mentor_messages
         if mentor_active():
+            # OpenVINO NPU actually starts llama-server with at most 2048.
+            if (getattr(state.provider, "backend", None) == "openvino"
+                    and str(getattr(state.provider, "device", "") or "").upper().startswith("NPU")):
+                context_size = min(context_size, 2048)
             return budget_mentor_messages(messages, context_size=context_size, reserve_tokens=max_tokens)
         result=apply_context_budget(messages,context_size=context_size,reserve_tokens=max_tokens)
         if result.tokens_before>result.budget:
