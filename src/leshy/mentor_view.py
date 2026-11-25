@@ -58,6 +58,7 @@ def mentor_snapshot(brain_dir: Path, *, chat_offset: int | None = None) -> dict:
     rid = config.get("request_id")
     if isinstance(rid, str) and _ID.fullmatch(rid):
         ids.add(rid)
+    scan_truncated = False
     for path in root.iterdir():
         name = path.name
         if name.endswith(".question.json"):
@@ -69,6 +70,7 @@ def mentor_snapshot(brain_dir: Path, *, chat_offset: int | None = None) -> dict:
         if _ID.fullmatch(candidate):
             ids.add(candidate)
         if len(ids) > 1000:
+            scan_truncated = True
             break
     # Доставка обновлятором видна до начала инференса, только после проверки хеша.
     delivered = {}
@@ -168,8 +170,8 @@ def mentor_snapshot(brain_dir: Path, *, chat_offset: int | None = None) -> dict:
             "open_investigations": len(investigations) if isinstance(investigations, list) else 0,
             "export_sha256": export_hash,
             "status": current, "last_check_at": _text(status.get("timestamp")),
-            "items": items, "truncated": len(ids) > (_MAX_ITEMS if chat_offset is None else 1000),
-            "has_older": chat_offset is not None and chat_offset + _MAX_ITEMS < len(ordered),
+            "items": items, "truncated": scan_truncated or len(ids) > (_MAX_ITEMS if chat_offset is None else 1000),
+            "has_older": chat_offset is not None and chat_offset + _MAX_ITEMS <= 1000 and chat_offset + _MAX_ITEMS < len(ordered),
             "delivered_count": len(delivered),
             "delivery_status": delivery_status,
             "delivery_checked_at": _text(transport.get("timestamp")),
