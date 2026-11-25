@@ -34,7 +34,7 @@ def model_descriptor(value):
     match = re.match(r"^(qwen[0-9.]*|llama[0-9.]*|mistral|mixtral|gemma[0-9.]*|deepseek|phi[0-9.]*|gpt-oss)(?:[-_.]|$)", name)
     family = match.group(1) if match else None
     size = re.search(r"(?:^|[-_.])([0-9]{1,4}(?:\.[0-9]+)?b)(?=[-_.]|$)", name)
-    quant = re.search(r"(?:^|[-_.])(q[2-8](?:_[0-9a-z]{1,4}){0,3}|iq[1-4](?:_[0-9a-z]{1,4}){0,3}|f16|bf16|f32)(?=[-.]|$)", name)
+    quant = re.search(r"(?:^|[-_.])(q[2-6]_k(?:_[sml])?|q[458]_[01]|q8_k|iq[1-4]_(?:s|m|xs|xxs|nl)|f16|bf16|f32)(?=[-.]|$)", name)
     return {"family": family, "parameter_size": size.group(1) if family and size else None,
             "quantization": quant.group(1).upper() if family and quant else None}
 
@@ -71,7 +71,9 @@ def observe_completion(body, *, backend, model, duration_seconds):
                      "generation_tokens": predicted if rate is not None else None,
                      "generation_ms": ms if rate is not None else None,
                      "generation_tokens_per_second": round(rate, 3) if rate is not None else None,
-                     "backend_request_seconds": _num(duration_seconds, 3600)})
+                     "backend_request_seconds": _num(duration_seconds, 3600),
+                     "request_output_tokens_per_second": round(output/duration_seconds, 3)
+                     if output is not None and _num(duration_seconds, 3600) and duration_seconds > 0 else None})
     except Exception:
         # Diagnostics must never change the answer or fail over a backend.
         return
@@ -234,6 +236,7 @@ class CyclePerformance:
                 "backend_response_samples": len(rows), "models": models,
                 "prompt_tokens": stats("prompt_tokens"), "completion_tokens": stats("completion_tokens"),
                 "generation_tokens_per_second": gen,
+                "request_output_tokens_per_second": stats("request_output_tokens_per_second"),
                 "answer_seconds": {"sum": round(self.duration, 3),
                                    "min": self.min_answer, "max": self.max_answer,
                                    "mean": round(self.duration/self.answers, 3) if self.answers else None},
