@@ -80,6 +80,13 @@
       <h2 class="section-title">Обучение</h2><div class="section-subtitle">Управляемое самообучение из интернета с верификацией.</div>
       <div class="card hidden" id="mentorHistoryCard" style="margin:12px 0">
         <div class="toolbar"><h3 style="margin:0">LiveMentor · Переписка</h3><button class="button small secondary" id="mentorRefresh" type="button">Обновить</button><button class="button small" id="mentorDownload" type="button">Получить вопросы</button></div>
+        <div id="mentorAuthPanel" class="hidden" style="margin:10px 0">
+          <div class="toolbar"><button class="button small" id="mentorConnect" type="button">Подключить GitHub</button><span class="hint" id="mentorAuthStatus" role="status"></span></div>
+          <div id="mentorAuthDevice" class="hidden" style="margin-top:8px">
+            <div class="hint">Подтвердите доступ приложения LiveMentor в GitHub. Одноразовый код:</div>
+            <div class="toolbar"><input class="field" id="mentorAuthCode" aria-label="Код GitHub" readonly style="max-width:130px;font-weight:bold"><button class="button small secondary" id="mentorCopyCode" type="button">Копировать код</button><a class="button small" href="https://github.com/login/device" target="_blank" rel="noopener noreferrer">Открыть GitHub</a></div>
+          </div>
+        </div>
         <div class="hint" id="mentorDeliveryRequest" role="status">Автоматическая проверка обновлятором каждые 15 минут.</div>
         <div class="hint" id="mentorHistoryStatus" role="status">Проверка доступа…</div>
         <div class="hint" style="margin:8px 0">Локальная история учебных пакетов. Оценки относятся только к подтверждённым ответам. Развитие навыка требует независимой проверки.</div>
@@ -241,6 +248,12 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   const refresh=document.getElementById('mentorRefresh');
   const download=document.getElementById('mentorDownload');
   const deliveryRequest=document.getElementById('mentorDeliveryRequest');
+  const authPanel=document.getElementById('mentorAuthPanel');
+  const connect=document.getElementById('mentorConnect');
+  const authStatus=document.getElementById('mentorAuthStatus');
+  const authDevice=document.getElementById('mentorAuthDevice');
+  const authCode=document.getElementById('mentorAuthCode');
+  const copyCode=document.getElementById('mentorCopyCode');
   const pane=document.getElementById('pane-learning');
   const tasksPane=document.getElementById('pane-tasks');
   const qualityCard=document.getElementById('mentorQualityCard');
@@ -285,14 +298,26 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
   if(!card||!state||!list||!refresh||!pane||!download||!deliveryRequest)return;
   const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',waiting_delivery:'Ожидание скачивания пакета',waiting_connection:'Нет связи с GitHub — локальная обработка',delivered:'Скачан, ожидает ответа',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ API сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
   const deliveryNames={not_configured:'Не настроен',disabled:'Отключён',authorization_required:'Требуется вход в GitHub',authorization_error:'Ошибка авторизации GitHub',configuration_changed:'Настройки изменились, ожидается повторная проверка',delivered:'Пакет скачан',up_to_date:'Пакет уже скачан',error:'Ошибка доставки',not_confirmed:'Нет подтверждения'};
-  let pending=false, generation=0, requesting=false;
+  let pending=false, generation=0, requesting=false, connecting=false;
+  function renderAuth(data){
+    const a=data.authorization||{};
+    authPanel.classList.toggle('hidden',data.delivery_allowed!==true);
+    const busy=['starting','waiting','finishing'].includes(a.state);
+    connect.disabled=connecting||busy||a.available!==true;
+    connect.textContent=a.saved?'Переподключить GitHub':'Подключить GitHub';
+    const messages={starting:'Запрашиваю код GitHub…',waiting:'Ожидается подтверждение в GitHub',finishing:'Сохраняю авторизацию…',connected:'GitHub подключён. Запрошена доставка вопросов.'};
+    authStatus.textContent=a.state==='error'?(a.error||'Ошибка авторизации'):messages[a.state]||(a.available!==true?'Подключение доступно на штатной Windows-установке':a.saved?(['authorization_error','authorization_required'].includes(data.delivery_status)?'Требуется повторная авторизация':'Авторизация сохранена'):'GitHub не подключён');
+    const code=typeof a.user_code==='string'&&/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(a.user_code)?a.user_code:'';
+    authCode.value=code;
+    authDevice.classList.toggle('hidden',!code||data.delivery_allowed!==true);
+  }
   function renderDelivery(data){
     const req=data.delivery_request||{};
     download.disabled=requesting||req.state==='queued'||!data.enabled||data.delivery_allowed!==true;
     deliveryRequest.textContent=req.state==='queued'?'Запрос в очереди обновлятора · '+req.created_at:req.state==='finished'?'Результат запроса: '+(deliveryNames[req.result]||'Нет подтверждения')+' · '+req.checked_at:req.state==='unconfirmed'?'Обновлятор не подтвердил выполнение запроса за 30 минут. Можно повторить.':'Автоматическая проверка обновлятором каждые 15 минут.';
   }
   const active=()=>!document.hidden&&(pane.classList.contains('active')||tasksPane.classList.contains('active'));
-  function clear(){resetComparison('');generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();state.textContent='';}
+  function clear(){authCode.value='';authDevice.classList.add('hidden');authPanel.classList.add('hidden');resetComparison('');generation++;card.classList.add('hidden');qualityCard.classList.add('hidden');qualityChart.replaceChildren();qualityStatus.textContent='';qualityDetail.textContent='';list.replaceChildren();state.textContent='';}
   function line(parent,label,value){
     if(!value)return;
     const el=document.createElement('div');
@@ -315,6 +340,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
       card.classList.remove('hidden');
       renderQuality(data);
       renderDelivery(data);
+      renderAuth(data);
       state.textContent=(names[data.status]||'Статус не подтверждён')+
         (data.last_check_at?' · Последняя проверка: '+data.last_check_at:' · Проверок пока нет')+
         (data.delivery_status?' · Обновлятор: '+(deliveryNames[data.delivery_status]||'Нет подтверждения'):'')+
@@ -346,6 +372,23 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
       if(token===generation){list.replaceChildren();state.textContent='История недоступна; данные не подтверждены';qualityChart.replaceChildren();qualityDetail.textContent='';qualityStatus.textContent='Сравнение недоступно';resetComparison('Сравнение недоступно');}
     }finally{pending=false;}
   }
+  connect.addEventListener('click',async()=>{
+    if(connecting)return;
+    connecting=true;connect.disabled=true;authStatus.textContent='Запрашиваю код GitHub…';
+    try{
+      const res=await fetch('/v1/mentor/authorize',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'});
+      const data=await res.json();
+      if(res.status===401||res.status===403){clear();return;}
+      if(!res.ok)throw Error(data.error||'HTTP '+res.status);
+      authStatus.textContent='Ожидается код GitHub…';
+    }catch(e){authStatus.textContent=e.message;connect.disabled=false;}
+    finally{connecting=false;load();}
+  });
+  copyCode.addEventListener('click',async()=>{
+    if(!authCode.value)return;
+    try{await navigator.clipboard.writeText(authCode.value);copyCode.textContent='Скопировано';}
+    catch(_){authCode.select();if(document.execCommand('copy'))copyCode.textContent='Скопировано';}
+  });
   refresh.addEventListener('click',load);
   download.addEventListener('click',async()=>{
     if(requesting)return;
