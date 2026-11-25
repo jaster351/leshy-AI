@@ -282,13 +282,13 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
     if(series.length>1)node('text',{x:598,y:232,fill:'currentColor','font-size':11,'text-anchor':'end'},last.timestamp.slice(0,16).replace('T',' '));
   }
 
-  if(!card||!state||!list||!refresh||!pane)return;
+  if(!card||!state||!list||!refresh||!pane||!download||!deliveryRequest)return;
   const names={not_configured:'Не настроен',disabled:'Отключён',not_confirmed:'Нет подтверждения',checking:'Проверка',waiting:'Ожидание',waiting_delivery:'Ожидание скачивания пакета',waiting_connection:'Нет связи с GitHub — локальная обработка',delivered:'Скачан, ожидает ответа',awaiting_review:'Ожидает проверки ответа',published:'Публикация подтверждена',error:'Ошибка обмена',answered:'Ответ API сохранён',received:'Вопрос получен',outcome_unknown:'Исход запроса не подтверждён',not_received:'Вопрос ещё не получен'};
   const deliveryNames={not_configured:'Не настроен',disabled:'Отключён',authorization_required:'Требуется вход в GitHub',authorization_error:'Ошибка авторизации GitHub',configuration_changed:'Настройки изменились, ожидается повторная проверка',delivered:'Пакет скачан',up_to_date:'Пакет уже скачан',error:'Ошибка доставки',not_confirmed:'Нет подтверждения'};
   let pending=false, generation=0, requesting=false;
   function renderDelivery(data){
     const req=data.delivery_request||{};
-    download.disabled=requesting||req.state==='queued'||!data.enabled;
+    download.disabled=requesting||req.state==='queued'||!data.enabled||data.delivery_allowed!==true;
     deliveryRequest.textContent=req.state==='queued'?'Запрос в очереди обновлятора · '+req.created_at:req.state==='finished'?'Результат запроса: '+(deliveryNames[req.result]||'Нет подтверждения')+' · '+req.checked_at:req.state==='unconfirmed'?'Обновлятор не подтвердил выполнение запроса за 30 минут. Можно повторить.':'Автоматическая проверка обновлятором каждые 15 минут.';
   }
   const active=()=>!document.hidden&&(pane.classList.contains('active')||tasksPane.classList.contains('active'));
