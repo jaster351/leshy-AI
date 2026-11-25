@@ -150,6 +150,9 @@ def mentor_snapshot(brain_dir: Path, *, chat_offset: int | None = None) -> dict:
         for point in history[-168:]:
             if not isinstance(point, dict):
                 continue
+            point_batch = point.get("batch_id")
+            if not isinstance(point_batch, str) or point_batch not in reviews:
+                continue
             value = point.get("leshy_percent")
             if type(value) not in (int, float) or not 0 <= value <= 100:
                 continue
