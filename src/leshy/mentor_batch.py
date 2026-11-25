@@ -347,6 +347,7 @@ class BatchRunner:
                         atomic(path, record)
                         try:
                             performance.add(measured, record["duration_ms"] / 1000, cpu_before)
+                            performance.add_context(context_samples)
                         except Exception as exc:
                             event("mentor_performance_sample_failed", error_type=type(exc).__name__)
                     except Exception as exc:
