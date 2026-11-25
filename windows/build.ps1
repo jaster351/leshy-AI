@@ -223,6 +223,7 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed `
   --add-data "web;web" `
   --add-data "resources;resources" `
   --add-data "windows/Leshy-Monitor.ps1;." `
+  --add-data "windows/Leshy-Monitor-GUI.ps1;." `
   --add-data "VERSION;." `
   windows/launcher.py
 
