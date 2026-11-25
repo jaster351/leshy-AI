@@ -20,17 +20,24 @@ def _sample(rows):
     return {}
 
 
-def response_evidence(context_samples, measured):
+def response_evidence(context_samples, measured, *, history_total=None, history_window=None):
     context = _sample(context_samples)
     backend = _sample(measured)
     result = {"schema": "leshy.mentor-answer-evidence.v1",
-              "context": None, "backend": None, "model_identity": "not_confirmed"}
+              "context": None, "backend": None, "history_window": None,
+              "model_identity": "not_confirmed"}
+    total = _int(history_total, 255)
+    window = _int(history_window, 8)
+    if total is not None and window is not None and window <= total:
+        result["history_window"] = {"available_pairs": total, "selected_pairs": window,
+                                    "omitted_before_budget": total - window}
     turns = {k: _int(context.get(k), 8) for k in _TURNS}
     tokens = {k: _int(context.get(k), 10_000_000) for k in _TOKENS}
     if (all(v is not None for v in turns.values()) and all(v is not None for v in tokens.values())
             and turns["kept_user_turns"] + turns["omitted_user_turns"] == turns["prior_turns"]
             and turns["kept_assistant_turns"] + turns["omitted_assistant_turns"] == turns["prior_turns"]
             and turns["kept_assistant_turns"] <= turns["kept_user_turns"]
+            and (result["history_window"] is None or turns["prior_turns"] == window)
             and tokens["estimated_tokens"] <= tokens["budget"]
             and tokens["generation_limit"] > 0):
         result["context"] = {**turns, **tokens}
@@ -48,7 +55,11 @@ def validate_evidence(obj):
         return None
     context, backend = obj.get("context"), obj.get("backend")
     rows = [dict(backend, backend=backend.get("name"))] if isinstance(backend, dict) else []
-    return response_evidence([context], rows)
+    window = obj.get("history_window")
+    window = window if isinstance(window, dict) else {}
+    return response_evidence([context], rows,
+                             history_total=window.get("available_pairs"),
+                             history_window=window.get("selected_pairs"))
 
 
 def diagnostic_rows(root, batch_id, batch_sha, questions, read_obj, digest):
