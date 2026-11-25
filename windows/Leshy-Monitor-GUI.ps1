@@ -20,6 +20,7 @@ $script:gpuKey=$null
 $script:updatingGpu=$false
 $script:failure=''
 $script:retryAfter=[datetime]::MinValue
+$script:collectorStarted=$null
 
 [xml]$xaml=@'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -124,21 +125,21 @@ $sections=@(
 )
 $nav=@{}
 foreach ($s in $sections) {
-    $button=[System.Windows.Controls.Button]::new();$button.Tag=$s.id;$button.Margin='0,0,0,7';$button.Padding='10,9';$button.HorizontalContentAlignment='Stretch'
+    $button=[System.Windows.Controls.Button]::new();$button.Tag=$s.id;$button.Margin=[System.Windows.Thickness]::new(0,0,0,7);$button.Padding=[System.Windows.Thickness]::new(10,9,10,9);$button.HorizontalContentAlignment='Stretch'
     $row=[System.Windows.Controls.DockPanel]::new()
-    $stripe=[System.Windows.Controls.Border]::new();$stripe.Width=3;$stripe.Background=Brush $s.color;$stripe.CornerRadius='2';$stripe.Margin='0,0,10,0';[System.Windows.Controls.DockPanel]::SetDock($stripe,'Left');[void]$row.Children.Add($stripe)
+    $stripe=[System.Windows.Controls.Border]::new();$stripe.Width=3;$stripe.Background=Brush $s.color;$stripe.CornerRadius=[System.Windows.CornerRadius]::new(2);$stripe.Margin=[System.Windows.Thickness]::new(0,0,10,0);[System.Windows.Controls.DockPanel]::SetDock($stripe,'Left');[void]$row.Children.Add($stripe)
     $stack=[System.Windows.Controls.StackPanel]::new()
     $title=NewText $s.title 14;$title.FontWeight='SemiBold'
-    $value=NewText '—' 13 '#A9B6C6';$value.Margin='0,4,0,0'
+    $value=NewText '—' 13 '#A9B6C6';$value.Margin=[System.Windows.Thickness]::new(0,4,0,0)
     [void]$stack.Children.Add($title);[void]$stack.Children.Add($value);[void]$row.Children.Add($stack);$button.Content=$row
     $button.Add_Click({param($sender,$e) $script:section=[string]$sender.Tag;RenderMonitor})
     [void]$ui.Navigation.Children.Add($button);$nav[$s.id]=@{button=$button;value=$value}
 }
 $cards=@()
 for ($i=0;$i -lt 6;$i++) {
-    $border=[System.Windows.Controls.Border]::new();$border.Background=Brush '#1B2633';$border.CornerRadius='7';$border.Padding='11';$border.Margin='4';$border.MinHeight=66
+    $border=[System.Windows.Controls.Border]::new();$border.Background=Brush '#1B2633';$border.CornerRadius=[System.Windows.CornerRadius]::new(7);$border.Padding=[System.Windows.Thickness]::new(11);$border.Margin=[System.Windows.Thickness]::new(4);$border.MinHeight=66
     $stack=[System.Windows.Controls.StackPanel]::new()
-    $label=NewText '—' 12 '#A9B6C6';$val=NewText '—' 21;$val.FontWeight='SemiBold';$val.Margin='0,5,0,0'
+    $label=NewText '—' 12 '#A9B6C6';$val=NewText '—' 21;$val.FontWeight='SemiBold';$val.Margin=[System.Windows.Thickness]::new(0,5,0,0)
     [void]$stack.Children.Add($label);[void]$stack.Children.Add($val);$border.Child=$stack
     [void]$ui.MetricCards.Children.Add($border);$cards+=@{border=$border;label=$label;value=$val}
 }
@@ -249,6 +250,7 @@ function StartCollector {
     $psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true
     $psi.StandardOutputEncoding=[System.Text.UTF8Encoding]::new($false)
     $script:process=[System.Diagnostics.Process]::Start($psi)
+    $script:collectorStarted=[datetime]::UtcNow
     $script:readTask=$script:process.StandardOutput.ReadLineAsync()
 }
 function StopCollector {
@@ -293,6 +295,11 @@ $timer=[System.Windows.Threading.DispatcherTimer]::new();$timer.Interval=[timesp
 $timer.Add_Tick({
     try{
         if($null -eq $script:process -and [datetime]::UtcNow -ge $script:retryAfter){StartCollector}
+        if($script:process -and $script:collectorStarted){
+            $latest=$script:collectorStarted
+            if($script:lastReceived -and $script:lastReceived -gt $latest){$latest=$script:lastReceived}
+            if(([datetime]::UtcNow-$latest).TotalSeconds -gt 45){throw 'Сборщик не отвечает.'}
+        }
         $n=0
         while($script:readTask -and $script:readTask.IsCompleted -and $n -lt 10){
             $line=$script:readTask.GetAwaiter().GetResult()
