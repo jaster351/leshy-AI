@@ -24,7 +24,7 @@
 
   async function resolve(card,id,allow){
     const buttons=[...card.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
-    const result=card.querySelector('.os-approval-result');result.textContent=allow?'Выполняю удаление…':'Отменяю…';
+    const result=card.querySelector('.os-approval-result');result.textContent=allow?'Выполняю действие…':'Отменяю…';
     try{
       const d=await api('/v1/os/approval',{method:'POST',body:JSON.stringify({owner_id:OWNER,id,allow})});
       result.textContent=d.message||'Готово';card.dataset.resolved='1';
@@ -37,11 +37,11 @@
     known.add(item.id);const root=host();if(!root)return;
     const card=document.createElement('div');card.className='os-approval-card';card.dataset.osApproval=item.id;
     const title=document.createElement('div');title.className='os-approval-title';title.textContent='Требуется подтверждение владельца';
-    const desc=document.createElement('div');desc.className='os-approval-desc';desc.textContent=item.description||'Удалить выбранный объект?';
+    const desc=document.createElement('div');desc.className='os-approval-desc';desc.textContent=item.description||'Выполнить предложенное системное действие?';
     const actions=document.createElement('div');actions.className='os-approval-actions';
-    const yes=document.createElement('button');yes.type='button';yes.className='yes';yes.textContent=item.yes_label||'Да, удалить';
+    const yes=document.createElement('button');yes.type='button';yes.className='yes';yes.textContent=item.yes_label||'Да, выполнить';
     const no=document.createElement('button');no.type='button';no.textContent=item.no_label||'Нет, отменить';
-    const result=document.createElement('div');result.className='os-approval-result';result.textContent='Без Вашего подтверждения удаление не выполняется.';
+    const result=document.createElement('div');result.className='os-approval-result';result.textContent='Без Вашего подтверждения действие не выполняется.';
     yes.onclick=()=>resolve(card,item.id,true);no.onclick=()=>resolve(card,item.id,false);actions.append(yes,no);card.append(title,desc,actions,result);root.appendChild(card);root.scrollTop=root.scrollHeight;
   }
 
