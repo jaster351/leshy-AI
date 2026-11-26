@@ -50,3 +50,14 @@ To remove the job (also from elevated PowerShell):
 The task can be inspected in taskschd.msc under **Task Scheduler Library**. Logging is rotated to scheduled-build.previous.log when the current file exceeds 10 MB.
 
 Note: a Windows account that is not in the Administrators group cannot use the elevated scheduled task as designed. The task has not been installed remotely by updating GitHub; the one-time local installation command above is required.
+
+## Необязательный переход на запуск до входа пользователя
+
+После обновления исходников и завершения старых сборок (закройте старую AutoBuilder UI, чтобы прежний локальный mutex не конкурировал с новым глобальным) откройте PowerShell 5.1 от администратора под тем же владельцем задачи:
+
+```powershell
+Clear
+.\windows\enable-unattended-tasks.ps1
+```
+
+Введите локальный пароль Windows, не PIN. Существующие задачи сохраняют владельца, действия, расписание, ограничения и ACL; добавляется отложенный старт основной задачи после загрузки Windows. Уже существующая задача подготовки моделей переводится на парольный вход без нового триггера. Если её нет, автоматическая регистрация с парольным principal может потребовать отдельной локальной установки с учётными данными. В Session 0 серверный runtime запускается без tray, ручной manual-stop.flag сохраняется. При повторном входе UI может не показывать tray фонового процесса; пользуйтесь Web-интерфейсом. Автовход, SYSTEM и Windows Services не включаются. При смене пароля обновите пароль задач штатными средствами. Проверка загрузки без входа, доступа к GitHub и здоровья runtime ещё не выполнена.
