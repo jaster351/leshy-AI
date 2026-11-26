@@ -33,6 +33,25 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                 "CREATE INDEX IF NOT EXISTS ix_os_action_approvals_owner_status "
                 "ON os_action_approvals(owner_id,status,created_at)"
             )
+        # Отдельная таблица: старый runtime при откате не может принять
+        # запрос запуска команды или записи файла за старое удаление.
+        with self.storage.connection() as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS os_model_action_approvals ("
+                "id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', "
+                "action TEXT NOT NULL, arguments_json TEXT NOT NULL, description TEXT NOT NULL, "
+                "status TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, resolved_at TEXT NOT NULL DEFAULT '')"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_os_model_action_approvals_owner_status "
+                "ON os_model_action_approvals(owner_id,status,created_at)"
+            )
+            # После смены версии или перезапуска нельзя оживлять старые
+            # предложения модели, разрешения на которые могли быть отозваны.
+            conn.execute(
+                "UPDATE os_model_action_approvals SET status='cancelled',resolved_at=? "
+                "WHERE status='pending'", (utcnow(),),
+            )
         self._gate.on_disabled = self._revoke_pending
         # После рестарта при выключенной настройке старые кнопки опасных
         # действий не должны оживать при следующем включении ОС.
@@ -46,8 +65,12 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                 "WHERE status='pending'",
                 (utcnow(),),
             )
-        outcome = {"approvals_cancelled": result.rowcount}
-        if result.rowcount:
+            model_result = conn.execute(
+                "UPDATE os_model_action_approvals SET status='cancelled',resolved_at=? "
+                "WHERE status='pending'", (utcnow(),),
+            )
+        outcome = {"approvals_cancelled": result.rowcount + model_result.rowcount}
+        if outcome["approvals_cancelled"]:
             self.storage.audit("os.control.pending_revoked", outcome)
         return outcome
 
@@ -113,6 +136,8 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             raise PermissionError("Удаление через оболочку запрещено. Требуется отдельное действие удаления файла.")
         # Не сокращаем план, который пользователь должен подтвердить.
         description = "Выполнить системное действие " + action + ": " + json.dumps(args, ensure_ascii=False)
+        if len(description.encode("utf-16-le")) // 2 > 1800:
+            raise ValueError("План слишком длинный для полного безопасного показа в Web и Telegram")
         generation = self._gate.begin()
         try:
             return self._store_approval(action, args, description, owner_id=owner_id,
@@ -122,12 +147,13 @@ class ApprovalOperatingSystemController(OperatingSystemController):
 
     def _store_approval(self, action, stored_args, description, *, owner_id, session_id, generation):
         self._gate.check(generation)
-        approval_id = secrets.token_urlsafe(18)
+        table = "os_action_approvals" if action == "delete" else "os_model_action_approvals"
+        approval_id = ("delete_" if action == "delete" else "model_") + secrets.token_urlsafe(18)
         created = datetime.now(timezone.utc)
         expires = created + timedelta(minutes=10)
         with self.storage.connection() as conn:
             conn.execute(
-                "INSERT INTO os_action_approvals(id,owner_id,session_id,action,arguments_json,description,status,created_at,expires_at,resolved_at) "
+                f"INSERT INTO {table}(id,owner_id,session_id,action,arguments_json,description,status,created_at,expires_at,resolved_at) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
                     approval_id,
@@ -147,7 +173,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         except PermissionError:
             with self.storage.connection() as conn:
                 conn.execute(
-                    "UPDATE os_action_approvals SET status='cancelled',resolved_at=? WHERE id=? AND status='pending'",
+                    f"UPDATE {table} SET status='cancelled',resolved_at=? WHERE id=? AND status='pending'",
                     (utcnow(), approval_id),
                 )
             raise
@@ -169,25 +195,27 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         owner = str(owner_id or "").strip()[:200]
         sid = str(session_id or "").strip()[:200]
         with self.storage.connection() as conn:
-            if sid:
-                rows = conn.execute(
-                    "SELECT id,description,action,created_at,expires_at FROM os_action_approvals "
-                    "WHERE owner_id=? AND session_id=? AND status='pending' ORDER BY created_at",
-                    (owner, sid),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT id,description,action,created_at,expires_at FROM os_action_approvals "
-                    "WHERE owner_id=? AND status='pending' ORDER BY created_at",
-                    (owner,),
-                ).fetchall()
+            # Обе таблицы принадлежат одному подтверждённому владельцу.
+            rows = []
+            for table in ("os_action_approvals", "os_model_action_approvals"):
+                query = (
+                    f"SELECT id,description,action,created_at,expires_at FROM {table} "
+                    "WHERE owner_id=? AND status='pending'"
+                )
+                params = (owner,)
+                if sid:
+                    query += " AND session_id=?"
+                    params = (owner, sid)
+                rows.extend(conn.execute(query, params).fetchall())
+        rows.sort(key=lambda row: str(row["created_at"]))
         now = datetime.now(timezone.utc)
         items: list[dict[str, Any]] = []
         for row in rows:
             expires = datetime.fromisoformat(str(row["expires_at"]))
             if now >= expires:
                 with self.storage.connection() as conn:
-                    conn.execute("UPDATE os_action_approvals SET status='expired',resolved_at=? WHERE id=? AND status='pending'", (utcnow(), str(row["id"])))
+                    table = self._approval_table(str(row["id"]))
+                    conn.execute(f"UPDATE {table} SET status='expired',resolved_at=? WHERE id=? AND status='pending'", (utcnow(), str(row["id"])))
                 continue
             items.append({
                 "id": str(row["id"]),
@@ -200,25 +228,31 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             })
         return items
 
+    @staticmethod
+    def _approval_table(approval_id: str) -> str:
+        # Имена таблиц — только константы, не пользовательский SQL.
+        return "os_model_action_approvals" if approval_id.startswith("model_") else "os_action_approvals"
+
     def resolve(self, approval_id: str, *, owner_id: str, allow: bool) -> dict[str, Any]:
         """Одноразовое подтверждение: claim до исполнения, без повторных эффектов."""
         approval_id = str(approval_id or "").strip()
+        table = self._approval_table(approval_id)
         owner = str(owner_id or "").strip()[:200]
         self._authorize_owner(owner)
         if not self.enabled():
             return {"id": approval_id, "status": "cancelled", "message": DISABLED}
         with self.storage.connection() as conn:
             row = conn.execute(
-                "SELECT * FROM os_action_approvals WHERE id=?", (approval_id,),
+                f"SELECT * FROM {table} WHERE id=?", (approval_id,),
             ).fetchone()
         if row is None:
             raise ValueError("Запрос подтверждения не найден")
         if str(row["owner_id"]) != owner:
             raise PermissionError("Подтвердить действие может только владелец запроса")
         action = str(row["action"])
-        if action not in MUTATING_ACTIONS:
-            raise ValueError("Неизвестный тип подтверждаемого действия")
         deletion = action == "delete"
+        if action not in MUTATING_ACTIONS or deletion != (table == "os_action_approvals"):
+            raise ValueError("Неизвестный тип подтверждаемого действия")
         status = str(row["status"])
         if status != "pending":
             return {"id": approval_id, "status": status,
@@ -226,7 +260,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         if datetime.now(timezone.utc) >= datetime.fromisoformat(str(row["expires_at"])):
             with self.storage.connection() as conn:
                 conn.execute(
-                    "UPDATE os_action_approvals SET status='expired',resolved_at=? "
+                    f"UPDATE {table} SET status='expired',resolved_at=? "
                     "WHERE id=? AND status='pending'", (utcnow(), approval_id),
                 )
             return {"id": approval_id, "status": "expired",
@@ -234,7 +268,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         if not allow:
             with self.storage.connection() as conn:
                 changed = conn.execute(
-                    "UPDATE os_action_approvals SET status='cancelled',resolved_at=? "
+                    f"UPDATE {table} SET status='cancelled',resolved_at=? "
                     "WHERE id=? AND owner_id=? AND status='pending'",
                     (utcnow(), approval_id, owner),
                 )
@@ -250,7 +284,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         # Только один поток/процесс может перейти pending -> executing.
         with self.storage.connection() as conn:
             claimed = conn.execute(
-                "UPDATE os_action_approvals SET status='executing' "
+                f"UPDATE {table} SET status='executing' "
                 "WHERE id=? AND owner_id=? AND status='pending'",
                 (approval_id, owner),
             )
@@ -289,7 +323,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             )
         with self.storage.connection() as conn:
             conn.execute(
-                "UPDATE os_action_approvals SET status=?,resolved_at=? "
+                f"UPDATE {table} SET status=?,resolved_at=? "
                 "WHERE id=? AND owner_id=? AND status='executing'",
                 (final_status, utcnow(), approval_id, owner),
             )
@@ -367,7 +401,8 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         value = super().status()
         with self.storage.connection() as conn:
             rows = conn.execute(
-                "SELECT status,COUNT(*) AS n FROM os_action_approvals "
+                "SELECT status,COUNT(*) AS n FROM (SELECT status FROM os_action_approvals "
+                "UNION ALL SELECT status FROM os_model_action_approvals) "
                 "WHERE status IN ('pending','executing','interrupted') "
                 "GROUP BY status"
             ).fetchall()
