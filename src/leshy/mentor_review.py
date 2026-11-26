@@ -1,7 +1,7 @@
-"""Оценки наставника, привязанные к ответам, и осторожная часовая планка.
+"""Оценки наставника, привязанные к ответам; качество не ограничивает диагностику.
 
-Отчёт содержит данные, а не команды. Только явно утверждённая оценка
-опубликованных ответов может менять локальную планку.
+Отчёт содержит данные, а не команды. Ограничения исполнения задаёт runner,
+а не баллы наставника. Сохраняем поле quota для совместимости протокола.
 """
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ _TAG = re.compile(r"[A-Za-z0-9_.-]{1,80}")
 CAUSES = {"question", "rubric", "knowledge", "context", "code", "model",
           "resources", "transport", "unknown"}
 CRITERIA = ("factuality", "constraints", "meaning")
-INITIAL_QUOTA = 30
 MAX_PART = 256  # транспортная часть; следующие части имеют отдельные ID
+INITIAL_QUOTA = MAX_PART
 
 
 def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now, review_path=None):
@@ -30,16 +30,25 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now, rev
     quota = state.get("quota")
     if type(quota) is not int or not 1 <= quota <= MAX_PART:
         raise ValueError("Некорректная сохранённая планка")
+    def without_new_review():
+        # Migrate only the legacy score-derived limit, without reapplying a review.
+        if quota != MAX_PART or not state_path.exists():
+            migrated = dict(state, quota=MAX_PART, previous_quota=quota,
+                            decision="capacity_only")
+            atomic(state_path, migrated)
+            return migrated
+        return state
+
     expected = config.get("approved_review_sha256", "")
     if not expected:
-        return state
+        return without_new_review()
     if not isinstance(expected, str) or not _HASH.fullmatch(expected):
         raise ValueError("Некорректный SHA-256 оценки")
     applied = state.get("applied")
     if not isinstance(applied, list) or any(not isinstance(x, str) or not _HASH.fullmatch(x) for x in applied):
         raise ValueError("Повреждён журнал оценок")
     if expected in applied:
-        return state
+        return without_new_review()
     if len(applied) >= 4096:
         raise ValueError("Требуется архивирование журнала оценок")
     raw = read_bytes(review_path if review_path is not None else root / "review.json", 256 * 1024)
@@ -151,7 +160,6 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now, rev
     comparable = obj.get("comparable") is True
     model = next(iter(models)) if len(models) == 1 else "not_confirmed"
     revision = next(iter(revisions)) if len(revisions) == 1 else "not_confirmed"
-    confirmed = model not in {"", "not_confirmed"} and revision not in {"", "not_confirmed"}
     summary = {"batch_id": bid, "review_sha256": expected, "benchmark_id": benchmark,
                "rubric_id": rubric, "quality": round(quality, 6), "reviewed": len(rows),
                "total": len(qids), "complete": full, "critical": critical,
@@ -184,13 +192,6 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now, rev
                          relative_percent=round(100 * total / reference_total, 2))
         history = (history + [point])[-168:]
         summary["comparison"] = point
-    previous = state.get("last_review") or {}
-    matched = (isinstance(previous, dict) and comparable and previous.get("comparable") is True
-               and full and previous.get("complete") is True
-               and previous.get("batch_id") != bid
-               and previous.get("benchmark_id") == benchmark and previous.get("rubric_id") == rubric
-               and previous.get("model") == model and previous.get("revision") == revision
-               and confirmed and isinstance(previous.get("quality"), (int, float)))
     # Не учитываем один пакет повторно даже с другим хешем.
     reviewed = state.get("reviewed_batches", [])
     if not isinstance(reviewed, list) or any(not isinstance(x, str) for x in reviewed):
@@ -201,32 +202,11 @@ def apply_review(root, config, *, read_obj, read_bytes, atomic, digest, now, rev
     if type(maximum) is not int or not 0 <= maximum <= MAX_PART:
         raise ValueError("Некорректный подтверждённый предел")
     old_quota = quota
-    if critical:
-        quota = max(1, quota // 2)
-        decision = "critical_investigation"
-    elif matched and quality < previous["quality"] - 0.000001:
-        quota = max(1, quota * 7 // 10)
-        decision = "quality_drop"
-    elif full and quality < 0.6:
-        quota = max(1, quota * 7 // 10)
-        decision = "low_quality_investigation"
-    elif matched and quality > previous["quality"] + 0.000001 and not issues:
-        # Качество само по себе не доказывает часовую пропускную способность.
-        # Исполнитель фиксирует завершённые вызовы, а не оценки.
-        perf = read_obj(root / "cycle-metrics.json") if (root / "cycle-metrics.json").exists() else {}
-        if (perf.get("batch_id") == bid and perf.get("quota") == quota
-                and type(perf.get("completed")) is int and perf["completed"] >= (quota * 9 + 9) // 10
-                and perf.get("stop_reason") == "quota"):
-            maximum = max(maximum, quota)
-            quota = min(MAX_PART, max(quota + 1, (quota * 12 + 9) // 10))
-            decision = "raise"
-        else:
-            decision = "hold_capacity_unconfirmed"
-    else:
-        decision = "hold_quality_unconfirmed"
-    if quota < old_quota and not issues:
-        issues.append({"id": "", "cause": "unknown", "critical": critical,
-                       "status": "requires_investigation"})
+    # A quality defect is a reason to investigate, not to suppress further evidence.
+    # The runner still enforces deadline, cancellation, user priority and transport size.
+    quota = MAX_PART
+    decision = ("critical_investigation" if critical else
+                "quality_investigation" if issues else "capacity_only")
     outstanding = state.get("investigation", [])
     if not isinstance(outstanding, list):
         raise ValueError("Повреждён журнал расследований")
