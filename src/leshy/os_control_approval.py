@@ -9,10 +9,12 @@ from typing import Any
 from .os_control import OperatingSystemController, OSActionResult
 from .storage import utcnow
 from .os_control_guard import DISABLED
+from .os_model_router import READ_ONLY_ACTIONS, MUTATING_ACTIONS, validate_os_plan
+from .action_safety_guard import check_external_action
 
 
 class ApprovalOperatingSystemController(OperatingSystemController):
-    """OS controller, где любое удаление требует отдельного подтверждения владельца."""
+    """Исполнитель ОС с независимым подтверждением изменяющих действий модели."""
 
     _SHELL_DELETE_RE = re.compile(
         r"(?i)(?:\bremove-item\b|\bdel(?:ete)?\b|\berase\b|\brm\b|\brmdir\b|\brd\b|\bremove-directory\b)"
@@ -62,10 +64,6 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             )
         return result
 
-    def is_request(self, message: str) -> bool:
-        text = str(message or "")
-        return bool(super().is_request(text) or re.match(r"(?i)^\s*/os\s+(?:delete|rm)\b", text))
-
     def execute(self, action: str, args: dict[str, Any] | None = None, *, owner_id: str = "web:local", approved_delete: bool = False) -> OSActionResult:
         normalized = str(action or "").strip().lower()
         try:
@@ -98,12 +96,35 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         path = self._path(args.get("path"))
         if self._is_root_or_system(path):
             raise PermissionError("Корень диска и системные каталоги нельзя удалить через чат")
-        approval_id = secrets.token_urlsafe(18)
-        created = datetime.now(timezone.utc)
-        expires = created + timedelta(minutes=10)
         stored_args = dict(args)
         stored_args["path"] = str(path)
         description = f"Удалить {'папку' if path.is_dir() else 'файл'}: {path}"
+        return self._store_approval("delete", stored_args, description, owner_id=owner_id,
+                                    session_id=session_id, generation=generation)
+
+    def request_model_approval(self, action, args, *, owner_id, session_id):
+        """Сохранить ровно предложенный моделью план, но не исполнять его."""
+        self._authorize_owner(owner_id)
+        action, args = validate_os_plan(action, args)
+        if action not in MUTATING_ACTIONS or action == "delete":
+            raise ValueError("Недопустимый вид подтверждения")
+        check_external_action(action, args)
+        if action in {"powershell", "native_shell"} and self._SHELL_DELETE_RE.search(args["command"]):
+            raise PermissionError("Удаление через оболочку запрещено. Требуется отдельное действие удаления файла.")
+        # Не сокращаем план, который пользователь должен подтвердить.
+        description = "Выполнить системное действие " + action + ": " + json.dumps(args, ensure_ascii=False)
+        generation = self._gate.begin()
+        try:
+            return self._store_approval(action, args, description, owner_id=owner_id,
+                                        session_id=session_id, generation=generation)
+        finally:
+            self._gate.finish()
+
+    def _store_approval(self, action, stored_args, description, *, owner_id, session_id, generation):
+        self._gate.check(generation)
+        approval_id = secrets.token_urlsafe(18)
+        created = datetime.now(timezone.utc)
+        expires = created + timedelta(minutes=10)
         with self.storage.connection() as conn:
             conn.execute(
                 "INSERT INTO os_action_approvals(id,owner_id,session_id,action,arguments_json,description,status,created_at,expires_at,resolved_at) "
@@ -112,7 +133,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                     approval_id,
                     str(owner_id)[:200],
                     str(session_id)[:200],
-                    "delete",
+                    action,
                     json.dumps(stored_args, ensure_ascii=False),
                     description,
                     "pending",
@@ -130,13 +151,14 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                     (utcnow(), approval_id),
                 )
             raise
-        self.storage.audit("os.approval_requested", {"id": approval_id, "owner_id": str(owner_id)[:200], "description": description})
+        # Не записываем команды и их аргументы в аудит; они остаются в закрытом запросе владельца.
+        self.storage.audit("os.approval_requested", {"id": approval_id, "owner_id": str(owner_id)[:200], "action": action})
         return {
             "id": approval_id,
-            "action": "delete",
+            "action": action,
             "description": description,
             "expires_at": expires.isoformat(),
-            "yes_label": "Да, удалить",
+            "yes_label": "Да, удалить" if action == "delete" else "Да, выполнить",
             "no_label": "Нет, отменить",
         }
 
@@ -173,7 +195,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                 "description": str(row["description"]),
                 "created_at": str(row["created_at"]),
                 "expires_at": str(row["expires_at"]),
-                "yes_label": "Да, удалить",
+                "yes_label": "Да, удалить" if str(row["action"]) == "delete" else "Да, выполнить",
                 "no_label": "Нет, отменить",
             })
         return items
@@ -192,7 +214,11 @@ class ApprovalOperatingSystemController(OperatingSystemController):
         if row is None:
             raise ValueError("Запрос подтверждения не найден")
         if str(row["owner_id"]) != owner:
-            raise PermissionError("Подтвердить удаление может только владелец запроса")
+            raise PermissionError("Подтвердить действие может только владелец запроса")
+        action = str(row["action"])
+        if action not in MUTATING_ACTIONS:
+            raise ValueError("Неизвестный тип подтверждаемого действия")
+        deletion = action == "delete"
         status = str(row["status"])
         if status != "pending":
             return {"id": approval_id, "status": status,
@@ -204,7 +230,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
                     "WHERE id=? AND status='pending'", (utcnow(), approval_id),
                 )
             return {"id": approval_id, "status": "expired",
-                    "message": "Время подтверждения истекло. Удаление не выполнялось."}
+                    "message": "Время подтверждения истекло. Действие не выполнялось."}
         if not allow:
             with self.storage.connection() as conn:
                 changed = conn.execute(
@@ -215,7 +241,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             if changed.rowcount != 1:
                 return {"id": approval_id, "status": "already_handled",
                         "message": "Запрос уже выполняется. Повтор запрещён."}
-            message = "Удаление отменено."
+            message = "Удаление отменено." if deletion else "Действие отменено."
             if row["session_id"]:
                 self.app._save_assistant(str(row["session_id"]), message)
             self.storage.audit("os.approval_cancelled", {"id": approval_id, "owner_id": owner})
@@ -230,27 +256,35 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             )
         if claimed.rowcount != 1:
             return {"id": approval_id, "status": "already_handled",
-                    "message": "Удаление уже выполняется; повтор запрещён."}
+                    "message": "Действие уже выполняется; повтор запрещён."}
         result = None
         failure = ""
         try:
             self.assert_allowed()
             args = json.loads(str(row["arguments_json"]) or "{}")
-            result = OperatingSystemController.execute(self, "delete", args, owner_id=owner)
+            if deletion:
+                result = OperatingSystemController.execute(self, "delete", args, owner_id=owner)
+            else:
+                action, args = validate_os_plan(action, args)
+                result = self.execute(action, args, owner_id=owner)
         except Exception as exc:
             failure = type(exc).__name__
         if not self.enabled():
             final_status = "interrupted"
             message = (
                 "Управление ОС отключено во время операции. Фактический "
-                "результат удаления не подтверждён: проверьте файл вручную."
+                "результат операции не подтверждён: проверьте состояние вручную."
             )
         elif result is not None and result.ok:
             final_status = "executed"
             message = str(result.summary)
+            if not deletion and result.data not in (None, "", [], {}):
+                output = result.data if isinstance(result.data, str) else json.dumps(result.data, ensure_ascii=False, indent=2)
+                message += "\n\n" + self._clip(output)
         else:
             final_status = "failed"
-            message = "Удаление не подтверждено; проверьте файл. " + (
+            message = ("Удаление не подтверждено; проверьте файл. " if deletion else
+                       "Действие не подтверждено; проверьте состояние. ") + (
                 str(result.summary) if result is not None else failure
             )
         with self.storage.connection() as conn:
@@ -285,6 +319,26 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             action, args = direct
         else:
             action, args = self._plan_natural(message)
+        return self._handle_action(action, args, owner_id=owner_id, session_id=session_id)
+
+    def handle_model_action(self, planned, *, owner_id, session_id):
+        """Модель предлагает действие; полномочия и подтверждения остаются в коде."""
+        self._authorize_owner(owner_id)
+        if not self.enabled():
+            return DISABLED
+        action, args = validate_os_plan(*planned)
+        if action in READ_ONLY_ACTIONS or action in {"need_clarification", "delete"}:
+            return self._handle_action(action, args, owner_id=owner_id, session_id=session_id)
+        if action not in MUTATING_ACTIONS:
+            raise ValueError("Неизвестное действие модели")
+        approval = self.request_model_approval(action, args, owner_id=owner_id, session_id=session_id)
+        return {
+            "approval_required": True,
+            "approval": approval,
+            "message": "Требуется Ваше подтверждение. " + approval["description"],
+        }
+
+    def _handle_action(self, action, args, *, owner_id, session_id):
         if action == "help":
             return (
                 "Управление ОС включено. Можно просить естественным языком или использовать `/os`: "
@@ -322,6 +376,7 @@ class ApprovalOperatingSystemController(OperatingSystemController):
             row["status"] in {"executing", "interrupted"} for row in rows
         )
         value["delete_requires_owner_approval"] = True
+        value["model_mutation_requires_owner_approval"] = True
         value["shell_delete_bypass_blocked"] = True
         value["approval_ttl_minutes"] = 10
         return value
