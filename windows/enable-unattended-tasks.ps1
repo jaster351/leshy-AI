@@ -57,7 +57,14 @@ foreach($item in $spec){
     }
     $plans+=@{Name=$item.Name;Delay=$item.Delay;HasBoot=$hasBoot;Definition=$definition}
 }
-if(-not $plans.Count){Write-Host 'No task registrations require changes.';return}
+# The existing build runner normally registers its optional on-demand model
+# task by copying the parent principal. A Password principal needs a local
+# password at registration, so provision that same task here when missing.
+$modelName='Leshy AI - Model Provision (automatic)'
+$modelScript=Join-Path $PSScriptRoot 'auto-prepare-models.ps1'
+$needsModel=(-not (Get-ScheduledTask -TaskPath '\' -TaskName $modelName -ErrorAction SilentlyContinue)) -and
+    (Test-Path -LiteralPath $modelScript -PathType Leaf)
+if(-not $plans.Count -and -not $needsModel){Write-Host 'No task registrations require changes.';return}
 if(-not $Credential){
     $Credential=Get-Credential -UserName $identity.Name -Message 'Enter the existing Windows task owner password (not the PIN).'
 }
@@ -93,6 +100,20 @@ try{
             if(-not $verifiedBoot){throw ('Startup trigger verification failed: '+$plan.Name)}
         }
         Write-Host ('Unattended registration verified: '+$plan.Name)
+    }
+    if($needsModel){
+        # No trigger: the existing updater starts this task on demand.
+        $repoRoot=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+        $exe=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $action=New-ScheduledTaskAction -Execute $exe -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$modelScript+'"') -WorkingDirectory $repoRoot
+        $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 12) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+        # No -Force: never overwrite a task created concurrently.
+        $null=Register-ScheduledTask -TaskPath '\' -TaskName $modelName -Action $action -Settings $settings -User $identity.Name -Password $password -RunLevel Highest -ErrorAction Stop
+        $model=$folder.GetTask($modelName).Definition
+        if([int]$model.Principal.LogonType -ne 1 -or (Resolve-TaskSid ([string]$model.Principal.UserId)) -ne $identity.User.Value){
+            throw 'Model task principal verification failed.'
+        }
+        Write-Host 'Existing on-demand model provision mechanism registered for unattended execution.'
     }
 }finally{
     $password=$null
