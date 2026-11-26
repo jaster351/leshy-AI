@@ -12,7 +12,6 @@ import socket
 import subprocess
 import time
 import threading
-from types import MethodType
 from typing import Any
 
 from .diagnostics import event, problem
@@ -40,26 +39,6 @@ class OperatingSystemController:
     локальной ОС. Команды выполняются с правами процесса Лешего; UAC не обходится.
     """
 
-    _INTENT_RE = re.compile(
-        r"(?i)(?:^\s*/os\b|\b(?:windows|виндовс|операционн\w*\s+систем\w*|на\s+компьютер\w*|на\s+пк)\b|"
-        r"\b(?:открой\s+(?:файл|папку|программ)|запусти\s+(?:программ|приложени|процесс|скрипт)|выполни\s+(?:команду|скрипт|powershell)|создай\s+папк|прочитай\s+файл|покажи\s+(?:файлы|папки|процессы)|"
-        r"останови\s+процесс|закрой\s+программ|скопируй\s+файл|перемести\s+файл|удали\s+файл)\b)"
-    )
-    _OS_TARGET_RE = re.compile(
-        r"(?i)\b(?:windows|виндовс|операционн\w*\s+систем\w*|"
-        r"на\s+(?:компьютер\w*|пк)|shell|powershell|терминал|командн\w*\s+строк\w*)\b"
-    )
-    _OS_ACTION_RE = re.compile(
-        r"(?i)\b(?:выполн\w*|запуст\w*|откро\w*|покаж\w*|удал\w*|"
-        r"настро\w*|измен\w*|поменя\w*|выключ\w*|включ\w*|"
-        r"перезагруз\w*|останов\w*|закро\w*|созда\w*|прочита\w*|"
-        r"скопиру\w*|перемест\w*|проверь|провер\w*|установ\w*)\b"
-    )
-    _OS_NEGATED_RE = re.compile(
-        r"(?i)\b(?:не\s+(?:меняй|изменяй|трогай|запускай|выполняй|"
-        r"удаляй|выключай|перезагружай|проверяй)|"
-        r"(?:никаких|без)\s+(?:изменений|действий|команд)\b)"
-    )
     _DANGEROUS_RE = re.compile(
         r"(?i)(?:format(?:-volume)?\b|clear-disk\b|remove-partition\b|diskpart\b|"
         r"bcdedit\b|bootrec\b|cipher\s+/w\b|remove-item\s+[^\r\n]*(?:windows|system32)[^\r\n]*-recurse|"
@@ -132,26 +111,8 @@ class OperatingSystemController:
                 )
 
     def is_request(self, message: str) -> bool:
-        """A mention of Windows or the OS is not a request to control it.
-
-        In particular, "не меняй Windows" and queries about Leshy's own
-        memory/constitution must remain safe normal chat for every user.
-        """
-        text = str(message or "").strip()
-        if re.match(r"(?i)^/os(?:\s|$)", text):
-            return True
-        # Natural-language OS commands must be short and standalone.
-        # Long work plans, quoted instructions and multi-step prompts belong
-        # to the LLM even when they mention editing files or running scripts.
-        if len(text) > 360 or "\n" in text or "\r" in text:
-            return False
-        if self._OS_NEGATED_RE.search(text):
-            return False
-        explicit_action = bool(self._INTENT_RE.search(text))
-        has_targeted_action = bool(
-            self._OS_TARGET_RE.search(text) and self._OS_ACTION_RE.search(text)
-        )
-        return bool((explicit_action and self._OS_ACTION_RE.search(text)) or has_targeted_action)
+        """Совместимость ручного интерфейса; обычный чат не использует этот метод."""
+        return bool(re.match(r"(?i)^/os(?:\s|$)", str(message or "").strip()))
 
     @staticmethod
     def _clip(value: str, limit: int = 12000) -> str:
@@ -544,43 +505,6 @@ def install_os_control(app) -> OperatingSystemController:
         return existing
     controller = OperatingSystemController(app)
     app.os_control = controller
-    original_chat = app.chat
-
-    def chat_with_os(self, message: str, *, owner_id: str = "web:local", session_id: str | None = None):
-        text = str(message or "").strip()
-        if controller.is_request(text):
-            if not controller.enabled():
-                sid = self._ensure_session(owner_id, session_id)
-                return {"session_id": sid, "answer": DISABLED, "created_at": self._save_assistant(sid, DISABLED), "sources": [], "os_action": True}
-            # OS intent matching is intentionally broad (e.g. "открой"). The LLM
-            # may correctly select a web or browser action. Never send such an
-            # action to OperatingSystemController.execute: route it back through
-            # the ordinary chat/search pipeline instead.
-            try:
-                planned = controller._direct_command(text) or controller._plan_natural(text)
-            except (ValueError, TypeError, json.JSONDecodeError):
-                return original_chat(message, owner_id=owner_id, session_id=session_id)
-            supported = {
-                "help", "need_clarification", "system_status", "list_dir",
-                "read_text", "write_text", "make_dir", "copy", "move",
-                "delete", "process_list", "start_process", "stop_process",
-                "open_path", "powershell", "native_shell",
-            }
-            if planned[0] not in supported:
-                event("os_action_delegated_to_chat", action=str(planned[0])[:80], owner_id=owner_id)
-                return original_chat(message, owner_id=owner_id, session_id=session_id)
-            sid = self._ensure_session(owner_id, session_id)
-            now = utcnow()
-            with self.storage.connection() as conn:
-                conn.execute("INSERT INTO messages(session_id,role,content,created_at) VALUES(?,?,?,?)", (sid, "user", text, now))
-                count = int(conn.execute("SELECT COUNT(*) AS c FROM messages WHERE session_id=?", (sid,)).fetchone()["c"])
-                if count == 1:
-                    conn.execute("UPDATE sessions SET title=?,title_source=?,updated_at=? WHERE id=?", (" ".join(text.split())[:80], "auto", now, sid))
-            answer = controller.handle_user_request(text, owner_id=owner_id, planned=planned) or "Системное действие не распознано."
-            return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer), "sources": [], "os_action": True}
-        return original_chat(message, owner_id=owner_id, session_id=session_id)
-
-    app.chat = MethodType(chat_with_os, app)
     return controller
 
 

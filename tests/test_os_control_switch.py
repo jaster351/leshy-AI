@@ -210,6 +210,68 @@ class OperatingSystemSwitchTests(unittest.TestCase):
         self.assertEqual(row["status"], "cancelled")
         self.assertEqual(path.read_text(encoding="utf-8"), "keep")
 
+    def test_model_mutation_requires_exact_owner_confirmation(self):
+        self.enable()
+        planned = ("native_shell", {"command": "echo hello"})
+        with patch.object(OperatingSystemController, "execute",
+                          return_value=OSActionResult("native_shell", True, "Выполнено", "hello")) as execute:
+            response = self.controller.handle_model_action(planned, owner_id="web:local", session_id="")
+            self.assertTrue(response["approval_required"])
+            approval = response["approval"]
+            self.assertEqual(approval["action"], "native_shell")
+            self.assertEqual(approval["yes_label"], "Да, выполнить")
+            self.assertIn("echo hello", approval["description"])
+            execute.assert_not_called()
+            self.assertEqual(self.controller.pending(owner_id="web:local")[0]["id"], approval["id"])
+            with self.assertRaises(PermissionError):
+                self.controller.resolve(approval["id"], owner_id="another-owner", allow=True)
+            execute.assert_not_called()
+            result = self.controller.resolve(approval["id"], owner_id="web:local", allow=True)
+            self.assertEqual(result["status"], "executed")
+            self.assertIn("hello", result["message"])
+            execute.assert_called_once_with("native_shell", {"command": "echo hello"}, owner_id="web:local")
+            self.controller.resolve(approval["id"], owner_id="web:local", allow=True)
+            self.assertEqual(execute.call_count, 1)
+
+    def test_model_mutation_is_revoked_when_module_disabled(self):
+        self.enable()
+        with patch.object(OperatingSystemController, "execute") as execute:
+            response = self.controller.handle_model_action(
+                ("make_dir", {"path": "test-folder"}), owner_id="web:local", session_id="")
+            aid = response["approval"]["id"]
+            set_module_enabled(self.storage, "os-control", False)
+            self.controller.sync_enabled()
+            self.enable()
+            self.assertEqual(self.controller.resolve(aid, owner_id="web:local", allow=True)["status"], "cancelled")
+            execute.assert_not_called()
+
+    def test_model_read_only_uses_existing_executor(self):
+        self.enable()
+        with patch.object(OperatingSystemController, "execute",
+                          return_value=OSActionResult("system_status", True, "Получено", {"os": "test"})) as execute:
+            response = self.controller.handle_model_action(
+                ("system_status", {}), owner_id="web:local", session_id="")
+            self.assertIn("Получено", response)
+            self.assertIn("test", response)
+            execute.assert_called_once_with("system_status", {}, owner_id="web:local")
+
+    def test_model_approval_is_isolated_from_legacy_delete_table(self):
+        self.enable()
+        response = self.controller.handle_model_action(
+            ("write_text", {"path": "example.txt", "content": "test"}),
+            owner_id="web:local", session_id="")
+        aid = response["approval"]["id"]
+        self.assertTrue(aid.startswith("model_"))
+        with self.storage.connection() as conn:
+            self.assertIsNone(conn.execute(
+                "SELECT id FROM os_action_approvals WHERE id=?", (aid,)).fetchone())
+            row = conn.execute(
+                "SELECT action FROM os_model_action_approvals WHERE id=?", (aid,)).fetchone()
+        self.assertEqual(row["action"], "write_text")
+        another = ApprovalOperatingSystemController(self.app)
+        self.addCleanup(another._gate.disable)
+        self.assertEqual(another.resolve(aid, owner_id="web:local", allow=True)["status"], "cancelled")
+
     def test_untracked_opening_is_refused(self):
         self.enable()
         result = self.controller.execute("open_path", {"path": str(Path(self.tmp.name))})

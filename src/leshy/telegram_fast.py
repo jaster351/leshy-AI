@@ -489,15 +489,6 @@ class FastTelegramBridge(RichTelegramBridge):
         if command in _ADMIN_COMMANDS and not owner:
             self._send(chat_id, "Эта команда доступна только хозяину Лешего.")
             return
-        os_control = getattr(self.app, "os_control", None)
-        if os_control is not None and os_control.is_request(text) and not owner:
-            # Специализированная «Лента» — не локальная ОС. Не блокируем
-            # команду корзины только из-за слов «открой» или «выполни».
-            from .lenta_runtime import _explicit_lenta
-            if not _explicit_lenta(text):
-                self._send(chat_id, "Управление операционной системой доступно только хозяину Лешего.")
-                return
-
         if text in {"/whoami", "/id"}:
             if chat.get("type") != "private":
                 self._send(chat_id, "Проверяйте Telegram ID в личном чате с ботом: /whoami")
