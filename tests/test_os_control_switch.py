@@ -255,6 +255,23 @@ class OperatingSystemSwitchTests(unittest.TestCase):
             self.assertIn("test", response)
             execute.assert_called_once_with("system_status", {}, owner_id="web:local")
 
+    def test_model_approval_is_isolated_from_legacy_delete_table(self):
+        self.enable()
+        response = self.controller.handle_model_action(
+            ("write_text", {"path": "example.txt", "content": "test"}),
+            owner_id="web:local", session_id="")
+        aid = response["approval"]["id"]
+        self.assertTrue(aid.startswith("model_"))
+        with self.storage.connection() as conn:
+            self.assertIsNone(conn.execute(
+                "SELECT id FROM os_action_approvals WHERE id=?", (aid,)).fetchone())
+            row = conn.execute(
+                "SELECT action FROM os_model_action_approvals WHERE id=?", (aid,)).fetchone()
+        self.assertEqual(row["action"], "write_text")
+        another = ApprovalOperatingSystemController(self.app)
+        self.addCleanup(another._gate.disable)
+        self.assertEqual(another.resolve(aid, owner_id="web:local", allow=True)["status"], "cancelled")
+
     def test_untracked_opening_is_refused(self):
         self.enable()
         result = self.controller.execute("open_path", {"path": str(Path(self.tmp.name))})
