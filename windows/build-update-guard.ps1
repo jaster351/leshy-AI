@@ -158,7 +158,12 @@ function Start-LeshyElevated {
       if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw 'The scheduled build is not running with elevated administrator rights.'
       }
-      $process = Start-Process -FilePath $exe -WorkingDirectory $dir -ArgumentList '--no-browser --scheduled-start' -WindowStyle Hidden -PassThru -ErrorAction Stop
+      $launchArgs = '--no-browser --scheduled-start'
+      # Session 0 has no interactive desktop. Keep the runtime, not its tray.
+      if ([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0) {
+        $launchArgs += ' --no-tray'
+      }
+      $process = Start-Process -FilePath $exe -WorkingDirectory $dir -ArgumentList $launchArgs -WindowStyle Hidden -PassThru -ErrorAction Stop
     } else {
       # An interactive build still asks Windows for explicit UAC approval.
       $process = Start-Process -FilePath $exe -WorkingDirectory $dir -Verb RunAs -PassThru -ErrorAction Stop
