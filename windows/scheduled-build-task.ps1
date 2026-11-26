@@ -10,7 +10,7 @@ $RequestPath = Join-Path $AutoRoot 'update-request.json'
 $StatusPath = Join-Path $AutoRoot 'update-status.json'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
-$mutexName = 'Local\LeshyAutoBuilderCore-' +
+$mutexName = 'Global\LeshyAutoBuilderCore-' +
     ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
 if ($mutexName.Length -gt 240) { $mutexName = $mutexName.Substring(0,240) }
 $mutex = New-Object System.Threading.Mutex($false, $mutexName)

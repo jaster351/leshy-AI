@@ -42,6 +42,10 @@ $every15Minutes = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -R
 $onLogon = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
 
 # Use the local admin account without saving its password in this task.
+$existingTask = Get-ScheduledTask -TaskName $TaskName -TaskPath '\' -ErrorAction SilentlyContinue
+if ($existingTask -and [string]$existingTask.Principal.LogonType -eq 'Password') {
+    throw 'Existing unattended task must not be overwritten. Use windows/enable-unattended-tasks.ps1 to manage its registration.'
+}
 $runAs = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Highest
 
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries

@@ -449,7 +449,7 @@ function Get-CoreStatus {
     } | ConvertTo-Json -Depth 4
 }
 
-$mutexName = 'Local\LeshyAutoBuilderCore-' + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
+$mutexName = 'Global\LeshyAutoBuilderCore-' + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RepoRoot))).Replace('=','').Replace('/','_').Replace('+','-')
 if ($mutexName.Length -gt 240) { $mutexName = $mutexName.Substring(0,240) }
 $mutex = New-Object System.Threading.Mutex($false, $mutexName)
 $hasMutex = $false
