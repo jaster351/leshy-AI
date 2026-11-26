@@ -475,7 +475,7 @@ refreshStatus();loadSessions();setInterval(refreshStatus,3000);
         (data.delivery_status?' · Обновлятор: '+(deliveryNames[data.delivery_status]||'Нет подтверждения'):'')+
         (data.delivery_checked_at?' · Проверка доставки: '+data.delivery_checked_at:'')+
         (Number.isInteger(data.delivered_count)?' · Скачано вопросов: '+data.delivered_count:'')+(data.truncated?' · Показаны до 50 записей':'')+(data.export_sha256?' · SHA-256 экспорта для локальной проверки: '+data.export_sha256:'')+
-        (Number.isInteger(data.training_quota)?' · Вопросов за цикл: '+data.training_quota:'')+
+        (Number.isInteger(data.training_quota)?' · Технический предел вопросов за цикл: '+data.training_quota:'')+
         (typeof data.review_quality==='number'?' · Оценка наставника: '+Math.round(data.review_quality*100)+'%':' · Оценка ещё не получена')+
         (Number.isInteger(data.applied_reviews_count)?' · Применено отчётов: '+data.applied_reviews_count:'')+
         (data.open_investigations?' · Требуют разбора: '+data.open_investigations:'');
