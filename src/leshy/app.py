@@ -494,6 +494,15 @@ class LeshyApp:
                 "created_at": self._save_assistant(sid, answer), "sources": [],
             }
 
+        from .os_model_router import select_os_action, NO_OS_RECEIPT
+        planned = select_os_action(self, message, rows, owner_id=owner_id, infer=self.llm.chat)
+        if planned is not None:
+            response = self.os_control.handle_model_action(planned, owner_id=owner_id, session_id=sid)
+            approval = response.get("approval") if isinstance(response, dict) else None
+            answer = str(response.get("message") or "") if isinstance(response, dict) else str(response or "")
+            return {"session_id": sid, "answer": answer, "created_at": self._save_assistant(sid, answer),
+                    "sources": [], "os_action": True, "approval": approval}
+
         image_prompt = self._image_prompt(message)
         image_job = self.image_generation.enqueue(image_prompt) if image_prompt is not None else None
 
@@ -518,6 +527,7 @@ class LeshyApp:
                 "или об устаревших шаблонах. Напиши готовый текст локально.",
             )
         context.append(ChatMessage("system", FACTUAL_EVIDENCE_POLICY))
+        context.append(ChatMessage("system", NO_OS_RECEIPT))
         # Every ordinary message reaches the LLM. Data from legacy factual/
         # memory tools is added as evidence, never returned as a canned answer.
         from .conversation_tool_evidence import conversation_tool_evidence
