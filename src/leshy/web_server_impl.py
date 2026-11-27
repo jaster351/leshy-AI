@@ -57,6 +57,7 @@ def _inject_runtime_ui(html: str) -> str:
         '<script src="/nas-panel.js"></script>',
         '<script src="/variant3.js"></script>',
         '<script src="/chat-extras.js"></script>',
+        '<script src="/network-security-panel.js"></script>',
     )
     scripts = "".join(marker + "\n" for marker in markers if marker not in html)
     if scripts:

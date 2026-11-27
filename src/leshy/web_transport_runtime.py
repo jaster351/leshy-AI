@@ -1,0 +1,522 @@
+"""HTTP/HTTPS на сетевых интерфейсах используют один handler и экземпляр Лешего."""
+from __future__ import annotations
+
+from contextlib import contextmanager
+from contextvars import ContextVar
+from http.server import ThreadingHTTPServer
+import errno
+import ipaddress
+import os
+import secrets
+from pathlib import Path
+import socket
+import threading
+import time
+from typing import Any, Callable
+
+from .diagnostics import problem
+from .web_certificates import WebCertificateStore, covers_hostname
+from .web_listeners import binding_addresses, create_listener
+from .web_readiness import probe_listener
+from .web_transport_settings import WebTransportSettings, validate_settings
+
+
+_listener_callback: ContextVar[Callable[[str], None] | None] = ContextVar("leshy_listener_callback", default=None)
+
+
+@contextmanager
+def listener_ready(callback: Callable[[str], None] | None):
+    """Передать launcher-уведомление через существующую цепочку serve без глобальной гонки."""
+    token = _listener_callback.set(callback)
+    try:
+        yield
+    finally:
+        _listener_callback.reset(token)
+
+
+class WebTransportRuntime:
+    def __init__(self, brain_dir: Path | str, host: str, explicit_http_port: int | None = None):
+        self.settings = WebTransportSettings(brain_dir)
+        self.configuration = self.settings.effective(explicit_http_port)
+        self._http_override = explicit_http_port is not None or "LESHY_PORT" in os.environ
+        self._https_override = "LESHY_HTTPS_PORT" in os.environ
+        self.host = host
+        self._on_listening = _listener_callback.get()
+        self.lock = threading.RLock()
+        self.certificates = WebCertificateStore(brain_dir, lambda: self.settings.load()["hostname"])
+        self._servers: dict[str, ThreadingHTTPServer] = {}
+        self._threads: dict[str, threading.Thread] = {}
+        self._bindings: dict[str, dict[str, Any]] = {}
+        self._states: dict[str, dict[str, Any]] = {
+            name: {"enabled": self.configuration[name + "_enabled"],
+                   "port": self.configuration[name + "_port"], "listening": False,
+                   "status": "not_started" if self.configuration[name + "_enabled"] else "disabled"}
+            for name in ("http", "https")
+        }
+        self._handler = None
+        self._running = False
+        self._stopping = threading.Event()
+        # Запуск/остановка продления не берут core-lock и не могут разминуться.
+        self._issuer_lifecycle_lock = threading.RLock()
+        from .web_local_ca import WebLocalCAService
+        self.local_ca = WebLocalCAService(
+            brain_dir, self.prepare_certificate, self.install_prepared_certificate,
+            self.certificates.stored_fingerprint, lambda: self.settings.load()["hostname"])
+        from .web_acme import WebAcmeService
+        self.acme = WebAcmeService(brain_dir, self.install_certificate, self._http01_available)
+
+    def _http01_available(self) -> bool:
+        with self.lock:
+            return bool(self.settings.load()["http_enabled"] and self._states["http"].get("ready") is True)
+
+    def listening_url(self) -> str | None:
+        """Только реально запущенный listener; не открывать чужой сервис на занятом порте."""
+        with self.lock:
+            for protocol in ("http", "https"):
+                if not self._states[protocol]["listening"]:
+                    continue
+                for name, thread in self._threads.items():
+                    if self._protocol(name) != protocol or not thread.is_alive():
+                        continue
+                    binding = self._bindings.get(name, self._states[protocol])
+                    if not binding["listening"] or binding.get("ready") is not True:
+                        continue
+                    if protocol == "https":
+                        host = self.configuration["hostname"]
+                        if (not host or self.certificates.context() is None
+                                or not covers_hostname(self.certificates.status(), host)):
+                            continue
+                    else:
+                        host = binding.get("address", self.host)
+                        host = "127.0.0.1" if host in {"", "auto", "0.0.0.0"} else "::1" if host == "::" else host
+                    if ":" in host:
+                        host = "[" + host.replace("%", "%25") + "]"
+                    return f"{protocol}://{host}:{binding['port']}/"
+            return None
+
+    def cluster_profile(self, local_ipv4: str) -> dict:
+        """Кандидат endpoint по живым привязкам; внешняя достижимость не доказана."""
+        unavailable = {"endpoint": None, "accepts_remote": False,
+                       "reason": "Нет пригодного входящего HTTP/HTTPS endpoint; проверьте адрес, SAN или явный advertise",
+                       "reachability_verified": False}
+        with self.lock:
+            for protocol in ("http", "https"):
+                if not self._states[protocol]["listening"]:
+                    continue
+                for name, thread in self._threads.items():
+                    if self._protocol(name) != protocol or not thread.is_alive():
+                        continue
+                    binding = self._bindings.get(name)
+                    if not binding or not binding["listening"] or binding.get("ready") is not True:
+                        continue
+                    try:
+                        address = ipaddress.ip_address(binding["address"].split("%", 1)[0])
+                    except ValueError:
+                        continue
+                    if address.is_loopback:
+                        continue
+                    if protocol == "https":
+                        host = self.configuration["hostname"]
+                        if (not host or host == "localhost" or host.endswith(".localhost")
+                                or self.certificates.context() is None
+                                or not covers_hostname(self.certificates.status(), host)):
+                            continue
+                        try:
+                            target = ipaddress.ip_address(host)
+                            if target.is_loopback or target.is_unspecified or (target.version == 6 and target.is_link_local):
+                                continue
+                        except ValueError:
+                            pass
+                    else:
+                        if address.is_unspecified:
+                            if address.version != 4:
+                                continue  # Не изобретать удалённый IPv6 адрес из wildcard ::.
+                            try:
+                                address = ipaddress.IPv4Address(local_ipv4)
+                            except ValueError:
+                                continue
+                        if address.is_loopback or address.is_unspecified or (address.version == 6 and address.is_link_local):
+                            continue
+                        host = str(address)
+                    if ":" in host:
+                        host = "[" + host.replace("%", "%25") + "]"
+                    return {"endpoint": f"{protocol}://{host}:{binding['port']}", "accepts_remote": True,
+                            "reason": "Кандидат по работающему listener; DNS/сеть и доверие CA у соседей не проверены",
+                            "reachability_verified": False}
+        return unavailable
+
+    @staticmethod
+    def _protocol(name: str) -> str:
+        return name.split("/", 1)[0]
+
+    def _refresh_protocol(self, protocol: str) -> None:
+        """Под self.lock; каждое семейство сохраняет собственный фактический результат."""
+        bindings = [item for name, item in self._bindings.items() if self._protocol(name) == protocol]
+        if not bindings:
+            return
+        listening = any(item["listening"] for item in bindings)
+        bound = any(item["status"] == "bound" for item in bindings)
+        stopped = any(item["status"] == "stopped" for item in bindings)
+        state = "listening" if listening else "bound" if bound else "stopped" if stopped else "bind_failed"
+        self._states[protocol].update(listening=listening, status=state,
+                                     ready=any(item.get("ready") is True for item in bindings),
+                                     error="" if listening or bound else "Нет доступной привязки " + protocol.upper())
+
+    def _bind(self, protocol: str) -> None:
+        if (any(self._protocol(name) == protocol for name in self._servers)
+                or not self.configuration[protocol + "_enabled"]):
+            return
+        if protocol == "https" and self.certificates.context() is None:
+            self._states[protocol].update(status="waiting_certificate", listening=False,
+                                         error="Загрузите сертификат, получите его через ACME или создайте локальный CA")
+            return
+        candidates = binding_addresses(self.host, self.configuration[protocol + "_port"])
+        last_error = None
+        for index, (family, address) in enumerate(candidates):
+            name = protocol if index == 0 else protocol + "/" + str(index)
+            binding = {"family": "IPv6" if family == socket.AF_INET6 else "IPv4",
+                       "address": address[0], "port": address[1], "listening": False,
+                       "ready": False, "readiness_error": "", "status": "not_started"}
+            self._bindings[name] = binding
+            try:
+                server = create_listener(family, address, self._handler,
+                                         self.certificates if protocol == "https" else None)
+            except OSError as exc:
+                last_error = exc
+                unavailable = exc.errno in {errno.EAFNOSUPPORT, errno.EPROTONOSUPPORT, errno.ENOPROTOOPT,
+                                           10047, 10043, 10042}
+                binding.update(status="unavailable" if unavailable else "bind_failed",
+                               error="Семейство адресов недоступно" if unavailable else "Адрес или порт занят либо недоступен")
+                continue
+            self._servers[name] = server
+            server._leshy_readiness_secret = secrets.token_bytes(32)
+            binding.update(address=server.server_address[0], port=server.server_address[1], status="bound")
+            if len(server.server_address) > 3 and server.server_address[3] and "%" not in binding["address"]:
+                binding["address"] += "%" + str(server.server_address[3])
+            self._states[protocol]["port"] = server.server_address[1]
+        self._refresh_protocol(protocol)
+        if not any(self._protocol(name) == protocol for name in self._servers):
+            if last_error is not None:
+                raise last_error
+            raise OSError("Не найдены подходящие адреса для привязки")
+
+    def bind(self, handler) -> None:
+        # После долгого выключения собственный leaf может истечь. Уже разрешённое
+        # локальное продление выполняется до bind, иначе HTTPS-only не запустится.
+        # Сеть и worker для этого не нужны; pending/чужой сертификат tick не меняет.
+        with self._issuer_lifecycle_lock:
+            if not self._stopping.is_set() and not self._running:
+                with self.acme.configuration_guard() as acme:
+                    if acme.get("enabled") is False and acme.get("in_progress") is False:
+                        self.local_ca.tick()
+        with self.lock:
+            self._handler = handler
+            try:
+                for name in ("http", "https"):
+                    try:
+                        self._bind(name)
+                    except OSError:
+                        self._states[name].update(status="bind_failed", listening=False,
+                                                  error="Порт " + name.upper() + " занят или недоступен")
+                if not self._servers:
+                    raise RuntimeError("Ни одна HTTP/HTTPS привязка недоступна; проверьте адреса, порты и сертификат")
+            except BaseException:
+                for server in self._servers.values():
+                    server.server_close()
+                self._servers.clear()
+                raise
+
+    def _start_server(self, name: str) -> None:
+        if name in self._threads:
+            return
+        server = self._servers[name]
+        protocol = self._protocol(name)
+        binding = self._bindings[name]
+        failed = threading.Event()
+        server._leshy_failed = failed
+
+        def run() -> None:
+            try:
+                server.serve_forever(poll_interval=0.25)
+            except Exception as exc:
+                problem("web_listener_failed", type(exc).__name__, protocol=name)
+            finally:
+                failed.set()
+                with self.lock:
+                    binding.update(listening=False, ready=False, status="stopped")
+                    self._refresh_protocol(protocol)
+
+        thread = threading.Thread(target=run, name="leshy-" + name, daemon=True)
+        self._threads[name] = thread
+        try:
+            thread.start()
+        except BaseException:
+            self._threads.pop(name, None)
+            server.server_close()
+            self._servers.pop(name, None)
+            binding.update(listening=False, status="start_failed", error="Не удалось запустить обработчик")
+            self._refresh_protocol(protocol)
+            raise
+        binding.update(listening=not failed.is_set(), ready=False,
+                       status="stopped" if failed.is_set() else "listening")
+        self._refresh_protocol(protocol)
+
+    def _verify_listeners(self, budget: float = 2.0) -> None:
+        """Проверять вне core; handler не должен ждать lock вызывающего его probe."""
+        deadline = time.monotonic() + budget
+        with self.lock:
+            names = [name for name, value in self._bindings.items()
+                     if value["listening"] and value.get("ready") is not True]
+        for name in names:
+            if self._stopping.is_set() or time.monotonic() >= deadline:
+                break
+            with self.lock:
+                server, thread = self._servers.get(name), self._threads.get(name)
+                if server is None or thread is None or not thread.is_alive():
+                    continue
+                failed = getattr(server, "_leshy_failed", None)
+                if failed is not None and failed.is_set() is True:
+                    continue
+                protocol = self._protocol(name)
+                configured_hostname = self.configuration["hostname"] if protocol == "https" else ""
+                snapshot = None
+                if protocol == "https":
+                    try:
+                        snapshot = self.certificates.readiness_tls_snapshot(configured_hostname)
+                    except (OSError, ValueError, RuntimeError):
+                        pass
+                if protocol == "https" and snapshot is None:
+                    self._bindings[name]["readiness_error"] = "TLS-проверка своего сертификата недоступна"
+                    continue
+                context, fingerprint, hostname = snapshot if snapshot is not None else (None, "", "")
+                family, address = server.address_family, tuple(server.server_address)
+                secret = server._leshy_readiness_secret
+            ready = probe_listener(family=family, address=address, secret=secret,
+                                   tls_context=context, server_hostname=hostname,
+                                   fingerprint_sha256=fingerprint,
+                                   deadline=min(deadline, time.monotonic() + 0.5),
+                                   stopped=self._stopping.is_set)
+            with self.lock:
+                if self._servers.get(name) is not server:
+                    continue
+                ready = (ready and not self._stopping.is_set() and thread.is_alive()
+                         and not (failed is not None and failed.is_set() is True))
+                if ready and protocol == "https":
+                    ready = (self.configuration["hostname"] == configured_hostname
+                             and self.certificates.context() is not None
+                             and self.certificates.status().get("fingerprint_sha256") == fingerprint)
+                self._bindings[name].update(ready=bool(ready), readiness_error="" if ready else
+                                           "Ответ своего HTTP(S) обработчика пока не подтверждён")
+                self._refresh_protocol(protocol)
+
+    def _notify_ready(self) -> None:
+        with self.lock:
+            if self._stopping.is_set() or not self._on_listening:
+                return
+            url = self.listening_url()
+            if not url:
+                return
+            callback, self._on_listening = self._on_listening, None
+        if not self._stopping.is_set():
+            try:
+                callback(url)
+            except Exception as exc:
+                problem("web_browser_open_failed", type(exc).__name__)
+
+    def serve_forever(self) -> None:
+        try:
+            self._serve_forever()
+        finally:
+            with self.lock:
+                self._running = False
+
+    def _serve_forever(self) -> None:
+        with self.lock:
+            if self._stopping.is_set():
+                return
+            self._running = True
+            for name in list(self._servers):
+                if self._stopping.is_set():
+                    break
+                try:
+                    self._start_server(name)
+                except (OSError, RuntimeError) as exc:
+                    problem("web_listener_start_failed", type(exc).__name__, protocol=self._protocol(name))
+            if self._stopping.is_set():
+                return
+            if not any(thread.is_alive() for thread in self._threads.values()):
+                raise RuntimeError("Не запущен ни один HTTP/HTTPS обработчик")
+        self._verify_listeners()
+        self._start_issuers()
+        self._notify_ready()
+        retry_at = time.monotonic() + 5
+        while not self._stopping.wait(0.5):
+            with self.lock:
+                if not any(thread.is_alive() for thread in self._threads.values()):
+                    break
+            if time.monotonic() >= retry_at:
+                self._verify_listeners(budget=0.5)
+                self._notify_ready()
+                retry_at = time.monotonic() + 5
+
+    def install_certificate(self, certificate_pem: str, private_key_pem: str,
+                            password: str | None = None) -> dict:
+        # Callback ACME уже держит его lock: подготовка освобождает core до local CA.
+        prepared = self.prepare_certificate(certificate_pem, private_key_pem, password)
+        return self.local_ca.replace_certificate_manually(lambda: self.install_prepared_certificate(prepared))
+
+    def prepare_certificate(self, certificate_pem: str, private_key_pem: str,
+                            password: str | None = None):
+        with self.lock:
+            return self.certificates.prepare(certificate_pem, private_key_pem, password)
+
+    def import_certificate(self, certificate_pem: str, private_key_pem: str,
+                           password: str | None = None) -> dict:
+        prepared = self.prepare_certificate(certificate_pem, private_key_pem, password)
+        return self.acme.replace_certificate_manually(
+            lambda: self.local_ca.replace_certificate_manually(lambda: self.install_prepared_certificate(prepared)),
+            installed_fingerprint=self.certificates.stored_fingerprint)
+
+    def issue_local_certificate(self, body: dict) -> dict:
+        with self.lock:
+            if self._stopping.is_set():
+                raise RuntimeError("Сервер останавливается; локальный сертификат не изменён")
+        with self.acme.configuration_guard() as acme:
+            if acme.get("in_progress") is not False:
+                raise ValueError("Дождитесь завершения текущего запроса ACME перед локальным выпуском")
+            result = self.acme.replace_certificate_manually(
+                lambda: self.local_ca.issue(body), installed_fingerprint=self.certificates.stored_fingerprint)
+        self._start_issuers(local_only=True)
+        return result
+
+    def disable_local_ca(self, body: dict) -> dict:
+        return self.local_ca.disable(body)
+
+    def configure_acme(self, body: dict) -> dict:
+        # Общий порядок ACME → local CA → core исключает два активных продления.
+        # ACME может вернуть state=error после сохранения настроек: тогда локальное
+        # продление остаётся выключенным, а фактический результат виден в статусе.
+        with self.acme.configuration_guard():
+            return self.local_ca.replace_certificate_manually(lambda: self.acme.configure(body))
+
+    def issue_acme(self, body: dict) -> dict:
+        with self.acme.configuration_guard():
+            return self.local_ca.replace_certificate_manually(lambda: self.acme.issue(body))
+
+    def _start_issuers(self, *, local_only: bool = False) -> None:
+        with self._issuer_lifecycle_lock:
+            # close выставляет событие до захвата lock; поздний HTTP-запрос не
+            # возобновляет продление после остановки сервера.
+            if self._stopping.is_set() or not self._running:
+                return
+            with self.acme.configuration_guard() as acme:
+                if not local_only:
+                    self.acme.start()
+                if acme.get("enabled") is False and acme.get("in_progress") is False:
+                    self.local_ca.start()
+
+    def install_prepared_certificate(self, prepared) -> dict:
+        with self.lock:
+            if self._stopping.is_set():
+                raise RuntimeError("Сервер останавливается; сертификат не изменён")
+            value = self.certificates.install_prepared(prepared)
+            for name, binding in self._bindings.items():
+                if self._protocol(name) == "https":
+                    binding.update(ready=False, readiness_error="Новый сертификат ожидает проверки HTTPS-ответа")
+            self._states["https"]["ready"] = False
+            # Новые TLS-соединения получают новый контекст. Существующие не обрываем.
+            if (self._running and self.configuration["https_enabled"]
+                    and not any(self._protocol(name) == "https" for name in self._servers)):
+                try:
+                    self._bind("https")
+                    for name in list(self._servers):
+                        if self._protocol(name) == "https":
+                            try:
+                                self._start_server(name)
+                            except (OSError, RuntimeError):
+                                pass
+                    if not self._states["https"]["listening"]:
+                        raise RuntimeError("HTTPS не запущен")
+                except (OSError, RuntimeError):
+                    self._states["https"].update(status="bind_failed", listening=False,
+                                                 error="Сертификат сохранён; порт HTTPS занят или недоступен")
+            value["active_for_new_connections"] = bool(self._states["https"].get("ready") is True and value.get("valid"))
+            return value
+
+    def save_settings(self, body: dict) -> dict:
+        # Единый порядок ACME → core не допускает гонку HTTP-off с configure/renewal.
+        with self.acme.configuration_guard() as acme:
+            return self._save_settings(body, acme)
+
+    def _save_settings(self, body: dict, acme: dict) -> dict:
+        with self.lock:
+            prospective = validate_settings({**self.settings.load(), **body})
+            effective = dict(prospective)
+            if self._http_override:
+                effective["http_port"] = self.configuration["http_port"]
+            if self._https_override:
+                effective["https_port"] = self.configuration["https_port"]
+            try:
+                validate_settings(effective)
+            except ValueError as exc:
+                raise ValueError("С учётом портов, заданных при запуске: " + str(exc)) from exc
+            if not prospective["http_enabled"]:
+                if acme["in_progress"] or (acme["enabled"] and acme["auto_renew"]):
+                    raise ValueError("Перед выключением HTTP завершите выпуск и отключите автопродление HTTP-01")
+                if (self.certificates.context() is None
+                        or not covers_hostname(self.certificates.status(), prospective["hostname"])):
+                    raise ValueError("Перед выключением HTTP загрузите действующий сертификат для указанного имени сервера")
+            value = self.settings.save(body)
+            return {"settings": value, "restart_required": value != self.configuration}
+
+    def status(self) -> dict:
+        # Статусы издателей читаются вне core: порядок ACME → local CA → core.
+        with self.lock:
+            value = self.settings.load()
+            states = {name: dict(state) for name, state in self._states.items()}
+            for protocol, state in states.items():
+                state["bindings"] = [dict(binding) for name, binding in self._bindings.items()
+                                     if self._protocol(name) == protocol]
+            certificate = self.certificates.status()
+            certificate["hostname_matches_settings"] = covers_hostname(certificate, value["hostname"])
+            certificate["active_for_new_connections"] = bool(states["https"].get("ready") is True and certificate.get("valid"))
+            runtime = {**states, "host": self.host, "restart_required": value != self.configuration,
+                       "applied_settings": dict(self.configuration),
+                       "http_port_override": self._http_override,
+                       "https_port_override": self._https_override}
+        acme = self.acme.status()
+        # Внутренняя проба своего handler не проверяет публичные DNS/NAT/TCP80.
+        acme["http01_public_port_80_verified"] = False
+        return {"settings": value, "runtime": runtime, "certificate": certificate,
+                "acme": acme, "local_ca": self.local_ca.status(),
+                "capabilities": {"configure": True, "import_certificate": True,
+                                 "acme": True, "local_ca": True, "browser_trust_verified": False}}
+
+    def shutdown(self) -> None:
+        """Совместимый сигнал Windows tray; cleanup выполняет основной serve/finally."""
+        self._stopping.set()
+
+    def close(self) -> None:
+        self._stopping.set()
+        with self._issuer_lifecycle_lock:
+            for name, service in (("acme", self.acme), ("local_ca", self.local_ca)):
+                try:
+                    service.stop()
+                except Exception as exc:
+                    problem("web_" + name + "_shutdown_failed", type(exc).__name__)
+        with self.lock:
+            servers = list(self._servers.items())
+        for name, server in servers:
+            thread = self._threads.get(name)
+            if thread and thread.is_alive():
+                server.shutdown()
+            server.server_close()
+        for thread in list(self._threads.values()):
+            if thread.is_alive():
+                thread.join(timeout=5)
+        with self.lock:
+            self._running = False
+            for state in self._states.values():
+                state.update(listening=False, ready=False, status="stopped")
+            for binding in self._bindings.values():
+                binding.update(listening=False, ready=False, status="stopped")
