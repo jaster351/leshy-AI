@@ -100,8 +100,10 @@ class WindowsLogRegressions(unittest.TestCase):
 
     def test_voice_ui_preserves_draft_and_uses_longer_pauses(self):
         javascript = (Path(__file__).resolve().parents[1] / "web" / "voice-live.js").read_text(encoding="utf-8")
-        self.assertIn("NORMAL_SILENCE_MS=5000", javascript)
-        self.assertIn("const finalText=await transcribeSnapshot(true,generation);", javascript)
+        self.assertIn("spokenFor<1600?6500:spokenFor<3500?5500:5000", javascript)
+        self.assertIn("const text=await transcribe(capture,true);", javascript)
+        self.assertIn("Завершённая запись не подтвердила промежуточный текст", javascript)
+        self.assertIn("capture.localFinal=await capture.local.stop()", javascript)
         self.assertIn("chatDictateButton", javascript)
         self.assertIn("send:state.mode==='conversation'", javascript)
 

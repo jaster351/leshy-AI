@@ -97,7 +97,7 @@
   function ensureCallDialog(){
     callStyle();let dialog=$('leshyCallDialog');if(dialog)return dialog;
     dialog=document.createElement('dialog');dialog.id='leshyCallDialog';dialog.setAttribute('aria-labelledby','leshyCallTitle');dialog.setAttribute('aria-modal','false');
-    dialog.innerHTML='<div class="call-header"><h2 id="leshyCallTitle">Разговор с Лешим</h2><button id="leshyCallClose" type="button" aria-label="Закрыть и завершить разговор">×</button></div><div class="call-body"><div class="call-wave" aria-hidden="true"></div><p id="leshyCallStatus" role="status" aria-live="polite"></p><p id="leshyCallError" hidden></p><p class="call-hint">Говорите обычными фразами. После ответа Леший снова начнёт слушать. Ответ можно прервать кнопкой.</p><div class="call-controls"><button id="leshyCallStart" type="button">Позвонить</button><button id="leshyCallInterrupt" type="button">Прервать ответ</button><button id="leshyCallServer" type="button">Распознавать на сервере</button><button id="leshyCallEnd" type="button" aria-label="Завершить разговор">■</button><button id="leshyCallSend" type="button" aria-label="Отправить реплику">↑</button></div></div>';
+    dialog.innerHTML='<div class="call-header"><h2 id="leshyCallTitle">Разговор с Лешим</h2><button id="leshyCallClose" type="button" aria-label="Закрыть и завершить разговор">×</button></div><div class="call-body"><div class="call-wave" aria-hidden="true"></div><p id="leshyCallStatus" role="status" aria-live="polite"></p><p id="leshyCallError" hidden></p><p class="call-hint">Говорите обычными фразами. После ответа Леший снова начнёт слушать. Ответ можно прервать кнопкой.</p><div class="call-controls"><button id="leshyCallStart" type="button">Позвонить</button><button id="leshyCallInterrupt" type="button">Прервать ответ</button><button id="leshyCallServer" type="button">Распознавать на сервере (передача аудио)</button><button id="leshyCallEnd" type="button" aria-label="Завершить разговор">■</button><button id="leshyCallSend" type="button" aria-label="Отправить реплику">↑</button></div></div>';
     const composer=document.querySelector('#pane-chat .composer');
     (composer?.parentElement||document.body).appendChild(dialog);
     const wave=dialog.querySelector('.call-wave');
@@ -127,14 +127,16 @@
   function renderCall(detail){
     callState=Object.assign({},callState,detail||{});
     const active=!!callState.enabled&&callState.mode!=='dictation';
-    const dialog=ensureCallDialog(),phase=callState.mode==='dictation'?'off':(callLabels[callState.phase]?callState.phase:(active?'listening':'off'));
-    if((active||(callState.phase==='error'&&callState.mode==='conversation'))&&!dialog.open)showCallDialog();
+    const dialog=ensureCallDialog(),phase=callLabels[callState.phase]?callState.phase:(active?'listening':'off');
+    if((active||phase==='error'||phase==='downloading')&&!dialog.open)showCallDialog();
+    if(callState.mode==='dictation'&&callState.enabled&&phase==='listening'&&dialog.open)closeCallDialog();
+    if(phase==='off'&&dialog.open&&detail?.reason!=='ready')closeCallDialog();
     dialog.dataset.phase=phase;
     const level=Math.max(0,Math.min(1,Number(callState.level)||0));dialog.style.setProperty('--voice-level',String(level));
-    const label=callLabels[phase];if($('leshyCallStatus').textContent!==label)$('leshyCallStatus').textContent=label;
+    const label=callLabels[phase]+(phase==='listening'?(callState.engine==='server'?' · на сервере':' · на устройстве'):'');if($('leshyCallStatus').textContent!==label)$('leshyCallStatus').textContent=label;
     const error=phase==='error'?String(callState.error||''):'';$('leshyCallError').textContent=error;$('leshyCallError').hidden=!error;
-    $('leshyCallStart').hidden=active;$('leshyCallEnd').hidden=!active;
-    $('leshyCallServer').hidden=active;
+    $('leshyCallStart').hidden=!!callState.enabled;$('leshyCallEnd').hidden=!callState.enabled;
+    $('leshyCallServer').hidden=!!callState.enabled;
     $('leshyCallSend').hidden=!active;$('leshyCallSend').disabled=phase!=='listening';
     const bars=Array.from(dialog.querySelectorAll('.call-wave span'));
     if(detail?.reason==='level'&&phase==='listening'){

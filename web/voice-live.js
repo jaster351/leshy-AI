@@ -40,7 +40,7 @@
   function publishState(reason='state'){
     const detail={
       enabled:state.enabled,recording:state.recording,speaking:state.speaking,
-      phase:state.phase,level:state.level,error:state.error,mode:state.mode,stopped:!state.enabled,reason,
+      phase:state.phase,level:state.level,error:state.error,mode:state.mode,engine:state.engine,stopped:!state.enabled,reason,
     };
     window.leshyVoiceState=detail;
     window.dispatchEvent(new CustomEvent('leshy:voice-state',{detail}));
@@ -646,7 +646,7 @@
           requireSession(epoch);
           if(result.status!=='ready')throw new Error(result.message||'Локальная модель недоступна.');
           state.localLanguage=result.language;
-        }finally{state.controllers.delete(controller)}
+        }finally{controller.abort();state.controllers.delete(controller)}
       }else await output;
       if(current(epoch))await startRecording(epoch);
     }catch(error){if(epoch===null||current(epoch))fail(error)}
@@ -722,7 +722,7 @@
 
   window.leshyVoiceCall={
     start:()=>start('conversation','local'),
-    startServer:()=>start('conversation','server'),
+    startServer:()=>start(state.mode==='dictation'&&state.phase==='error'?'dictation':'conversation','server'),
     send:()=>state.capture?.recording?finishTurn(state.capture):Promise.resolve(),
     stop:()=>stop(),
     interrupt:()=>interrupt(),

@@ -136,7 +136,7 @@ function voice() {
   const env = environment();
   load(env, 'voice-live.js', 'window.__voice={state,sendVoiceTurn,speak,startRecording};');
   env.voice = env.context.__voice;
-  Object.assign(env.voice.state, {enabled: true, epoch: 1, sessionId: 'chat-a'});
+  Object.assign(env.voice.state, {enabled: true, epoch: 1, sessionId: 'chat-a', engine: 'server'});
   return env;
 }
 
