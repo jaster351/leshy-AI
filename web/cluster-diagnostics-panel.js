@@ -87,12 +87,15 @@
       draw(await api('/v1/cluster/diagnostics'));
       try{
         const sync=await api('/v1/cluster/knowledge-sync/status');
-        const state=({waiting:'ожидание соседних ПК',synchronized:'подключено',disabled:'выключено',error:'ошибка'}[sync.state]||sync.state||'неизвестно');
+        const state=({waiting:'ожидание соседних ПК',synchronized:'подключено',disabled:'выключено',error:'ошибка',unsupported_targets:'нет поддерживаемого LAN-IP маршрута репликации'}[sync.state]||sync.state||'неизвестно');
+        const skipped=Array.isArray(sync.skipped_peers)?sync.skipped_peers:[];
+        const reasons={no_endpoint:'нет входящего endpoint',dns_not_supported:'для репликации требуется LAN-IP, DNS пока не поддерживается',outside_lan:'адрес вне допустимой LAN-области',invalid_endpoint:'неподдерживаемый адрес'};
+        const skippedText=skipped.length?' · Пропущено: '+skipped.length+' ('+[...new Set(skipped.map(p=>reasons[p.reason]||'неподдерживаемый маршрут'))].join('; ')+'). Это статус репликации; доступность маршрута кластерных задач проверяется отдельно.':'';
         txt('leshyClusterKnowledgeSync',
           'Состояние: '+state+' · Получено записей: '+(sync.received_total||0)+
           ' · Отдано: '+(sync.sent_total||0)+
           ' · Последний обмен: '+(sync.last_sync||'ещё не было')+
-          (sync.last_error?' · Ошибка: '+sync.last_error:''));
+          (sync.last_error?' · Ошибка: '+sync.last_error:'')+skippedText);
       }catch(error){
         txt('leshyClusterKnowledgeSync','Нет данных синхронизации: '+error.message);
       }

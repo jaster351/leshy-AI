@@ -195,10 +195,14 @@ class LanPeerDiscovery:
 
     def announce(self, node: ClusterNode) -> None:
         self._last_node = node
+        public_node = asdict(node)
+        if not node.endpoint:
+            # Не запрещать локальное исполнение, но и не обещать входящие задачи.
+            public_node["accepting_tasks"] = False
         payload = {
             "magic": _DISCOVERY_MAGIC,
             "cluster_id": self.identity.cluster_id,
-            "node": asdict(node),
+            "node": public_node,
             # Лишь SHA-256: в UDP не отправляем имя, личную память или роли.
             "creator_digest": creator_identity_digest(),
         }
@@ -251,7 +255,9 @@ class LanPeerDiscovery:
             if node_id == self.identity.node_id:
                 # Broadcast возвращает собственные объявления. Их нельзя считать
                 # признаком клонированного node-id второго компьютера.
-                own_ip = parse.urlsplit(self._last_node.endpoint).hostname if self._last_node else _local_ip()
+                # Входящий UDP здесь IPv4; HTTPS endpoint может быть DNS/IPv6.
+                # Имя Web-сервера не определяет источник собственного broadcast.
+                own_ip = _local_ip()
                 if source_ip and source_ip != own_ip:
                     self._record("same_node_id")
                 return
@@ -270,7 +276,10 @@ class LanPeerDiscovery:
                 last_seen=time.time(),
             )
             if not peer.endpoint.startswith(("http://", "https://")):
-                return
+                # Подписанный профиль без входящего endpoint сохраняет election/
+                # consensus, но никогда не выбирается удалённым исполнителем.
+                if peer.endpoint or node_data.get("accepting_tasks") is not False:
+                    return
             role = data.get("telegram")
             # Голос — часть уже проверенного HMAC-пакета; недоверенные
             # форматы игнорируются, чтобы старые версии оставались совместимы.
@@ -518,8 +527,13 @@ class DistributedClusterRuntime:
         memory_total, memory_available = _memory_info()
         endpoint = os.getenv("LESHY_CLUSTER_ADVERTISE", "").strip()
         if not endpoint:
-            port = int(os.getenv("LESHY_PORT", "8765"))
-            endpoint = f"http://{_local_ip()}:{port}"
+            transport = getattr(self.app, "web_security", None)
+            profile = getattr(transport, "cluster_profile", None)
+            if callable(profile):
+                endpoint = str(profile(_local_ip()).get("endpoint") or "")
+            else:
+                port = int(os.getenv("LESHY_PORT", "8765"))
+                endpoint = f"http://{_local_ip()}:{port}"
         scheduler = get_inference_scheduler(self.app)
         scheduler_state = scheduler.status()
         # An active generation occupies the only local inference slot, even if nobody is queued.
@@ -663,6 +677,8 @@ class DistributedClusterRuntime:
         discovery = self.discovery.diagnostics()
         remote = max(0, int(state["peer_count"]) - 1) if cluster_enabled else 0
         hints: list[str] = []
+        if not self.local_node.endpoint:
+            hints.append("Входящий HTTP/HTTPS endpoint не готов: проверьте сетевой listener, имя SAN или LESHY_CLUSTER_ADVERTISE. Локальные вычисления и LAN-обнаружение сохранены.")
         if not cluster_enabled:
             hints.append("Кластер выключен: включите переключатель в настройках.")
         elif not self._autodiscovery_configured:
@@ -877,6 +893,7 @@ class DistributedClusterRuntime:
             "cluster_id": self.identity.cluster_id,
             "node_id": self.identity.node_id,
             "advertise_endpoint": self.local_node.endpoint,
+            "incoming_tasks_advertised": bool(self.local_node.endpoint),
             "secret_path": str(self.identity.secret_path),
             "monetization": False,
             "proof_of_work": False,

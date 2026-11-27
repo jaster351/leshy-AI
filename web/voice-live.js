@@ -6,206 +6,726 @@
   const MAX_BUFFER_BYTES=8*1024*1024;
   const SNAPSHOT_INTERVAL_MS=3500;
   const MIN_ASR_BYTES=8000;
-  const SHORT_UTTERANCE_MS=1600;
-  const MEDIUM_UTTERANCE_MS=3500;
-  // A thoughtful pause must not prematurely submit a half-spoken sentence.
-  const SHORT_SILENCE_MS=6500;
-  const MEDIUM_SILENCE_MS=5500;
-  const NORMAL_SILENCE_MS=5000;
+  const ASR_BUSY_REJECTION='Локальный ASR уже обрабатывает предыдущий фрагмент. Повторите после его завершения.';
+  const ASR_BUSY_WAIT_MS=1500;
+  const ASR_BUSY_TIMEOUT_MS=30000;
+  const MAX_ASR_BUSY_RETRIES=20;
   const STOP_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>';
   const state={
-    mode:'conversation',enabled:false,recording:false,speaking:false,stream:null,recorder:null,chunks:[],chunkBytes:0,mime:'',baseText:'',latestText:'',
-    inFlight:false,startedAt:0,speechSeen:false,speechStartedAt:0,lastVoiceAt:0,analyser:null,audioContext:null,raf:0,
-    snapshotTimer:0,restartTimer:0,generation:0,playback:null,playbackUrl:'',ttsUnavailable:false,asrFailed:false,
+    enabled:false,mode:'conversation',phase:'off',error:'',recording:false,speaking:false,level:0,
+    epoch:0,capture:null,starting:false,finishing:false,restartTimer:0,restartDeadline:0,
+    controllers:new Set(),pendingChat:null,playback:null,sessionId:'',lastLevelAt:0,
+    outputContext:null,outputUnlock:null,outputDecode:null,engine:'local',localLanguage:'ru-RU',
   };
 
-  function notice(text,ms=2200){
-    let n=$('chatVoiceState');
-    if(!n){const composer=document.querySelector('#pane-chat .composer');if(!composer)return;n=document.createElement('div');n.id='chatVoiceState';composer.appendChild(n)}
-    n.textContent=text;n.classList.add('show');clearTimeout(n._t);n._t=setTimeout(()=>n.classList.remove('show'),ms);
+  function currentSession(){return localStorage.getItem('leshy.session')||''}
+  function current(epoch){return state.enabled&&epoch===state.epoch}
+  function currentCapture(capture){return !!capture&&state.capture===capture&&current(capture.epoch)}
+  function cancelled(){return new DOMException('Голосовой разговор завершён','AbortError')}
+  function requireSession(epoch){
+    if(!current(epoch))throw cancelled();
+    if(currentSession()!==state.sessionId)throw new Error('Чат изменился. Разговор остановлен, реплика не отправлена.');
   }
 
-  function chooseMime(){
-    const candidates=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm','audio/ogg'];
-    for(const value of candidates){try{if(window.MediaRecorder&&MediaRecorder.isTypeSupported(value))return value}catch(_e){}}
-    return '';
+  function notice(text,ms=2400){
+    let node=$('chatVoiceState');
+    if(!node){
+      const composer=document.querySelector('#pane-chat .composer');if(!composer)return;
+      node=document.createElement('div');node.id='chatVoiceState';composer.appendChild(node);
+    }
+    node.textContent=text;node.classList.add('show');clearTimeout(node._t);
+    node._t=setTimeout(()=>node.classList.remove('show'),ms);
   }
 
   function publishState(reason='state'){
-    const detail={enabled:!!state.enabled,recording:!!state.recording,speaking:!!state.speaking,stopped:!state.enabled,reason};
+    const detail={
+      enabled:state.enabled,recording:state.recording,speaking:state.speaking,
+      phase:state.phase,level:state.level,error:state.error,mode:state.mode,stopped:!state.enabled,reason,
+    };
     window.leshyVoiceState=detail;
-    try{window.dispatchEvent(new CustomEvent('leshy:voice-state',{detail}))}catch(_e){}
+    window.dispatchEvent(new CustomEvent('leshy:voice-state',{detail}));
   }
 
-  function setButton(reason='state'){
-    const b=$('chatMicButton');if(!b){publishState(reason);return}
-    if(!b.dataset.voiceIdleHtml)b.dataset.voiceIdleHtml=b.innerHTML;
-    b.classList.toggle('voice-live-active',state.enabled);
-    b.classList.toggle('voice-live-speaking',state.speaking);
-    b.innerHTML=state.enabled?STOP_ICON:b.dataset.voiceIdleHtml;
-    b.dataset.voiceState=!state.enabled?'off':state.speaking?'speaking':state.recording?'recording':'waiting';
-    b.setAttribute('aria-pressed',state.enabled?'true':'false');
-    b.setAttribute('aria-label',state.enabled?'Остановить голосовой режим':'Включить голосовой режим');
-    b.style.background=state.recording?'#474747':(state.speaking?'#3f3f3f':(state.enabled?'#363636':''));
-    b.title=state.enabled?'Остановить голосовой режим':'Включить локальный голосовой режим';
-    const dict=$('chatDictateButton');if(dict){dict.classList.toggle('voice-live-active',state.enabled&&state.mode==='dictation');dict.setAttribute('aria-pressed',state.enabled&&state.mode==='dictation'?'true':'false');dict.textContent=state.enabled&&state.mode==='dictation'?'■ Завершить диктовку':'Диктовка';}
+  function updateButtons(reason='state'){
+    const button=$('chatMicButton');
+    if(button){
+      if(!button.dataset.voiceIdleHtml)button.dataset.voiceIdleHtml=button.innerHTML;
+      button.classList.toggle('voice-live-active',state.enabled);
+      button.classList.toggle('voice-live-speaking',state.speaking);
+      button.innerHTML=state.enabled?STOP_ICON:button.dataset.voiceIdleHtml;
+      button.dataset.voiceState=state.phase;
+      button.setAttribute('aria-pressed',String(state.enabled));
+      button.setAttribute('aria-label',state.enabled?'Завершить голосовой разговор':'Позвонить Лешему');
+      button.title=state.enabled?'Завершить голосовой разговор':'Позвонить Лешему';
+    }
+    const dictate=$('chatDictateButton'),dictating=state.enabled&&state.mode==='dictation';
+    if(dictate){
+      dictate.classList.toggle('voice-live-active',dictating);
+      dictate.setAttribute('aria-pressed',String(dictating));
+      dictate.textContent=dictating?'■ Завершить диктовку':'Диктовка';
+    }
     publishState(reason);
   }
 
-  function clearSnapshotTimer(){if(state.snapshotTimer)clearInterval(state.snapshotTimer);state.snapshotTimer=0}
-  function closeAudioGraph(){if(state.raf)cancelAnimationFrame(state.raf);state.raf=0;clearSnapshotTimer();try{state.audioContext&&state.audioContext.close()}catch(_e){}state.audioContext=null;state.analyser=null}
-  function stopTracks(){try{for(const track of state.stream?.getTracks?.()||[])track.stop()}catch(_e){}state.stream=null}
-  function clearRecordedAudio(){state.chunks=[];state.chunkBytes=0;state.latestText='';state.baseText='';state.speechStartedAt=0}
-
-  function abortVoiceAfterAsrError(error){
-    if(state.asrFailed)return;
-    state.asrFailed=true;state.enabled=false;state.recording=false;state.generation+=1;
-    clearTimeout(state.restartTimer);closeAudioGraph();
-    try{if(state.recorder&&state.recorder.state!=='inactive')state.recorder.stop()}catch(_e){}
-    state.recorder=null;stopTracks();clearRecordedAudio();setButton('error');
-    notice('Голосовой режим остановлен: '+(error?.message||String(error))+'. Повторные запросы не отправляются.',6500);
+  function phase(value,reason=value,error=''){
+    state.phase=value;state.error=error;state.level=0;updateButtons(reason);
   }
 
-  async function transcribeSnapshot(final=false,generation=state.generation){
-    if(generation!==state.generation||state.asrFailed||!state.chunks.length)return '';
-    if(state.inFlight)return state.latestText;
-    const blob=new Blob(state.chunks,{type:state.mime||'audio/webm'});if(blob.size<MIN_ASR_BYTES)return state.latestText;
-    if(blob.size>MAX_BUFFER_BYTES){abortVoiceAfterAsrError(new Error('аудиобуфер превысил безопасный лимит 8 МБ'));return ''}
-    state.inFlight=true;
+  function chooseMime(){
+    const candidates=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'];
+    for(const value of candidates){
+      try{if(typeof MediaRecorder.isTypeSupported==='function'&&MediaRecorder.isTypeSupported(value))return value}catch(_e){}
+    }
+    return '';
+  }
+
+  function preflight(){
+    if(!window.isSecureContext)throw new Error('Для микрофона откройте Лешего по доверенному HTTPS. HTTP по адресу локальной сети не подходит; localhost разрешён только на этом устройстве.');
+    if(!navigator.mediaDevices?.getUserMedia||(state.engine==='server'&&!window.MediaRecorder))throw new Error('В этом браузере недоступна запись микрофона. Откройте Лешего в браузере с MediaRecorder.');
+    if(state.mode==='conversation'&&!(window.AudioContext||window.webkitAudioContext))throw new Error('Браузер не поддерживает определение пауз речи. Доступна отдельная диктовка.');
+    if(document.hidden)throw new Error('Для голосового разговора оставьте вкладку Лешего открытой на экране.');
+    if($('chatInput')?.disabled)throw new Error('Этот чат недоступен для отправки сообщений. Сначала разблокируйте его.');
+  }
+
+  async function voiceRequest(path,options,epoch,timeoutMs,decode){
+    requireSession(epoch);
+    const controller=new AbortController();state.controllers.add(controller);
+    let timedOut=false;
+    const timer=setTimeout(()=>{timedOut=true;controller.abort()},timeoutMs);
     try{
-      const lang=localStorage.getItem('leshy.voice.language')||'';
-      const response=await fetch('/v1/voice/transcribe?language='+encodeURIComponent(lang),{method:'POST',headers:{'Content-Type':blob.type||'audio/webm'},body:blob});
-      const data=await response.json().catch(()=>({error:'Некорректный ответ ASR'}));if(!response.ok)throw new Error(data.error||('HTTP '+response.status));
-      if(generation!==state.generation||state.asrFailed)return '';
-      const text=String(data.text||'').trim();
-      if(text){state.latestText=text;const input=$('chatInput');if(input){input.value=(state.baseText+(state.baseText?' ':'')+text).trimStart();input.dispatchEvent(new Event('input',{bubbles:true}))}}
-      if(final)notice(text?'Речь распознана локально':'Речь не распознана',1000);else notice('Слушаю · '+(text||'распознаю…'),1300);
-      return text;
-    }catch(error){
-      if(generation===state.generation){
-        // A live WebM snapshot can end before a complete media frame has arrived.
-        // Keep recording and retry on the next snapshot instead of killing the call.
-        const temporary=/Invalid data found|End of file|invalid webm|truncated/i.test(String(error.message||error));
-        if(!final&&temporary)notice('Продолжаю слушать · ожидаю полный аудиофрагмент',1500);
-        else if(!temporary)abortVoiceAfterAsrError(error);
+      const response=await fetch(path,Object.assign({},options,{
+        credentials:'same-origin',signal:controller.signal,
+        headers:Object.assign({},options.headers||{}, {'X-Leshy-UI':'voice'}),
+      }));
+      if(!response.ok){
+        const data=await response.json().catch(()=>({}));
+        const error=new Error(data.error||('Голосовой сервер: HTTP '+response.status));
+        // busy в status может относиться к другому запросу после ошибки. Только
+        // точный отказ request_gate доказывает, что этот фрагмент не был принят.
+        error.rejectedAsrBusy=path.startsWith('/v1/voice/transcribe?')&&response.status===400
+          &&data.error===ASR_BUSY_REJECTION&&data.voice?.busy===true;
+        throw error;
       }
-      return '';
-    }finally{state.inFlight=false}
+      const data=await decode(response);
+      requireSession(epoch);
+      return data;
+    }catch(error){
+      if(timedOut&&current(epoch))throw new Error('Голосовой сервер не ответил вовремя. Разговор остановлен; запрос не повторяется.');
+      throw error;
+    }finally{
+      clearTimeout(timer);state.controllers.delete(controller);
+    }
   }
 
-  function speechTextFromAnswer(answer){
-    let text=String(answer||'').trim();if(!text)return '';
-    text=text.replace(/```[\s\S]*?```/g,' Код приведён на экране. ').replace(/\bКопировать\b/g,' ').replace(/https?:\/\/\S+/g,' ссылка ');
-    return text.replace(/[`*_#>|]/g,' ').replace(/\s+/g,' ').trim();
+  function closeGraph(capture){
+    if(!capture)return;
+    if(capture.raf)cancelAnimationFrame(capture.raf);
+    clearInterval(capture.snapshotTimer);clearTimeout(capture.maxTimer);
+    capture.raf=0;capture.snapshotTimer=0;capture.maxTimer=0;
+    if(capture.inputResume)capture.inputResume(cancelled());
+    try{capture.inputSource?.disconnect();capture.analyser?.disconnect()}catch(_e){}
+    if(capture.ownsContext&&capture.audioContext){try{const result=capture.audioContext.close();result?.catch(()=>{})}catch(_e){}}
+    capture.audioContext=null;capture.inputSource=null;capture.analyser=null;
+  }
+
+  function resumeInput(capture){
+    const context=capture.audioContext;
+    if(context.state==='running')return Promise.resolve();
+    return new Promise((resolve,reject)=>{
+      let done=false,timer=0;
+      const finish=error=>{
+        if(done)return;done=true;clearTimeout(timer);
+        if(capture.inputResume===finish)capture.inputResume=null;
+        if(error)reject(error);else resolve();
+      };
+      capture.inputResume=finish;
+      timer=setTimeout(()=>finish(new Error('Браузер не разрешил обработку микрофона. Нажмите «Позвонить» ещё раз.')),5000);
+      try{
+        Promise.resolve(context.resume()).then(()=>{
+          if(!currentCapture(capture))finish(cancelled());
+          else if(context.state!=='running')finish(new Error('Обработка микрофона приостановлена браузером.'));
+          else finish();
+        },error=>finish(error));
+      }catch(error){finish(error)}
+    });
+  }
+
+  function releaseTracks(capture){
+    if(!capture)return;
+    for(const track of capture.stream?.getTracks?.()||[]){
+      track.onended=null;try{track.stop()}catch(_e){}
+    }
+    capture.stream=null;
+  }
+
+  function discardCapture(){
+    const capture=state.capture;state.capture=null;state.recording=false;state.starting=false;state.finishing=false;
+    if(!capture)return;
+    capture.local?.abort();
+    closeGraph(capture);
+    if(capture.stopSettle)capture.stopSettle(cancelled());
+    try{if(capture.recorder&&capture.recorder.state!=='inactive')capture.recorder.stop()}catch(_e){}
+    releaseTracks(capture);capture.chunks=[];capture.latestText='';
   }
 
   function stopPlayback(){
-    const audio=state.playback;state.playback=null;state.speaking=false;setButton('playback-stopped');
-    if(audio){try{audio.pause();audio.src=''}catch(_e){}}
-    if(state.playbackUrl){try{URL.revokeObjectURL(state.playbackUrl)}catch(_e){}state.playbackUrl=''}
+    const playback=state.playback;state.playback=null;state.speaking=false;
+    if(!playback)return;
+    playback.source.onended=null;
+    try{playback.source.stop();playback.source.disconnect()}catch(_e){}
+    // Остановленный источник может не прислать ended: завершаем ожидание явно.
+    playback.finish();
   }
 
-  async function speakAssistantAnswer(answer){
-    if(!state.enabled||state.ttsUnavailable)return;
-    const text=speechTextFromAnswer(answer);if(!text)return;
-    notice('Леший говорит…',1200);
-    try{
-      const response=await fetch('/v1/voice/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
-      if(!response.ok){const data=await response.json().catch(()=>({error:'Озвучка недоступна'}));throw new Error(data.error||('HTTP '+response.status))}
-      const blob=await response.blob();if(!state.enabled)return;
-      const url=URL.createObjectURL(blob),audio=new Audio(url);state.playbackUrl=url;state.playback=audio;state.speaking=true;setButton('speaking');
-      await new Promise(resolve=>{audio.onended=resolve;audio.onerror=resolve;const p=audio.play();if(p&&typeof p.catch==='function')p.catch(resolve)});
-      stopPlayback();
-    }catch(error){state.ttsUnavailable=true;notice('Локальная озвучка недоступна: '+error.message,4000);stopPlayback()}
+  function closeOutput(){
+    if(state.outputUnlock)state.outputUnlock(cancelled());
+    if(state.outputDecode)state.outputDecode(cancelled());
+    const context=state.outputContext;state.outputContext=null;
+    if(context){try{context.close().catch(()=>{})}catch(_e){}}
   }
 
-  async function finishTurn({send=true,keepSession=true}={}){
-    if(!state.recording)return;
-    state.recording=false;setButton('processing');closeAudioGraph();const generation=state.generation,recorder=state.recorder;
-    await new Promise(resolve=>{if(!recorder||recorder.state==='inactive'){resolve();return}const old=recorder.onstop;recorder.onstop=e=>{try{old&&old.call(recorder,e)}catch(_e){}resolve()};try{recorder.requestData()}catch(_e){}try{recorder.stop()}catch(_e){resolve()}setTimeout(resolve,700)});
-    stopTracks();await new Promise(r=>setTimeout(r,80));
-    let waits=0;while(state.inFlight&&waits<80&&generation===state.generation){await new Promise(r=>setTimeout(r,100));waits+=1}
-    // Always transcribe the completed recording; a previous interim snapshot
-    // may omit the last words. Keep interim text when the final blob is invalid.
-    const finalText=await transcribeSnapshot(true,generation);
-    const text=finalText||state.latestText;state.recorder=null;
-    if(send&&state.mode==='conversation'&&text&&generation===state.generation&&!state.asrFailed){
-      const input=$('chatInput');if(input)input.value=(state.baseText+(state.baseText?' ':'')+text).trim();notice('Отправляю…',700);
-      let result=null;
-      try{if(typeof window.sendFrom==='function')result=await window.sendFrom(input);else $('chatSend')?.click()}catch(_e){}
-      const answer=result&&typeof result.answer==='string'?result.answer:'';
-      if(state.enabled&&answer)await speakAssistantAnswer(answer);
+  function unlockOutput(epoch){
+    const AC=window.AudioContext||window.webkitAudioContext;
+    // Вызывается из start до разрешения микрофона и сетевых запросов:
+    // мобильный браузер должен получить пользовательский жест для звука сейчас.
+    const context=state.outputContext||new AC();state.outputContext=context;
+    return new Promise((resolve,reject)=>{
+      let done=false,timer=0;
+      const finish=error=>{
+        if(done)return;done=true;clearTimeout(timer);
+        if(state.outputUnlock===finish)state.outputUnlock=null;
+        if(error)reject(error);else resolve();
+      };
+      state.outputUnlock=finish;
+      timer=setTimeout(()=>finish(new Error('Браузер не разрешил звук. Разрешите воспроизведение для сайта и снова нажмите «Позвонить».')),5000);
+      try{
+        const resumed=context.resume();
+        Promise.resolve(resumed).then(()=>{
+          if(!current(epoch))finish(cancelled());
+          else if(context.state!=='running')finish(new Error('Звук приостановлен браузером. Нажмите «Позвонить» ещё раз.'));
+          else finish();
+        },error=>finish(error));
+      }catch(error){finish(error)}
+    });
+  }
+
+  function decodeSpeech(context,buffer){
+    return new Promise((resolve,reject)=>{
+      let done=false,timer=0;
+      const finish=(error,decoded)=>{
+        if(done)return;done=true;clearTimeout(timer);
+        if(state.outputDecode===finish)state.outputDecode=null;
+        if(error)reject(error);else resolve(decoded);
+      };
+      state.outputDecode=finish;
+      timer=setTimeout(()=>finish(new Error('Браузер не успел подготовить голосовой ответ.')),15000);
+      try{
+        const decoding=context.decodeAudioData(buffer,decoded=>finish(null,decoded),()=>finish(new Error('Браузер не смог декодировать голосовой ответ.')));
+        if(decoding&&typeof decoding.catch==='function')decoding.catch(error=>finish(error));
+      }
+      catch(error){finish(error)}
+    });
+  }
+
+  function stopOwnRequest(pending){
+    if(!pending?.requestId)return;
+    // Останавливаем только запрос этого звонка, а не текущий чат по кнопке Send.
+    fetch('/v1/chat/stop',{
+      method:'POST',credentials:'same-origin',keepalive:true,
+      headers:{'Content-Type':'application/json','X-Leshy-UI':'voice'},
+      body:JSON.stringify({request_id:pending.requestId}),
+    }).catch(()=>{});
+  }
+
+  function invalidate(keepOutput=false){
+    state.epoch+=1;clearTimeout(state.restartTimer);state.restartTimer=0;
+    const pending=state.pendingChat;
+    if(pending){stopOwnRequest(pending);pending.settle(cancelled())}
+    for(const controller of state.controllers)controller.abort();
+    state.controllers.clear();stopPlayback();
+    if(state.outputDecode)state.outputDecode(cancelled());
+    if(!keepOutput)closeOutput();
+    discardCapture();state.level=0;
+  }
+
+  function stop(reason='stopped'){
+    state.enabled=false;invalidate();phase('off',reason);
+    return Promise.resolve();
+  }
+
+  function fail(error,reason='error'){
+    const message=error?.message||String(error);
+    state.enabled=false;invalidate();phase('error',reason,message);notice(message,6500);
+  }
+
+  function waitForAsr(capture){
+    requireSession(capture.epoch);
+    if(!currentCapture(capture))return Promise.reject(cancelled());
+    const controller=new AbortController();state.controllers.add(controller);
+    return new Promise((resolve,reject)=>{
+      let timer=0,done=false;
+      const finish=error=>{
+        if(done)return;done=true;clearTimeout(timer);
+        controller.signal.removeEventListener('abort',onAbort);state.controllers.delete(controller);
+        if(error)reject(error);else resolve();
+      };
+      const onAbort=()=>finish(cancelled());
+      controller.signal.addEventListener('abort',onAbort,{once:true});
+      timer=setTimeout(()=>{
+        try{requireSession(capture.epoch);if(!currentCapture(capture))throw cancelled();finish()}
+        catch(error){finish(error)}
+      },ASR_BUSY_WAIT_MS);
+    });
+  }
+
+  async function requestTranscription(capture,blob,language){
+    const deadline=performance.now()+ASR_BUSY_TIMEOUT_MS;
+    const busyTimeout=()=>new Error('Предыдущее распознавание всё ещё занято. Разговор остановлен; проверьте черновик и повторите вручную.');
+    for(let retry=0;;retry+=1){
+      if(!currentCapture(capture))throw cancelled();
+      // Таймер может проснуться поздно после приостановки вкладки/устройства.
+      if(retry>0&&performance.now()>=deadline)throw busyTimeout();
+      try{
+        return await voiceRequest('/v1/voice/transcribe?language='+encodeURIComponent(language),{
+          method:'POST',headers:{'Content-Type':blob.type||'audio/webm'},body:blob,
+        },capture.epoch,90000,response=>response.json());
+      }catch(error){
+        if(!error.rejectedAsrBusy)throw error;
+        requireSession(capture.epoch);
+        if(!currentCapture(capture))throw cancelled();
+        if(retry>=MAX_ASR_BUSY_RETRIES||performance.now()+ASR_BUSY_WAIT_MS>deadline){
+          throw busyTimeout();
+        }
+        notice('Распознавание ещё занято предыдущим фрагментом · ожидаю',ASR_BUSY_WAIT_MS+200);
+        await waitForAsr(capture);
+      }
     }
-    clearRecordedAudio();if(keepSession&&state.enabled&&!state.asrFailed)scheduleRestartAfterAnswer();
   }
 
-  function silenceLimitMs(){
-    if(!state.speechSeen||!state.speechStartedAt)return SHORT_SILENCE_MS;
-    const spokenFor=Math.max(0,state.lastVoiceAt-state.speechStartedAt);
-    if(spokenFor<SHORT_UTTERANCE_MS)return SHORT_SILENCE_MS;
-    if(spokenFor<MEDIUM_UTTERANCE_MS)return MEDIUM_SILENCE_MS;
-    return NORMAL_SILENCE_MS;
+  async function transcribe(capture,final=false){
+    if(!currentCapture(capture))return '';
+    requireSession(capture.epoch);
+    if(capture.local)return String(capture.localFinal||'').trim();
+    if(capture.asrTask){
+      if(!final)return capture.latestText;
+      await capture.asrTask;
+      if(!currentCapture(capture))return '';
+    }
+    const blob=new Blob(capture.chunks,{type:capture.mime||'audio/webm'});
+    if(blob.size<MIN_ASR_BYTES)return capture.latestText;
+    if(blob.size>MAX_BUFFER_BYTES)throw new Error('Аудиобуфер превысил безопасный лимит 8 МБ.');
+    const task=(async()=>{
+      try{
+        const language=localStorage.getItem('leshy.voice.language')||'';
+        const data=await requestTranscription(capture,blob,language);
+        if(!currentCapture(capture))return '';
+        requireSession(capture.epoch);
+        const text=String(data.text||'').trim();
+        if(final&&!text&&capture.latestText)throw new Error('Завершённая запись не подтвердила промежуточный текст. Проверьте его в поле сообщения перед отправкой.');
+        if(text){
+          capture.latestText=text;
+          const input=$('chatInput');
+          if(input){
+            input.value=(capture.baseText+(capture.baseText?' ':'')+text).trimStart();
+            input.dispatchEvent(new Event('input',{bubbles:true}));
+          }
+        }
+        return text;
+      }catch(error){
+        if(!currentCapture(capture)||error?.name==='AbortError')return '';
+        const temporary=/Invalid data found|End of file|invalid webm|truncated/i.test(String(error.message||error));
+        if(!final&&temporary){notice('Слушаю · ожидаю полный аудиофрагмент',1400);return capture.latestText}
+        throw error;
+      }
+    })();
+    capture.asrTask=task;
+    try{return await task}finally{if(capture.asrTask===task)capture.asrTask=null}
   }
 
-  function vadLoop(generation){
-    if(!state.recording||generation!==state.generation||!state.analyser)return;
-    const data=new Float32Array(state.analyser.fftSize);state.analyser.getFloatTimeDomainData(data);let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];const rms=Math.sqrt(sum/data.length),now=performance.now(),threshold=0.022;
-    if(rms>threshold){if(!state.speechSeen)state.speechStartedAt=now;state.speechSeen=true;state.lastVoiceAt=now}
-    if(now-state.startedAt>MAX_RECORDING_MS){finishTurn({send:state.mode==='conversation',keepSession:state.mode==='conversation'}).then(()=>{if(state.mode==='dictation')disableVoice()});return}
-    const silenceMs=silenceLimitMs();
-    if(state.mode==='conversation'&&state.speechSeen&&now-state.lastVoiceAt>silenceMs&&now-state.startedAt>1800){finishTurn({send:true,keepSession:true});return}
-    state.raf=requestAnimationFrame(()=>vadLoop(generation));
+  async function stopRecording(capture){
+    capture.recording=false;state.recording=false;closeGraph(capture);
+    if(capture.local){
+      try{capture.localFinal=await capture.local.stop()}finally{releaseTracks(capture)}
+      return;
+    }
+    await new Promise((resolve,reject)=>{
+      const recorder=capture.recorder;
+      if(!recorder||recorder.state==='inactive'){resolve();return}
+      let timer=0,done=false;
+      const finish=error=>{
+        if(done)return;done=true;clearTimeout(timer);recorder.onstop=null;
+        if(capture.stopSettle===finish)capture.stopSettle=null;
+        if(error)reject(error);else resolve();
+      };
+      capture.stopSettle=finish;
+      recorder.onstop=()=>finish();
+      timer=setTimeout(()=>finish(new Error('Микрофон не завершил запись вовремя. Реплика не отправлена: проверьте текст и повторите вручную.')),1500);
+      try{recorder.requestData()}catch(_e){}
+      try{recorder.stop()}catch(error){finish(error)}
+    });
+    releaseTracks(capture);capture.recorder=null;
   }
 
-  async function startRecording(){
-    if(!state.enabled||state.recording||state.speaking||state.asrFailed)return;
-    if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){notice('Браузер не умеет передавать аудио с микрофона',3200);state.enabled=false;setButton('unsupported');return}
+  function sendVoiceTurn(text,epoch){
+    try{requireSession(epoch)}catch(error){return Promise.reject(error)}
+    if(typeof window.sendFrom!=='function')return Promise.reject(new Error('Модуль чата ещё не готов. Повторно включите разговор после загрузки интерфейса.'));
+    if($('chatSend')?.classList.contains('streaming'))return Promise.reject(new Error('В этом чате уже идёт другой ответ. Дождитесь его завершения перед звонком.'));
+    const input=$('chatInput');
+    if(!input||input.disabled)return Promise.reject(new Error('Нельзя отправить голосовую реплику в этот чат.'));
+    return new Promise((resolve,reject)=>{
+      const pending={requestId:'',initialSession:currentSession(),accepting:false,settled:false,timer:0,settle:null};
+      const cleanup=()=>{
+        clearTimeout(pending.timer);window.removeEventListener('leshy:activity',onActivity);
+        window.removeEventListener('leshy:done',onDone);
+        if(state.pendingChat===pending)state.pendingChat=null;
+      };
+      pending.settle=(error,result)=>{
+        if(pending.settled)return;pending.settled=true;cleanup();
+        if(error)reject(error);else resolve(result);
+      };
+      const onActivity=event=>{
+        const detail=event.detail||{};
+        // Первый activity публикуется синхронно внутри именно нашего sendFrom,
+        // до await fetch и до назначения session_id новому чату.
+        if(pending.accepting&&!pending.requestId&&typeof detail.request_id==='string'){
+          pending.requestId=detail.request_id;
+        }
+      };
+      const onDone=event=>{
+        const detail=event.detail||{};
+        if(!pending.requestId||detail.request_id!==pending.requestId)return;
+        try{requireSession(epoch)}catch(error){pending.settle(error);return}
+        if(detail.session_id&&detail.session_id!==currentSession()){
+          pending.settle(new Error('Текущий чат изменился. Голосовой ответ не воспроизводится.'));return;
+        }
+        if(detail.error){pending.settle(new Error(detail.error));return}
+        if(detail.duplicate){pending.settle(new Error('Сервер сообщил о повторном запросе. Реплика не отправляется повторно.'));return}
+        if(detail.session_id)state.sessionId=detail.session_id;
+        pending.settle(null,{answer:String(detail.answer||''),stopped:!!detail.stopped});
+      };
+      state.pendingChat=pending;
+      window.addEventListener('leshy:activity',onActivity);window.addEventListener('leshy:done',onDone);
+      pending.timer=setTimeout(()=>{
+        stopOwnRequest(pending);
+        pending.settle(new Error('Ответ не завершился за допустимое время. Автоматический повтор отключён.'));
+      },180000);
+      input.value=text;
+      try{
+        pending.accepting=true;
+        const returned=window.sendFrom(input);
+        pending.accepting=false;
+        // Поддержка контроллера, который уже возвращает {answer}; текущий
+        // multitask-контроллер возвращает undefined и завершает ход событием done.
+        Promise.resolve(returned).then(result=>{
+          if(pending.settled)return;
+          try{requireSession(epoch)}catch(error){pending.settle(error);return}
+          if(result&&typeof result.answer==='string'){
+            if(result.session_id&&result.session_id!==currentSession())pending.settle(new Error('Текущий чат изменился. Голосовой ответ не воспроизводится.'));
+            else if(result.error)pending.settle(new Error(result.error));
+            else if(result.duplicate)pending.settle(new Error('Сервер сообщил о повторном запросе. Реплика не отправляется повторно.'));
+            else pending.settle(null,result);
+          }else if(!pending.requestId){
+            pending.settle(new Error('Чат не подтвердил запуск голосовой реплики.'));
+          }
+        },error=>pending.settle(error));
+      }catch(error){pending.accepting=false;pending.settle(error)}
+    });
+  }
+
+  function speechText(answer){
+    return String(answer||'')
+      .replace(/\x60{3}[\s\S]*?\x60{3}/g,' Код приведён на экране. ')
+      .replace(/https?:\/\/\S+/g,' ссылка ')
+      .replace(/[\x60*_#>|]/g,' ').replace(/\s+/g,' ').trim();
+  }
+
+  async function speak(answer,epoch){
+    requireSession(epoch);
+    const text=speechText(answer);if(!text)return;
+    phase('thinking','preparing-speech');
+    const blob=await voiceRequest('/v1/voice/speak',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text}),
+    },epoch,90000,response=>response.blob());
+    if(!current(epoch))return;
+    if(!blob.size)throw new Error('Сервер вернул пустую озвучку.');
+    const context=state.outputContext;
+    if(!context||context.state!=='running')throw new Error('Браузер приостановил звук. Разрешите воспроизведение для сайта и снова нажмите «Позвонить».');
+    const encoded=await blob.arrayBuffer();requireSession(epoch);
+    const decoded=await decodeSpeech(context,encoded);requireSession(epoch);
+    if(context.state!=='running')throw new Error('Браузер приостановил звук. Снова нажмите «Позвонить».');
+    const source=context.createBufferSource();source.buffer=decoded;source.connect(context.destination);
     try{
-      const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});if(!state.enabled){stream.getTracks().forEach(t=>t.stop());return}
-      state.generation+=1;const generation=state.generation;state.stream=stream;state.chunks=[];state.chunkBytes=0;state.latestText='';state.baseText=$('chatInput')?.value.trim()||'';state.speechSeen=false;state.speechStartedAt=0;state.lastVoiceAt=performance.now();state.startedAt=performance.now();state.mime=chooseMime();
-      state.recorder=state.mime?new MediaRecorder(stream,{mimeType:state.mime,audioBitsPerSecond:64000}):new MediaRecorder(stream);state.mime=state.recorder.mimeType||state.mime||'audio/webm';
-      state.recorder.ondataavailable=e=>{if(generation!==state.generation||!e.data||e.data.size<=0)return;state.chunks.push(e.data);state.chunkBytes+=e.data.size;if(state.chunkBytes>MAX_BUFFER_BYTES)abortVoiceAfterAsrError(new Error('аудиобуфер превысил безопасный лимит 8 МБ'))};
-      state.recorder.onerror=e=>abortVoiceAfterAsrError(e.error||new Error('ошибка записи микрофона'));
-      state.recorder.start(700);state.recording=true;setButton('recording');notice('Слушаю локально…',1500);
-      const AC=window.AudioContext||window.webkitAudioContext;if(AC){state.audioContext=new AC();const source=state.audioContext.createMediaStreamSource(stream);state.analyser=state.audioContext.createAnalyser();state.analyser.fftSize=1024;state.analyser.smoothingTimeConstant=.25;source.connect(state.analyser);state.raf=requestAnimationFrame(()=>vadLoop(generation))}
-      state.snapshotTimer=setInterval(()=>{if(state.recording&&!state.inFlight&&state.chunks.length&&!state.asrFailed)transcribeSnapshot(false,generation)},SNAPSHOT_INTERVAL_MS);
-    }catch(error){state.enabled=false;setButton('permission-error');const msg=error&&error.name==='NotAllowedError'?'Нет разрешения на микрофон':(error.message||String(error));notice('Микрофон: '+msg,3500)}
+      await new Promise((resolve,reject)=>{
+        let settled=false,timer=0;
+        const finish=error=>{
+          if(settled)return;settled=true;clearTimeout(timer);
+          if(error)reject(error);else resolve();
+        };
+        state.playback={source,finish};source.onended=()=>finish();
+        timer=setTimeout(()=>finish(new Error('Воспроизведение не завершилось вовремя.')),Math.min(180000,Math.max(15000,decoded.duration*1000+5000)));
+        try{source.start();state.speaking=true;phase('speaking','playing')}
+        catch(error){finish(new Error('Не удалось воспроизвести голос: '+(error?.message||String(error))))}
+      });
+    }finally{
+      if(state.playback?.source===source)stopPlayback();
+    }
   }
 
-  function scheduleRestartAfterAnswer(){
-    clearTimeout(state.restartTimer);const wait=()=>{if(!state.enabled||state.asrFailed)return;if(state.speaking){state.restartTimer=setTimeout(wait,200);return}const send=$('chatSend');if(send?.classList.contains('streaming')){state.restartTimer=setTimeout(wait,250);return}state.restartTimer=setTimeout(()=>{if(state.enabled&&!state.recording&&!state.speaking&&!state.asrFailed)startRecording()},220)};wait();
+  function scheduleRestart(epoch){
+    if(!current(epoch))return;
+    state.restartDeadline=performance.now()+30000;
+    const wait=()=>{
+      if(!current(epoch))return;
+      if($('chatSend')?.classList.contains('streaming')){
+        if(performance.now()>state.restartDeadline){fail(new Error('Чат ещё завершает ответ. Разговор остановлен; реплика не повторяется.'));return}
+        state.restartTimer=setTimeout(wait,200);return;
+      }
+      state.restartTimer=setTimeout(()=>startRecording(epoch),220);
+    };
+    phase('requesting','next-turn');wait();
   }
 
-  async function disableVoice(){const previous=state.mode;state.enabled=false;clearTimeout(state.restartTimer);stopPlayback();setButton('disabled');if(state.recording)await finishTurn({send:false,keepSession:false});closeAudioGraph();stopTracks();clearRecordedAudio();notice(previous==='dictation'?'Диктовка завершена. Проверьте текст перед отправкой.':'Голосовой режим выключен',1800)}
+  async function finishTurn(capture,{send=true,keepSession=true}={}){
+    if(!currentCapture(capture)||capture.finishing)return;
+    capture.finishing=true;state.finishing=true;phase('transcribing','transcribing');
+    try{
+      await stopRecording(capture);
+      if(!currentCapture(capture))return;
+      const text=await transcribe(capture,true);
+      if(!currentCapture(capture))return;
+      if(send&&state.mode==='conversation'&&text){
+        const message=(capture.baseText+(capture.baseText?' ':'')+text).trim();
+        phase('thinking','awaiting-answer');
+        const result=await sendVoiceTurn(message,capture.epoch);
+        if(!currentCapture(capture))return;
+        if(!result.stopped){
+          if(!result.answer)throw new Error('Леший завершил ответ без текста для озвучки.');
+          await speak(result.answer,capture.epoch);
+        }
+      }
+      if(!currentCapture(capture))return;
+      state.capture=null;state.finishing=false;capture.chunks=[];
+      if(keepSession&&state.enabled)scheduleRestart(capture.epoch);
+      else stop('dictation-finished');
+    }catch(error){
+      if(current(capture.epoch)&&error?.name!=='AbortError')fail(error);
+    }finally{
+      if(capture.epoch===state.epoch)state.finishing=false;
+    }
+  }
 
-  async function toggleVoice(){
-    if(state.enabled){await disableVoice();return}
-    const send=$('chatSend');if(send?.classList.contains('streaming')){try{send.click()}catch(_e){}await new Promise(r=>setTimeout(r,120))}
-    state.mode='conversation';state.enabled=true;state.asrFailed=false;state.ttsUnavailable=false;setButton('enabled');await startRecording();
+  function vadLoop(capture){
+    if(!currentCapture(capture)||!capture.recording||!capture.analyser)return;
+    const data=capture.samples;capture.analyser.getFloatTimeDomainData(data);
+    let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];
+    const rms=Math.sqrt(sum/data.length),now=performance.now();
+    state.level=Math.max(0,Math.min(1,rms/.15));
+    if(now-state.lastLevelAt>100){state.lastLevelAt=now;publishState('level')}
+    if(rms>.022){
+      if(!capture.speechSeen)capture.speechStartedAt=now;
+      capture.speechSeen=true;capture.lastVoiceAt=now;
+    }
+    const spokenFor=Math.max(0,capture.lastVoiceAt-capture.speechStartedAt);
+    const silenceMs=spokenFor<1600?6500:spokenFor<3500?5500:5000;
+    if(state.mode==='conversation'&&capture.speechSeen&&now-capture.lastVoiceAt>silenceMs&&now-capture.startedAt>1800){
+      void finishTurn(capture);return;
+    }
+    capture.raf=requestAnimationFrame(()=>vadLoop(capture));
+  }
+
+  async function startRecording(epoch){
+    if(!current(epoch)||state.starting||state.recording||state.finishing)return;
+    state.starting=true;phase('requesting','microphone');
+    let stream=null,capture=null;
+    try{
+      preflight();
+      requireSession(epoch);
+      stream=await navigator.mediaDevices.getUserMedia({
+        audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},
+      });
+      if(!current(epoch)){stream.getTracks().forEach(track=>track.stop());return}
+      requireSession(epoch);
+      capture={
+        epoch,stream,recorder:null,recording:false,finishing:false,chunks:[],chunkBytes:0,latestText:'',
+        baseText:$('chatInput')?.value.trim()||'',mime:chooseMime(),asrTask:null,
+        audioContext:null,ownsContext:false,inputSource:null,inputResume:null,analyser:null,samples:null,raf:0,snapshotTimer:0,maxTimer:0,
+        speechSeen:false,speechStartedAt:0,lastVoiceAt:performance.now(),startedAt:performance.now(),
+      };
+      state.capture=capture;
+      const AC=window.AudioContext||window.webkitAudioContext;
+      if(AC){
+        // Разговор повторно использует контекст, разблокированный первым нажатием.
+        capture.audioContext=state.mode==='conversation'?state.outputContext:new AC();
+        capture.ownsContext=capture.audioContext!==state.outputContext;
+        if(!capture.audioContext)throw new Error('Звуковой контекст разговора недоступен. Нажмите «Позвонить» ещё раз.');
+        await resumeInput(capture);
+        if(!currentCapture(capture)){closeGraph(capture);releaseTracks(capture);return}
+        requireSession(epoch);
+        const source=capture.audioContext.createMediaStreamSource(stream);capture.inputSource=source;
+        capture.analyser=capture.audioContext.createAnalyser();capture.analyser.fftSize=1024;
+        capture.analyser.smoothingTimeConstant=.25;capture.samples=new Float32Array(1024);
+        source.connect(capture.analyser);
+      }
+      if(state.engine==='local'){
+        const local=window.leshyOnDeviceVoice;
+        if(!local)throw new Error('Модуль локального распознавания не загрузился. Можно выбрать серверное распознавание.');
+        capture.local=local.start({language:state.localLanguage,track:stream.getAudioTracks()[0],onText:({finalText,interimText})=>{
+          if(!currentCapture(capture))return;
+          try{requireSession(epoch)}catch(error){fail(error);return}
+          capture.localFinal=finalText;
+          const input=$('chatInput');
+          if(input){input.value=[capture.baseText,finalText,interimText].filter(Boolean).join(' ');input.dispatchEvent(new Event('input',{bubbles:true}))}
+        }});
+        capture.recording=true;state.recording=true;phase('listening','local-listening');
+        if(capture.analyser)capture.raf=requestAnimationFrame(()=>vadLoop(capture));
+        for(const track of stream.getAudioTracks())track.onended=()=>{if(currentCapture(capture)&&capture.recording)fail(new Error('Микрофон отключён или разрешение отозвано.'))};
+        capture.maxTimer=setTimeout(()=>{if(currentCapture(capture)&&capture.recording&&!capture.finishing)fail(new Error('Достигнут предел записи 4 минуты. Реплика не отправлена.'))},MAX_RECORDING_MS);
+        capture.local.done.then(text=>{
+          if(!currentCapture(capture)||capture.finishing)return;
+          if(!text){fail(new Error('Речь не распознана. Нажмите «Позвонить» ещё раз.'));return}
+          void finishTurn(capture,{send:state.mode==='conversation',keepSession:state.mode==='conversation'});
+        },error=>{if(currentCapture(capture)&&!capture.finishing)fail(error)});
+        return;
+      }
+      capture.recorder=capture.mime
+        ?new MediaRecorder(stream,{mimeType:capture.mime,audioBitsPerSecond:64000})
+        :new MediaRecorder(stream);
+      capture.mime=capture.recorder.mimeType||capture.mime||'audio/webm';
+      capture.recorder.ondataavailable=event=>{
+        if(!currentCapture(capture)||!event.data?.size)return;
+        capture.chunks.push(event.data);capture.chunkBytes+=event.data.size;
+        if(capture.chunkBytes>MAX_BUFFER_BYTES)fail(new Error('Аудиобуфер превысил безопасный лимит 8 МБ.'));
+      };
+      capture.recorder.onerror=event=>{if(currentCapture(capture))fail(event.error||new Error('Ошибка записи микрофона.'))};
+      for(const track of stream.getAudioTracks())track.onended=()=>{
+        if(currentCapture(capture)&&capture.recording)fail(new Error('Микрофон отключён или разрешение отозвано.'));
+      };
+      capture.recorder.start(700);capture.recording=true;state.recording=true;
+      phase('listening',state.mode==='dictation'?'dictating':'listening');
+      if(capture.analyser)capture.raf=requestAnimationFrame(()=>vadLoop(capture));
+      capture.snapshotTimer=setInterval(()=>{
+        if(!currentCapture(capture)||!capture.recording||capture.asrTask||!capture.chunks.length)return;
+        transcribe(capture).catch(error=>{if(currentCapture(capture))fail(error)});
+      },SNAPSHOT_INTERVAL_MS);
+      capture.maxTimer=setTimeout(()=>{
+        if(!currentCapture(capture)||!capture.recording||capture.finishing)return;
+        if(state.mode==='conversation'){
+          fail(new Error(capture.speechSeen
+            ?'Достигнут предел записи 4 минуты без завершения реплики. Она не отправлена. Проверьте черновик и снова нажмите «Позвонить».'
+            :'За 4 минуты речь не обнаружена. Разговор остановлен без отправки. Снова нажмите «Позвонить».'));
+        }else void finishTurn(capture,{send:false,keepSession:false});
+      },MAX_RECORDING_MS);
+    }catch(error){
+      if(current(epoch)){
+        if(capture){closeGraph(capture);releaseTracks(capture)}
+        else stream?.getTracks().forEach(track=>track.stop());
+        if(error?.name==='NotAllowedError')fail(new Error('Нет разрешения на микрофон. Разрешите его в настройках браузера и нажмите «Позвонить».'));
+        else if(error?.name!=='AbortError')fail(error);
+      }
+    }finally{if(epoch===state.epoch)state.starting=false}
+  }
+
+  async function start(mode='conversation',engine='local'){
+    if(state.enabled&&state.mode===mode)return;
+    if(state.enabled)await stop('mode-changed');
+    state.mode=mode;state.engine=engine;state.error='';state.sessionId=currentSession();
+    let epoch=null;
+    try{
+      preflight();
+      if($('chatSend')?.classList.contains('streaming'))throw new Error('Сначала дождитесь завершения текущего ответа в чате.');
+      state.epoch+=1;epoch=state.epoch;state.enabled=true;phase('requesting','enabled');
+      const output=mode==='conversation'?unlockOutput(epoch):Promise.resolve();
+      if(engine==='local'){
+        const controller=new AbortController();state.controllers.add(controller);
+        try{
+          const preparation=window.leshyOnDeviceVoice?.prepare({language:localStorage.getItem('leshy.voice.language')||'ru-RU',signal:controller.signal,onStatus:({status})=>{
+            if(current(epoch)&&status==='downloading')phase('downloading','language-download');
+          }});
+          if(!preparation){await output;throw new Error('Локальный модуль отсутствует. Выберите серверное распознавание.')}
+          const [result]=await Promise.all([preparation,output]);
+          requireSession(epoch);
+          if(result.status!=='ready')throw new Error(result.message||'Локальная модель недоступна.');
+          state.localLanguage=result.language;
+        }finally{state.controllers.delete(controller)}
+      }else await output;
+      if(current(epoch))await startRecording(epoch);
+    }catch(error){if(epoch===null||current(epoch))fail(error)}
+  }
+
+  function interrupt(){
+    if(!state.enabled||!['thinking','speaking','transcribing'].includes(state.phase))return Promise.resolve();
+    invalidate(true);state.enabled=true;state.sessionId=currentSession();
+    scheduleRestart(state.epoch);return Promise.resolve();
   }
 
   async function toggleDictation(){
-    const wasDictating=state.enabled&&state.mode==='dictation';
-    if(state.enabled)await disableVoice();
-    if(wasDictating)return;
-    state.mode='dictation';state.enabled=true;state.asrFailed=false;setButton('dictation-enabled');await startRecording();
-    notice('Диктовка: текст появится в поле сообщения. Для завершения нажмите «Диктовка» ещё раз.',3800);
+    if(state.enabled&&state.mode==='dictation'){
+      if(state.capture?.recording)await finishTurn(state.capture,{send:false,keepSession:false});
+      else await stop('dictation-stopped');
+      return;
+    }
+    await start('dictation','local');
+    if(state.enabled)notice('Диктовка: завершите её кнопкой, затем проверьте текст перед отправкой.',4000);
   }
 
   function install(){
-    const b=$('chatMicButton');if(!b||b.dataset.localVoiceBound==='1')return false;
-    b.dataset.localVoiceBound='1';b.dataset.voiceIdleHtml=b.innerHTML;b.onclick=e=>{e.preventDefault();e.stopPropagation();toggleVoice()};
+    const button=$('chatMicButton');if(!button||button.dataset.localVoiceBound==='1')return false;
+    button.dataset.localVoiceBound='1';button.dataset.voiceIdleHtml=button.innerHTML;
+    button.onclick=event=>{event.preventDefault();event.stopPropagation();if(state.enabled)void stop();else void start()};
     const composer=document.querySelector('#pane-chat .composer');
     if(composer&&!$('chatDictateButton')){
-      const dictate=document.createElement('button');dictate.id='chatDictateButton';dictate.type='button';dictate.className='button secondary small';dictate.textContent='Диктовка';
-      dictate.onclick=e=>{e.preventDefault();e.stopPropagation();toggleDictation()};
+      const dictate=document.createElement('button');dictate.id='chatDictateButton';dictate.type='button';
+      dictate.className='button secondary small';dictate.textContent='Диктовка';
+      dictate.onclick=event=>{event.preventDefault();event.stopPropagation();void toggleDictation()};
       composer.insertBefore(dictate,$('chatSend')||null);
     }
-    setButton('installed');
-    if(!$('leshyLocalVoiceStyle')){const style=document.createElement('style');style.id='leshyLocalVoiceStyle';style.textContent='#chatMicButton.voice-live-active{box-shadow:0 0 0 1px #737373 inset,0 0 0 4px rgba(255,255,255,.035)}#chatMicButton.voice-live-speaking{animation:leshyVoicePulse 1s ease-in-out infinite}@keyframes leshyVoicePulse{50%{box-shadow:0 0 0 6px rgba(255,255,255,.08)}}';document.head.appendChild(style)}
-    return true;
+    if(!$('leshyLocalVoiceStyle')){
+      const style=document.createElement('style');style.id='leshyLocalVoiceStyle';
+      style.textContent='#chatMicButton.voice-live-active{box-shadow:0 0 0 2px #93ddb1 inset}#chatMicButton.voice-live-speaking{animation:leshyVoicePulse 1s ease-in-out infinite}@keyframes leshyVoicePulse{50%{box-shadow:0 0 0 6px rgba(147,221,177,.16)}}@media(prefers-reduced-motion:reduce){#chatMicButton.voice-live-speaking{animation:none}}';
+      document.head.appendChild(style);
+    }
+    updateButtons('installed');return true;
   }
 
-  function boot(){if(!install()){const observer=new MutationObserver(()=>{if(install())observer.disconnect()});observer.observe(document.documentElement,{childList:true,subtree:true})}window.addEventListener('beforeunload',()=>{state.enabled=false;state.generation+=1;stopPlayback();closeAudioGraph();stopTracks();clearRecordedAudio()})}
+  function boot(){
+    if(!install()){
+      const observer=new MutationObserver(()=>{if(install())observer.disconnect()});
+      observer.observe(document.documentElement,{childList:true,subtree:true});
+    }
+    window.addEventListener('leshy:session-changed',()=>{
+      if(!state.enabled)return;
+      const next=currentSession();if(next===state.sessionId)return;
+      const pending=state.pendingChat;
+      if(next&&pending?.requestId&&!pending.initialSession&&!state.sessionId){
+        // SSE назначает id первому чату. На done дополнительно сверяется id ответа.
+        state.sessionId=next;return;
+      }
+      void stop('session-changed');notice('Разговор завершён при переходе в другой чат.');
+    });
+    window.addEventListener('storage',event=>{
+      if(!state.enabled||(event.key!==null&&event.key!=='leshy.session'))return;
+      if(event.key!==null&&currentSession()===state.sessionId)return;
+      void stop('session-changed');notice('Разговор завершён: чат изменился в другой вкладке.');
+    });
+    document.addEventListener('click',event=>{
+      if(!state.enabled||!(event.target instanceof Element))return;
+      const open=event.target.closest('.leshy-session-open');
+      const newChat=event.target.closest('#chatSidebarNew,#sidebarNewChat,#newChat');
+      if(newChat||(open&&open.closest('.leshy-session-item')?.dataset.sessionId!==state.sessionId))void stop('chat-navigation');
+    },true);
+    document.addEventListener('visibilitychange',()=>{
+      if(document.hidden&&state.enabled){void stop('background');notice('Разговор остановлен: вернитесь во вкладку и нажмите «Позвонить».',4000)}
+    });
+    window.addEventListener('beforeunload',()=>{state.enabled=false;invalidate()});
+    publishState('ready');
+  }
+
+  window.leshyVoiceCall={
+    start:()=>start('conversation','local'),
+    startServer:()=>start('conversation','server'),
+    send:()=>state.capture?.recording?finishTurn(state.capture):Promise.resolve(),
+    stop:()=>stop(),
+    interrupt:()=>interrupt(),
+  };
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();

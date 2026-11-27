@@ -53,7 +53,7 @@
   }
   // Вызывающая сторона владеет сессией чата и отправкой текста.
   // В режиме разговора отправлять только успешный финальный результат.
-  function start({language,signal,onText=()=>{},onStatus=()=>{},continuous=true}={}){
+  function start({language,signal,onText=()=>{},onStatus=()=>{},continuous=true,track}={}){
     if(signal?.aborted)throw cancelled();
     if(!secure())throw error('insecure','Микрофон требует доверенный HTTPS');
     const R=constructor();
@@ -112,7 +112,7 @@
     };
     recognition.onend=()=>settle(signal?.aborted?cancelled():null);
     signal?.addEventListener('abort',abort,{once:true});
-    try{recognition.start()}catch(e){settle(e);try{recognition.abort()}catch(_e){}}
+    try{if(track)recognition.start(track);else recognition.start()}catch(e){settle(e);try{recognition.abort()}catch(_e){}}
     return {done,stop,abort};
   }
   window.leshyOnDeviceVoice=Object.freeze({prepare,start});
